@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  inference-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: inference-service-layer
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - HOST=0.0.0.0
+      - PORT=8000
+      - RELOAD=false
+      - WORKERS=1
+      - ENABLE_DETERMINISTIC_MODE=true
+    volumes:
+      - ./src:/app/src
+      - ./.env:/app/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: inference-network
