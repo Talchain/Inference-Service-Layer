@@ -67,3 +67,4 @@ dmypy.json
 # Documentation builds
 site/
 docs/_build/
+*.rdb
