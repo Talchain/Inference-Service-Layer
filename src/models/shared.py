@@ -76,18 +76,50 @@ class DistributionType(str, Enum):
 class DAGStructure(BaseModel):
     """Directed Acyclic Graph structure."""
 
-    nodes: List[str] = Field(..., description="List of node names in the graph")
+    nodes: List[str] = Field(
+        ...,
+        description="List of node names in the graph",
+        min_length=1,
+        max_length=50
+    )
     edges: List[Tuple[str, str]] = Field(
         ...,
         description="List of directed edges as (from, to) tuples",
+        max_length=200
     )
 
     @field_validator("nodes")
     @classmethod
-    def validate_nodes_not_empty(cls, v: List[str]) -> List[str]:
-        """Ensure at least one node exists."""
+    def validate_nodes(cls, v: List[str]) -> List[str]:
+        """Validate nodes: not empty, no duplicates, valid identifiers."""
+        from src.utils.security_validators import (
+            validate_no_duplicate_nodes,
+            validate_node_names
+        )
+
         if not v:
             raise ValueError("DAG must contain at least one node")
+
+        validate_no_duplicate_nodes(v)
+        validate_node_names(v)
+
+        return v
+
+    @field_validator("edges")
+    @classmethod
+    def validate_edges(cls, v: List[Tuple[str, str]], info) -> List[Tuple[str, str]]:
+        """Validate edges: no self-loops, reference existing nodes."""
+        from src.utils.security_validators import (
+            validate_no_self_loops,
+            validate_edges_reference_nodes
+        )
+
+        validate_no_self_loops(v)
+
+        # Validate edges reference nodes (if nodes already validated)
+        if 'nodes' in info.data:
+            validate_edges_reference_nodes(v, info.data['nodes'])
+
         return v
 
     model_config = {
@@ -116,7 +148,11 @@ class Distribution(BaseModel):
 class StructuralModel(BaseModel):
     """Structural causal model specification."""
 
-    variables: List[str] = Field(..., description="List of variable names")
+    variables: List[str] = Field(
+        ...,
+        description="List of variable names",
+        max_length=50
+    )
     equations: Dict[str, str] = Field(
         ...,
         description="Structural equations mapping variable to expression",
@@ -125,6 +161,36 @@ class StructuralModel(BaseModel):
         ...,
         description="Prior distributions for exogenous variables",
     )
+
+    @field_validator("variables")
+    @classmethod
+    def validate_variable_names(cls, v: List[str]) -> List[str]:
+        """Validate variables are valid identifiers."""
+        from src.utils.security_validators import validate_node_names
+        validate_node_names(v)
+        return v
+
+    @field_validator("equations")
+    @classmethod
+    def validate_equations(cls, v: Dict[str, str]) -> Dict[str, str]:
+        """Validate equations contain only safe characters."""
+        from src.utils.security_validators import (
+            validate_equations_safe,
+            validate_dict_size
+        )
+
+        validate_dict_size(v, "equations")
+        validate_equations_safe(v)
+
+        return v
+
+    @field_validator("distributions")
+    @classmethod
+    def validate_distributions_size(cls, v: Dict[str, Distribution]) -> Dict[str, Distribution]:
+        """Validate distributions dict size."""
+        from src.utils.security_validators import validate_dict_size
+        validate_dict_size(v, "distributions")
+        return v
 
     model_config = {
         "json_schema_extra": {
