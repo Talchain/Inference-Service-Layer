@@ -20,6 +20,7 @@ from src.models.responses import ErrorCode, ErrorResponse
 from .analysis import router as analysis_router
 from .causal import router as causal_router
 from .health import router as health_router
+from .preferences import router as preferences_router
 from .team import router as team_router
 
 # Setup logging
@@ -164,6 +165,11 @@ app.include_router(
     causal_router,
     prefix=f"{settings.API_V1_PREFIX}/causal",
     tags=["Causal Inference"],
+)
+app.include_router(
+    preferences_router,
+    prefix=f"{settings.API_V1_PREFIX}/preferences",
+    tags=["Preference Learning"],
 )
 app.include_router(
     team_router,
