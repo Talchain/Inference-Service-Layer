@@ -112,6 +112,49 @@ class CounterfactualEngine:
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
 
+    def _topological_sort_equations(self, equations: Dict[str, str]) -> List[Tuple[str, str]]:
+        """
+        Topologically sort equations based on variable dependencies.
+
+        Args:
+            equations: Dict mapping variable names to equations
+
+        Returns:
+            List of (var_name, equation) tuples in dependency order
+        """
+        # Build dependency graph
+        dependencies: Dict[str, set] = {}
+        for var_name, equation in equations.items():
+            # Find all variable references in the equation
+            # Match variable names (alphanumeric + underscore)
+            var_refs = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', equation))
+            # Remove known non-variables (math functions, constants)
+            var_refs -= {'exp', 'log', 'sqrt', 'abs', 'min', 'max', 'pow'}
+            # Only keep variables that are in the equations dict
+            dependencies[var_name] = var_refs & set(equations.keys())
+
+        # Topological sort using Kahn's algorithm
+        sorted_vars = []
+        in_degree = {var: len(deps) for var, deps in dependencies.items()}
+        queue = [var for var, degree in in_degree.items() if degree == 0]
+
+        while queue:
+            var = queue.pop(0)
+            sorted_vars.append(var)
+
+            # Reduce in-degree for dependent variables
+            for other_var, deps in dependencies.items():
+                if var in deps and other_var not in sorted_vars:
+                    in_degree[other_var] -= 1
+                    if in_degree[other_var] == 0:
+                        queue.append(other_var)
+
+        # Check for cycles
+        if len(sorted_vars) != len(equations):
+            raise ValueError("Circular dependencies detected in structural equations")
+
+        return [(var, equations[var]) for var in sorted_vars]
+
     def _run_monte_carlo(
         self, request: CounterfactualRequest
     ) -> Dict[str, np.ndarray]:
@@ -141,8 +184,9 @@ class CounterfactualEngine:
             for var_name, value in request.context.items():
                 samples[var_name] = np.full(self.num_iterations, value)
 
-        # Evaluate structural equations topologically
-        for var_name, equation in request.model.equations.items():
+        # Evaluate structural equations topologically (in dependency order)
+        sorted_equations = self._topological_sort_equations(request.model.equations)
+        for var_name, equation in sorted_equations:
             if var_name not in samples:  # Skip if already set by intervention/context
                 samples[var_name] = self._evaluate_equation(equation, samples)
 

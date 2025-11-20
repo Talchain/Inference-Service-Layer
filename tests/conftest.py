@@ -5,20 +5,28 @@ Provides reusable test fixtures for all test modules.
 """
 
 import pytest
-from fastapi.testclient import TestClient
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
 
 from src.api.main import app
 
 
-@pytest.fixture
-def client():
+@pytest_asyncio.fixture
+async def client():
     """
-    FastAPI test client.
+    Async HTTP client for FastAPI testing.
+
+    Uses httpx.AsyncClient instead of TestClient to avoid known Starlette
+    async middleware bugs (anyio.EndOfStream errors).
 
     Returns:
-        TestClient: FastAPI test client for making requests
+        AsyncClient: Async HTTP client for making requests
     """
-    return TestClient(app)
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test"
+    ) as ac:
+        yield ac
 
 
 @pytest.fixture

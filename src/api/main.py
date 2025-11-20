@@ -117,6 +117,16 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
         return response
 
     except Exception as exc:
+        # Handle anyio.EndOfStream from async test clients (known Starlette bug)
+        # https://github.com/encode/starlette/issues/1678
+        # This occurs when validation errors are raised before middleware completes
+        import anyio
+        if isinstance(exc, (anyio.EndOfStream, anyio.WouldBlock)):
+            # Decrement active requests before re-raising
+            active_requests.dec()
+            raise
+
+        # Handle other exceptions
         duration_seconds = time.time() - start_time
         duration_ms = duration_seconds * 1000
 

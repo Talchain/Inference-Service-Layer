@@ -1,11 +1,17 @@
 """
 Integration tests for health endpoint.
+
+NOTE: Tests converted to async to avoid Starlette TestClient async middleware bug.
+Uses httpx.AsyncClient with pytest-asyncio.
 """
 
+import pytest
 
-def test_health_endpoint(client):
+
+@pytest.mark.asyncio
+async def test_health_endpoint(client):
     """Test health check endpoint."""
-    response = client.get("/health")
+    response = await client.get("/health")
 
     assert response.status_code == 200
     data = response.json()
@@ -16,9 +22,10 @@ def test_health_endpoint(client):
     assert data["version"] == "0.1.0"
 
 
-def test_health_endpoint_fields(client):
+@pytest.mark.asyncio
+async def test_health_endpoint_fields(client):
     """Test health endpoint returns all required fields."""
-    response = client.get("/health")
+    response = await client.get("/health")
     data = response.json()
 
     required_fields = ["status", "version", "timestamp"]

@@ -1,11 +1,17 @@
 """
 Integration tests for team alignment endpoint.
+
+NOTE: Tests converted to async to avoid Starlette TestClient async middleware bug.
+Uses httpx.AsyncClient with pytest-asyncio.
 """
 
+import pytest
 
-def test_team_alignment_basic(client, team_perspectives, decision_options):
+
+@pytest.mark.asyncio
+async def test_team_alignment_basic(client, team_perspectives, decision_options):
     """Test basic team alignment."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/team/align",
         json={"perspectives": team_perspectives, "options": decision_options},
     )
@@ -20,9 +26,10 @@ def test_team_alignment_basic(client, team_perspectives, decision_options):
     assert "explanation" in data
 
 
-def test_team_alignment_common_ground(client, team_perspectives, decision_options):
+@pytest.mark.asyncio
+async def test_team_alignment_common_ground(client, team_perspectives, decision_options):
     """Test that common ground is identified."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/team/align",
         json={"perspectives": team_perspectives, "options": decision_options},
     )
@@ -37,9 +44,10 @@ def test_team_alignment_common_ground(client, team_perspectives, decision_option
     assert 0 <= common_ground["agreement_level"] <= 100
 
 
-def test_team_alignment_ranked_options(client, team_perspectives, decision_options):
+@pytest.mark.asyncio
+async def test_team_alignment_ranked_options(client, team_perspectives, decision_options):
     """Test that options are ranked by satisfaction."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/team/align",
         json={"perspectives": team_perspectives, "options": decision_options},
     )
@@ -57,9 +65,10 @@ def test_team_alignment_ranked_options(client, team_perspectives, decision_optio
         )
 
 
-def test_team_alignment_recommendation(client, team_perspectives, decision_options):
+@pytest.mark.asyncio
+async def test_team_alignment_recommendation(client, team_perspectives, decision_options):
     """Test that recommendation is provided."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/team/align",
         json={"perspectives": team_perspectives, "options": decision_options},
     )

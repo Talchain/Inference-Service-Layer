@@ -2,6 +2,9 @@
 Integration tests for Bayesian teaching endpoint.
 
 Tests end-to-end teaching workflow through REST API.
+
+NOTE: Tests converted to async to avoid Starlette TestClient async middleware bug.
+Uses httpx.AsyncClient with pytest-asyncio.
 """
 
 import pytest
@@ -51,9 +54,10 @@ def teaching_request():
     }
 
 
-def test_generate_teaching_examples_basic(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_basic(client, teaching_request):
     """Test basic teaching example generation."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -91,11 +95,12 @@ def test_generate_teaching_examples_basic(client, teaching_request):
     assert "minute" in data["expected_learning_time"].lower()
 
 
-def test_generate_teaching_examples_confounding(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_confounding(client, teaching_request):
     """Test teaching examples for confounding concept."""
     teaching_request["target_concept"] = "confounding"
 
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -111,11 +116,12 @@ def test_generate_teaching_examples_confounding(client, teaching_request):
     assert "confound" in text or "correlation" in text or "causation" in text
 
 
-def test_generate_teaching_examples_causal(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_causal(client, teaching_request):
     """Test teaching examples for causal mechanism concept."""
     teaching_request["target_concept"] = "causal_mechanism"
 
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -126,11 +132,12 @@ def test_generate_teaching_examples_causal(client, teaching_request):
     assert len(data["examples"]) > 0
 
 
-def test_generate_teaching_examples_uncertainty(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_uncertainty(client, teaching_request):
     """Test teaching examples for uncertainty concept."""
     teaching_request["target_concept"] = "uncertainty"
 
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -141,11 +148,12 @@ def test_generate_teaching_examples_uncertainty(client, teaching_request):
     assert len(data["examples"]) > 0
 
 
-def test_generate_teaching_examples_optimization(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_optimization(client, teaching_request):
     """Test teaching examples for optimization concept."""
     teaching_request["target_concept"] = "optimization"
 
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -156,14 +164,15 @@ def test_generate_teaching_examples_optimization(client, teaching_request):
     assert len(data["examples"]) > 0
 
 
-def test_generate_teaching_examples_deterministic(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_deterministic(client, teaching_request):
     """Test that teaching is deterministic."""
-    response1 = client.post(
+    response1 = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
 
-    response2 = client.post(
+    response2 = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -180,12 +189,13 @@ def test_generate_teaching_examples_deterministic(client, teaching_request):
         assert ex1["information_value"] == ex2["information_value"]
 
 
-def test_generate_teaching_examples_max_examples(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_max_examples(client, teaching_request):
     """Test that max_examples parameter is respected."""
     for max_examples in [1, 2, 3, 5]:
         teaching_request["max_examples"] = max_examples
 
-        response = client.post(
+        response = await client.post(
             "/api/v1/teaching/teach",
             json=teaching_request,
         )
@@ -197,9 +207,10 @@ def test_generate_teaching_examples_max_examples(client, teaching_request):
         assert len(data["examples"]) <= max_examples
 
 
-def test_generate_teaching_examples_ranked(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_ranked(client, teaching_request):
     """Test that examples are ranked by teaching value."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -214,7 +225,8 @@ def test_generate_teaching_examples_ranked(client, teaching_request):
     assert values == sorted(values, reverse=True)
 
 
-def test_generate_teaching_examples_different_concepts(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_different_concepts(client, teaching_request):
     """Test that different concepts generate different examples."""
     concepts = ["confounding", "trade_offs", "causal_mechanism"]
     results = {}
@@ -222,7 +234,7 @@ def test_generate_teaching_examples_different_concepts(client, teaching_request)
     for concept in concepts:
         teaching_request["target_concept"] = concept
 
-        response = client.post(
+        response = await client.post(
             "/api/v1/teaching/teach",
             json=teaching_request,
         )
@@ -235,14 +247,15 @@ def test_generate_teaching_examples_different_concepts(client, teaching_request)
     assert len(set(explanations)) > 1
 
 
-def test_generate_teaching_examples_invalid_request(client):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_invalid_request(client):
     """Test error handling for invalid request."""
     invalid_request = {
         "user_id": "test_user",
         # Missing required fields
     }
 
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=invalid_request,
     )
@@ -251,9 +264,10 @@ def test_generate_teaching_examples_invalid_request(client):
     assert response.status_code == 422
 
 
-def test_generate_teaching_examples_learning_objectives(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_learning_objectives(client, teaching_request):
     """Test that learning objectives are meaningful."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
@@ -272,14 +286,15 @@ def test_generate_teaching_examples_learning_objectives(client, teaching_request
     assert concept.replace("_", " ") in text or "trade" in text
 
 
-def test_generate_teaching_examples_time_estimate(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_time_estimate(client, teaching_request):
     """Test time estimate scaling."""
     results = {}
 
     for max_examples in [1, 3, 5]:
         teaching_request["max_examples"] = max_examples
 
-        response = client.post(
+        response = await client.post(
             "/api/v1/teaching/teach",
             json=teaching_request,
         )
@@ -293,9 +308,10 @@ def test_generate_teaching_examples_time_estimate(client, teaching_request):
     assert all("minute" in time.lower() for time in results.values())
 
 
-def test_generate_teaching_examples_privacy(client, teaching_request):
+@pytest.mark.asyncio
+async def test_generate_teaching_examples_privacy(client, teaching_request):
     """Test that user IDs are handled privately."""
-    response = client.post(
+    response = await client.post(
         "/api/v1/teaching/teach",
         json=teaching_request,
     )
