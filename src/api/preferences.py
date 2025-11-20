@@ -7,10 +7,12 @@ Provides endpoints for:
 """
 
 import logging
+import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
+from src.models.metadata import create_response_metadata
 from src.models.phase1_models import (
     CounterfactualQuery,
     PreferenceElicitationRequest,
@@ -65,20 +67,26 @@ user_storage = UserStorage()
 )
 async def elicit_preferences(
     request: PreferenceElicitationRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> PreferenceElicitationResponse:
     """
     Generate preference elicitation queries.
 
     Args:
         request: Preference elicitation request with context and beliefs
+        x_request_id: Optional request ID for tracing
 
     Returns:
         PreferenceElicitationResponse: Ranked queries with strategy info
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "preference_elicitation_request",
             extra={
+                "request_id": request_id,
                 "user_id": _hash_user_id(request.user_id),
                 "domain": request.context.domain,
                 "num_variables": len(request.context.variables),
@@ -131,6 +139,7 @@ async def elicit_preferences(
         logger.info(
             "preference_elicitation_completed",
             extra={
+                "request_id": request_id,
                 "user_id": _hash_user_id(request.user_id),
                 "num_queries": len(queries),
                 "strategy": strategy.type.value,
@@ -138,13 +147,18 @@ async def elicit_preferences(
             },
         )
 
-        return PreferenceElicitationResponse(
+        response = PreferenceElicitationResponse(
             queries=queries,
             strategy=strategy,
             expected_information_gain=expected_info_gain,
             estimated_queries_remaining=estimated_remaining,
             explanation=explanation,
         )
+
+        # Inject metadata
+        response.metadata = create_response_metadata(request_id)
+
+        return response
 
     except HTTPException:
         raise
@@ -198,20 +212,26 @@ async def elicit_preferences(
 )
 async def update_beliefs(
     request: PreferenceUpdateRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> PreferenceUpdateResponse:
     """
     Update user beliefs based on preference response.
 
     Args:
         request: Preference update request with query response
+        x_request_id: Optional request ID for tracing
 
     Returns:
         PreferenceUpdateResponse: Updated beliefs and next queries
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "preference_update_request",
             extra={
+                "request_id": request_id,
                 "user_id": _hash_user_id(request.user_id),
                 "query_id": request.query_id,
                 "response": request.response.value,
@@ -323,6 +343,7 @@ async def update_beliefs(
         logger.info(
             "preference_update_completed",
             extra={
+                "request_id": request_id,
                 "user_id": _hash_user_id(request.user_id),
                 "queries_completed": queries_completed,
                 "avg_uncertainty": round(avg_uncertainty, 3),
@@ -331,13 +352,18 @@ async def update_beliefs(
             },
         )
 
-        return PreferenceUpdateResponse(
+        response = PreferenceUpdateResponse(
             updated_beliefs=updated_beliefs,
             queries_completed=queries_completed,
             estimated_queries_remaining=estimated_remaining,
             next_queries=next_queries,
             learning_summary=learning_summary,
         )
+
+        # Inject metadata
+        response.metadata = create_response_metadata(request_id)
+
+        return response
 
     except HTTPException:
         raise

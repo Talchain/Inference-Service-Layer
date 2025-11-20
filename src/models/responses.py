@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .metadata import ResponseMetadata
 from .shared import (
     ConfidenceInterval,
     ConfidenceLevel,
@@ -110,6 +111,13 @@ class CausalValidationResponse(BaseModel):
     # Always present
     confidence: ConfidenceLevel = Field(..., description="Confidence in the analysis")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -223,6 +231,13 @@ class CounterfactualResponse(BaseModel):
     robustness: RobustnessAnalysis = Field(..., description="Robustness analysis")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
 
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -322,6 +337,13 @@ class TeamAlignmentResponse(BaseModel):
     recommendation: Recommendation = Field(..., description="Top recommendation")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
 
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -405,6 +427,13 @@ class SensitivityAnalysisResponse(BaseModel):
     robustness: RobustnessScore = Field(..., description="Overall robustness")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
 
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -450,6 +479,10 @@ class HealthResponse(BaseModel):
     status: str = Field(default="healthy", description="Service status")
     version: str = Field(..., description="Service version")
     timestamp: str = Field(..., description="Current timestamp")
+    config_fingerprint: Optional[str] = Field(
+        default=None,
+        description="Config fingerprint for determinism verification"
+    )
 
     model_config = {
         "json_schema_extra": {

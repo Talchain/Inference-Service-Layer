@@ -8,7 +8,9 @@ from datetime import datetime
 
 from fastapi import APIRouter
 
+from src.__version__ import __version__
 from src.config import get_settings
+from src.models.metadata import generate_config_fingerprint
 from src.models.responses import HealthResponse
 
 router = APIRouter()
@@ -33,6 +35,7 @@ async def health_check() -> HealthResponse:
     """
     return HealthResponse(
         status="healthy",
-        version=settings.VERSION,
+        version=__version__,
         timestamp=datetime.utcnow().isoformat() + "Z",
+        config_fingerprint=generate_config_fingerprint(),
     )

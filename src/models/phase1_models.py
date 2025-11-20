@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
+from .metadata import ResponseMetadata
 from .shared import ConfidenceLevel, Distribution, ExplanationMetadata
 
 
@@ -170,6 +171,13 @@ class PreferenceElicitationResponse(BaseModel):
     )
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
 
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
 
 class PreferenceChoice(str, Enum):
     """User's preference choice."""
@@ -217,6 +225,13 @@ class PreferenceUpdateResponse(BaseModel):
     )
     learning_summary: LearningSummary = Field(..., description="Learning progress summary")
 
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
 
 # ============================================================================
 # Bayesian Teaching Models
@@ -257,6 +272,13 @@ class BayesianTeachingResponse(BaseModel):
     explanation: str = Field(..., description="Overall teaching strategy explanation")
     learning_objectives: List[str] = Field(..., description="What user will learn")
     expected_learning_time: str = Field(..., description="Estimated time to learn concept")
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
 
 
 # ============================================================================
@@ -397,3 +419,10 @@ class AdvancedValidationResponse(BaseModel):
     suggestions: List[ModelSuggestion] = Field(..., description="Improvement suggestions")
     best_practices: List[BestPractice] = Field(..., description="Best practice adherence")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )

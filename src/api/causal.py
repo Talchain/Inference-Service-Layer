@@ -7,9 +7,12 @@ Provides endpoints for:
 """
 
 import logging
+import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
+from typing import Optional
 
+from src.models.metadata import create_response_metadata
 from src.models.requests import CausalValidationRequest, CounterfactualRequest
 from src.models.responses import (
     CausalValidationResponse,
@@ -53,20 +56,26 @@ counterfactual_engine = CounterfactualEngine()
 )
 async def validate_causal_model(
     request: CausalValidationRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> CausalValidationResponse:
     """
     Validate causal model for identifiability.
 
     Args:
         request: Causal validation request with DAG and variables
+        x_request_id: Optional request ID for tracing
 
     Returns:
         CausalValidationResponse: Validation results with adjustment sets or issues
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "causal_validation_request",
             extra={
+                "request_id": request_id,
                 "treatment": request.treatment,
                 "outcome": request.outcome,
                 "num_nodes": len(request.dag.nodes),
@@ -76,9 +85,13 @@ async def validate_causal_model(
 
         result = causal_validator.validate(request)
 
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
         logger.info(
             "causal_validation_completed",
             extra={
+                "request_id": request_id,
                 "status": result.status,
                 "confidence": result.confidence,
             },
@@ -119,20 +132,26 @@ async def validate_causal_model(
 )
 async def analyze_counterfactual(
     request: CounterfactualRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> CounterfactualResponse:
     """
     Perform counterfactual analysis.
 
     Args:
         request: Counterfactual request with structural model and intervention
+        x_request_id: Optional request ID for tracing
 
     Returns:
         CounterfactualResponse: Counterfactual predictions with uncertainty
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "counterfactual_request",
             extra={
+                "request_id": request_id,
                 "outcome": request.outcome,
                 "intervention": request.intervention,
                 "num_variables": len(request.model.variables),
@@ -141,9 +160,13 @@ async def analyze_counterfactual(
 
         result = counterfactual_engine.analyze(request)
 
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
         logger.info(
             "counterfactual_completed",
             extra={
+                "request_id": request_id,
                 "point_estimate": result.prediction.point_estimate,
                 "uncertainty": result.uncertainty.overall,
                 "robustness": result.robustness.score,
