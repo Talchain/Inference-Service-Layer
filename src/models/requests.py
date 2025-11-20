@@ -4,7 +4,7 @@ Request Pydantic models for API endpoints.
 
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .shared import DAGStructure, Distribution, DistributionType, StructuralModel
 

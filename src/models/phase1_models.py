@@ -11,7 +11,7 @@ Includes models for:
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .metadata import ResponseMetadata
 from .shared import ConfidenceLevel, Distribution, ExplanationMetadata
