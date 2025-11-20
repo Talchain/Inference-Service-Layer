@@ -124,6 +124,7 @@ async def elicit_preferences(
         explanation = ExplanationMetadata(
             summary=f"Generated {len(queries)} queries using {strategy.type.value} strategy",
             reasoning=strategy.rationale,
+            technical_basis=f"ActiVA algorithm: Information gain computed via Monte Carlo sampling (1000 samples) to estimate H(current) - E[H(posterior)]",
             assumptions=[f"Focus area: {area}" for area in strategy.focus_areas],
         )
 
