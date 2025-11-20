@@ -6,9 +6,12 @@ critical factors.
 """
 
 import logging
+import uuid
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
+from src.models.metadata import create_response_metadata
 from src.models.requests import SensitivityAnalysisRequest
 from src.models.responses import SensitivityAnalysisResponse
 from src.services.sensitivity_analyzer import SensitivityAnalyzer
@@ -43,6 +46,7 @@ sensitivity_analyzer = SensitivityAnalyzer()
 )
 async def analyze_sensitivity(
     request: SensitivityAnalysisRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> SensitivityAnalysisResponse:
     """
     Perform sensitivity analysis on assumptions.
@@ -53,6 +57,9 @@ async def analyze_sensitivity(
     Returns:
         SensitivityAnalysisResponse: Sensitivity analysis results
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "sensitivity_analysis_request",

@@ -5,9 +5,12 @@ Provides endpoints for pedagogically optimized teaching examples.
 """
 
 import logging
+import uuid
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
+from src.models.metadata import create_response_metadata
 from src.models.phase1_models import (
     BayesianTeachingRequest,
     BayesianTeachingResponse,
@@ -63,20 +66,26 @@ bayesian_teacher = BayesianTeacher()
 )
 async def generate_teaching_examples(
     request: BayesianTeachingRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> BayesianTeachingResponse:
     """
     Generate teaching examples using Bayesian teaching.
 
     Args:
         request: Teaching request with concept and beliefs
+        x_request_id: Optional request ID for tracing
 
     Returns:
         BayesianTeachingResponse: Teaching examples and strategy
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "teaching_request",
             extra={
+                "request_id": request_id,
                 "user_id": _hash_user_id(request.user_id),
                 "concept": request.target_concept,
                 "max_examples": request.max_examples,
@@ -95,6 +104,7 @@ async def generate_teaching_examples(
         logger.info(
             "teaching_completed",
             extra={
+                "request_id": request_id,
                 "user_id": _hash_user_id(request.user_id),
                 "concept": request.target_concept,
                 "num_examples": len(examples),
@@ -105,12 +115,17 @@ async def generate_teaching_examples(
             },
         )
 
-        return BayesianTeachingResponse(
+        response = BayesianTeachingResponse(
             examples=examples,
             explanation=explanation,
             learning_objectives=objectives,
             expected_learning_time=time,
         )
+
+        # Inject metadata
+        response.metadata = create_response_metadata(request_id)
+
+        return response
 
     except HTTPException:
         raise

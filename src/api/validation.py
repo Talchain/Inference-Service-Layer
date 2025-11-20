@@ -5,9 +5,12 @@ Provides comprehensive validation for causal models.
 """
 
 import logging
+import uuid
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
+from src.models.metadata import create_response_metadata
 from src.models.phase1_models import (
     AdvancedValidationRequest,
     AdvancedValidationResponse,
@@ -61,20 +64,26 @@ advanced_validator = AdvancedModelValidator()
 )
 async def validate_model(
     request: AdvancedValidationRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> AdvancedValidationResponse:
     """
     Perform advanced model validation.
 
     Args:
         request: Validation request with DAG and optional structural model
+        x_request_id: Optional request ID for tracing
 
     Returns:
         AdvancedValidationResponse: Validation results and suggestions
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "validation_request",
             extra={
+                "request_id": request_id,
                 "num_nodes": len(request.dag.get("nodes", [])),
                 "num_edges": len(request.dag.get("edges", [])),
                 "level": request.validation_level.value,
@@ -112,13 +121,14 @@ async def validate_model(
         logger.info(
             "validation_completed",
             extra={
+                "request_id": request_id,
                 "quality_level": quality_level.value,
                 "quality_score": quality_score,
                 "num_suggestions": len(suggestions),
             },
         )
 
-        return AdvancedValidationResponse(
+        response = AdvancedValidationResponse(
             overall_quality=quality_level,
             quality_score=quality_score,
             validation_results=validation_results,
@@ -126,6 +136,11 @@ async def validate_model(
             best_practices=best_practices,
             explanation=explanation,
         )
+
+        # Inject metadata
+        response.metadata = create_response_metadata(request_id)
+
+        return response
 
     except HTTPException:
         raise

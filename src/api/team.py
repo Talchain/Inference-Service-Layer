@@ -6,9 +6,12 @@ across different team perspectives.
 """
 
 import logging
+import uuid
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
+from src.models.metadata import create_response_metadata
 from src.models.requests import TeamAlignmentRequest
 from src.models.responses import TeamAlignmentResponse
 from src.services.team_aligner import TeamAligner
@@ -42,7 +45,9 @@ team_aligner = TeamAligner()
         500: {"description": "Internal computation error"},
     },
 )
-async def align_team(request: TeamAlignmentRequest) -> TeamAlignmentResponse:
+async def align_team(request: TeamAlignmentRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> TeamAlignmentResponse:
     """
     Find team alignment across perspectives.
 
@@ -52,6 +57,9 @@ async def align_team(request: TeamAlignmentRequest) -> TeamAlignmentResponse:
     Returns:
         TeamAlignmentResponse: Alignment analysis with recommendations
     """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
     try:
         logger.info(
             "team_alignment_request",
