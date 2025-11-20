@@ -23,6 +23,7 @@ from .health import router as health_router
 from .preferences import router as preferences_router
 from .teaching import router as teaching_router
 from .team import router as team_router
+from .validation import router as validation_router
 
 # Setup logging
 logger = setup_logging()
@@ -176,6 +177,11 @@ app.include_router(
     teaching_router,
     prefix=f"{settings.API_V1_PREFIX}/teaching",
     tags=["Bayesian Teaching"],
+)
+app.include_router(
+    validation_router,
+    prefix=f"{settings.API_V1_PREFIX}/validation",
+    tags=["Advanced Validation"],
 )
 app.include_router(
     team_router,
