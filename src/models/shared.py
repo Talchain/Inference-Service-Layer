@@ -38,6 +38,7 @@ class ValidationStatus(str, Enum):
     IDENTIFIABLE = "identifiable"
     UNCERTAIN = "uncertain"
     CANNOT_IDENTIFY = "cannot_identify"
+    DEGRADED = "degraded"  # Y₀ analysis failed, using fallback
 
 
 class ValidationIssueType(str, Enum):

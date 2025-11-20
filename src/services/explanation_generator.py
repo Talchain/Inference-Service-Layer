@@ -26,7 +26,7 @@ class ExplanationGenerator:
         Generate explanation for causal validation results.
 
         Args:
-            status: Validation status (identifiable, uncertain, cannot_identify)
+            status: Validation status (identifiable, uncertain, cannot_identify, degraded)
             treatment: Treatment variable name
             outcome: Outcome variable name
             adjustment_sets: Valid adjustment sets (if identifiable)
@@ -71,6 +71,21 @@ class ExplanationGenerator:
             assumptions = [
                 "Current structure may be incomplete",
                 "Additional edges or variables may exist",
+            ]
+
+        elif status == "degraded":
+            summary = "Advanced causal analysis unavailable; using fallback structural assessment"
+            reasoning = (
+                f"The advanced causal identification engine encountered an error while analyzing "
+                f"the effect of {treatment} on {outcome}. A basic structural assessment has been "
+                f"provided instead. This may indicate an issue with the graph structure complexity "
+                f"or an internal analysis error. Manual review by a causal inference expert is recommended."
+            )
+            technical_basis = "Y₀ causal identification failed; fallback to structural path analysis"
+            assumptions = [
+                "Fallback structural analysis may be incomplete",
+                "Manual expert review recommended before making decisions",
+                "Graph may need simplification or restructuring",
             ]
 
         else:  # cannot_identify
