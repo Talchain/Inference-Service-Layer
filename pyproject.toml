@@ -33,6 +33,9 @@ mypy = "^1.7.0"
 # Phase 1 testing dependencies
 pytest-redis = "^3.0.2"
 fakeredis = "^2.20.0"
+# Developer tooling
+typer = "^0.9.0"
+rich = "^13.7.0"
 
 [tool.poetry.group.docs.dependencies]
 mkdocs = "^1.5.0"
