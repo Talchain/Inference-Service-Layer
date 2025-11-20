@@ -1,0 +1,267 @@
+{
+  "dashboard": {
+    "title": "Inference Service Layer - Overview",
+    "tags": ["isl", "pilot", "causal-inference"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 0},
+        "type": "stat",
+        "title": "Service Status",
+        "targets": [
+          {
+            "expr": "isl_service_up",
+            "legendFormat": "Service Up",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "background"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "red"},
+                {"value": 1, "color": "green"}
+              ]
+            },
+            "mappings": [
+              {"type": "value", "value": "0", "text": "DOWN"},
+              {"type": "value", "value": "1", "text": "UP"}
+            ]
+          }
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 0},
+        "type": "stat",
+        "title": "Request Rate (req/s)",
+        "targets": [
+          {
+            "expr": "sum(rate(isl_http_requests_total[1m]))",
+            "legendFormat": "Requests",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 0},
+        "type": "stat",
+        "title": "Error Rate (%)",
+        "targets": [
+          {
+            "expr": "(sum(rate(isl_http_errors_total[5m])) / sum(rate(isl_http_requests_total[5m]))) * 100",
+            "legendFormat": "Error Rate",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "graphMode": "area",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "yellow"},
+                {"value": 5, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+        "type": "graph",
+        "title": "Request Latency (P50, P95, P99)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(isl_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(isl_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(isl_http_request_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "s",
+            "label": "Latency"
+          }
+        ],
+        "thresholds": [
+          {
+            "value": 2.0,
+            "colorMode": "critical",
+            "fill": false,
+            "line": true,
+            "op": "gt"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+        "type": "graph",
+        "title": "Requests by Endpoint",
+        "targets": [
+          {
+            "expr": "sum(rate(isl_http_requests_total[5m])) by (endpoint)",
+            "legendFormat": "{{endpoint}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "reqps",
+            "label": "Requests/s"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 14},
+        "type": "graph",
+        "title": "Business Metrics - Queries Generated",
+        "targets": [
+          {
+            "expr": "sum(rate(isl_preference_queries_generated_total[5m])) by (strategy)",
+            "legendFormat": "{{strategy}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Queries/s"
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 14},
+        "type": "graph",
+        "title": "Cache Performance",
+        "targets": [
+          {
+            "expr": "rate(isl_cache_hits_total[5m])",
+            "legendFormat": "Cache Hits",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(isl_cache_misses_total[5m])",
+            "legendFormat": "Cache Misses",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Operations/s"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 22},
+        "type": "graph",
+        "title": "Causal Analysis Operations",
+        "targets": [
+          {
+            "expr": "sum(rate(isl_causal_validations_total[5m])) by (status)",
+            "legendFormat": "Validations ({{status}})",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(isl_counterfactual_analyses_total[5m])",
+            "legendFormat": "Counterfactuals",
+            "refId": "B"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Operations/s"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 22},
+        "type": "graph",
+        "title": "Teaching Examples Generated",
+        "targets": [
+          {
+            "expr": "sum(rate(isl_teaching_examples_generated_total[5m])) by (concept)",
+            "legendFormat": "{{concept}}",
+            "refId": "A"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "ops",
+            "label": "Examples/s"
+          }
+        ]
+      },
+      {
+        "id": 10,
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+        "type": "graph",
+        "title": "Computation Performance",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(isl_activa_computation_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "ActiVA P95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(isl_bayesian_update_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "Bayesian Update P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(isl_counterfactual_computation_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "Counterfactual P95",
+            "refId": "C"
+          }
+        ],
+        "yaxes": [
+          {
+            "format": "s",
+            "label": "Duration"
+          }
+        ]
+      }
+    ]
+  }
+}

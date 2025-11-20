@@ -1,0 +1,108 @@
+# Production Redis Deployment for ISL
+#
+# Features:
+# - Persistent storage (RDB + AOF)
+# - Health checks
+# - Resource limits
+# - Automatic restarts
+# - Security configuration
+#
+# Usage:
+#   docker-compose -f docker-compose.redis.yml up -d
+#
+# Access:
+#   - Redis: localhost:6379
+
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: isl-redis
+    restart: unless-stopped
+
+    # Use custom configuration
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+    # Ports
+    ports:
+      - "6379:6379"
+
+    # Volumes
+    volumes:
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+
+    # Environment
+    environment:
+      - TZ=UTC
+
+    # Resource Limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Health Check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Network
+    networks:
+      - isl-backend
+
+    # Labels
+    labels:
+      com.isl.description: "Redis cache and user storage"
+      com.isl.service: "redis"
+
+  # Optional: Redis Commander (Web UI for debugging)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: isl-redis-commander
+    restart: unless-stopped
+
+    # Ports
+    ports:
+      - "8081:8081"
+
+    # Environment
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      # - REDIS_PASSWORD=your-redis-password  # Uncomment if using password
+
+    # Depends on Redis
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # Network
+    networks:
+      - isl-backend
+
+    # Labels
+    labels:
+      com.isl.description: "Redis web UI for debugging"
+      com.isl.service: "redis-commander"
+
+    # Only enable in development/staging, not production
+    profiles:
+      - debug
+
+networks:
+  isl-backend:
+    driver: bridge
+    name: isl-backend
+
+volumes:
+  redis-data:
+    name: isl-redis-data
+    driver: local

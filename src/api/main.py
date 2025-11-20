@@ -20,6 +20,7 @@ from src.models.responses import ErrorCode, ErrorResponse
 from .analysis import router as analysis_router
 from .causal import router as causal_router
 from .health import router as health_router
+from .metrics import router as metrics_router
 from .preferences import router as preferences_router
 from .teaching import router as teaching_router
 from .team import router as team_router
@@ -44,36 +45,70 @@ app = FastAPI(
 @app.middleware("http")
 async def log_requests(request: Request, call_next: Callable) -> Response:
     """
-    Log all incoming requests and responses.
+    Log all incoming requests and responses with Prometheus metrics.
 
     Tracks:
     - Request method, path, and client
     - Response status and duration
     - Any errors that occur
+    - Prometheus metrics (request counts, latencies, errors)
     """
+    from .metrics import (
+        http_requests_total,
+        http_request_duration_seconds,
+        http_errors_total,
+        active_requests,
+    )
+
     start_time = time.time()
     request_id = f"{int(time.time() * 1000)}"
+
+    # Track active requests
+    active_requests.inc()
+
+    # Extract endpoint pattern (strip query params)
+    endpoint = request.url.path
 
     logger.info(
         "request_started",
         extra={
             "request_id": request_id,
             "method": request.method,
-            "path": request.url.path,
+            "path": endpoint,
             "client": request.client.host if request.client else "unknown",
         },
     )
 
     try:
         response = await call_next(request)
-        duration_ms = (time.time() - start_time) * 1000
+        duration_seconds = time.time() - start_time
+        duration_ms = duration_seconds * 1000
+
+        # Record metrics
+        http_requests_total.labels(
+            method=request.method,
+            endpoint=endpoint,
+            status=response.status_code,
+        ).inc()
+        http_request_duration_seconds.labels(
+            method=request.method,
+            endpoint=endpoint,
+        ).observe(duration_seconds)
+
+        # Track errors (4xx and 5xx)
+        if response.status_code >= 400:
+            http_errors_total.labels(
+                method=request.method,
+                endpoint=endpoint,
+                error_code=response.status_code,
+            ).inc()
 
         logger.info(
             "request_completed",
             extra={
                 "request_id": request_id,
                 "method": request.method,
-                "path": request.url.path,
+                "path": endpoint,
                 "status_code": response.status_code,
                 "duration_ms": round(duration_ms, 2),
             },
@@ -82,14 +117,22 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
         return response
 
     except Exception as exc:
-        duration_ms = (time.time() - start_time) * 1000
+        duration_seconds = time.time() - start_time
+        duration_ms = duration_seconds * 1000
+
+        # Record error metrics
+        http_errors_total.labels(
+            method=request.method,
+            endpoint=endpoint,
+            error_code="500",
+        ).inc()
 
         logger.error(
             "request_failed",
             extra={
                 "request_id": request_id,
                 "method": request.method,
-                "path": request.url.path,
+                "path": endpoint,
                 "error": str(exc),
                 "duration_ms": round(duration_ms, 2),
             },
@@ -97,6 +140,10 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
         )
 
         raise
+
+    finally:
+        # Always decrement active requests
+        active_requests.dec()
 
 
 # Exception handlers
@@ -163,6 +210,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 # Include routers
 app.include_router(health_router, tags=["Health"])
+app.include_router(metrics_router, tags=["Monitoring"])
 app.include_router(
     causal_router,
     prefix=f"{settings.API_V1_PREFIX}/causal",

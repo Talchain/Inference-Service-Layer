@@ -1,0 +1,103 @@
+# Prometheus alert rules for ISL monitoring
+#
+# These rules define alerts for critical conditions that require attention.
+# Alerts fire when conditions are met for the specified duration.
+
+groups:
+  - name: isl_service_health
+    interval: 30s
+    rules:
+      - alert: ISLServiceDown
+        expr: isl_service_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ISL service is down"
+          description: "The Inference Service Layer has been down for more than 1 minute."
+
+      - alert: ISLRedisDisconnected
+        expr: isl_redis_connected == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis connection lost"
+          description: "ISL has lost connection to Redis. Using in-memory fallback."
+
+      - alert: ISLHighErrorRate
+        expr: |
+          (
+            sum(rate(isl_http_errors_total[5m]))
+            /
+            sum(rate(isl_http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+  - name: isl_performance
+    interval: 30s
+    rules:
+      - alert: ISLHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(isl_http_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 2.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High request latency on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value }}s, exceeding 2.0s threshold."
+
+      - alert: ISLVeryHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(isl_http_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 5.0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Very high request latency on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value }}s, exceeding 5.0s threshold."
+
+      - alert: ISLHighActiveRequests
+        expr: isl_active_requests > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of active requests"
+          description: "{{ $value }} active requests, indicating potential bottleneck."
+
+  - name: isl_business_metrics
+    interval: 60s
+    rules:
+      - alert: ISLLowCacheHitRate
+        expr: |
+          (
+            sum(rate(isl_cache_hits_total[10m]))
+            /
+            (sum(rate(isl_cache_hits_total[10m])) + sum(rate(isl_cache_misses_total[10m])))
+          ) < 0.20
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }}, below 20% target. Consider increasing cache TTL."
+
+      - alert: ISLNoRequestsReceived
+        expr: |
+          sum(rate(isl_http_requests_total[5m])) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No requests received"
+          description: "ISL has not received any requests in the last 10 minutes. Check if service is accessible."
