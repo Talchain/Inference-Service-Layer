@@ -41,35 +41,38 @@ class TestFingerprinting:
             }),
         ]
 
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
-            for endpoint, payload in endpoints:
-                try:
-                    response = await client.post(endpoint, json=payload)
+        try:
+            async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+                for endpoint, payload in endpoints:
+                    try:
+                        response = await client.post(endpoint, json=payload)
 
-                    if response.status_code != 200:
-                        print(f"⚠ {endpoint} returned {response.status_code}: {response.text}")
-                        continue
+                        if response.status_code != 200:
+                            print(f"⚠ {endpoint} returned {response.status_code}: {response.text}")
+                            continue
 
-                    data = response.json()
-                    assert "_metadata" in data, f"{endpoint} missing _metadata"
+                        data = response.json()
+                        assert "_metadata" in data, f"{endpoint} missing _metadata"
 
-                    metadata = data["_metadata"]
-                    assert "isl_version" in metadata, f"{endpoint} missing isl_version"
-                    assert "config_fingerprint" in metadata, f"{endpoint} missing config_fingerprint"
-                    assert "request_id" in metadata, f"{endpoint} missing request_id"
+                        metadata = data["_metadata"]
+                        assert "isl_version" in metadata, f"{endpoint} missing isl_version"
+                        assert "config_fingerprint" in metadata, f"{endpoint} missing config_fingerprint"
+                        assert "request_id" in metadata, f"{endpoint} missing request_id"
 
-                    # Fingerprint should be 12-character hex
-                    fp = metadata["config_fingerprint"]
-                    assert len(fp) == 12, f"{endpoint} fingerprint wrong length: {fp}"
-                    assert all(c in "0123456789abcdef" for c in fp), f"{endpoint} fingerprint not hex: {fp}"
+                        # Fingerprint should be 12-character hex
+                        fp = metadata["config_fingerprint"]
+                        assert len(fp) == 12, f"{endpoint} fingerprint wrong length: {fp}"
+                        assert all(c in "0123456789abcdef" for c in fp), f"{endpoint} fingerprint not hex: {fp}"
 
-                    print(f"✓ {endpoint}: fingerprint={fp}")
+                        print(f"✓ {endpoint}: fingerprint={fp}")
 
-                except httpx.TimeoutException:
-                    print(f"⚠ {endpoint} timed out (server may not be running)")
-                except Exception as e:
-                    print(f"✗ {endpoint} failed: {e}")
-                    raise
+                    except httpx.TimeoutException:
+                        print(f"⚠ {endpoint} timed out (server may not be running)")
+                    except Exception as e:
+                        print(f"✗ {endpoint} failed: {e}")
+                        raise
+        except httpx.ConnectError:
+            pytest.skip("ISL server not running at localhost:8000")
 
     @pytest.mark.asyncio
     async def test_fingerprint_stable_across_requests(self):
