@@ -146,6 +146,31 @@ Once the service is running, visit:
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
+## Documentation
+
+### Operations Documentation
+
+For operations teams managing ISL in production:
+
+- **[Pilot Monitoring Runbook](docs/operations/PILOT_MONITORING_RUNBOOK.md)** - Daily monitoring procedures, alert response, escalation paths
+- **[Redis Strategy](docs/operations/REDIS_STRATEGY.md)** - Cache architecture, key patterns, TTL standards, operational procedures
+- **[Redis Troubleshooting](docs/operations/REDIS_TROUBLESHOOTING.md)** - Common issues, diagnostic commands, emergency procedures
+- **[Staging Deployment Checklist](docs/operations/STAGING_DEPLOYMENT_CHECKLIST.md)** - Step-by-step deployment procedures, rollback plans
+
+### Integration Documentation
+
+For UI teams integrating with ISL:
+
+- **[Cross-Reference Schema](docs/integration/CROSS_REFERENCE_SCHEMA.md)** - Assumption traceability, stable IDs, navigation flows, TypeScript implementation
+
+### Developer Documentation
+
+For developers optimizing and extending ISL:
+
+- **[Optimization Roadmap](docs/development/OPTIMIZATION_ROADMAP.md)** - 4-phase performance optimization strategy with targets and ROI analysis
+- **[Performance Profiling Script](scripts/profile_performance.py)** - Executable profiling tool for identifying bottlenecks
+- **[Redis Performance Validation](scripts/validate_redis_performance.py)** - Redis performance testing and validation
+
 ## Project Structure
 
 ```
@@ -171,10 +196,26 @@ inference-service-layer/
 │   │   └── validation.py
 │   └── config.py            # Configuration
 ├── tests/                   # Test suite
-│   ├── unit/
-│   ├── integration/
+│   ├── unit/                # Unit tests
+│   ├── integration/         # Integration tests
+│   │   ├── test_fingerprinting.py    # Version fingerprinting
+│   │   ├── test_redis_failover.py    # Redis failover scenarios
+│   │   ├── test_concurrency.py       # Concurrent request handling
+│   │   └── test_redis_health.py      # Redis health checks
 │   └── fixtures/
 ├── docs/                    # Documentation
+│   ├── operations/          # Operations runbooks
+│   │   ├── PILOT_MONITORING_RUNBOOK.md
+│   │   ├── REDIS_STRATEGY.md
+│   │   ├── REDIS_TROUBLESHOOTING.md
+│   │   └── STAGING_DEPLOYMENT_CHECKLIST.md
+│   ├── integration/         # UI integration guides
+│   │   └── CROSS_REFERENCE_SCHEMA.md
+│   └── development/         # Developer documentation
+│       └── OPTIMIZATION_ROADMAP.md
+├── scripts/                 # Operational scripts
+│   ├── profile_performance.py        # Performance profiling
+│   └── validate_redis_performance.py # Redis validation
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pyproject.toml
@@ -190,12 +231,40 @@ poetry run pytest
 # Run specific test file
 poetry run pytest tests/unit/test_determinism.py
 
+# Run integration tests
+poetry run pytest tests/integration/ -v
+
+# Run Redis health checks (requires Redis running)
+poetry run pytest tests/integration/test_redis_health.py -v -s
+
 # Run with verbose output
 poetry run pytest -v
 
 # Generate coverage report
 poetry run pytest --cov=src --cov-report=html
 ```
+
+### Integration Test Suites
+
+**Fingerprinting & Determinism** (`test_fingerprinting.py`):
+- Version fingerprinting metadata on all endpoints
+- Deterministic responses for identical inputs
+- Request ID uniqueness and propagation
+
+**Redis Failover** (`test_redis_failover.py`):
+- Graceful degradation when Redis unavailable
+- Error propagation with request IDs
+- Service availability under failure conditions
+
+**Concurrency** (`test_concurrency.py`):
+- Concurrent request handling without interference
+- Performance stability under sustained load
+- Cache contention behaviour
+
+**Redis Health** (`test_redis_health.py`):
+- Redis connectivity and configuration
+- TTL enforcement (no infinite keys)
+- Eviction policy and memory limits
 
 ## Configuration
 
@@ -314,19 +383,35 @@ For questions or issues:
 
 ## Roadmap
 
-### Phase 0 (Current)
+### Phase 0: Core Functionality (Completed ✅)
 - ✅ Causal validation with Y₀
 - ✅ Counterfactual analysis
 - ✅ Team alignment
 - ✅ Sensitivity analysis
-- ✅ Comprehensive testing
+- ✅ Comprehensive testing (119 tests)
 - ✅ Docker support
 
-### Phase 1 (Future)
+### Phase 1: Production Readiness (Completed ✅)
+- ✅ Version fingerprinting for determinism
+- ✅ Request ID propagation for distributed tracing
+- ✅ Redis caching strategy and integration
+- ✅ Configuration fingerprinting
+- ✅ API documentation and integration guides
+
+### Phase 2: Operational Excellence & Pilot Readiness (Completed ✅)
+- ✅ Operations runbooks and monitoring procedures
+- ✅ Redis operational strategy and troubleshooting guides
+- ✅ Staging deployment checklists and rollback procedures
+- ✅ Enhanced integration testing (21 tests)
+- ✅ Performance profiling tools
+- ✅ 4-phase optimization roadmap
+- ✅ Cross-reference schema for UI integration
+
+### Phase 3 (Future)
 - ActiVA integration for value alignment
 - Bayesian Teaching for explanations
 - Advanced FACET features
-- Performance optimizations
+- Phase 1-2 optimization implementation (targeting 40-70% latency reduction)
 - Additional distribution types
 - GraphQL API option
 
@@ -340,6 +425,6 @@ Built for Olumi's decision enhancement platform, leveraging:
 
 ---
 
-**Version**: 0.1.0
-**Status**: Phase 0 - Pilot Ready
-**Last Updated**: 2025-01-19
+**Version**: 1.0.0
+**Status**: Phase 2 - Operational Excellence Complete, Pilot Ready
+**Last Updated**: 2025-01-20
