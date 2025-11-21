@@ -17,7 +17,7 @@ from src.models.robustness import (
     OutcomeGuarantee,
     RobustnessRequest,
 )
-from src.models.shared import StructuralModel, Variable
+from src.models.shared import StructuralModel
 from src.services.causal_validator import CausalValidator
 from src.services.counterfactual_engine import CounterfactualEngine
 from src.utils.determinism import make_deterministic
@@ -339,9 +339,7 @@ class RobustnessAnalyzer:
 
                 cf_request = CounterfactualRequest(
                     model=StructuralModel(
-                        variables=[
-                            Variable(name=var) for var in structural_model.get("variables", [])
-                        ],
+                        variables=structural_model.get("variables", []),
                         equations=structural_model.get("equations", {}),
                         distributions=structural_model.get("distributions", {}),
                     ),

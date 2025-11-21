@@ -19,6 +19,7 @@ from src.models.responses import ErrorCode, ErrorResponse
 
 from .analysis import router as analysis_router
 from .causal import router as causal_router
+from .deliberation import router as deliberation_router
 from .health import router as health_router
 from .metrics import router as metrics_router
 from .preferences import router as preferences_router
@@ -256,6 +257,11 @@ app.include_router(
     robustness_router,
     prefix=f"{settings.API_V1_PREFIX}/robustness",
     tags=["FACET Robustness"],
+)
+app.include_router(
+    deliberation_router,
+    prefix=f"{settings.API_V1_PREFIX}/deliberation",
+    tags=["Habermas Machine"],
 )
 
 

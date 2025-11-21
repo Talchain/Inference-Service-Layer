@@ -85,6 +85,30 @@ facet_robust_regions_found = Histogram(
     buckets=[0, 1, 2, 3, 5, 10]
 )
 
+# Habermas Machine deliberation metrics
+habermas_deliberations_total = Counter(
+    'isl_habermas_deliberations_total',
+    'Total deliberation rounds conducted',
+    ['status']  # active, converged, diverged
+)
+
+habermas_rounds_per_session = Histogram(
+    'isl_habermas_rounds_per_session',
+    'Number of rounds per deliberation session',
+    buckets=[1, 2, 3, 5, 7, 10, 15]
+)
+
+habermas_agreement_level = Histogram(
+    'isl_habermas_agreement_level',
+    'Agreement levels achieved',
+    buckets=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+)
+
+habermas_convergence_total = Counter(
+    'isl_habermas_convergence_total',
+    'Successful convergences achieved'
+)
+
 
 def track_assumption_validated(evidence_quality: str) -> None:
     """Track assumption validation by evidence quality."""
@@ -155,3 +179,26 @@ def track_robustness_analysis(
         facet_fragile_recommendations_total.inc()
 
     facet_robust_regions_found.observe(regions_found)
+
+
+def track_habermas_deliberation(
+    status: str,
+    agreement_level: float,
+    round_number: int,
+    converged: bool,
+) -> None:
+    """
+    Track Habermas Machine deliberation metrics.
+
+    Args:
+        status: Deliberation status (active, converged, diverged)
+        agreement_level: Agreement level achieved (0-1)
+        round_number: Current round number
+        converged: Whether convergence was reached
+    """
+    habermas_deliberations_total.labels(status=status).inc()
+    habermas_agreement_level.observe(agreement_level)
+
+    if converged:
+        habermas_convergence_total.inc()
+        habermas_rounds_per_session.observe(round_number)
