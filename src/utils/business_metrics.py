@@ -61,6 +61,30 @@ activa_information_gain = Histogram(
     buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
 )
 
+# FACET robustness metrics
+facet_analyses_total = Counter(
+    'isl_facet_analyses_total',
+    'Total robustness analyses performed',
+    ['status']  # robust, fragile, failed
+)
+
+facet_robustness_score = Histogram(
+    'isl_facet_robustness_score',
+    'Robustness scores distribution',
+    buckets=[0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
+)
+
+facet_fragile_recommendations_total = Counter(
+    'isl_facet_fragile_recommendations_total',
+    'Fragile recommendations flagged'
+)
+
+facet_robust_regions_found = Histogram(
+    'isl_facet_robust_regions_found',
+    'Number of robust regions per analysis',
+    buckets=[0, 1, 2, 3, 5, 10]
+)
+
 
 def track_assumption_validated(evidence_quality: str) -> None:
     """Track assumption validation by evidence quality."""
@@ -107,3 +131,27 @@ def track_activa_convergence(num_queries: int) -> None:
 def track_activa_information_gain(info_gain: float) -> None:
     """Track ActiVA expected information gain."""
     activa_information_gain.observe(info_gain)
+
+
+def track_robustness_analysis(
+    status: str,
+    robustness_score: float,
+    is_fragile: bool,
+    regions_found: int,
+) -> None:
+    """
+    Track FACET robustness analysis metrics.
+
+    Args:
+        status: Analysis status (robust, fragile, failed)
+        robustness_score: Overall robustness score (0-1)
+        is_fragile: Whether recommendation is fragile
+        regions_found: Number of robust regions found
+    """
+    facet_analyses_total.labels(status=status).inc()
+    facet_robustness_score.observe(robustness_score)
+
+    if is_fragile:
+        facet_fragile_recommendations_total.inc()
+
+    facet_robust_regions_found.observe(regions_found)

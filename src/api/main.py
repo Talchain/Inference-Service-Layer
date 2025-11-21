@@ -22,6 +22,7 @@ from .causal import router as causal_router
 from .health import router as health_router
 from .metrics import router as metrics_router
 from .preferences import router as preferences_router
+from .robustness import router as robustness_router
 from .teaching import router as teaching_router
 from .team import router as team_router
 from .validation import router as validation_router
@@ -250,6 +251,11 @@ app.include_router(
     analysis_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Sensitivity Analysis"],
+)
+app.include_router(
+    robustness_router,
+    prefix=f"{settings.API_V1_PREFIX}/robustness",
+    tags=["FACET Robustness"],
 )
 
 
