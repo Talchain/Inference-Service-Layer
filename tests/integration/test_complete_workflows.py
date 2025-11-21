@@ -64,34 +64,33 @@ class TestCompleteDecisionWorkflow:
         assert counterfactual_response.status_code == 200
         cf_result = counterfactual_response.json()
 
-        # Should have counterfactual outcome
-        assert "counterfactual_outcome" in cf_result
-        assert "revenue" in cf_result["counterfactual_outcome"]
+        # Should have prediction with point estimate
+        assert "prediction" in cf_result
+        assert "point_estimate" in cf_result["prediction"]
 
         # Step 3: Check robustness
-        revenue_median = cf_result["counterfactual_outcome"]["revenue"]["p50"]
+        revenue_estimate = cf_result["prediction"]["point_estimate"]
         revenue_range = (
-            revenue_median * 0.95,
-            revenue_median * 1.05,
+            revenue_estimate * 0.95,
+            revenue_estimate * 1.05,
         )
 
         robustness_response = client.post(
             "/api/v1/robustness/analyze",
             json={
-                "structural_model": {
-                    "variables": ["price", "revenue"],
-                    "equations": {"revenue": "100000 - 1000 * price"},
-                    "distributions": {
-                        "price": {"type": "normal", "parameters": {"mean": 50, "std": 5}}
-                    },
+                "causal_model": {
+                    "nodes": ["price", "marketing", "quality", "demand", "revenue"],
+                    "edges": [
+                        ["price", "demand"],
+                        ["marketing", "demand"],
+                        ["quality", "demand"],
+                        ["demand", "revenue"],
+                    ],
                 },
                 "intervention_proposal": {"price": 55},
-                "target_outcome": {"revenue": revenue_range},
-                "robustness_config": {
-                    "perturbation_radius": 0.1,
-                    "min_samples_per_region": 50,
-                    "confidence_level": 0.95,
-                },
+                "target_outcome": {"revenue": list(revenue_range)},
+                "perturbation_radius": 0.1,
+                "min_samples": 100,
             },
         )
 
@@ -111,7 +110,7 @@ class TestCompleteDecisionWorkflow:
                 "positions": [
                     {
                         "member_id": "pm_001",
-                        "position_statement": f"I support this because revenue would increase to approximately £{revenue_median:.0f}, and the robustness score of {rob_result['analysis']['robustness_score']:.2f} gives me confidence.",
+                        "position_statement": f"I support this because revenue would increase to approximately £{revenue_estimate:.0f}, and the robustness score of {rob_result['analysis']['robustness_score']:.2f} gives me confidence.",
                         "timestamp": datetime.utcnow().isoformat(),
                     },
                     {
@@ -133,7 +132,7 @@ class TestCompleteDecisionWorkflow:
 
         # Verify data flow integrity
         # PM's position should reference counterfactual results
-        assert str(int(revenue_median / 1000)) in str(revenue_median)
+        assert str(int(revenue_estimate / 1000)) in str(revenue_estimate)
 
 
 class TestCrossServiceDataFlow:
@@ -179,8 +178,8 @@ class TestCrossServiceDataFlow:
         cf_result = counterfactual_response.json()
 
         # Counterfactual should work for validated model
-        assert "counterfactual_outcome" in cf_result
-        assert "Y" in cf_result["counterfactual_outcome"]
+        assert "prediction" in cf_result
+        assert "point_estimate" in cf_result["prediction"]
 
 
 class TestErrorHandling:
@@ -270,4 +269,4 @@ class TestServiceIndependence:
 
         assert response.status_code == 200
         result = response.json()
-        assert "counterfactual_outcome" in result
+        assert "prediction" in result
