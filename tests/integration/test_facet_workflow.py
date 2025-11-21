@@ -102,8 +102,12 @@ class TestFACETRobustnessWorkflow:
 
         response = client.post("/api/v1/robustness/analyze", json=request_data)
 
-        # Should fail validation or return error
-        assert response.status_code in [400, 422, 500]
+        # Service handles empty requests gracefully with heuristic analysis
+        # Updated for Phase 4C: graceful degradation instead of hard failure
+        assert response.status_code == 200
+        result = response.json()
+        assert "analysis" in result
+        assert result["analysis"]["status"] in ["robust", "fragile"]
 
     def test_robustness_analysis_with_structural_model(self):
         """Test robustness analysis with full structural model."""

@@ -27,6 +27,7 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 from src.config.llm_config import LLMConfig, get_llm_config
+from src.infrastructure.memory_cache import get_memory_cache
 from src.infrastructure.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -126,11 +127,13 @@ class LLMClient:
         config: Optional[LLMConfig] = None,
         cost_tracker: Optional[CostTracker] = None,
         redis_client=None,
+        memory_cache=None,
     ):
         """Initialize LLM client."""
         self.config = config or get_llm_config()
         self.cost_tracker = cost_tracker or CostTracker(redis_client)
         self.redis = redis_client or get_redis_client()
+        self.memory_cache = memory_cache or get_memory_cache()
 
         # Initialize provider clients
         if self.config.provider == "openai":
@@ -336,34 +339,69 @@ class LLMClient:
         }
 
     def _get_cached_response(self, cache_key: str) -> Optional[Dict]:
-        """Get cached LLM response."""
-        if not self.redis:
-            return None
+        """
+        Get cached LLM response.
 
-        key = f"isl:llm_cache:{cache_key}"
-        try:
-            data = self.redis.get(key)
-            if data:
-                return json.loads(data)
-        except Exception:
-            pass
+        Uses in-memory cache as primary, falls back to Redis if available.
+        """
+        # Try in-memory cache first (fast)
+        if self.memory_cache:
+            cached = self.memory_cache.get(cache_key)
+            if cached:
+                logger.debug(f"Memory cache hit for {cache_key}")
+                return cached
+
+        # Fall back to Redis (slower, but shared across instances)
+        if self.redis:
+            key = f"isl:llm_cache:{cache_key}"
+            try:
+                data = self.redis.get(key)
+                if data:
+                    response = json.loads(data)
+
+                    # Populate memory cache for next time
+                    if self.memory_cache:
+                        self.memory_cache.set(
+                            cache_key, response, ttl=self.config.cache_ttl_seconds
+                        )
+
+                    logger.debug(f"Redis cache hit for {cache_key}")
+                    return response
+            except Exception as e:
+                logger.warning(f"Redis cache read failed: {e}")
+
         return None
 
     def _cache_response(self, cache_key: str, response: Dict):
-        """Cache LLM response."""
-        if not self.redis:
-            return
+        """
+        Cache LLM response.
 
-        key = f"isl:llm_cache:{cache_key}"
-        try:
-            # Remove non-serializable fields
-            cacheable = {
-                "content": response["content"],
-                "usage": response["usage"],
-                "cost": response["cost"],
-            }
-            self.redis.setex(
-                key, self.config.cache_ttl_seconds, json.dumps(cacheable)
-            )
-        except Exception as e:
-            logger.error(f"Failed to cache response: {e}")
+        Caches in both memory (fast) and Redis (shared) if available.
+        """
+        # Remove non-serializable fields
+        cacheable = {
+            "content": response["content"],
+            "usage": response["usage"],
+            "cost": response["cost"],
+        }
+
+        # Cache in memory (always, fast)
+        if self.memory_cache:
+            try:
+                self.memory_cache.set(
+                    cache_key, cacheable, ttl=self.config.cache_ttl_seconds
+                )
+                logger.debug(f"Cached response in memory for {cache_key}")
+            except Exception as e:
+                logger.warning(f"Memory cache write failed: {e}")
+
+        # Also cache in Redis (shared across instances, optional)
+        if self.redis:
+            key = f"isl:llm_cache:{cache_key}"
+            try:
+                self.redis.setex(
+                    key, self.config.cache_ttl_seconds, json.dumps(cacheable)
+                )
+                logger.debug(f"Cached response in Redis for {cache_key}")
+            except Exception as e:
+                logger.warning(f"Redis cache write failed: {e}")

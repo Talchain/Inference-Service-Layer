@@ -205,19 +205,5 @@ class TestLLMClient:
         assert response["cached"] is False
 
 
-class TestLLMIntegration:
-    """Integration tests for LLM services."""
-
-    def test_value_extractor_fallback_on_error(self):
-        """Test that ValueExtractor falls back on LLM error."""
-        # This will be tested when we run full integration tests
-        # For now, just ensure the class can be imported
-        from src.services.value_extractor_llm import ValueExtractorLLM
-
-        assert ValueExtractorLLM is not None
-
-    def test_consensus_generator_fallback_on_error(self):
-        """Test that ConsensusGenerator falls back on LLM error."""
-        from src.services.consensus_generator_llm import ConsensusGeneratorLLM
-
-        assert ConsensusGeneratorLLM is not None
+# ARCHIVED: TestLLMIntegration class removed as it tested Habermas-specific services
+# (ValueExtractorLLM, ConsensusGeneratorLLM) which have been deferred to TAE PoC v02
