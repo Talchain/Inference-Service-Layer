@@ -37,6 +37,30 @@ cache_fingerprint_matches = Counter(
     'Determinism verifications (fingerprint matches)'
 )
 
+# ActiVA preference learning metrics
+activa_queries_generated_total = Counter(
+    'isl_activa_queries_generated_total',
+    'Total preference queries generated'
+)
+
+activa_queries_answered_total = Counter(
+    'isl_activa_queries_answered_total',
+    'Total preference queries answered',
+    ['choice']  # A or B
+)
+
+activa_convergence_total = Counter(
+    'isl_activa_convergence_total',
+    'Users reached convergence',
+    ['num_queries_bucket']  # 1-5, 6-10, 11+
+)
+
+activa_information_gain = Histogram(
+    'isl_activa_information_gain',
+    'Expected information gain of generated queries',
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+)
+
 
 def track_assumption_validated(evidence_quality: str) -> None:
     """Track assumption validation by evidence quality."""
@@ -57,3 +81,29 @@ def track_model_complexity(node_count: int, edge_count: int) -> None:
 def track_cache_fingerprint_match() -> None:
     """Track determinism verification (fingerprint match)."""
     cache_fingerprint_matches.inc()
+
+
+def track_activa_query_generated() -> None:
+    """Track ActiVA preference query generation."""
+    activa_queries_generated_total.inc()
+
+
+def track_activa_query_answered(choice: str) -> None:
+    """Track ActiVA preference query answered."""
+    activa_queries_answered_total.labels(choice=choice).inc()
+
+
+def track_activa_convergence(num_queries: int) -> None:
+    """Track ActiVA preference learning convergence."""
+    if num_queries <= 5:
+        bucket = "1-5"
+    elif num_queries <= 10:
+        bucket = "6-10"
+    else:
+        bucket = "11+"
+    activa_convergence_total.labels(num_queries_bucket=bucket).inc()
+
+
+def track_activa_information_gain(info_gain: float) -> None:
+    """Track ActiVA expected information gain."""
+    activa_information_gain.observe(info_gain)
