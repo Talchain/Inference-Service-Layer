@@ -23,6 +23,12 @@ from src.models.phase1_models import (
 from src.services.belief_updater import BeliefUpdater
 from src.services.preference_elicitor import PreferenceElicitor
 from src.services.user_storage import UserStorage
+from src.utils.business_metrics import (
+    track_activa_query_generated,
+    track_activa_query_answered,
+    track_activa_convergence,
+    track_activa_information_gain,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -115,6 +121,11 @@ async def elicit_preferences(
 
         # Calculate total expected information gain
         expected_info_gain = sum(q.information_gain for q in queries)
+
+        # Track metrics
+        for query in queries:
+            track_activa_query_generated()
+            track_activa_information_gain(query.information_gain)
 
         # Estimate remaining queries
         # Rough heuristic: need ~5 queries per 0.5 uncertainty
@@ -290,6 +301,9 @@ async def update_beliefs(
             confidence=request.confidence,
         )
 
+        # Track metrics
+        track_activa_query_answered(request.response.value)
+
         # Store updated beliefs
         user_storage.store_beliefs(
             user_id=request.user_id,
@@ -311,6 +325,10 @@ async def update_beliefs(
             beliefs=updated_beliefs,
             queries_completed=queries_completed,
         )
+
+        # Track convergence if ready
+        if learning_summary.ready_for_recommendations:
+            track_activa_convergence(queries_completed)
 
         # Generate next batch of queries
         # Get context from the original elicitation request

@@ -83,12 +83,72 @@ class ValidationIssue(BaseModel):
     }
 
 
+class AssumptionDetail(BaseModel):
+    """
+    Individual assumption required for causal identification.
+
+    Provides structured information about each assumption, including
+    its type, description, and criticality.
+    """
+
+    type: str = Field(..., description="Assumption type (e.g., 'no_unmeasured_confounding', 'positivity')")
+    description: str = Field(..., description="Human-readable explanation of the assumption")
+    critical: bool = Field(..., description="Whether this assumption is critical for identification")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "no_unmeasured_confounding",
+                "description": "No unmeasured confounders after adjusting for adjustment set",
+                "critical": True
+            }
+        }
+    }
+
+
+class AlternativeMethod(BaseModel):
+    """
+    Alternative identification method assessment.
+
+    Documents whether alternative methods (backdoor, front-door, IV, do-calculus)
+    are applicable and why.
+    """
+
+    method: str = Field(..., description="Method name (e.g., 'backdoor', 'front_door', 'instrumental_variables')")
+    applicable: bool = Field(..., description="Whether this method is applicable to the problem")
+    reason: str = Field(..., description="Why the method is or is not applicable")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "method": "front_door",
+                "applicable": False,
+                "reason": "No mediator set completely captures causal pathway"
+            }
+        }
+    }
+
+
 class CausalValidationResponse(BaseModel):
-    """Response model for causal validation endpoint."""
+    """
+    Enhanced response model for causal validation endpoint.
+
+    Provides comprehensive Y₀-powered identifiability analysis including:
+    - Identification method used (backdoor, front-door, IV, do-calculus)
+    - Adjustment sets and identification formula
+    - Structured assumptions with criticality
+    - Alternative methods considered
+    - Structured failure diagnosis when non-identifiable
+    - Graceful degradation with fallback assessment
+    """
 
     status: ValidationStatus = Field(..., description="Validation status")
 
-    # For identifiable cases
+    # Enhanced identifiable case fields
+    method: Optional[str] = Field(
+        default=None,
+        description="Identification method used: backdoor, front_door, instrumental_variables, do_calculus"
+    )
     adjustment_sets: Optional[List[List[str]]] = Field(
         default=None,
         description="Valid adjustment sets for causal identification",
@@ -97,15 +157,45 @@ class CausalValidationResponse(BaseModel):
         default=None,
         description="Minimal sufficient adjustment set",
     )
+    identification_formula: Optional[str] = Field(
+        default=None,
+        description="Human-readable identification formula"
+    )
+    structured_assumptions: Optional[List[AssumptionDetail]] = Field(
+        default=None,
+        description="Required assumptions for valid identification (structured)"
+    )
+    alternative_methods: Optional[List[AlternativeMethod]] = Field(
+        default=None,
+        description="Alternative identification methods considered"
+    )
     backdoor_paths: Optional[List[str]] = Field(
         default=None,
         description="Backdoor paths that create confounding",
     )
 
-    # For problematic cases
+    # Enhanced non-identifiable case fields
+    reason: Optional[str] = Field(
+        default=None,
+        description="Why identification failed (e.g., 'no_causal_path', 'unmeasured_confounding', 'selection_bias')"
+    )
+    suggestions: Optional[List[str]] = Field(
+        default=None,
+        description="Suggested remedies to achieve identifiability"
+    )
+    attempted_methods: Optional[List[str]] = Field(
+        default=None,
+        description="Methods attempted during identification"
+    )
     issues: Optional[List[ValidationIssue]] = Field(
         default=None,
-        description="Issues preventing identification",
+        description="Issues preventing identification (legacy compatibility)",
+    )
+
+    # Degraded mode fields
+    fallback_assessment: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Best-effort assessment when Y₀ fails"
     )
 
     # Always present
@@ -121,19 +211,70 @@ class CausalValidationResponse(BaseModel):
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "status": "identifiable",
-                "adjustment_sets": [["Brand"], ["Brand", "CustomerAcquisition"]],
-                "minimal_set": ["Brand"],
-                "backdoor_paths": ["Price ← Brand → Revenue"],
-                "confidence": "high",
-                "explanation": {
-                    "summary": "Effect is identifiable by controlling for Brand",
-                    "reasoning": "Brand influences both Price and Revenue...",
-                    "technical_basis": "Backdoor criterion satisfied",
-                    "assumptions": ["No unmeasured confounding"],
+            "examples": [
+                {
+                    "title": "Identifiable (Backdoor)",
+                    "value": {
+                        "status": "identifiable",
+                        "method": "backdoor",
+                        "adjustment_sets": [["Brand"], ["Brand", "CustomerAcquisition"]],
+                        "minimal_set": ["Brand"],
+                        "identification_formula": "P(revenue|do(price)) = Σ_Brand P(revenue|price, Brand) P(Brand)",
+                        "structured_assumptions": [
+                            {
+                                "type": "no_unmeasured_confounding",
+                                "description": "No unmeasured confounders after adjusting for Brand",
+                                "critical": True
+                            },
+                            {
+                                "type": "positivity",
+                                "description": "All price values possible at all Brand levels",
+                                "critical": True
+                            }
+                        ],
+                        "alternative_methods": [
+                            {
+                                "method": "backdoor",
+                                "applicable": True,
+                                "reason": "Valid adjustment set exists"
+                            },
+                            {
+                                "method": "front_door",
+                                "applicable": False,
+                                "reason": "No mediator set completely captures pathway"
+                            }
+                        ],
+                        "backdoor_paths": ["Price ← Brand → Revenue"],
+                        "confidence": "high",
+                        "explanation": {
+                            "summary": "Effect is identifiable by controlling for Brand",
+                            "reasoning": "Brand influences both Price and Revenue, creating confounding. Controlling for Brand blocks the backdoor path.",
+                            "technical_basis": "Backdoor criterion satisfied with adjustment set {Brand}",
+                            "assumptions": ["No unmeasured confounding", "Correct causal structure"]
+                        }
+                    }
                 },
-            }
+                {
+                    "title": "Non-Identifiable",
+                    "value": {
+                        "status": "cannot_identify",
+                        "reason": "unmeasured_confounding",
+                        "suggestions": [
+                            "Add measured confounders to the model",
+                            "Consider using instrumental variables if available",
+                            "Explore front-door criterion with full mediation"
+                        ],
+                        "attempted_methods": ["backdoor", "front_door", "do_calculus"],
+                        "confidence": "high",
+                        "explanation": {
+                            "summary": "Effect cannot be identified due to unmeasured confounding",
+                            "reasoning": "Backdoor paths exist but no valid adjustment set found with measured variables.",
+                            "technical_basis": "No identification formula available",
+                            "assumptions": ["DAG structure correct"]
+                        }
+                    }
+                }
+            ]
         }
     }
 

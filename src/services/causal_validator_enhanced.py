@@ -11,10 +11,9 @@ Provides rich identifiability analysis including:
 """
 
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
-from fastapi import HTTPException
 from y0.algorithm.identify import Identification, identify_outcomes
 from y0.dsl import P, Variable
 from y0.graph import NxMixedGraph
@@ -35,17 +34,11 @@ from src.utils.validation import validate_dag_structure, validate_node_in_graph
 logger = logging.getLogger(__name__)
 
 
-class CausalValidator:
+class EnhancedCausalValidator:
     """
     Enhanced Y₀-powered causal validator.
 
-    Provides comprehensive identifiability analysis with rich explanation metadata including:
-    - Identification method used (backdoor, front-door, IV, do-calculus)
-    - Human-readable identification formulas
-    - Structured assumptions with criticality
-    - Alternative method consideration
-    - Structured failure diagnosis
-    - Graceful degradation with fallback assessment
+    Provides comprehensive identifiability analysis with rich explanation metadata.
     """
 
     def __init__(self) -> None:
@@ -60,7 +53,7 @@ class CausalValidator:
             request: Validation request with DAG and variables
 
         Returns:
-            CausalValidationResponse: Enhanced validation results with rich metadata
+            CausalValidationResponse: Enhanced validation results
         """
         # Make computation deterministic
         request_hash = make_deterministic(request.model_dump())
@@ -80,15 +73,16 @@ class CausalValidator:
             validate_node_in_graph(request.treatment, request.dag.nodes, "Treatment")
             validate_node_in_graph(request.outcome, request.dag.nodes, "Outcome")
 
-            # Convert to NetworkX for analysis
+            # Convert to NetworkX for basic analysis
             nx_graph = edge_list_to_networkx(request.dag.nodes, request.dag.edges)
 
             # Check if there's any path from treatment to outcome
             if not nx.has_path(nx_graph, request.treatment, request.outcome):
                 return self._create_no_path_response(request, nx_graph)
 
-            # Try comprehensive Y₀ identification first
+            # Try comprehensive Y₀ identification
             y0_result = self._try_comprehensive_y0_identification(request, nx_graph)
+
             if y0_result:
                 return y0_result
 
@@ -106,96 +100,10 @@ class CausalValidator:
             # Cannot identify
             return self._create_cannot_identify_response(request, nx_graph)
 
-        except HTTPException:
-            # Re-raise validation errors (400-level errors)
-            raise
         except Exception as e:
             logger.error("enhanced_causal_validation_failed", exc_info=True)
-            # Graceful degradation for unexpected errors
+            # Graceful degradation
             return self._create_degraded_response(request, error=e)
-
-    def _find_adjustment_sets(
-        self,
-        graph: nx.DiGraph,
-        treatment: str,
-        outcome: str,
-        all_nodes: List[str],
-    ) -> Optional[List[List[str]]]:
-        """
-        Find valid adjustment sets using backdoor criterion.
-
-        Args:
-            graph: NetworkX graph
-            treatment: Treatment node
-            outcome: Outcome node
-            all_nodes: All nodes in the graph
-
-        Returns:
-            List of valid adjustment sets, or None if none exist
-        """
-        # Get all potential adjustment variables (everything except treatment and outcome)
-        potential_adjusters = [
-            node for node in all_nodes if node not in [treatment, outcome]
-        ]
-
-        # Find backdoor paths
-        backdoor_paths = find_backdoor_paths(graph, treatment, outcome)
-
-        if not backdoor_paths:
-            # No backdoor paths - no adjustment needed
-            return [[]]
-
-        # Try different adjustment sets
-        valid_sets = []
-
-        # Try each individual node
-        for node in potential_adjusters:
-            if self._blocks_all_backdoors(graph, treatment, outcome, [node]):
-                valid_sets.append([node])
-
-        # Try pairs (if no single node works)
-        if not valid_sets and len(potential_adjusters) >= 2:
-            for i, node1 in enumerate(potential_adjusters):
-                for node2 in potential_adjusters[i + 1 :]:
-                    if self._blocks_all_backdoors(graph, treatment, outcome, [node1, node2]):
-                        valid_sets.append([node1, node2])
-
-        return valid_sets if valid_sets else None
-
-    def _blocks_all_backdoors(
-        self,
-        graph: nx.DiGraph,
-        treatment: str,
-        outcome: str,
-        adjustment_set: List[str],
-    ) -> bool:
-        """
-        Check if an adjustment set blocks all backdoor paths.
-
-        Args:
-            graph: NetworkX graph
-            treatment: Treatment node
-            outcome: Outcome node
-            adjustment_set: Proposed adjustment set
-
-        Returns:
-            bool: True if all backdoor paths are blocked
-        """
-        # Get parents of treatment
-        parents = list(graph.predecessors(treatment))
-
-        for parent in parents:
-            # Check if there's a path from parent to outcome that doesn't go through adjustment set
-            # Create a copy of graph with adjustment set nodes removed
-            temp_graph = graph.copy()
-            temp_graph.remove_nodes_from(adjustment_set)
-
-            # If there's still a path, this backdoor is not blocked
-            if temp_graph.has_node(parent) and temp_graph.has_node(outcome):
-                if nx.has_path(temp_graph, parent, outcome):
-                    return False
-
-        return True
 
     def _try_comprehensive_y0_identification(
         self,
@@ -227,23 +135,29 @@ class CausalValidator:
                 outcomes={outcome_var},
             )
 
-            if result:
+            if result and result != Identification.UNKNOWN:
                 logger.info("y0_comprehensive_identification_successful")
 
                 # Determine which method Y₀ used
                 method = self._determine_y0_method(result, nx_graph, request)
 
-                # Extract adjustment set
-                adjustment_set = self._extract_y0_adjustment_set(result, nx_graph, request)
+                # Extract adjustment set (for backdoor cases)
+                adjustment_set = self._extract_y0_adjustment_set(
+                    result, nx_graph, request
+                )
 
                 # Generate identification formula
-                formula = self._generate_identification_formula(method, adjustment_set, request)
+                formula = self._generate_identification_formula(
+                    method, adjustment_set, request
+                )
 
                 # Extract structured assumptions
                 assumptions = self._extract_assumptions(method, adjustment_set)
 
                 # Check alternative methods
-                alternatives = self._check_alternative_methods(request, nx_graph)
+                alternatives = self._check_alternative_methods(
+                    request, nx_graph
+                )
 
                 # Generate explanation
                 explanation = self.explanation_generator.generate_causal_validation_explanation(
@@ -279,9 +193,21 @@ class CausalValidator:
         nx_graph: nx.DiGraph,
         request: CausalValidationRequest
     ) -> str:
-        """Determine which identification method Y₀ used."""
+        """
+        Determine which identification method Y₀ used.
+
+        Args:
+            y0_result: Y₀ identification result
+            nx_graph: NetworkX graph
+            request: Validation request
+
+        Returns:
+            Method name: "backdoor", "front_door", "instrumental_variables", or "do_calculus"
+        """
         # Check if backdoor criterion applies
-        backdoor_paths = find_backdoor_paths(nx_graph, request.treatment, request.outcome)
+        backdoor_paths = find_backdoor_paths(
+            nx_graph, request.treatment, request.outcome
+        )
 
         # If no backdoor paths or we found valid adjustment set, it's backdoor
         if not backdoor_paths or self._find_adjustment_sets(
@@ -290,6 +216,7 @@ class CausalValidator:
             return "backdoor"
 
         # For now, assume do-calculus for complex cases
+        # TODO: Add front-door and IV detection when Y₀ exposes that info
         return "do_calculus"
 
     def _extract_y0_adjustment_set(
@@ -298,7 +225,17 @@ class CausalValidator:
         nx_graph: nx.DiGraph,
         request: CausalValidationRequest
     ) -> List[str]:
-        """Extract adjustment set from Y₀ result or networkx analysis."""
+        """
+        Extract adjustment set from Y₀ result or networkx analysis.
+
+        Args:
+            y0_result: Y₀ identification result
+            nx_graph: NetworkX graph
+            request: Validation request
+
+        Returns:
+            List of variables to adjust for
+        """
         # Try to find backdoor adjustment set
         adjustment_sets = self._find_adjustment_sets(
             nx_graph,
@@ -308,6 +245,7 @@ class CausalValidator:
         )
 
         if adjustment_sets:
+            # Return minimal set
             return min(adjustment_sets, key=len)
 
         return []
@@ -318,7 +256,17 @@ class CausalValidator:
         adjustment_set: List[str],
         request: CausalValidationRequest
     ) -> str:
-        """Generate human-readable identification formula."""
+        """
+        Generate human-readable identification formula.
+
+        Args:
+            method: Identification method used
+            adjustment_set: Adjustment set variables
+            request: Validation request
+
+        Returns:
+            Human-readable formula string
+        """
         treatment = request.treatment
         outcome = request.outcome
 
@@ -328,10 +276,13 @@ class CausalValidator:
             else:
                 z_vars = ", ".join(adjustment_set)
                 return f"P({outcome}|do({treatment})) = Σ_{{{z_vars}}} P({outcome}|{treatment}, {z_vars}) P({z_vars})"
+
         elif method == "front_door":
             return f"P({outcome}|do({treatment})) = Σ_M P(M|{treatment}) Σ_{treatment}' P({outcome}|M, {treatment}') P({treatment}')"
+
         elif method == "instrumental_variables":
-            return f"P({outcome}|do({treatment})) identifiable via instrumental variable"
+            return f"P({outcome}|do({treatment})) identifiable via instrumental variable Z"
+
         else:  # do_calculus
             return f"P({outcome}|do({treatment})) identifiable via general do-calculus"
 
@@ -340,7 +291,16 @@ class CausalValidator:
         method: str,
         adjustment_set: List[str]
     ) -> List[AssumptionDetail]:
-        """Extract structured assumptions for the identification method."""
+        """
+        Extract structured assumptions for the identification method.
+
+        Args:
+            method: Identification method used
+            adjustment_set: Adjustment set variables
+
+        Returns:
+            List of structured assumption details
+        """
         assumptions = []
 
         if method == "backdoor":
@@ -370,6 +330,7 @@ class CausalValidator:
                     critical=True
                 )
             ])
+
         elif method == "front_door":
             assumptions.extend([
                 AssumptionDetail(
@@ -381,9 +342,29 @@ class CausalValidator:
                     type="no_confounding_mediator_outcome",
                     description="No unmeasured confounding between mediator and outcome",
                     critical=True
+                ),
+                AssumptionDetail(
+                    type="causal_structure",
+                    description="DAG correctly represents causal relationships",
+                    critical=True
                 )
             ])
-        else:  # do_calculus or other
+
+        elif method == "instrumental_variables":
+            assumptions.extend([
+                AssumptionDetail(
+                    type="instrument_validity",
+                    description="Instrument affects outcome only through treatment",
+                    critical=True
+                ),
+                AssumptionDetail(
+                    type="instrument_relevance",
+                    description="Instrument sufficiently affects treatment",
+                    critical=True
+                )
+            ])
+
+        else:  # do_calculus
             assumptions.extend([
                 AssumptionDetail(
                     type="causal_structure",
@@ -404,25 +385,37 @@ class CausalValidator:
         request: CausalValidationRequest,
         nx_graph: nx.DiGraph
     ) -> List[AlternativeMethod]:
-        """Check which alternative identification methods are applicable."""
+        """
+        Check which alternative identification methods are applicable.
+
+        Args:
+            request: Validation request
+            nx_graph: NetworkX graph
+
+        Returns:
+            List of alternative method assessments
+        """
         alternatives = []
 
         # Check backdoor
-        backdoor_applicable, backdoor_reason = self._try_backdoor_method(nx_graph, request)
+        backdoor_applicable, backdoor_reason = self._try_backdoor_method(
+            nx_graph, request
+        )
         alternatives.append(AlternativeMethod(
             method="backdoor",
             applicable=backdoor_applicable,
             reason=backdoor_reason
         ))
 
-        # Check front-door (simplified - not yet fully implemented)
+        # Check front-door (simplified heuristic)
+        # TODO: Implement proper front-door criterion check
         alternatives.append(AlternativeMethod(
             method="front_door",
             applicable=False,
             reason="Front-door criterion check not yet implemented"
         ))
 
-        # Check instrumental variables
+        # Check instrumental variables (not typically applicable without explicit IV)
         alternatives.append(AlternativeMethod(
             method="instrumental_variables",
             applicable=False,
@@ -436,7 +429,16 @@ class CausalValidator:
         nx_graph: nx.DiGraph,
         request: CausalValidationRequest
     ) -> Tuple[bool, str]:
-        """Check if backdoor criterion is applicable."""
+        """
+        Check if backdoor criterion is applicable.
+
+        Args:
+            nx_graph: NetworkX graph
+            request: Validation request
+
+        Returns:
+            Tuple of (applicable, reason)
+        """
         adjustment_sets = self._find_adjustment_sets(
             nx_graph,
             request.treatment,
@@ -451,11 +453,74 @@ class CausalValidator:
                 minimal = min(adjustment_sets, key=len)
                 return True, f"Valid adjustment set exists: {{{', '.join(minimal)}}}"
         else:
-            backdoor_paths = find_backdoor_paths(nx_graph, request.treatment, request.outcome)
+            backdoor_paths = find_backdoor_paths(
+                nx_graph, request.treatment, request.outcome
+            )
             if backdoor_paths:
                 return False, "Backdoor paths exist but no valid adjustment set with measured variables"
             else:
                 return True, "No backdoor paths to block"
+
+    def _find_adjustment_sets(
+        self,
+        graph: nx.DiGraph,
+        treatment: str,
+        outcome: str,
+        all_nodes: List[str],
+    ) -> Optional[List[List[str]]]:
+        """
+        Find valid adjustment sets using backdoor criterion.
+
+        (Same implementation as original - kept for backward compatibility)
+        """
+        potential_adjusters = [
+            node for node in all_nodes if node not in [treatment, outcome]
+        ]
+
+        backdoor_paths = find_backdoor_paths(graph, treatment, outcome)
+
+        if not backdoor_paths:
+            return [[]]
+
+        valid_sets = []
+
+        # Try each individual node
+        for node in potential_adjusters:
+            if self._blocks_all_backdoors(graph, treatment, outcome, [node]):
+                valid_sets.append([node])
+
+        # Try pairs if no single node works
+        if not valid_sets and len(potential_adjusters) >= 2:
+            for i, node1 in enumerate(potential_adjusters):
+                for node2 in potential_adjusters[i + 1 :]:
+                    if self._blocks_all_backdoors(graph, treatment, outcome, [node1, node2]):
+                        valid_sets.append([node1, node2])
+
+        return valid_sets if valid_sets else None
+
+    def _blocks_all_backdoors(
+        self,
+        graph: nx.DiGraph,
+        treatment: str,
+        outcome: str,
+        adjustment_set: List[str],
+    ) -> bool:
+        """
+        Check if an adjustment set blocks all backdoor paths.
+
+        (Same implementation as original - kept for backward compatibility)
+        """
+        parents = list(graph.predecessors(treatment))
+
+        for parent in parents:
+            temp_graph = graph.copy()
+            temp_graph.remove_nodes_from(adjustment_set)
+
+            if temp_graph.has_node(parent) and temp_graph.has_node(outcome):
+                if nx.has_path(temp_graph, parent, outcome):
+                    return False
+
+        return True
 
     def _get_backdoor_paths(
         self,
@@ -463,7 +528,9 @@ class CausalValidator:
         request: CausalValidationRequest
     ) -> Optional[List[str]]:
         """Get formatted backdoor paths."""
-        paths_list = find_backdoor_paths(nx_graph, request.treatment, request.outcome)
+        paths_list = find_backdoor_paths(
+            nx_graph, request.treatment, request.outcome
+        )
         if paths_list:
             return [" → ".join(path) for path in paths_list]
         return None
@@ -478,12 +545,14 @@ class CausalValidator:
         minimal_set = min(adjustment_sets, key=len) if adjustment_sets else []
 
         # Generate formula
-        formula = self._generate_identification_formula("backdoor", minimal_set, request)
+        formula = self._generate_identification_formula(
+            "backdoor", minimal_set, request
+        )
 
-        # Extract structured assumptions
+        # Extract assumptions
         assumptions = self._extract_assumptions("backdoor", minimal_set)
 
-        # Check alternative methods
+        # Check alternatives
         alternatives = self._check_alternative_methods(request, graph)
 
         # Generate explanation
@@ -627,7 +696,7 @@ class CausalValidator:
             nx_graph = edge_list_to_networkx(request.dag.nodes, request.dag.edges)
             direct_path = nx.has_path(nx_graph, request.treatment, request.outcome)
 
-            # Find potential confounders
+            # Find potential confounders (nodes with paths to both treatment and outcome)
             potential_confounders = []
             for node in request.dag.nodes:
                 if node not in [request.treatment, request.outcome]:

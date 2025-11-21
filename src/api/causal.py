@@ -44,9 +44,10 @@ counterfactual_engine = CounterfactualEngine()
     **Use when:** Building a decision model, before running scenarios.
 
     **Returns:**
-    - `identifiable`: Valid adjustment sets provided
+    - `identifiable`: Valid adjustment sets provided (with method, formula, assumptions)
     - `uncertain`: Potential issues detected, clarification needed
-    - `cannot_identify`: Fundamental structural problems
+    - `cannot_identify`: Fundamental structural problems (with reason and suggestions)
+    - `degraded`: Advanced analysis failed, fallback assessment provided
     """,
     responses={
         200: {"description": "Validation completed successfully"},
