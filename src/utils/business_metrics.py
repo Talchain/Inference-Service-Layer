@@ -109,6 +109,42 @@ habermas_convergence_total = Counter(
     'Successful convergences achieved'
 )
 
+# LLM usage and cost metrics (Phase 4A)
+llm_requests_total = Counter(
+    'isl_llm_requests_total',
+    'Total LLM requests made',
+    ['model', 'endpoint', 'cached']  # Track by model, endpoint, and cache status
+)
+
+llm_cost_dollars = Histogram(
+    'isl_llm_cost_dollars',
+    'LLM cost per request in dollars',
+    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
+)
+
+llm_cache_hits_total = Counter(
+    'isl_llm_cache_hits_total',
+    'Total LLM cache hits'
+)
+
+llm_tokens_total = Counter(
+    'isl_llm_tokens_total',
+    'Total LLM tokens used',
+    ['type', 'model']  # input/output, model name
+)
+
+llm_budget_exceeded_total = Counter(
+    'isl_llm_budget_exceeded_total',
+    'Times session budget was exceeded',
+    ['session_type']  # deliberation, preference, etc.
+)
+
+llm_fallback_to_rules_total = Counter(
+    'isl_llm_fallback_to_rules_total',
+    'Times LLM failed and fell back to rules',
+    ['reason']  # error, budget, timeout
+)
+
 
 def track_assumption_validated(evidence_quality: str) -> None:
     """Track assumption validation by evidence quality."""
@@ -202,3 +238,42 @@ def track_habermas_deliberation(
     if converged:
         habermas_convergence_total.inc()
         habermas_rounds_per_session.observe(round_number)
+
+
+def track_llm_request(
+    model: str,
+    endpoint: str,
+    cost: float,
+    input_tokens: int,
+    output_tokens: int,
+    cached: bool,
+) -> None:
+    """
+    Track LLM request metrics.
+
+    Args:
+        model: LLM model name (e.g., gpt-4, gpt-3.5-turbo)
+        endpoint: Endpoint that made the request
+        cost: Cost in dollars
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+        cached: Whether response was cached
+    """
+    cached_str = "true" if cached else "false"
+    llm_requests_total.labels(model=model, endpoint=endpoint, cached=cached_str).inc()
+    llm_cost_dollars.observe(cost)
+    llm_tokens_total.labels(type="input", model=model).inc(input_tokens)
+    llm_tokens_total.labels(type="output", model=model).inc(output_tokens)
+
+    if cached:
+        llm_cache_hits_total.inc()
+
+
+def track_llm_budget_exceeded(session_type: str) -> None:
+    """Track LLM budget exceeded event."""
+    llm_budget_exceeded_total.labels(session_type=session_type).inc()
+
+
+def track_llm_fallback(reason: str) -> None:
+    """Track LLM fallback to rule-based system."""
+    llm_fallback_to_rules_total.labels(reason=reason).inc()

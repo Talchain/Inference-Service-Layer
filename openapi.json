@@ -1,0 +1,4855 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Olumi Inference Service Layer",
+    "description": "Deterministic scientific computation core for decision enhancement",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Health check",
+        "description": "Returns service health status for monitoring and load balancers.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/causal/validate": {
+      "post": {
+        "tags": [
+          "Causal Inference"
+        ],
+        "summary": "Validate causal model structure",
+        "description": "Validates whether a causal model (DAG) supports causal identification\n    for a given treatment-outcome pair.\n\n    Returns adjustment sets if identifiable, or specific issues if not.\n\n    **Use when:** Building a decision model, before running scenarios.\n\n    **Returns:**\n    - `identifiable`: Valid adjustment sets provided (with method, formula, assumptions)\n    - `uncertain`: Potential issues detected, clarification needed\n    - `cannot_identify`: Fundamental structural problems (with reason and suggestions)\n    - `degraded`: Advanced analysis failed, fallback assessment provided",
+        "operationId": "validate_causal_model_api_v1_causal_validate_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CausalValidationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CausalValidationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., empty DAG, node not found)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/causal/counterfactual": {
+      "post": {
+        "tags": [
+          "Causal Inference"
+        ],
+        "summary": "Perform counterfactual analysis",
+        "description": "Analyzes what would happen under a counterfactual intervention.\n\n    Provides:\n    - Point estimates and confidence intervals\n    - Uncertainty breakdown by source\n    - Robustness analysis\n    - Critical assumptions\n\n    **Use when:** Evaluating \"what if\" scenarios for decision making.",
+        "operationId": "analyze_counterfactual_api_v1_causal_counterfactual_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CounterfactualRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Counterfactual analysis completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterfactualResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., malformed structural model)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/preferences/elicit": {
+      "post": {
+        "tags": [
+          "Preference Learning"
+        ],
+        "summary": "Generate preference elicitation queries",
+        "description": "Generates counterfactual queries to efficiently learn user preferences.\n\n    Uses ActiVA algorithm to maximize information gain with minimal queries.\n    Queries are ranked by expected reduction in uncertainty about user values.\n\n    **Algorithm:** Information-theoretic query selection\n    - Computes: H(current beliefs) - E[H(posterior beliefs)]\n    - Selects queries that maximize expected information gain\n    - Typically learns preferences in 5-7 questions\n\n    **Use when:**\n    - Starting preference elicitation for a new user/context\n    - User has answered previous queries (provide updated beliefs)\n    - Need to refine understanding of user priorities\n\n    **Returns:**\n    - Ranked counterfactual queries with scenarios\n    - Query selection strategy and rationale\n    - Expected information gain per query\n    - Estimated remaining queries needed",
+        "operationId": "elicit_preferences_api_v1_preferences_elicit_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferenceElicitationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Queries generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferenceElicitationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., empty context)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/preferences/update": {
+      "post": {
+        "tags": [
+          "Preference Learning"
+        ],
+        "summary": "Update user beliefs from response",
+        "description": "Updates user belief model based on their preference response.\n\n    Uses Bayesian inference to update probability distributions over:\n    - Value weights (importance of different outcomes)\n    - Risk tolerance\n    - Uncertainty estimates\n\n    **Algorithm:** Bayesian belief updating\n    - Computes likelihood: P(response | beliefs)\n    - Updates posterior: P(beliefs | response) \u221d P(response | beliefs) \u00d7 P(beliefs)\n    - Reduces uncertainty with each response\n\n    **Use when:**\n    - User has answered a preference query\n    - Want to refine belief model before generating next queries\n\n    **Returns:**\n    - Updated belief model (stored automatically)\n    - Learning progress summary\n    - Next batch of queries\n    - Recommendation readiness status",
+        "operationId": "update_beliefs_api_v1_preferences_update_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferenceUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Beliefs updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferenceUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., unknown query_id)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/teaching/teach": {
+      "post": {
+        "tags": [
+          "Bayesian Teaching"
+        ],
+        "summary": "Generate teaching examples",
+        "description": "Generates pedagogically optimized teaching examples using Bayesian teaching.\n\n    Selects examples that maximize learning efficiency given user's current\n    understanding. Uses information theory to choose examples that most\n    efficiently teach the target concept.\n\n    **Algorithm:** Bayesian Teaching (Zhu et al.)\n    - Selects examples that maximize: P(understanding | example, current_beliefs)\n    - Considers novelty, clarity, and relevance\n    - Adapts to user's knowledge state\n\n    **Supported Concepts:**\n    - `confounding`: Understanding confounding variables and spurious correlations\n    - `trade_offs`: Understanding trade-offs between competing objectives\n    - `causal_mechanism`: Understanding causal mechanisms and pathways\n    - `uncertainty`: Understanding uncertainty and risk\n    - `optimization`: Understanding optimization under constraints\n\n    **Use when:**\n    - User needs to learn a specific concept\n    - Want to provide pedagogically optimal examples\n    - Need to adapt teaching to user's current understanding\n\n    **Returns:**\n    - Ranked teaching examples with pedagogical rationale\n    - Learning objectives\n    - Expected learning time\n    - Overall teaching strategy explanation",
+        "operationId": "generate_teaching_examples_api_v1_teaching_teach_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BayesianTeachingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Teaching examples generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BayesianTeachingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., unknown concept)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/validation/validate": {
+      "post": {
+        "tags": [
+          "Advanced Validation"
+        ],
+        "summary": "Perform advanced model validation",
+        "description": "Performs comprehensive validation of causal models.\n\n    **Validation Levels:**\n    - `BASIC`: Quick structural checks only\n    - `STANDARD`: Structural + statistical checks (default)\n    - `COMPREHENSIVE`: All checks + detailed analysis\n\n    **Validation Types:**\n    1. **Structural**: DAG properties, cycles, connectivity, size\n    2. **Statistical**: Distributions, parameters, equations\n    3. **Domain**: Best practices, naming conventions\n\n    **Target**: 90%+ issue detection rate\n\n    **Returns:**\n    - Overall quality assessment (EXCELLENT/GOOD/ACCEPTABLE/POOR)\n    - Numerical quality score (0-100)\n    - Detailed validation results by category\n    - Actionable suggestions for improvements\n    - Best practice adherence checks\n\n    **Use when:**\n    - Building a new causal model\n    - Before running causal inference\n    - Reviewing model quality\n    - Need suggestions for improvements",
+        "operationId": "validate_model_api_v1_validation_validate_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdvancedValidationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvancedValidationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/team/align": {
+      "post": {
+        "tags": [
+          "Team Alignment"
+        ],
+        "summary": "Find team alignment",
+        "description": "Identifies common ground across team perspectives and recommends\n    options that best satisfy all stakeholders.\n\n    Provides:\n    - Shared goals and constraints\n    - Options ranked by satisfaction score\n    - Identified conflicts with resolutions\n    - Top recommendation with rationale\n\n    **Use when:** Making decisions with multiple stakeholders.",
+        "operationId": "align_team_api_v1_team_align_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamAlignmentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Team alignment analysis completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamAlignmentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., no perspectives provided)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/analysis/sensitivity": {
+      "post": {
+        "tags": [
+          "Sensitivity Analysis"
+        ],
+        "summary": "Perform sensitivity analysis",
+        "description": "Tests how robust conclusions are to changes in assumptions.\n\n    Provides:\n    - Assumption importance ranking\n    - Impact assessment for each assumption\n    - Overall robustness score\n    - Critical breakpoints where conclusions flip\n\n    **Use when:** Understanding which assumptions matter most.",
+        "operationId": "analyze_sensitivity_api_v1_analysis_sensitivity_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SensitivityAnalysisRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sensitivity analysis completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SensitivityAnalysisResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., no assumptions provided)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/robustness/analyze": {
+      "post": {
+        "tags": [
+          "FACET Robustness"
+        ],
+        "summary": "Analyze robustness of counterfactual recommendation using FACET",
+        "description": "Verifies whether proposed intervention robustly achieves target outcomes\n    by exploring intervention space and identifying robust regions.\n\n    **FACET (Region-Based Robustness Analysis)**\n\n    Instead of asking \"What if price = \u00a355?\", FACET answers:\n    - \"Which price ranges reliably achieve \u00a395k-\u00a3105k revenue?\"\n    - \"How fragile is this recommendation to small changes?\"\n    - \"Do I have flexibility in implementation?\"\n\n    **Use this when:**\n    - Making high-stakes decisions\n    - Need confidence in recommendations\n    - Want to understand operating ranges\n    - Assessing strategy fragility\n\n    **Returns:**\n    - Robust intervention regions (e.g., \"price \u00a352-\u00a358 works\")\n    - Outcome guarantees (e.g., \"revenue \u00a395k-\u00a3105k\")\n    - Robustness score (0-1, higher = more robust)\n    - Fragility warnings\n    - Actionable recommendations\n\n    **Performance:** 1-5 seconds depending on samples and dimensions\n\n    **Example workflow:**\n    1. Get counterfactual: \"price=\u00a355 \u2192 revenue=\u00a3100k\"\n    2. Check robustness: Is this recommendation stable?\n    3. Receive: \"Any price \u00a352-\u00a358 works\" (robust) or \"Only \u00a354.8-\u00a355.2 works\" (fragile)\n    4. Decide: Proceed with confidence or revise strategy",
+        "operationId": "analyze_robustness_api_v1_robustness_analyze_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RobustnessRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Robustness analysis completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RobustnessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., malformed model)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deliberation/deliberate": {
+      "post": {
+        "tags": [
+          "Habermas Machine"
+        ],
+        "summary": "Conduct Habermas Machine deliberation round",
+        "description": "AI-mediated democratic deliberation for team alignment.\n\n    **Habermas Machine transforms team decision-making through:**\n    - Structured value elicitation (what matters and why)\n    - Automatic common ground identification\n    - AI-generated consensus statements\n    - Iterative refinement through team feedback\n    - Convergence toward genuine alignment\n\n    **Not:** Vote counting, majority rule, forced compromise\n    **Is:** Democratic deliberation, mutual understanding, genuine consensus\n\n    **Use this when:**\n    - Making strategic team decisions\n    - Need alignment across diverse perspectives\n    - Want to surface and resolve disagreements productively\n    - Building shared understanding, not just vote aggregation\n\n    **Process:**\n    1. Team members submit positions (values, concerns, rationales)\n    2. System identifies common ground\n    3. Generates consensus statement\n    4. Team reviews and suggests edits\n    5. Iterate until convergence\n\n    **Returns:**\n    - Common ground analysis\n    - Generated consensus statement\n    - Convergence assessment\n    - Recommended next steps\n\n    **Performance:** 200-800ms per round\n\n    **Example workflow:**\n    ```\n    Round 1: Submit initial positions \u2192 Get consensus draft\n    Round 2: Submit edit suggestions \u2192 Get refined consensus\n    Round 3: Review \u2192 Converged!\n    ```",
+        "operationId": "conduct_deliberation_api_v1_deliberation_deliberate_post",
+        "parameters": [
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliberationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deliberation round completed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliberationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input (e.g., missing positions)"
+          },
+          "500": {
+            "description": "Internal computation error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/deliberation/session/{session_id}": {
+      "get": {
+        "tags": [
+          "Habermas Machine"
+        ],
+        "summary": "Get deliberation session details",
+        "description": "Retrieve complete deliberation session history and current state.",
+        "operationId": "get_deliberation_session_api_v1_deliberation_session__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "X-Request-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdvancedValidationRequest": {
+        "properties": {
+          "dag": {
+            "title": "Dag",
+            "description": "DAG structure"
+          },
+          "structural_model": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structural Model",
+            "description": "Optional structural model"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Optional context (e.g., domain)"
+          },
+          "validation_level": {
+            "$ref": "#/components/schemas/ValidationLevel",
+            "description": "Level of validation to perform",
+            "default": "standard"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dag"
+        ],
+        "title": "AdvancedValidationRequest",
+        "description": "Request for advanced model validation."
+      },
+      "AdvancedValidationResponse": {
+        "properties": {
+          "overall_quality": {
+            "$ref": "#/components/schemas/QualityLevel",
+            "description": "Overall quality assessment"
+          },
+          "quality_score": {
+            "type": "number",
+            "title": "Quality Score",
+            "description": "Numerical quality score (0-100)"
+          },
+          "validation_results": {
+            "$ref": "#/components/schemas/ValidationResults",
+            "description": "Detailed validation results"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/ModelSuggestion"
+            },
+            "type": "array",
+            "title": "Suggestions",
+            "description": "Improvement suggestions"
+          },
+          "best_practices": {
+            "items": {
+              "$ref": "#/components/schemas/BestPractice"
+            },
+            "type": "array",
+            "title": "Best Practices",
+            "description": "Best practice adherence"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/ExplanationMetadata",
+            "description": "Explanation metadata"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overall_quality",
+          "quality_score",
+          "validation_results",
+          "suggestions",
+          "best_practices",
+          "explanation"
+        ],
+        "title": "AdvancedValidationResponse",
+        "description": "Response from advanced validation."
+      },
+      "AlignedOption": {
+        "properties": {
+          "option": {
+            "type": "string",
+            "title": "Option",
+            "description": "Option ID"
+          },
+          "satisfies_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Satisfies Roles",
+            "description": "Roles satisfied by this option"
+          },
+          "satisfaction_score": {
+            "type": "number",
+            "title": "Satisfaction Score",
+            "description": "Overall satisfaction (0-100)"
+          },
+          "tradeoffs": {
+            "items": {
+              "$ref": "#/components/schemas/Tradeoff"
+            },
+            "type": "array",
+            "title": "Tradeoffs",
+            "description": "Tradeoffs for each role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option",
+          "satisfies_roles",
+          "satisfaction_score",
+          "tradeoffs"
+        ],
+        "title": "AlignedOption",
+        "description": "An option with alignment analysis."
+      },
+      "AlternativeMethod": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "Method name (e.g., 'backdoor', 'front_door', 'instrumental_variables')"
+          },
+          "applicable": {
+            "type": "boolean",
+            "title": "Applicable",
+            "description": "Whether this method is applicable to the problem"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Why the method is or is not applicable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "applicable",
+          "reason"
+        ],
+        "title": "AlternativeMethod",
+        "description": "Alternative identification method assessment.\n\nDocuments whether alternative methods (backdoor, front-door, IV, do-calculus)\nare applicable and why.",
+        "example": {
+          "applicable": false,
+          "method": "front_door",
+          "reason": "No mediator set completely captures causal pathway"
+        }
+      },
+      "Assumption": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Assumption name"
+          },
+          "current_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              }
+            ],
+            "title": "Current Value",
+            "description": "Current assumed value"
+          },
+          "type": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Type",
+            "description": "Assumption type: parametric, structural, or distributional"
+          },
+          "variation_range": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variation Range",
+            "description": "Range to test (min/max values)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "current_value",
+          "type"
+        ],
+        "title": "Assumption",
+        "description": "An assumption to test in sensitivity analysis.",
+        "example": {
+          "current_value": 0.5,
+          "name": "Customer price sensitivity",
+          "type": "parametric",
+          "variation_range": {
+            "max": 0.8,
+            "min": 0.3
+          }
+        }
+      },
+      "AssumptionAnalysis": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Assumption name"
+          },
+          "current_value": {
+            "title": "Current Value",
+            "description": "Current assumed value"
+          },
+          "importance": {
+            "$ref": "#/components/schemas/ImportanceLevel",
+            "description": "Importance level"
+          },
+          "impact": {
+            "$ref": "#/components/schemas/ImpactAssessment",
+            "description": "Impact assessment"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel",
+            "description": "Confidence in assumption"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence",
+            "description": "Evidence for this assumption"
+          },
+          "recommendation": {
+            "type": "string",
+            "title": "Recommendation",
+            "description": "Recommended action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "current_value",
+          "importance",
+          "impact",
+          "confidence",
+          "evidence",
+          "recommendation"
+        ],
+        "title": "AssumptionAnalysis",
+        "description": "Analysis of a single assumption."
+      },
+      "AssumptionDetail": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Assumption type (e.g., 'no_unmeasured_confounding', 'positivity')"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human-readable explanation of the assumption"
+          },
+          "critical": {
+            "type": "boolean",
+            "title": "Critical",
+            "description": "Whether this assumption is critical for identification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "description",
+          "critical"
+        ],
+        "title": "AssumptionDetail",
+        "description": "Individual assumption required for causal identification.\n\nProvides structured information about each assumption, including\nits type, description, and criticality.",
+        "example": {
+          "critical": true,
+          "description": "No unmeasured confounders after adjusting for adjustment set",
+          "type": "no_unmeasured_confounding"
+        }
+      },
+      "BayesianTeachingRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_\\-]+$",
+            "title": "User Id",
+            "description": "User identifier"
+          },
+          "current_beliefs": {
+            "$ref": "#/components/schemas/UserBeliefModel-Input",
+            "description": "Current user beliefs"
+          },
+          "target_concept": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Target Concept",
+            "description": "Concept to teach (e.g., 'confounding', 'trade_offs')"
+          },
+          "context": {
+            "$ref": "#/components/schemas/DecisionContext",
+            "description": "Decision context"
+          },
+          "max_examples": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Max Examples",
+            "description": "Maximum examples to return",
+            "default": 3
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "current_beliefs",
+          "target_concept",
+          "context"
+        ],
+        "title": "BayesianTeachingRequest",
+        "description": "Request for teaching examples."
+      },
+      "BayesianTeachingResponse": {
+        "properties": {
+          "examples": {
+            "items": {
+              "$ref": "#/components/schemas/TeachingExample"
+            },
+            "type": "array",
+            "title": "Examples",
+            "description": "Selected teaching examples"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation",
+            "description": "Overall teaching strategy explanation"
+          },
+          "learning_objectives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Learning Objectives",
+            "description": "What user will learn"
+          },
+          "expected_learning_time": {
+            "type": "string",
+            "title": "Expected Learning Time",
+            "description": "Estimated time to learn concept"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "examples",
+          "explanation",
+          "learning_objectives",
+          "expected_learning_time"
+        ],
+        "title": "BayesianTeachingResponse",
+        "description": "Response with teaching examples."
+      },
+      "BestPractice": {
+        "properties": {
+          "practice": {
+            "type": "string",
+            "title": "Practice",
+            "description": "Best practice name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BestPracticeStatus",
+            "description": "Adherence status"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Status description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "practice",
+          "status",
+          "description"
+        ],
+        "title": "BestPractice",
+        "description": "Best practice check."
+      },
+      "BestPracticeStatus": {
+        "type": "string",
+        "enum": [
+          "followed",
+          "partial",
+          "not_followed"
+        ],
+        "title": "BestPracticeStatus",
+        "description": "Best practice adherence status."
+      },
+      "Breakpoint": {
+        "properties": {
+          "assumption": {
+            "type": "string",
+            "title": "Assumption",
+            "description": "Assumption name"
+          },
+          "threshold": {
+            "type": "string",
+            "title": "Threshold",
+            "description": "Threshold where conclusion flips"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assumption",
+          "threshold"
+        ],
+        "title": "Breakpoint",
+        "description": "A breakpoint where conclusion changes."
+      },
+      "CausalValidationRequest": {
+        "properties": {
+          "dag": {
+            "$ref": "#/components/schemas/DAGStructure",
+            "description": "Directed acyclic graph structure"
+          },
+          "treatment": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Treatment",
+            "description": "Treatment variable name"
+          },
+          "outcome": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Outcome",
+            "description": "Outcome variable name"
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed",
+            "description": "Optional list of observed variables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dag",
+          "treatment",
+          "outcome"
+        ],
+        "title": "CausalValidationRequest",
+        "description": "Request model for causal validation endpoint.",
+        "example": {
+          "dag": {
+            "edges": [
+              [
+                "Price",
+                "Revenue"
+              ],
+              [
+                "Brand",
+                "Price"
+              ],
+              [
+                "Brand",
+                "Revenue"
+              ],
+              [
+                "CustomerAcquisition",
+                "Revenue"
+              ]
+            ],
+            "nodes": [
+              "Price",
+              "Brand",
+              "Revenue",
+              "CustomerAcquisition"
+            ]
+          },
+          "outcome": "Revenue",
+          "treatment": "Price"
+        }
+      },
+      "CausalValidationResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/src__models__shared__ValidationStatus",
+            "description": "Validation status"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method",
+            "description": "Identification method used: backdoor, front_door, instrumental_variables, do_calculus"
+          },
+          "adjustment_sets": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adjustment Sets",
+            "description": "Valid adjustment sets for causal identification"
+          },
+          "minimal_set": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimal Set",
+            "description": "Minimal sufficient adjustment set"
+          },
+          "identification_formula": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identification Formula",
+            "description": "Human-readable identification formula"
+          },
+          "structured_assumptions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AssumptionDetail"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structured Assumptions",
+            "description": "Required assumptions for valid identification (structured)"
+          },
+          "alternative_methods": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AlternativeMethod"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alternative Methods",
+            "description": "Alternative identification methods considered"
+          },
+          "backdoor_paths": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backdoor Paths",
+            "description": "Backdoor paths that create confounding"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why identification failed (e.g., 'no_causal_path', 'unmeasured_confounding', 'selection_bias')"
+          },
+          "suggestions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggestions",
+            "description": "Suggested remedies to achieve identifiability"
+          },
+          "attempted_methods": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempted Methods",
+            "description": "Methods attempted during identification"
+          },
+          "issues": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issues",
+            "description": "Issues preventing identification (legacy compatibility)"
+          },
+          "fallback_assessment": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallback Assessment",
+            "description": "Best-effort assessment when Y\u2080 fails"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel",
+            "description": "Confidence in the analysis"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/ExplanationMetadata",
+            "description": "Explanation metadata"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "confidence",
+          "explanation"
+        ],
+        "title": "CausalValidationResponse",
+        "description": "Enhanced response model for causal validation endpoint.\n\nProvides comprehensive Y\u2080-powered identifiability analysis including:\n- Identification method used (backdoor, front-door, IV, do-calculus)\n- Adjustment sets and identification formula\n- Structured assumptions with criticality\n- Alternative methods considered\n- Structured failure diagnosis when non-identifiable\n- Graceful degradation with fallback assessment",
+        "examples": [
+          {
+            "title": "Identifiable (Backdoor)",
+            "value": {
+              "adjustment_sets": [
+                [
+                  "Brand"
+                ],
+                [
+                  "Brand",
+                  "CustomerAcquisition"
+                ]
+              ],
+              "alternative_methods": [
+                {
+                  "applicable": true,
+                  "method": "backdoor",
+                  "reason": "Valid adjustment set exists"
+                },
+                {
+                  "applicable": false,
+                  "method": "front_door",
+                  "reason": "No mediator set completely captures pathway"
+                }
+              ],
+              "backdoor_paths": [
+                "Price \u2190 Brand \u2192 Revenue"
+              ],
+              "confidence": "high",
+              "explanation": {
+                "assumptions": [
+                  "No unmeasured confounding",
+                  "Correct causal structure"
+                ],
+                "reasoning": "Brand influences both Price and Revenue, creating confounding. Controlling for Brand blocks the backdoor path.",
+                "summary": "Effect is identifiable by controlling for Brand",
+                "technical_basis": "Backdoor criterion satisfied with adjustment set {Brand}"
+              },
+              "identification_formula": "P(revenue|do(price)) = \u03a3_Brand P(revenue|price, Brand) P(Brand)",
+              "method": "backdoor",
+              "minimal_set": [
+                "Brand"
+              ],
+              "status": "identifiable",
+              "structured_assumptions": [
+                {
+                  "critical": true,
+                  "description": "No unmeasured confounders after adjusting for Brand",
+                  "type": "no_unmeasured_confounding"
+                },
+                {
+                  "critical": true,
+                  "description": "All price values possible at all Brand levels",
+                  "type": "positivity"
+                }
+              ]
+            }
+          },
+          {
+            "title": "Non-Identifiable",
+            "value": {
+              "attempted_methods": [
+                "backdoor",
+                "front_door",
+                "do_calculus"
+              ],
+              "confidence": "high",
+              "explanation": {
+                "assumptions": [
+                  "DAG structure correct"
+                ],
+                "reasoning": "Backdoor paths exist but no valid adjustment set found with measured variables.",
+                "summary": "Effect cannot be identified due to unmeasured confounding",
+                "technical_basis": "No identification formula available"
+              },
+              "reason": "unmeasured_confounding",
+              "status": "cannot_identify",
+              "suggestions": [
+                "Add measured confounders to the model",
+                "Consider using instrumental variables if available",
+                "Explore front-door criterion with full mediation"
+              ]
+            }
+          }
+        ]
+      },
+      "CommonGround": {
+        "properties": {
+          "shared_goals": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Shared Goals",
+            "description": "Goals shared by all roles"
+          },
+          "shared_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Shared Constraints",
+            "description": "Constraints shared by all roles"
+          },
+          "agreement_level": {
+            "type": "number",
+            "title": "Agreement Level",
+            "description": "Agreement percentage (0-100)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "shared_goals",
+          "shared_constraints",
+          "agreement_level"
+        ],
+        "title": "CommonGround",
+        "description": "Common ground among team perspectives."
+      },
+      "ConcernStatement": {
+        "properties": {
+          "concern_name": {
+            "type": "string",
+            "title": "Concern Name",
+            "description": "Concern identifier"
+          },
+          "severity": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Severity",
+            "description": "How serious (0-1)"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation",
+            "description": "What's the concern and why"
+          },
+          "conditions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conditions",
+            "description": "Under what conditions would this be addressed?"
+          }
+        },
+        "type": "object",
+        "required": [
+          "concern_name",
+          "severity",
+          "explanation"
+        ],
+        "title": "ConcernStatement",
+        "description": "Individual concern about a decision/option.\n\nCaptures risks, worries, or objections."
+      },
+      "ConclusionStatement": {
+        "properties": {
+          "statement": {
+            "type": "string",
+            "title": "Statement",
+            "description": "The conclusion being tested"
+          },
+          "base_case": {
+            "type": "number",
+            "title": "Base Case",
+            "description": "Base case result value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "statement",
+          "base_case"
+        ],
+        "title": "ConclusionStatement",
+        "description": "Conclusion statement for sensitivity analysis."
+      },
+      "ConfidenceInterval": {
+        "properties": {
+          "lower": {
+            "type": "number",
+            "title": "Lower",
+            "description": "Lower bound of confidence interval"
+          },
+          "upper": {
+            "type": "number",
+            "title": "Upper",
+            "description": "Upper bound of confidence interval"
+          },
+          "confidence_level": {
+            "type": "number",
+            "title": "Confidence Level",
+            "description": "Confidence level (default 95%)",
+            "default": 0.95
+          }
+        },
+        "type": "object",
+        "required": [
+          "lower",
+          "upper"
+        ],
+        "title": "ConfidenceInterval",
+        "description": "Confidence interval for numerical estimates.",
+        "example": {
+          "confidence_level": 0.95,
+          "lower": 45000,
+          "upper": 55000
+        }
+      },
+      "ConfidenceLevel": {
+        "type": "string",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "ConfidenceLevel",
+        "description": "Confidence level for analysis results."
+      },
+      "Conflict": {
+        "properties": {
+          "between": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Between",
+            "description": "Roles in conflict"
+          },
+          "about": {
+            "type": "string",
+            "title": "About",
+            "description": "What the conflict is about"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/ConflictSeverity",
+            "description": "Conflict severity"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion",
+            "description": "Potential resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "between",
+          "about",
+          "severity",
+          "suggestion"
+        ],
+        "title": "Conflict",
+        "description": "A conflict between team perspectives."
+      },
+      "ConflictSeverity": {
+        "type": "string",
+        "enum": [
+          "minor",
+          "moderate",
+          "major"
+        ],
+        "title": "ConflictSeverity",
+        "description": "Severity of team alignment conflict."
+      },
+      "ConsensusStatement": {
+        "properties": {
+          "statement_id": {
+            "type": "string",
+            "title": "Statement Id",
+            "description": "Unique statement identifier"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Version number (increments with edits)",
+            "default": 1
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "The consensus statement itself"
+          },
+          "incorporated_values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Incorporated Values",
+            "description": "Which values are reflected"
+          },
+          "incorporated_concerns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Incorporated Concerns",
+            "description": "Which concerns are addressed"
+          },
+          "supporting_members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supporting Members",
+            "description": "Members who support this statement"
+          },
+          "support_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Support Score",
+            "description": "Fraction of team supporting (0-1)"
+          },
+          "unresolved_disagreements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unresolved Disagreements",
+            "description": "Issues not yet resolved"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At",
+            "description": "When statement was generated"
+          },
+          "generated_by": {
+            "type": "string",
+            "title": "Generated By",
+            "description": "Generation method",
+            "default": "habermas_machine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "statement_id",
+          "text",
+          "support_score",
+          "generated_at"
+        ],
+        "title": "ConsensusStatement",
+        "description": "AI-generated consensus statement.\n\nReflects common ground and can be iteratively refined."
+      },
+      "CounterfactualQuery": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "description": "Unique query identifier"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Question",
+            "description": "Natural language question"
+          },
+          "scenario_a": {
+            "$ref": "#/components/schemas/Scenario",
+            "description": "First scenario option"
+          },
+          "scenario_b": {
+            "$ref": "#/components/schemas/Scenario",
+            "description": "Second scenario option"
+          },
+          "information_gain": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Information Gain",
+            "description": "Expected reduction in uncertainty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "question",
+          "scenario_a",
+          "scenario_b",
+          "information_gain"
+        ],
+        "title": "CounterfactualQuery",
+        "description": "A counterfactual query for preference elicitation.",
+        "example": {
+          "id": "query_001",
+          "information_gain": 0.34,
+          "question": "Which outcome would you prefer?\n\nOption A: ...",
+          "scenario_a": {
+            "description": "Conservative approach",
+            "outcomes": {
+              "revenue": 45000
+            },
+            "trade_offs": [
+              "Lower risk"
+            ]
+          },
+          "scenario_b": {
+            "description": "Aggressive approach",
+            "outcomes": {
+              "revenue": 55000
+            },
+            "trade_offs": [
+              "Higher risk"
+            ]
+          }
+        }
+      },
+      "CounterfactualRequest": {
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/StructuralModel",
+            "description": "Structural causal model"
+          },
+          "intervention": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Intervention",
+            "description": "Intervention values mapping variable names to values"
+          },
+          "outcome": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Outcome",
+            "description": "Outcome variable to predict"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Optional observed context values"
+          },
+          "preferences": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferences",
+            "description": "Reserved for ActiVA preferences (Phase 1)"
+          },
+          "user_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Context",
+            "description": "Reserved for Bayesian Teaching context (Phase 1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "intervention",
+          "outcome"
+        ],
+        "title": "CounterfactualRequest",
+        "description": "Request model for counterfactual analysis endpoint.",
+        "example": {
+          "context": {
+            "baseline_brand": 52
+          },
+          "intervention": {
+            "Price": 15
+          },
+          "model": {
+            "distributions": {
+              "baseline_brand": {
+                "parameters": {
+                  "mean": 50,
+                  "std": 5
+                },
+                "type": "normal"
+              }
+            },
+            "equations": {
+              "Brand": "baseline_brand + 0.3 * Price",
+              "Revenue": "10000 + 500 * Price - 200 * Brand"
+            },
+            "variables": [
+              "Price",
+              "Brand",
+              "Revenue"
+            ]
+          },
+          "outcome": "Revenue"
+        }
+      },
+      "CounterfactualResponse": {
+        "properties": {
+          "scenario": {
+            "$ref": "#/components/schemas/ScenarioDescription",
+            "description": "Scenario description"
+          },
+          "prediction": {
+            "$ref": "#/components/schemas/PredictionResults",
+            "description": "Prediction results"
+          },
+          "uncertainty": {
+            "$ref": "#/components/schemas/UncertaintyBreakdown",
+            "description": "Uncertainty breakdown"
+          },
+          "robustness": {
+            "$ref": "#/components/schemas/RobustnessAnalysis",
+            "description": "Robustness analysis"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/ExplanationMetadata",
+            "description": "Explanation metadata"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario",
+          "prediction",
+          "uncertainty",
+          "robustness",
+          "explanation"
+        ],
+        "title": "CounterfactualResponse",
+        "description": "Response model for counterfactual analysis endpoint.",
+        "example": {
+          "explanation": {
+            "assumptions": [
+              "Structural equations correct"
+            ],
+            "reasoning": "Price increase drives growth...",
+            "summary": "Revenue likely increases by \u00a345k-\u00a355k",
+            "technical_basis": "FACET region-based analysis"
+          },
+          "prediction": {
+            "confidence_interval": {
+              "lower": 45000,
+              "upper": 55000
+            },
+            "point_estimate": 51000,
+            "sensitivity_range": {
+              "explanation": "Range accounts for competitive effects",
+              "optimistic": 62000,
+              "pessimistic": 38000
+            }
+          },
+          "robustness": {
+            "critical_assumptions": [
+              {
+                "assumption": "Price sensitivity constant",
+                "confidence": "medium",
+                "impact": 15000,
+                "recommendation": "A/B test before rollout"
+              }
+            ],
+            "score": "moderate"
+          },
+          "scenario": {
+            "intervention": {
+              "Price": 15
+            },
+            "outcome": "Revenue"
+          },
+          "uncertainty": {
+            "overall": "medium",
+            "sources": [
+              {
+                "basis": "Historical data",
+                "confidence": "medium",
+                "explanation": "Brand changes take time",
+                "factor": "Brand perception lag",
+                "impact": 3000
+              }
+            ]
+          }
+        }
+      },
+      "CriticalAssumption": {
+        "properties": {
+          "assumption": {
+            "type": "string",
+            "title": "Assumption",
+            "description": "The assumption being tested"
+          },
+          "impact": {
+            "type": "number",
+            "title": "Impact",
+            "description": "How much result changes if assumption is wrong"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel",
+            "description": "Confidence in this assumption"
+          },
+          "recommendation": {
+            "type": "string",
+            "title": "Recommendation",
+            "description": "Recommended action"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assumption",
+          "impact",
+          "confidence",
+          "recommendation"
+        ],
+        "title": "CriticalAssumption",
+        "description": "A critical assumption affecting robustness.",
+        "example": {
+          "assumption": "Customer price sensitivity remains constant",
+          "confidence": "medium",
+          "impact": 15000,
+          "recommendation": "Consider A/B testing before full rollout"
+        }
+      },
+      "DAGStructure": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Nodes",
+            "description": "List of node names in the graph"
+          },
+          "edges": {
+            "items": {
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Edges",
+            "description": "List of directed edges as (from, to) tuples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "DAGStructure",
+        "description": "Directed Acyclic Graph structure.",
+        "example": {
+          "edges": [
+            [
+              "Price",
+              "Revenue"
+            ],
+            [
+              "Brand",
+              "Price"
+            ],
+            [
+              "Brand",
+              "Revenue"
+            ]
+          ],
+          "nodes": [
+            "Price",
+            "Brand",
+            "Revenue"
+          ]
+        }
+      },
+      "DecisionContext": {
+        "properties": {
+          "domain": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Domain",
+            "description": "Decision domain (e.g., 'pricing', 'feature_prioritization')"
+          },
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Variables",
+            "description": "Relevant decision variables"
+          },
+          "constraints": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraints",
+            "description": "Domain-specific constraints"
+          }
+        },
+        "type": "object",
+        "required": [
+          "domain",
+          "variables"
+        ],
+        "title": "DecisionContext",
+        "description": "Context for a decision domain.",
+        "example": {
+          "constraints": {
+            "current_price": 49,
+            "industry": "SaaS"
+          },
+          "domain": "pricing",
+          "variables": [
+            "price",
+            "revenue",
+            "churn",
+            "brand_perception"
+          ]
+        }
+      },
+      "DecisionOption": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "description": "Unique option identifier"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "description": "Human-readable option name"
+          },
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes",
+            "description": "Characteristics of this option"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "attributes"
+        ],
+        "title": "DecisionOption",
+        "description": "A decision option to evaluate.",
+        "example": {
+          "attributes": {
+            "acquisition_potential": "high",
+            "quality": "medium",
+            "speed": "fast"
+          },
+          "id": "option_a",
+          "name": "Quick MVP launch"
+        }
+      },
+      "DeliberationRequest": {
+        "properties": {
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id",
+            "description": "Existing session ID (None for new session)"
+          },
+          "decision_context": {
+            "type": "string",
+            "title": "Decision Context",
+            "description": "What's being decided"
+          },
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/MemberPosition"
+            },
+            "type": "array",
+            "title": "Positions",
+            "description": "Current positions from team members"
+          },
+          "previous_consensus": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConsensusStatement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Previous consensus being refined"
+          },
+          "edit_suggestions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EditSuggestion"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edit Suggestions",
+            "description": "Edits suggested by team"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Deliberation configuration (thresholds, etc.)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision_context",
+          "positions"
+        ],
+        "title": "DeliberationRequest",
+        "description": "Request to initiate or continue deliberation."
+      },
+      "DeliberationResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "description": "Session identifier"
+          },
+          "round_number": {
+            "type": "integer",
+            "title": "Round Number",
+            "description": "Current round number"
+          },
+          "common_ground": {
+            "$ref": "#/components/schemas/HabermasCommonGround",
+            "description": "Identified common ground"
+          },
+          "consensus_statement": {
+            "$ref": "#/components/schemas/ConsensusStatement",
+            "description": "New or revised consensus statement"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "active, converged, needs_more_input"
+          },
+          "convergence_assessment": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Convergence Assessment",
+            "description": "Progress toward convergence"
+          },
+          "next_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Next Steps",
+            "description": "Recommended next actions"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "round_number",
+          "common_ground",
+          "consensus_statement",
+          "status",
+          "convergence_assessment"
+        ],
+        "title": "DeliberationResponse",
+        "description": "Response from deliberation round.",
+        "example": {
+          "common_ground": {
+            "agreement_level": 0.75,
+            "shared_values": [
+              {
+                "agreement_score": 0.9,
+                "average_weight": 0.8,
+                "supporting_members": [
+                  "alice",
+                  "bob",
+                  "charlie"
+                ],
+                "synthesized_rationale": "We all prioritize user satisfaction",
+                "value_name": "user_satisfaction"
+              }
+            ]
+          },
+          "consensus_statement": {
+            "statement_id": "consensus_001",
+            "support_score": 0.9,
+            "text": "We agree that user satisfaction is our top priority...",
+            "version": 1
+          },
+          "round_number": 1,
+          "session_id": "delib_abc123",
+          "status": "active"
+        }
+      },
+      "Distribution": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/DistributionType",
+            "description": "Type of distribution"
+          },
+          "parameters": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Parameters",
+            "description": "Distribution parameters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "parameters"
+        ],
+        "title": "Distribution",
+        "description": "Probability distribution specification.",
+        "example": {
+          "parameters": {
+            "mean": 0,
+            "std": 1
+          },
+          "type": "normal"
+        }
+      },
+      "DistributionType": {
+        "type": "string",
+        "enum": [
+          "normal",
+          "uniform",
+          "beta",
+          "exponential"
+        ],
+        "title": "DistributionType",
+        "description": "Types of probability distributions."
+      },
+      "DomainValidation": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationCheck"
+            },
+            "type": "array",
+            "title": "Checks",
+            "description": "Domain checks performed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checks"
+        ],
+        "title": "DomainValidation",
+        "description": "Domain-specific validation results."
+      },
+      "EditSuggestion": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "title": "Member Id",
+            "description": "Who suggested this edit"
+          },
+          "edit_type": {
+            "type": "string",
+            "title": "Edit Type",
+            "description": "Type: 'addition', 'deletion', 'clarification', 'reframing'"
+          },
+          "suggestion": {
+            "type": "string",
+            "title": "Suggestion",
+            "description": "The specific edit suggestion"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale",
+            "description": "Why this edit improves the statement"
+          },
+          "priority": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Priority",
+            "description": "How important is this edit (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_id",
+          "edit_type",
+          "suggestion",
+          "rationale",
+          "priority"
+        ],
+        "title": "EditSuggestion",
+        "description": "Team member's suggested edit to consensus statement.\n\nPart of iterative refinement."
+      },
+      "ExplanationMetadata": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "One-line summary of the result"
+          },
+          "reasoning": {
+            "type": "string",
+            "title": "Reasoning",
+            "description": "Plain English explanation of why"
+          },
+          "technical_basis": {
+            "type": "string",
+            "title": "Technical Basis",
+            "description": "Mathematical/technical justification"
+          },
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Assumptions",
+            "description": "Key assumptions made in analysis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary",
+          "reasoning",
+          "technical_basis",
+          "assumptions"
+        ],
+        "title": "ExplanationMetadata",
+        "description": "Explanation metadata included in all responses.",
+        "example": {
+          "assumptions": [
+            "No unmeasured confounding",
+            "Correct causal structure specified"
+          ],
+          "reasoning": "Brand influences both Price and Revenue, creating confounding. Controlling for Brand blocks the backdoor path.",
+          "summary": "Effect is identifiable by controlling for Brand",
+          "technical_basis": "Backdoor criterion satisfied with adjustment set {Brand}"
+        }
+      },
+      "FACETRobustnessAnalysis": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Analysis status: robust, fragile, or failed"
+          },
+          "robust_regions": {
+            "items": {
+              "$ref": "#/components/schemas/InterventionRegion"
+            },
+            "type": "array",
+            "title": "Robust Regions",
+            "description": "Regions achieving target outcome"
+          },
+          "outcome_guarantees": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OutcomeGuarantee"
+            },
+            "type": "object",
+            "title": "Outcome Guarantees",
+            "description": "Guaranteed outcomes by outcome variable"
+          },
+          "robustness_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Robustness Score",
+            "description": "Overall robustness (0-1, higher = more robust)"
+          },
+          "region_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Region Count",
+            "description": "Number of robust regions found"
+          },
+          "total_volume": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Total Volume",
+            "description": "Total volume of robust regions"
+          },
+          "is_fragile": {
+            "type": "boolean",
+            "title": "Is Fragile",
+            "description": "True if recommendation is fragile"
+          },
+          "fragility_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fragility Reasons",
+            "description": "Why recommendation might be fragile"
+          },
+          "samples_tested": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Samples Tested",
+            "description": "Samples used in verification"
+          },
+          "samples_successful": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Samples Successful",
+            "description": "Samples achieving target"
+          },
+          "confidence_level": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Level",
+            "description": "Statistical confidence",
+            "default": 0.95
+          },
+          "interpretation": {
+            "type": "string",
+            "title": "Interpretation",
+            "description": "Plain English summary"
+          },
+          "recommendation": {
+            "type": "string",
+            "title": "Recommendation",
+            "description": "Actionable guidance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "robustness_score",
+          "region_count",
+          "total_volume",
+          "is_fragile",
+          "samples_tested",
+          "samples_successful",
+          "interpretation",
+          "recommendation"
+        ],
+        "title": "FACETRobustnessAnalysis",
+        "description": "Complete FACET robustness analysis result.\n\nContains robust intervention region(s), outcome guarantees,\nrobustness metrics, and fragility warnings.",
+        "example": {
+          "confidence_level": 0.95,
+          "fragility_reasons": [],
+          "interpretation": "ROBUST RECOMMENDATION (robustness: 0.75). Multiple intervention strategies achieve the target outcome.",
+          "is_fragile": false,
+          "outcome_guarantees": {
+            "revenue": {
+              "confidence": 0.95,
+              "maximum": 105000.0,
+              "minimum": 95000.0,
+              "outcome_variable": "revenue"
+            }
+          },
+          "recommendation": "Recommendation: Proceed with confidence. Operating ranges: price: 52.0-58.0. Strategy is robust to reasonable variations.",
+          "region_count": 1,
+          "robust_regions": [
+            {
+              "variable_ranges": {
+                "price": [
+                  52.0,
+                  58.0
+                ]
+              }
+            }
+          ],
+          "robustness_score": 0.75,
+          "samples_successful": 500,
+          "samples_tested": 500,
+          "status": "robust",
+          "total_volume": 0.06
+        }
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HabermasCommonGround": {
+        "properties": {
+          "shared_values": {
+            "items": {
+              "$ref": "#/components/schemas/SharedValue"
+            },
+            "type": "array",
+            "title": "Shared Values",
+            "description": "Values team agrees on"
+          },
+          "shared_concerns": {
+            "items": {
+              "$ref": "#/components/schemas/SharedValue"
+            },
+            "type": "array",
+            "title": "Shared Concerns",
+            "description": "Concerns team shares"
+          },
+          "agreement_level": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Agreement Level",
+            "description": "Overall agreement score"
+          },
+          "participants": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Participants",
+            "description": "Member IDs included in common ground"
+          }
+        },
+        "type": "object",
+        "required": [
+          "agreement_level",
+          "participants"
+        ],
+        "title": "HabermasCommonGround",
+        "description": "Shared values and concerns across team.\n\nFoundation for consensus building."
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Service status",
+            "default": "healthy"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Service version"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "Current timestamp"
+          },
+          "config_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Fingerprint",
+            "description": "Config fingerprint for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "timestamp"
+        ],
+        "title": "HealthResponse",
+        "description": "Response model for health check endpoint.",
+        "example": {
+          "status": "healthy",
+          "timestamp": "2025-01-15T10:30:00Z",
+          "version": "0.1.0"
+        }
+      },
+      "ImpactAssessment": {
+        "properties": {
+          "if_wrong": {
+            "type": "number",
+            "title": "If Wrong",
+            "description": "Absolute change in result if assumption wrong"
+          },
+          "percentage": {
+            "type": "number",
+            "title": "Percentage",
+            "description": "Percentage of total variance explained"
+          }
+        },
+        "type": "object",
+        "required": [
+          "if_wrong",
+          "percentage"
+        ],
+        "title": "ImpactAssessment",
+        "description": "Impact of an assumption being wrong."
+      },
+      "ImpactLevel": {
+        "type": "string",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "ImpactLevel",
+        "description": "Impact level of suggestion."
+      },
+      "ImportanceLevel": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "moderate",
+          "minor"
+        ],
+        "title": "ImportanceLevel",
+        "description": "Importance level for assumptions."
+      },
+      "InterventionRegion": {
+        "properties": {
+          "variable_ranges": {
+            "additionalProperties": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "object",
+            "title": "Variable Ranges",
+            "description": "Variable name \u2192 (min, max) range"
+          }
+        },
+        "type": "object",
+        "required": [
+          "variable_ranges"
+        ],
+        "title": "InterventionRegion",
+        "description": "Multi-dimensional region of intervention values.\n\nRepresents set of interventions that achieve target outcome.\nEach region is defined as a hyper-rectangle in intervention space.",
+        "example": {
+          "variable_ranges": {
+            "price": [
+              52.0,
+              58.0
+            ],
+            "quality_score": [
+              7.5,
+              8.5
+            ]
+          }
+        }
+      },
+      "LearningSummary": {
+        "properties": {
+          "top_priorities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Priorities",
+            "description": "Inferred top priorities"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "description": "Overall confidence in beliefs (0-1)"
+          },
+          "insights": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Insights",
+            "description": "Key insights about user preferences"
+          },
+          "ready_for_recommendations": {
+            "type": "boolean",
+            "title": "Ready For Recommendations",
+            "description": "Whether enough has been learned"
+          }
+        },
+        "type": "object",
+        "required": [
+          "top_priorities",
+          "confidence",
+          "insights",
+          "ready_for_recommendations"
+        ],
+        "title": "LearningSummary",
+        "description": "Summary of what has been learned about user."
+      },
+      "MemberPosition": {
+        "properties": {
+          "member_id": {
+            "type": "string",
+            "title": "Member Id",
+            "description": "Team member identifier"
+          },
+          "member_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Name",
+            "description": "Display name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role",
+            "description": "Role (PM, Engineer, Designer, etc.)"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/ValueStatement"
+            },
+            "type": "array",
+            "title": "Values",
+            "description": "What matters to this member"
+          },
+          "concerns": {
+            "items": {
+              "$ref": "#/components/schemas/ConcernStatement"
+            },
+            "type": "array",
+            "title": "Concerns",
+            "description": "Risks or objections"
+          },
+          "preferred_option": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Option",
+            "description": "Which option they prefer (if applicable)"
+          },
+          "position_statement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Statement",
+            "description": "Free-form explanation of their position"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "When position was stated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "member_id",
+          "timestamp"
+        ],
+        "title": "MemberPosition",
+        "description": "Complete position of one team member.\n\nIncludes values, concerns, and reasoning."
+      },
+      "ModelSuggestion": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/SuggestionType",
+            "description": "Type of suggestion"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What to change"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale",
+            "description": "Why this change would help"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "description": "Confidence in suggestion (0-1)"
+          },
+          "impact": {
+            "$ref": "#/components/schemas/ImpactLevel",
+            "description": "Expected impact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "description",
+          "rationale",
+          "confidence",
+          "impact"
+        ],
+        "title": "ModelSuggestion",
+        "description": "Suggestion for model improvement."
+      },
+      "OutcomeGuarantee": {
+        "properties": {
+          "outcome_variable": {
+            "type": "string",
+            "title": "Outcome Variable",
+            "description": "Outcome variable name"
+          },
+          "minimum": {
+            "type": "number",
+            "title": "Minimum",
+            "description": "Guaranteed minimum outcome"
+          },
+          "maximum": {
+            "type": "number",
+            "title": "Maximum",
+            "description": "Guaranteed maximum outcome"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "description": "Confidence level (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome_variable",
+          "minimum",
+          "maximum",
+          "confidence"
+        ],
+        "title": "OutcomeGuarantee",
+        "description": "Guaranteed outcome range across intervention region.\n\nWith high confidence, all interventions in region produce\noutcomes within this range.",
+        "example": {
+          "confidence": 0.95,
+          "maximum": 105000.0,
+          "minimum": 95000.0,
+          "outcome_variable": "revenue"
+        }
+      },
+      "PredictionResults": {
+        "properties": {
+          "point_estimate": {
+            "type": "number",
+            "title": "Point Estimate",
+            "description": "Most likely outcome value"
+          },
+          "confidence_interval": {
+            "$ref": "#/components/schemas/ConfidenceInterval",
+            "description": "Confidence interval for prediction"
+          },
+          "sensitivity_range": {
+            "$ref": "#/components/schemas/SensitivityRange",
+            "description": "Range of plausible outcomes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "point_estimate",
+          "confidence_interval",
+          "sensitivity_range"
+        ],
+        "title": "PredictionResults",
+        "description": "Prediction results for counterfactual analysis."
+      },
+      "PreferenceChoice": {
+        "type": "string",
+        "enum": [
+          "A",
+          "B",
+          "indifferent"
+        ],
+        "title": "PreferenceChoice",
+        "description": "User's preference choice."
+      },
+      "PreferenceElicitationRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_\\-]+$",
+            "title": "User Id",
+            "description": "User identifier"
+          },
+          "context": {
+            "$ref": "#/components/schemas/DecisionContext",
+            "description": "Decision context"
+          },
+          "current_beliefs": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserBeliefModel-Input"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current user beliefs (None for first elicitation)"
+          },
+          "num_queries": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Num Queries",
+            "description": "Number of queries to generate",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "context"
+        ],
+        "title": "PreferenceElicitationRequest",
+        "description": "Request for preference elicitation."
+      },
+      "PreferenceElicitationResponse": {
+        "properties": {
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/CounterfactualQuery"
+            },
+            "type": "array",
+            "title": "Queries",
+            "description": "Generated queries"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/QueryStrategyInfo",
+            "description": "Query selection strategy"
+          },
+          "expected_information_gain": {
+            "type": "number",
+            "title": "Expected Information Gain",
+            "description": "Expected total information gain"
+          },
+          "estimated_queries_remaining": {
+            "type": "integer",
+            "title": "Estimated Queries Remaining",
+            "description": "Estimated queries needed after these"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/ExplanationMetadata",
+            "description": "Explanation metadata"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "queries",
+          "strategy",
+          "expected_information_gain",
+          "estimated_queries_remaining",
+          "explanation"
+        ],
+        "title": "PreferenceElicitationResponse",
+        "description": "Response from preference elicitation."
+      },
+      "PreferenceUpdateRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[a-zA-Z0-9_\\-]+$",
+            "title": "User Id",
+            "description": "User identifier"
+          },
+          "query_id": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Query Id",
+            "description": "Query being responded to"
+          },
+          "response": {
+            "$ref": "#/components/schemas/PreferenceChoice",
+            "description": "User's choice"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "description": "User's confidence in choice (0-1)",
+            "default": 1.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "query_id",
+          "response"
+        ],
+        "title": "PreferenceUpdateRequest",
+        "description": "Request to update user beliefs based on response."
+      },
+      "PreferenceUpdateResponse": {
+        "properties": {
+          "updated_beliefs": {
+            "$ref": "#/components/schemas/UserBeliefModel-Output",
+            "description": "Updated belief model"
+          },
+          "queries_completed": {
+            "type": "integer",
+            "title": "Queries Completed",
+            "description": "Total queries completed"
+          },
+          "estimated_queries_remaining": {
+            "type": "integer",
+            "title": "Estimated Queries Remaining",
+            "description": "Estimated queries still needed"
+          },
+          "next_queries": {
+            "items": {
+              "$ref": "#/components/schemas/CounterfactualQuery"
+            },
+            "type": "array",
+            "title": "Next Queries",
+            "description": "Next batch of queries"
+          },
+          "learning_summary": {
+            "$ref": "#/components/schemas/LearningSummary",
+            "description": "Learning progress summary"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated_beliefs",
+          "queries_completed",
+          "estimated_queries_remaining",
+          "next_queries",
+          "learning_summary"
+        ],
+        "title": "PreferenceUpdateResponse",
+        "description": "Response from belief update."
+      },
+      "QualityLevel": {
+        "type": "string",
+        "enum": [
+          "excellent",
+          "good",
+          "acceptable",
+          "poor"
+        ],
+        "title": "QualityLevel",
+        "description": "Overall model quality."
+      },
+      "QueryStrategy": {
+        "type": "string",
+        "enum": [
+          "uncertainty_sampling",
+          "expected_improvement",
+          "exploration"
+        ],
+        "title": "QueryStrategy",
+        "description": "Strategy for query selection."
+      },
+      "QueryStrategyInfo": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/QueryStrategy",
+            "description": "Strategy type"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale",
+            "description": "Why this strategy was chosen"
+          },
+          "focus_areas": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Focus Areas",
+            "description": "Which preferences being targeted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "rationale",
+          "focus_areas"
+        ],
+        "title": "QueryStrategyInfo",
+        "description": "Information about the query selection strategy."
+      },
+      "Recommendation": {
+        "properties": {
+          "top_option": {
+            "type": "string",
+            "title": "Top Option",
+            "description": "Recommended option ID"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale",
+            "description": "Why this option is recommended"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel",
+            "description": "Confidence in recommendation"
+          },
+          "next_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Next Steps",
+            "description": "Suggested next steps"
+          }
+        },
+        "type": "object",
+        "required": [
+          "top_option",
+          "rationale",
+          "confidence",
+          "next_steps"
+        ],
+        "title": "Recommendation",
+        "description": "Recommendation for team alignment."
+      },
+      "ResponseMetadata": {
+        "properties": {
+          "isl_version": {
+            "type": "string",
+            "title": "Isl Version",
+            "description": "ISL service version (semver)",
+            "example": "1.0.0"
+          },
+          "config_fingerprint": {
+            "type": "string",
+            "title": "Config Fingerprint",
+            "description": "Hash of determinism-critical config",
+            "example": "a3f8c9d2e1b4"
+          },
+          "config_details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config Details",
+            "description": "Key configuration values",
+            "example": {
+              "confidence_level": 0.95,
+              "learning_rate": 0.1,
+              "monte_carlo_samples": 10000
+            }
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id",
+            "description": "Request ID for tracing",
+            "example": "req_abc123"
+          }
+        },
+        "type": "object",
+        "required": [
+          "isl_version",
+          "config_fingerprint",
+          "config_details",
+          "request_id"
+        ],
+        "title": "ResponseMetadata",
+        "description": "Metadata attached to all ISL responses for reproducibility.\n\nEnables PLoT to:\n- Verify same ISL version across reruns\n- Detect config changes that affect determinism\n- Audit what configuration produced results"
+      },
+      "RobustnessAnalysis": {
+        "properties": {
+          "score": {
+            "$ref": "#/components/schemas/RobustnessLevel",
+            "description": "Overall robustness score"
+          },
+          "critical_assumptions": {
+            "items": {
+              "$ref": "#/components/schemas/CriticalAssumption"
+            },
+            "type": "array",
+            "title": "Critical Assumptions",
+            "description": "Critical assumptions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "critical_assumptions"
+        ],
+        "title": "RobustnessAnalysis",
+        "description": "Robustness analysis results."
+      },
+      "RobustnessLevel": {
+        "type": "string",
+        "enum": [
+          "robust",
+          "moderate",
+          "fragile"
+        ],
+        "title": "RobustnessLevel",
+        "description": "Robustness level for analysis results."
+      },
+      "RobustnessRequest": {
+        "properties": {
+          "causal_model": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Causal Model",
+            "description": "Causal DAG structure (nodes and edges)"
+          },
+          "intervention_proposal": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Intervention Proposal",
+            "description": "Proposed intervention (e.g., {'price': 55})"
+          },
+          "target_outcome": {
+            "additionalProperties": {
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array",
+              "maxItems": 2,
+              "minItems": 2
+            },
+            "type": "object",
+            "title": "Target Outcome",
+            "description": "Target outcome ranges (e.g., {'revenue': (95000, 105000)})"
+          },
+          "perturbation_radius": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Perturbation Radius",
+            "description": "How far to search around proposal (0.1 = \u00b110%)",
+            "default": 0.1
+          },
+          "min_samples": {
+            "type": "integer",
+            "maximum": 1000.0,
+            "minimum": 10.0,
+            "title": "Min Samples",
+            "description": "Minimum samples for verification per region",
+            "default": 100
+          },
+          "confidence_level": {
+            "type": "number",
+            "maximum": 0.99,
+            "minimum": 0.5,
+            "title": "Confidence Level",
+            "description": "Required confidence level",
+            "default": 0.95
+          },
+          "feasible_ranges": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "prefixItems": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "type": "array",
+                  "maxItems": 2,
+                  "minItems": 2
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feasible Ranges",
+            "description": "Feasible ranges for intervention variables"
+          },
+          "structural_model": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structural Model",
+            "description": "Structural equations and distributions for simulation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "causal_model",
+          "intervention_proposal",
+          "target_outcome"
+        ],
+        "title": "RobustnessRequest",
+        "description": "Request for FACET robustness analysis.",
+        "example": {
+          "causal_model": {
+            "edges": [
+              [
+                "price",
+                "demand"
+              ],
+              [
+                "demand",
+                "revenue"
+              ]
+            ],
+            "nodes": [
+              "price",
+              "demand",
+              "revenue"
+            ]
+          },
+          "confidence_level": 0.95,
+          "intervention_proposal": {
+            "price": 55.0
+          },
+          "min_samples": 100,
+          "perturbation_radius": 0.1,
+          "target_outcome": {
+            "revenue": [
+              95000.0,
+              105000.0
+            ]
+          }
+        }
+      },
+      "RobustnessResponse": {
+        "properties": {
+          "analysis": {
+            "$ref": "#/components/schemas/FACETRobustnessAnalysis",
+            "description": "Robustness analysis result"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "analysis"
+        ],
+        "title": "RobustnessResponse",
+        "description": "Response with FACET robustness analysis.",
+        "example": {
+          "analysis": {
+            "interpretation": "ROBUST RECOMMENDATION",
+            "is_fragile": false,
+            "recommendation": "Proceed with confidence",
+            "region_count": 2,
+            "robustness_score": 0.75,
+            "status": "robust"
+          }
+        }
+      },
+      "RobustnessScore": {
+        "properties": {
+          "overall": {
+            "$ref": "#/components/schemas/RobustnessLevel",
+            "description": "Overall robustness level"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Summary of robustness"
+          },
+          "breakpoints": {
+            "items": {
+              "$ref": "#/components/schemas/Breakpoint"
+            },
+            "type": "array",
+            "title": "Breakpoints",
+            "description": "Critical breakpoints"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overall",
+          "summary",
+          "breakpoints"
+        ],
+        "title": "RobustnessScore",
+        "description": "Overall robustness score for sensitivity analysis."
+      },
+      "Scenario": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 10000,
+            "title": "Description",
+            "description": "Natural language description"
+          },
+          "outcomes": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Outcomes",
+            "description": "Predicted outcomes"
+          },
+          "trade_offs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Trade Offs",
+            "description": "What's gained vs lost"
+          }
+        },
+        "type": "object",
+        "required": [
+          "description",
+          "outcomes",
+          "trade_offs"
+        ],
+        "title": "Scenario",
+        "description": "A decision scenario for comparison.",
+        "example": {
+          "description": "Conservative growth, preserve relationships",
+          "outcomes": {
+            "brand": 0,
+            "churn": 0.015,
+            "revenue": 45000
+          },
+          "trade_offs": [
+            "Lower revenue",
+            "Better retention"
+          ]
+        }
+      },
+      "ScenarioDescription": {
+        "properties": {
+          "intervention": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Intervention",
+            "description": "Intervention values"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome",
+            "description": "Outcome variable"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Observed context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "intervention",
+          "outcome"
+        ],
+        "title": "ScenarioDescription",
+        "description": "Description of the counterfactual scenario."
+      },
+      "SensitivityAnalysisRequest": {
+        "properties": {
+          "model": {
+            "$ref": "#/components/schemas/StructuralModel",
+            "description": "Structural causal model"
+          },
+          "baseline_result": {
+            "type": "number",
+            "title": "Baseline Result",
+            "description": "Baseline analysis result"
+          },
+          "assumptions": {
+            "items": {
+              "$ref": "#/components/schemas/Assumption"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "minItems": 1,
+            "title": "Assumptions",
+            "description": "Assumptions to test"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "baseline_result",
+          "assumptions"
+        ],
+        "title": "SensitivityAnalysisRequest",
+        "description": "Request model for sensitivity analysis endpoint.",
+        "example": {
+          "assumptions": [
+            {
+              "current_value": 500,
+              "name": "Price sensitivity",
+              "type": "parametric",
+              "variation_range": {
+                "max": 700,
+                "min": 300
+              }
+            }
+          ],
+          "baseline_result": 51000,
+          "model": {
+            "distributions": {
+              "sensitivity": {
+                "parameters": {
+                  "mean": 500,
+                  "std": 50
+                },
+                "type": "normal"
+              }
+            },
+            "equations": {
+              "Revenue": "10000 + sensitivity * Price"
+            },
+            "variables": [
+              "Price",
+              "Revenue"
+            ]
+          }
+        }
+      },
+      "SensitivityAnalysisResponse": {
+        "properties": {
+          "conclusion": {
+            "$ref": "#/components/schemas/ConclusionStatement",
+            "description": "Conclusion being tested"
+          },
+          "assumptions": {
+            "items": {
+              "$ref": "#/components/schemas/AssumptionAnalysis"
+            },
+            "type": "array",
+            "title": "Assumptions",
+            "description": "Analyzed assumptions"
+          },
+          "robustness": {
+            "$ref": "#/components/schemas/RobustnessScore",
+            "description": "Overall robustness"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/ExplanationMetadata",
+            "description": "Explanation metadata"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conclusion",
+          "assumptions",
+          "robustness",
+          "explanation"
+        ],
+        "title": "SensitivityAnalysisResponse",
+        "description": "Response model for sensitivity analysis endpoint.",
+        "example": {
+          "assumptions": [
+            {
+              "confidence": "medium",
+              "current_value": 0.5,
+              "evidence": "Historical data",
+              "impact": {
+                "if_wrong": 15000,
+                "percentage": 58
+              },
+              "importance": "critical",
+              "name": "Price sensitivity",
+              "recommendation": "Validate with A/B test"
+            }
+          ],
+          "conclusion": {
+            "base_case": 51000,
+            "statement": "Revenue increases by \u00a345k-\u00a355k per month"
+          },
+          "explanation": {
+            "assumptions": [
+              "Assumptions independent"
+            ],
+            "reasoning": "Depends on price sensitivity...",
+            "summary": "Moderately robust with one critical assumption",
+            "technical_basis": "One-at-a-time sensitivity analysis"
+          },
+          "robustness": {
+            "breakpoints": [
+              {
+                "assumption": "Price sensitivity",
+                "threshold": "If sensitivity > 0.75, impact becomes negative"
+              }
+            ],
+            "overall": "moderate",
+            "summary": "Holds unless price sensitivity substantially different"
+          }
+        }
+      },
+      "SensitivityRange": {
+        "properties": {
+          "optimistic": {
+            "type": "number",
+            "title": "Optimistic",
+            "description": "Optimistic scenario value"
+          },
+          "pessimistic": {
+            "type": "number",
+            "title": "Pessimistic",
+            "description": "Pessimistic scenario value"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation",
+            "description": "What creates this range"
+          }
+        },
+        "type": "object",
+        "required": [
+          "optimistic",
+          "pessimistic",
+          "explanation"
+        ],
+        "title": "SensitivityRange",
+        "description": "Sensitivity range showing best/worst plausible cases.",
+        "example": {
+          "explanation": "Range accounts for uncertainty in competitive response",
+          "optimistic": 62000,
+          "pessimistic": 38000
+        }
+      },
+      "SharedValue": {
+        "properties": {
+          "value_name": {
+            "type": "string",
+            "title": "Value Name",
+            "description": "Shared value identifier"
+          },
+          "agreement_score": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Agreement Score",
+            "description": "Degree of agreement (0-1)"
+          },
+          "supporting_members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supporting Members",
+            "description": "Member IDs who share this value"
+          },
+          "average_weight": {
+            "type": "number",
+            "title": "Average Weight",
+            "description": "Average priority weight among supporters"
+          },
+          "synthesized_rationale": {
+            "type": "string",
+            "title": "Synthesized Rationale",
+            "description": "Combined explanation of why this matters"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value_name",
+          "agreement_score",
+          "supporting_members",
+          "average_weight",
+          "synthesized_rationale"
+        ],
+        "title": "SharedValue",
+        "description": "Value that multiple team members share.\n\nPart of common ground."
+      },
+      "StatisticalValidation": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationCheck"
+            },
+            "type": "array",
+            "title": "Checks",
+            "description": "Statistical checks performed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checks"
+        ],
+        "title": "StatisticalValidation",
+        "description": "Statistical validation results."
+      },
+      "StructuralModel": {
+        "properties": {
+          "variables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Variables",
+            "description": "List of variable names"
+          },
+          "equations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Equations",
+            "description": "Structural equations mapping variable to expression"
+          },
+          "distributions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Distribution"
+            },
+            "type": "object",
+            "title": "Distributions",
+            "description": "Prior distributions for exogenous variables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "variables",
+          "equations",
+          "distributions"
+        ],
+        "title": "StructuralModel",
+        "description": "Structural causal model specification.",
+        "example": {
+          "distributions": {
+            "X": {
+              "parameters": {
+                "mean": 0,
+                "std": 1
+              },
+              "type": "normal"
+            }
+          },
+          "equations": {
+            "Y": "10 + 2*X + 3*Z",
+            "Z": "5 + 0.5*X"
+          },
+          "variables": [
+            "X",
+            "Y",
+            "Z"
+          ]
+        }
+      },
+      "StructuralValidation": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationCheck"
+            },
+            "type": "array",
+            "title": "Checks",
+            "description": "Structural checks performed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "checks"
+        ],
+        "title": "StructuralValidation",
+        "description": "Structural validation results."
+      },
+      "SuggestionType": {
+        "type": "string",
+        "enum": [
+          "add_edge",
+          "remove_edge",
+          "add_node",
+          "restructure"
+        ],
+        "title": "SuggestionType",
+        "description": "Type of model suggestion."
+      },
+      "TeachingExample": {
+        "properties": {
+          "scenario": {
+            "$ref": "#/components/schemas/Scenario",
+            "description": "Example scenario"
+          },
+          "key_insight": {
+            "type": "string",
+            "title": "Key Insight",
+            "description": "What this teaches"
+          },
+          "why_this_example": {
+            "type": "string",
+            "title": "Why This Example",
+            "description": "Why this is pedagogically valuable"
+          },
+          "information_value": {
+            "type": "number",
+            "title": "Information Value",
+            "description": "Teaching value score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario",
+          "key_insight",
+          "why_this_example",
+          "information_value"
+        ],
+        "title": "TeachingExample",
+        "description": "A pedagogically valuable example."
+      },
+      "TeamAlignmentRequest": {
+        "properties": {
+          "perspectives": {
+            "items": {
+              "$ref": "#/components/schemas/TeamPerspective"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 2,
+            "title": "Perspectives",
+            "description": "Team member perspectives"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionOption"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 2,
+            "title": "Options",
+            "description": "Decision options to evaluate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "perspectives",
+          "options"
+        ],
+        "title": "TeamAlignmentRequest",
+        "description": "Request model for team alignment endpoint.",
+        "example": {
+          "options": [
+            {
+              "attributes": {
+                "quality": "medium",
+                "speed": "fast"
+              },
+              "id": "option_a",
+              "name": "Quick MVP"
+            },
+            {
+              "attributes": {
+                "quality": "high",
+                "speed": "medium"
+              },
+              "id": "option_b",
+              "name": "Polished feature"
+            }
+          ],
+          "perspectives": [
+            {
+              "constraints": [
+                "Limited budget"
+              ],
+              "preferred_options": [
+                "option_a"
+              ],
+              "priorities": [
+                "User acquisition",
+                "Revenue growth"
+              ],
+              "role": "Product Manager"
+            },
+            {
+              "constraints": [
+                "Design system limitations"
+              ],
+              "preferred_options": [
+                "option_b"
+              ],
+              "priorities": [
+                "User experience",
+                "Brand consistency"
+              ],
+              "role": "Designer"
+            }
+          ]
+        }
+      },
+      "TeamAlignmentResponse": {
+        "properties": {
+          "common_ground": {
+            "$ref": "#/components/schemas/CommonGround",
+            "description": "Shared goals and constraints"
+          },
+          "aligned_options": {
+            "items": {
+              "$ref": "#/components/schemas/AlignedOption"
+            },
+            "type": "array",
+            "title": "Aligned Options",
+            "description": "Options with alignment scores"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/Conflict"
+            },
+            "type": "array",
+            "title": "Conflicts",
+            "description": "Identified conflicts"
+          },
+          "recommendation": {
+            "$ref": "#/components/schemas/Recommendation",
+            "description": "Top recommendation"
+          },
+          "explanation": {
+            "$ref": "#/components/schemas/ExplanationMetadata",
+            "description": "Explanation metadata"
+          },
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          }
+        },
+        "type": "object",
+        "required": [
+          "common_ground",
+          "aligned_options",
+          "conflicts",
+          "recommendation",
+          "explanation"
+        ],
+        "title": "TeamAlignmentResponse",
+        "description": "Response model for team alignment endpoint.",
+        "example": {
+          "aligned_options": [
+            {
+              "option": "option_b",
+              "satisfaction_score": 85,
+              "satisfies_roles": [
+                "PM",
+                "Designer",
+                "Engineer"
+              ],
+              "tradeoffs": []
+            }
+          ],
+          "common_ground": {
+            "agreement_level": 72,
+            "shared_constraints": [
+              "Limited budget"
+            ],
+            "shared_goals": [
+              "Deliver value to users",
+              "Meet Q4 deadline"
+            ]
+          },
+          "conflicts": [],
+          "explanation": {
+            "assumptions": [
+              "Priorities accurate"
+            ],
+            "reasoning": "All roles value quality...",
+            "summary": "Team can align on polished feature set",
+            "technical_basis": "Overlap analysis with priority weighting"
+          },
+          "recommendation": {
+            "confidence": "high",
+            "next_steps": [
+              "Define MVP scope"
+            ],
+            "rationale": "Balances all priorities",
+            "top_option": "option_b"
+          }
+        }
+      },
+      "TeamPerspective": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Role",
+            "description": "Role name (e.g., PM, Designer, Engineer)"
+          },
+          "priorities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Priorities",
+            "description": "What this role cares about"
+          },
+          "constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Constraints",
+            "description": "What limits this role"
+          },
+          "preferred_options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preferred Options",
+            "description": "Preferred option IDs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "priorities",
+          "constraints"
+        ],
+        "title": "TeamPerspective",
+        "description": "Individual team member's perspective.",
+        "example": {
+          "constraints": [
+            "Limited budget",
+            "Q4 deadline"
+          ],
+          "preferred_options": [
+            "option_a",
+            "option_b"
+          ],
+          "priorities": [
+            "User acquisition",
+            "Revenue growth",
+            "Fast time-to-market"
+          ],
+          "role": "Product Manager"
+        }
+      },
+      "Tradeoff": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "description": "Role making the tradeoff"
+          },
+          "gives": {
+            "type": "string",
+            "title": "Gives",
+            "description": "What this role compromises on"
+          },
+          "gets": {
+            "type": "string",
+            "title": "Gets",
+            "description": "What this role gains"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "gives",
+          "gets"
+        ],
+        "title": "Tradeoff",
+        "description": "A tradeoff for a specific role."
+      },
+      "UncertaintyBreakdown": {
+        "properties": {
+          "overall": {
+            "$ref": "#/components/schemas/UncertaintyLevel",
+            "description": "Overall uncertainty level"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/UncertaintySource"
+            },
+            "type": "array",
+            "title": "Sources",
+            "description": "Individual uncertainty sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overall",
+          "sources"
+        ],
+        "title": "UncertaintyBreakdown",
+        "description": "Breakdown of uncertainty sources."
+      },
+      "UncertaintyLevel": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "UncertaintyLevel",
+        "description": "Overall uncertainty level."
+      },
+      "UncertaintySource": {
+        "properties": {
+          "factor": {
+            "type": "string",
+            "title": "Factor",
+            "description": "Name of uncertainty factor"
+          },
+          "impact": {
+            "type": "number",
+            "title": "Impact",
+            "description": "Contribution to variance"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/ConfidenceLevel",
+            "description": "Confidence in this estimate"
+          },
+          "explanation": {
+            "type": "string",
+            "title": "Explanation",
+            "description": "Plain English explanation"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis",
+            "description": "Evidence source for this factor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "factor",
+          "impact",
+          "confidence",
+          "explanation",
+          "basis"
+        ],
+        "title": "UncertaintySource",
+        "description": "Source of uncertainty in the analysis.",
+        "example": {
+          "basis": "Historical data from 3 previous price changes",
+          "confidence": "medium",
+          "explanation": "Brand changes take 2-4 weeks to affect revenue",
+          "factor": "Brand perception lag",
+          "impact": 3000
+        }
+      },
+      "UserBeliefModel-Input": {
+        "properties": {
+          "value_weights": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Distribution"
+            },
+            "type": "object",
+            "title": "Value Weights",
+            "description": "Probability distributions over value weights"
+          },
+          "risk_tolerance": {
+            "$ref": "#/components/schemas/Distribution",
+            "description": "Risk aversion parameter distribution"
+          },
+          "time_horizon": {
+            "$ref": "#/components/schemas/Distribution",
+            "description": "Short-term vs long-term focus distribution"
+          },
+          "uncertainty_estimates": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Uncertainty Estimates",
+            "description": "Confidence in each belief (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value_weights",
+          "risk_tolerance",
+          "time_horizon",
+          "uncertainty_estimates"
+        ],
+        "title": "UserBeliefModel",
+        "description": "Bayesian model of user preferences and beliefs.",
+        "example": {
+          "risk_tolerance": {
+            "parameters": {
+              "alpha": 2,
+              "beta": 2
+            },
+            "type": "beta"
+          },
+          "time_horizon": {
+            "parameters": {
+              "mean": 12,
+              "std": 3
+            },
+            "type": "normal"
+          },
+          "uncertainty_estimates": {
+            "churn_weight": 0.4,
+            "revenue_weight": 0.3
+          },
+          "value_weights": {
+            "churn": {
+              "parameters": {
+                "mean": 0.4,
+                "std": 0.2
+              },
+              "type": "normal"
+            },
+            "revenue": {
+              "parameters": {
+                "mean": 0.6,
+                "std": 0.2
+              },
+              "type": "normal"
+            }
+          }
+        }
+      },
+      "UserBeliefModel-Output": {
+        "properties": {
+          "value_weights": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Distribution"
+            },
+            "type": "object",
+            "title": "Value Weights",
+            "description": "Probability distributions over value weights"
+          },
+          "risk_tolerance": {
+            "$ref": "#/components/schemas/Distribution",
+            "description": "Risk aversion parameter distribution"
+          },
+          "time_horizon": {
+            "$ref": "#/components/schemas/Distribution",
+            "description": "Short-term vs long-term focus distribution"
+          },
+          "uncertainty_estimates": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Uncertainty Estimates",
+            "description": "Confidence in each belief (0-1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value_weights",
+          "risk_tolerance",
+          "time_horizon",
+          "uncertainty_estimates"
+        ],
+        "title": "UserBeliefModel",
+        "description": "Bayesian model of user preferences and beliefs.",
+        "example": {
+          "risk_tolerance": {
+            "parameters": {
+              "alpha": 2,
+              "beta": 2
+            },
+            "type": "beta"
+          },
+          "time_horizon": {
+            "parameters": {
+              "mean": 12,
+              "std": 3
+            },
+            "type": "normal"
+          },
+          "uncertainty_estimates": {
+            "churn_weight": 0.4,
+            "revenue_weight": 0.3
+          },
+          "value_weights": {
+            "churn": {
+              "parameters": {
+                "mean": 0.4,
+                "std": 0.2
+              },
+              "type": "normal"
+            },
+            "revenue": {
+              "parameters": {
+                "mean": 0.6,
+                "std": 0.2
+              },
+              "type": "normal"
+            }
+          }
+        }
+      },
+      "ValidationCheck": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Check name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/src__models__phase1_models__ValidationStatus",
+            "description": "Check status"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Check result description"
+          },
+          "recommendation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation",
+            "description": "Recommendation if check failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "status",
+          "description"
+        ],
+        "title": "ValidationCheck",
+        "description": "A single validation check result."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "ValidationIssue": {
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/ValidationIssueType",
+            "description": "Type of validation issue"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Description of the issue"
+          },
+          "affected_nodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected Nodes",
+            "description": "Nodes affected by this issue"
+          },
+          "suggested_action": {
+            "type": "string",
+            "title": "Suggested Action",
+            "description": "How to resolve the issue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "description",
+          "affected_nodes",
+          "suggested_action"
+        ],
+        "title": "ValidationIssue",
+        "description": "Issue identified during causal validation.",
+        "example": {
+          "affected_nodes": [
+            "CustomerAcquisition",
+            "Price",
+            "Revenue"
+          ],
+          "description": "CustomerAcquisition may confound the Price-Revenue relationship",
+          "suggested_action": "Clarify: Does CustomerAcquisition affect Price?",
+          "type": "missing_connection"
+        }
+      },
+      "ValidationIssueType": {
+        "type": "string",
+        "enum": [
+          "missing_connection",
+          "confounding",
+          "ambiguous_relationship"
+        ],
+        "title": "ValidationIssueType",
+        "description": "Type of validation issue."
+      },
+      "ValidationLevel": {
+        "type": "string",
+        "enum": [
+          "basic",
+          "standard",
+          "comprehensive"
+        ],
+        "title": "ValidationLevel",
+        "description": "Level of validation to perform."
+      },
+      "ValidationResults": {
+        "properties": {
+          "structural": {
+            "$ref": "#/components/schemas/StructuralValidation",
+            "description": "Structural validation"
+          },
+          "statistical": {
+            "$ref": "#/components/schemas/StatisticalValidation",
+            "description": "Statistical validation"
+          },
+          "domain": {
+            "$ref": "#/components/schemas/DomainValidation",
+            "description": "Domain validation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "structural",
+          "statistical",
+          "domain"
+        ],
+        "title": "ValidationResults",
+        "description": "All validation results."
+      },
+      "ValueStatement": {
+        "properties": {
+          "value_name": {
+            "type": "string",
+            "title": "Value Name",
+            "description": "Value identifier (e.g., 'user_satisfaction')"
+          },
+          "weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Weight",
+            "description": "Priority weight (0-1)"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale",
+            "description": "Why this value matters to this person"
+          },
+          "examples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Examples",
+            "description": "Concrete examples of this value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value_name",
+          "weight",
+          "rationale"
+        ],
+        "title": "ValueStatement",
+        "description": "Individual team member's value statement.\n\nCaptures what matters to them and why."
+      },
+      "src__models__phase1_models__ValidationStatus": {
+        "type": "string",
+        "enum": [
+          "pass",
+          "warning",
+          "fail"
+        ],
+        "title": "ValidationStatus",
+        "description": "Status of a validation check."
+      },
+      "src__models__shared__ValidationStatus": {
+        "type": "string",
+        "enum": [
+          "identifiable",
+          "uncertain",
+          "cannot_identify",
+          "degraded"
+        ],
+        "title": "ValidationStatus",
+        "description": "Status of causal validation."
+      }
+    }
+  }
+}
