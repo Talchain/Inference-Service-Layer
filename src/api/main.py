@@ -19,9 +19,13 @@ from src.models.responses import ErrorCode, ErrorResponse
 
 from .analysis import router as analysis_router
 from .causal import router as causal_router
+# ARCHIVED: Deliberation deferred to TAE PoC v02
+# from .deliberation import router as deliberation_router
 from .health import router as health_router
 from .metrics import router as metrics_router
-from .preferences import router as preferences_router
+# ARCHIVED: Preferences deferred to TAE PoC v02
+# from .preferences import router as preferences_router
+from .robustness import router as robustness_router
 from .teaching import router as teaching_router
 from .team import router as team_router
 from .validation import router as validation_router
@@ -226,11 +230,12 @@ app.include_router(
     prefix=f"{settings.API_V1_PREFIX}/causal",
     tags=["Causal Inference"],
 )
-app.include_router(
-    preferences_router,
-    prefix=f"{settings.API_V1_PREFIX}/preferences",
-    tags=["Preference Learning"],
-)
+# ARCHIVED: Preferences endpoint deferred to TAE PoC v02
+# app.include_router(
+#     preferences_router,
+#     prefix=f"{settings.API_V1_PREFIX}/preferences",
+#     tags=["Preference Learning"],
+# )
 app.include_router(
     teaching_router,
     prefix=f"{settings.API_V1_PREFIX}/teaching",
@@ -251,6 +256,17 @@ app.include_router(
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Sensitivity Analysis"],
 )
+app.include_router(
+    robustness_router,
+    prefix=f"{settings.API_V1_PREFIX}/robustness",
+    tags=["FACET Robustness"],
+)
+# ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
+# app.include_router(
+#     deliberation_router,
+#     prefix=f"{settings.API_V1_PREFIX}/deliberation",
+#     tags=["Habermas Machine"],
+# )
 
 
 @app.on_event("startup")

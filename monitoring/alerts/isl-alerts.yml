@@ -1,0 +1,261 @@
+# Prometheus Alert Rules for ISL Production
+
+groups:
+  - name: isl_availability
+    interval: 30s
+    rules:
+      - alert: ISLHighErrorRate
+        expr: |
+          sum(rate(isl_requests_total{status=~"5.."}[5m]))
+          / sum(rate(isl_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: isl
+          team: inference
+        annotations:
+          summary: "ISL error rate above 5%"
+          description: "Error rate is {{ $value | humanizePercentage }} over last 5 minutes (threshold: 5%)"
+          impact: "Users experiencing failures on {{ $labels.endpoint }} endpoint"
+          runbook: "https://docs.olumi.com/runbooks/isl-high-error-rate"
+          dashboard: "https://grafana.olumi.com/d/isl-overview"
+
+      - alert: ISLServiceDown
+        expr: up{job="isl"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: isl
+          team: inference
+          page: "true"
+        annotations:
+          summary: "ISL service is down"
+          description: "ISL service has been down for 1 minute - no metrics received"
+          impact: "All ISL functionality unavailable - PLoT, CEE, UI blocked"
+          runbook: "https://docs.olumi.com/runbooks/isl-service-down"
+          action: "Page on-call engineer immediately"
+
+      - alert: ISLHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(isl_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+        annotations:
+          summary: "ISL P95 latency above 5s on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value }}s (threshold: 5s)"
+          impact: "Users experiencing slow responses"
+          runbook: "https://docs.olumi.com/runbooks/isl-high-latency"
+
+      - alert: ISLVeryHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(isl_request_duration_seconds_bucket[5m])) by (le, endpoint)
+          ) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: isl
+          team: inference
+        annotations:
+          summary: "ISL P95 latency above 10s on {{ $labels.endpoint }}"
+          description: "P95 latency is {{ $value }}s - service severely degraded"
+          impact: "Users experiencing timeouts and failures"
+          runbook: "https://docs.olumi.com/runbooks/isl-high-latency"
+
+      - alert: ISLLowRequestVolume
+        expr: |
+          sum(rate(isl_requests_total[5m])) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+        annotations:
+          summary: "ISL receiving unusually low traffic"
+          description: "Request rate is {{ $value }}/sec (expected >0.1/sec)"
+          impact: "Possible integration issues or upstream failures"
+          runbook: "https://docs.olumi.com/runbooks/isl-low-traffic"
+
+  - name: isl_costs
+    interval: 5m
+    rules:
+      - alert: ISLLLMCostsHigh
+        expr: sum(increase(isl_llm_cost_dollars[1h])) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+          cost: "true"
+        annotations:
+          summary: "ISL LLM costs exceeded $10/hour"
+          description: "LLM costs are ${{ $value | humanize }} per hour (threshold: $10/hour)"
+          impact: "Budget risk - monthly projection: ${{ $value | humanize }}*24*30 = ${{ $value | humanize | multiply 720 }}"
+          runbook: "https://docs.olumi.com/runbooks/isl-high-llm-costs"
+          action: "Review cost dashboard and consider enabling aggressive fallback"
+
+      - alert: ISLLLMCostsCritical
+        expr: sum(increase(isl_llm_cost_dollars[1h])) > 50
+        for: 5m
+        labels:
+          severity: critical
+          component: isl
+          team: inference
+          cost: "true"
+        annotations:
+          summary: "ISL LLM costs critically high: ${{ $value | humanize }}/hour"
+          description: "Emergency cost threshold exceeded - immediate action required"
+          impact: "Projected monthly cost: ${{ $value | humanize | multiply 720 }}"
+          runbook: "https://docs.olumi.com/runbooks/isl-high-llm-costs"
+          action: "Enable fallback mode immediately or disable LLM if necessary"
+
+      - alert: ISLFrequentBudgetExceeded
+        expr: sum(increase(isl_llm_budget_exceeded_total[1h])) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+        annotations:
+          summary: "Many sessions exceeding LLM budget"
+          description: "{{ $value }} sessions exceeded budget in last hour (threshold: 10)"
+          impact: "Users experiencing degraded LLM features, falling back to rules"
+          runbook: "https://docs.olumi.com/runbooks/isl-budget-exceeded"
+          action: "Review session costs and consider increasing per-session budget"
+
+      - alert: ISLDailyCostTrend
+        expr: |
+          sum(increase(isl_llm_cost_dollars[24h])) > 100
+        for: 1h
+        labels:
+          severity: info
+          component: isl
+          team: inference
+          cost: "true"
+        annotations:
+          summary: "ISL daily LLM costs above $100"
+          description: "Daily cost is ${{ $value | humanize }} (projected monthly: ${{ $value | humanize | multiply 30 }})"
+          impact: "Budget tracking - within limits but monitor closely"
+          dashboard: "https://grafana.olumi.com/d/isl-llm-costs"
+
+  - name: isl_quality
+    interval: 10m
+    rules:
+      - alert: ISLLowCacheHitRate
+        expr: |
+          sum(rate(isl_llm_cache_hits_total[10m]))
+          / sum(rate(isl_llm_requests_total[10m])) < 0.3
+        for: 30m
+        labels:
+          severity: info
+          component: isl
+          team: inference
+        annotations:
+          summary: "ISL LLM cache hit rate below 30%"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} (target: >50%)"
+          impact: "Increased LLM costs and latency due to cache misses"
+          runbook: "https://docs.olumi.com/runbooks/isl-low-cache-hits"
+          action: "Check Redis health, review cache TTL settings"
+
+      - alert: ISLHighFallbackRate
+        expr: |
+          sum(rate(isl_llm_fallback_to_rules_total[10m]))
+          / sum(rate(isl_llm_requests_total[10m])) > 0.2
+        for: 20m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+        annotations:
+          summary: "High rate of LLM fallbacks to rules"
+          description: "{{ $value | humanizePercentage }} of requests falling back (threshold: 20%)"
+          impact: "Degraded deliberation quality - using rule-based instead of LLM"
+          runbook: "https://docs.olumi.com/runbooks/isl-high-fallback"
+          action: "Check LLM API availability, review budget settings, check error logs"
+
+      - alert: ISLFragileRecommendations
+        expr: |
+          sum(rate(isl_facet_fragile_recommendations_total[1h]))
+          / sum(rate(isl_facet_analyses_total[1h])) > 0.5
+        for: 30m
+        labels:
+          severity: info
+          component: isl
+          team: inference
+        annotations:
+          summary: "High rate of fragile recommendations"
+          description: "{{ $value | humanizePercentage }} of analyses are fragile (threshold: 50%)"
+          impact: "Users receiving low-confidence recommendations"
+          runbook: "https://docs.olumi.com/runbooks/isl-fragile-recommendations"
+          action: "Review input scenarios - may indicate poor causal models from users"
+
+      - alert: ISLLowDeliberationConvergence
+        expr: |
+          sum(rate(isl_habermas_convergence_rate[24h]))
+          / sum(rate(isl_habermas_deliberations_total[24h])) < 0.6
+        for: 2h
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+        annotations:
+          summary: "Low deliberation convergence rate"
+          description: "Only {{ $value | humanizePercentage }} of deliberations converging (target: >70%)"
+          impact: "Teams unable to reach consensus effectively"
+          runbook: "https://docs.olumi.com/runbooks/isl-low-convergence"
+          action: "Review deliberation quality, check LLM performance"
+
+  - name: isl_dependencies
+    interval: 1m
+    rules:
+      - alert: ISLRedisDown
+        expr: redis_up{instance=~".*isl.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: isl
+          team: inference
+          dependency: redis
+        annotations:
+          summary: "ISL Redis instance is down"
+          description: "Redis instance {{ $labels.instance }} unreachable"
+          impact: "No caching - increased LLM costs and latency"
+          runbook: "https://docs.olumi.com/runbooks/isl-redis-down"
+          action: "Check Redis service, restart if necessary"
+
+      - alert: ISLRedisHighMemory
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+          dependency: redis
+        annotations:
+          summary: "ISL Redis memory usage high"
+          description: "Redis using {{ $value | humanizePercentage }} of available memory"
+          impact: "Risk of cache evictions or OOM"
+          runbook: "https://docs.olumi.com/runbooks/isl-redis-memory"
+          action: "Review cache TTL, consider increasing Redis memory"
+
+      - alert: ISLDatabaseConnectionPoolExhausted
+        expr: |
+          isl_database_connections_active
+          / isl_database_connections_max > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: isl
+          team: inference
+          dependency: database
+        annotations:
+          summary: "ISL database connection pool near capacity"
+          description: "Using {{ $value | humanizePercentage }} of database connections"
+          impact: "Risk of connection timeouts"
+          runbook: "https://docs.olumi.com/runbooks/isl-db-connections"
+          action: "Check for connection leaks, consider increasing pool size"
