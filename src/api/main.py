@@ -18,6 +18,7 @@ from src.config import get_settings, setup_logging
 from src.models.responses import ErrorCode, ErrorResponse
 
 from .analysis import router as analysis_router
+from .batch import router as batch_router
 from .causal import router as causal_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
@@ -229,6 +230,11 @@ app.include_router(
     causal_router,
     prefix=f"{settings.API_V1_PREFIX}/causal",
     tags=["Causal Inference"],
+)
+app.include_router(
+    batch_router,
+    prefix=f"{settings.API_V1_PREFIX}/batch",
+    tags=["Batch Processing"],
 )
 # ARCHIVED: Preferences endpoint deferred to TAE PoC v02
 # app.include_router(
