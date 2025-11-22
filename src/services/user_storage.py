@@ -37,20 +37,31 @@ class UserStorage:
     """
 
     def __init__(self) -> None:
-        """Initialize storage with Redis connection."""
+        """Initialize storage with Redis connection pool."""
         self.redis_enabled = True
         try:
-            self.redis_client = redis.Redis(
+            # Create connection pool for better performance
+            pool = redis.ConnectionPool(
                 host=os.getenv("REDIS_HOST", "localhost"),
                 port=int(os.getenv("REDIS_PORT", 6379)),
                 db=int(os.getenv("REDIS_DB", 0)),
-                decode_responses=True,
+                max_connections=int(os.getenv("REDIS_POOL_SIZE", 20)),
                 socket_connect_timeout=5,
                 socket_timeout=5,
+                socket_keepalive=True,
+                socket_keepalive_options={},
+                health_check_interval=30,  # Check connection health every 30s
+                decode_responses=True,
             )
+
+            self.redis_client = redis.Redis(connection_pool=pool)
+
             # Test connection
             self.redis_client.ping()
-            logger.info("redis_connected")
+            logger.info(
+                "redis_connected",
+                extra={"pool_size": pool.max_connections}
+            )
         except Exception as e:
             logger.warning(
                 "redis_connection_failed",

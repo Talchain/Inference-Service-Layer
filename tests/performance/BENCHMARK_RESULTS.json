@@ -1,0 +1,42 @@
+{
+  "batch_validation": {
+    "sequential_ms": 45.71041700000933,
+    "parallel_ms": 110.82131900002423,
+    "speedup": 0.412469526734286,
+    "batch_size": 30,
+    "target_met": false
+  },
+  "batch_counterfactual": {
+    "sequential_ms": 17.24630100000013,
+    "parallel_ms": 49.135936999959995,
+    "speedup": 0.35099159704666205,
+    "batch_size": 20,
+    "target_met": false
+  },
+  "p95_latencies": {
+    "validation": {
+      "p50_ms": 1.0441089999631004,
+      "p95_ms": 1.20509199996377,
+      "p99_ms": 1.3881219999802852,
+      "target_met": true
+    },
+    "counterfactual": {
+      "p50_ms": 0.6775269999934608,
+      "p95_ms": 0.799765000010666,
+      "p99_ms": 1.3005810000095153,
+      "target_met": true
+    }
+  },
+  "adaptive_sampling": {
+    "low_variance": {
+      "fixed_ms": 12.611490999915986,
+      "adaptive_ms": 6.361133000041264,
+      "speedup": 1.9825856494171994
+    },
+    "high_variance": {
+      "fixed_ms": 11.683973000003789,
+      "adaptive_ms": 7.504378000021461,
+      "speedup": 1.5569542205856868
+    }
+  }
+}

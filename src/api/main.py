@@ -12,12 +12,18 @@ from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import get_settings, setup_logging
+from src.middleware.circuit_breaker import MemoryCircuitBreaker
+from src.middleware.rate_limiting import RateLimitMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
+from src.utils.tracing import TracingMiddleware
 
 from .analysis import router as analysis_router
+from .batch import router as batch_router
 from .causal import router as causal_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
@@ -43,6 +49,43 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
+
+# Enable gzip compression (40-70% size reduction for JSON responses)
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,  # Only compress responses >1KB
+    compresslevel=6     # Balance speed vs compression (1-9, 6 is good default)
+)
+
+# Memory circuit breaker (reject requests when memory >85%)
+app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
+
+# Distributed tracing (adds X-Trace-Id to all requests/responses)
+app.add_middleware(TracingMiddleware)
+
+# Configure CORS middleware
+# For production: Set specific origins via environment variable
+CORS_ORIGINS = [
+    "http://localhost:3000",  # Local development
+    "http://localhost:8080",  # Alternative dev port
+]
+
+# In development mode, allow all origins for easier testing
+if settings.RELOAD:
+    CORS_ORIGINS = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Request-Id", "X-Trace-Id"],
+    max_age=600,  # Cache preflight requests for 10 minutes
+)
+
+# Add rate limiting middleware (before request logging)
+app.add_middleware(RateLimitMiddleware)
 
 
 # Request logging middleware
@@ -229,6 +272,11 @@ app.include_router(
     causal_router,
     prefix=f"{settings.API_V1_PREFIX}/causal",
     tags=["Causal Inference"],
+)
+app.include_router(
+    batch_router,
+    prefix=f"{settings.API_V1_PREFIX}/batch",
+    tags=["Batch Processing"],
 )
 # ARCHIVED: Preferences endpoint deferred to TAE PoC v02
 # app.include_router(
