@@ -7,6 +7,7 @@ and exception handlers.
 
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Callable
 
@@ -40,6 +41,29 @@ from .validation import router as validation_router
 logger = setup_logging()
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events.
+
+    Handles initialization on startup and cleanup on shutdown.
+    """
+    # Startup
+    logger.info(
+        "application_startup",
+        extra={
+            "version": settings.VERSION,
+            "environment": "production" if not settings.RELOAD else "development",
+        },
+    )
+
+    yield
+
+    # Shutdown
+    logger.info("application_shutdown")
+
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -48,6 +72,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # Enable gzip compression (40-70% size reduction for JSON responses)
@@ -315,24 +340,6 @@ app.include_router(
 #     prefix=f"{settings.API_V1_PREFIX}/deliberation",
 #     tags=["Habermas Machine"],
 # )
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Run on application startup."""
-    logger.info(
-        "application_startup",
-        extra={
-            "version": settings.VERSION,
-            "environment": "production" if not settings.RELOAD else "development",
-        },
-    )
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Run on application shutdown."""
-    logger.info("application_shutdown")
 
 
 if __name__ == "__main__":
