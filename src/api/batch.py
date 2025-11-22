@@ -10,7 +10,7 @@ Uses parallel processing for 5-10x speedup vs sequential requests.
 
 import logging
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -40,6 +40,7 @@ counterfactual_engine = CounterfactualEngine()
 MAX_VALIDATION_BATCH = 50
 MAX_COUNTERFACTUAL_BATCH = 20
 MAX_WORKERS = 10  # Concurrent workers
+BATCH_ITEM_TIMEOUT_SECONDS = 30  # Per-item timeout to prevent hanging
 
 
 # === Request/Response Models ===
@@ -215,11 +216,27 @@ async def batch_validate_causal_models(
                 for idx, req in enumerate(request.requests)
             }
 
-            # Collect results as they complete
-            for future in as_completed(futures):
+            # Collect results as they complete (with timeout)
+            total_timeout = BATCH_ITEM_TIMEOUT_SECONDS * batch_size
+            for future in as_completed(futures, timeout=total_timeout):
                 try:
-                    result = future.result()
+                    result = future.result(timeout=BATCH_ITEM_TIMEOUT_SECONDS)
                     results.append(result)
+                except FutureTimeoutError:
+                    # Handle timeout for individual item
+                    idx = futures[future]
+                    logger.warning(
+                        "batch_validation_item_timeout",
+                        extra={"index": idx, "timeout_seconds": BATCH_ITEM_TIMEOUT_SECONDS},
+                    )
+                    results.append(
+                        BatchValidationItem(
+                            index=idx,
+                            success=False,
+                            result=None,
+                            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s",
+                        )
+                    )
                 except Exception as e:
                     # Handle unexpected errors from executor
                     idx = futures[future]
@@ -334,11 +351,27 @@ async def batch_analyze_counterfactuals(
                 for idx, req in enumerate(request.requests)
             }
 
-            # Collect results as they complete
-            for future in as_completed(futures):
+            # Collect results as they complete (with timeout)
+            total_timeout = BATCH_ITEM_TIMEOUT_SECONDS * batch_size
+            for future in as_completed(futures, timeout=total_timeout):
                 try:
-                    result = future.result()
+                    result = future.result(timeout=BATCH_ITEM_TIMEOUT_SECONDS)
                     results.append(result)
+                except FutureTimeoutError:
+                    # Handle timeout for individual item
+                    idx = futures[future]
+                    logger.warning(
+                        "batch_counterfactual_item_timeout",
+                        extra={"index": idx, "timeout_seconds": BATCH_ITEM_TIMEOUT_SECONDS},
+                    )
+                    results.append(
+                        BatchCounterfactualItem(
+                            index=idx,
+                            success=False,
+                            result=None,
+                            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s",
+                        )
+                    )
                 except Exception as e:
                     # Handle unexpected errors from executor
                     idx = futures[future]

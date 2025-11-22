@@ -12,9 +12,11 @@ from typing import Any, Callable
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import get_settings, setup_logging
+from src.middleware.rate_limiting import RateLimitMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
 
 from .analysis import router as analysis_router
@@ -44,6 +46,30 @@ app = FastAPI(
     redoc_url="/redoc",
     openapi_url="/openapi.json",
 )
+
+# Configure CORS middleware
+# For production: Set specific origins via environment variable
+CORS_ORIGINS = [
+    "http://localhost:3000",  # Local development
+    "http://localhost:8080",  # Alternative dev port
+]
+
+# In development mode, allow all origins for easier testing
+if settings.RELOAD:
+    CORS_ORIGINS = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Request-Id"],
+    max_age=600,  # Cache preflight requests for 10 minutes
+)
+
+# Add rate limiting middleware (before request logging)
+app.add_middleware(RateLimitMiddleware)
 
 
 # Request logging middleware

@@ -5,7 +5,9 @@ Implements counterfactual reasoning using structural causal models
 with Monte Carlo simulation for uncertainty quantification.
 """
 
+import ast
 import logging
+import operator
 import re
 from functools import lru_cache
 from typing import Any, Dict, List, Tuple, Optional
@@ -322,7 +324,9 @@ class CounterfactualEngine:
         self, equation: str, samples: Dict[str, np.ndarray]
     ) -> np.ndarray:
         """
-        Evaluate a structural equation using sampled values.
+        Safely evaluate a structural equation using AST parsing instead of eval().
+
+        This prevents code injection by only allowing whitelisted operations.
 
         Args:
             equation: Mathematical expression
@@ -330,28 +334,126 @@ class CounterfactualEngine:
 
         Returns:
             Array of evaluated results
+
+        Security Note:
+            Uses AST-based evaluation to prevent code injection attacks.
+            Only allows: +, -, *, /, ** and whitelisted functions.
         """
-        # Create a safe evaluation environment
-        safe_dict = {
-            "np": np,
-            "sqrt": np.sqrt,
-            "exp": np.exp,
-            "log": np.log,
-            "abs": np.abs,
-            "max": np.maximum,
-            "min": np.minimum,
-        }
-
-        # Add samples to evaluation environment
-        safe_dict.update(samples)
-
         try:
-            # Evaluate the equation
-            result = eval(equation, {"__builtins__": {}}, safe_dict)
+            # Parse equation into AST
+            tree = ast.parse(equation, mode='eval')
+
+            # Evaluate AST with safety checks
+            result = self._eval_ast_node(tree.body, samples, depth=0)
+
             return np.array(result)
+        except SyntaxError as e:
+            logger.error(f"Syntax error in equation '{equation}': {e}")
+            raise ValueError(f"Invalid equation syntax: {equation}")
         except Exception as e:
             logger.error(f"Failed to evaluate equation '{equation}': {e}")
             raise ValueError(f"Invalid equation: {equation}")
+
+    def _eval_ast_node(
+        self, node: ast.AST, samples: Dict[str, np.ndarray], depth: int = 0
+    ) -> Any:
+        """
+        Recursively evaluate AST node with security checks.
+
+        Args:
+            node: AST node to evaluate
+            samples: Dictionary of variable samples
+            depth: Current recursion depth (prevents stack overflow)
+
+        Returns:
+            Evaluation result
+
+        Raises:
+            ValueError: If unsafe operations detected or depth limit exceeded
+        """
+        # Prevent deeply nested expressions (DoS protection)
+        MAX_DEPTH = 20
+        if depth > MAX_DEPTH:
+            raise ValueError(
+                f"Equation too complex (max nesting depth {MAX_DEPTH} exceeded)"
+            )
+
+        # Whitelist of safe binary operations
+        SAFE_OPS = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.Pow: operator.pow,
+            ast.Mod: operator.mod,
+            ast.FloorDiv: operator.floordiv,
+        }
+
+        # Whitelist of safe unary operations
+        SAFE_UNARY_OPS = {
+            ast.USub: operator.neg,
+            ast.UAdd: operator.pos,
+        }
+
+        # Whitelist of safe functions
+        SAFE_FUNCS = {
+            'sqrt': np.sqrt,
+            'exp': np.exp,
+            'log': np.log,
+            'abs': np.abs,
+            'sin': np.sin,
+            'cos': np.cos,
+            'tan': np.tan,
+        }
+
+        # Handle different node types
+        if isinstance(node, ast.Constant):  # Python ≥3.8
+            return node.value
+        elif isinstance(node, ast.Num):  # Python <3.8 compatibility
+            return node.n
+        elif isinstance(node, ast.Name):
+            # Variable reference
+            if node.id in samples:
+                return samples[node.id]
+            raise ValueError(f"Unknown variable: {node.id}")
+        elif isinstance(node, ast.BinOp):
+            # Binary operation (+, -, *, /, **)
+            if type(node.op) not in SAFE_OPS:
+                raise ValueError(
+                    f"Unsafe operation: {type(node.op).__name__}. "
+                    f"Allowed: +, -, *, /, **, %, //"
+                )
+            left = self._eval_ast_node(node.left, samples, depth + 1)
+            right = self._eval_ast_node(node.right, samples, depth + 1)
+            return SAFE_OPS[type(node.op)](left, right)
+        elif isinstance(node, ast.UnaryOp):
+            # Unary operation (-, +)
+            if type(node.op) not in SAFE_UNARY_OPS:
+                raise ValueError(
+                    f"Unsafe unary operation: {type(node.op).__name__}"
+                )
+            operand = self._eval_ast_node(node.operand, samples, depth + 1)
+            return SAFE_UNARY_OPS[type(node.op)](operand)
+        elif isinstance(node, ast.Call):
+            # Function call
+            if not isinstance(node.func, ast.Name):
+                raise ValueError("Only simple function calls allowed")
+            func_name = node.func.id
+            if func_name not in SAFE_FUNCS:
+                raise ValueError(
+                    f"Unsafe function: {func_name}. "
+                    f"Allowed: {', '.join(SAFE_FUNCS.keys())}"
+                )
+            # Evaluate arguments
+            args = [self._eval_ast_node(arg, samples, depth + 1) for arg in node.args]
+            if node.keywords:
+                raise ValueError("Keyword arguments not allowed in equations")
+            return SAFE_FUNCS[func_name](*args)
+        else:
+            raise ValueError(
+                f"Unsafe expression type: {type(node).__name__}. "
+                f"Only basic arithmetic and whitelisted functions allowed."
+            )
 
     def _compute_prediction(
         self, samples: Dict[str, np.ndarray], outcome_var: str
