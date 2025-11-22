@@ -3,7 +3,7 @@ Response Pydantic models for API endpoints.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -129,6 +129,135 @@ class AlternativeMethod(BaseModel):
     }
 
 
+class ConditionalIndependence(BaseModel):
+    """
+    Conditional independence assumption.
+
+    Represents an assumption that X ⊥ Y | Z (X is independent of Y given Z).
+    """
+
+    variable_a: str = Field(..., description="First variable")
+    variable_b: str = Field(..., description="Second variable")
+    conditioning_set: List[str] = Field(default_factory=list, description="Variables to condition on")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable_a": "Revenue",
+                "variable_b": "Competitors",
+                "conditioning_set": ["Brand"]
+            }
+        }
+    }
+
+
+class SuggestionAction(BaseModel):
+    """
+    Specific action to implement a suggestion.
+
+    Contains the concrete graph modifications or assumptions needed.
+    """
+
+    # For add_mediator/add_confounder
+    add_node: Optional[str] = Field(default=None, description="Node to add to the graph")
+    add_edges: Optional[List[Tuple[str, str]]] = Field(
+        default=None,
+        description="Edges to add (list of [from, to] pairs)"
+    )
+
+    # For reverse_edge
+    reverse_edge: Optional[Tuple[str, str]] = Field(
+        default=None,
+        description="Edge to reverse ([from, to] pair)"
+    )
+
+    # For remove_edge
+    remove_edge: Optional[Tuple[str, str]] = Field(
+        default=None,
+        description="Edge to remove ([from, to] pair)"
+    )
+
+    # For conditional independence
+    assume_independence: Optional[ConditionalIndependence] = Field(
+        default=None,
+        description="Conditional independence assumption to make"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "title": "Add Confounder",
+                    "value": {
+                        "add_node": "Competitors",
+                        "add_edges": [["Competitors", "Price"], ["Competitors", "Revenue"]]
+                    }
+                },
+                {
+                    "title": "Reverse Edge",
+                    "value": {
+                        "reverse_edge": ["A", "B"]
+                    }
+                }
+            ]
+        }
+    }
+
+
+class ValidationSuggestion(BaseModel):
+    """
+    Actionable suggestion for making a non-identifiable DAG identifiable.
+
+    Provides specific, algorithmic guidance on how to modify the causal graph
+    or make additional assumptions to achieve identification.
+    """
+
+    type: str = Field(
+        ...,
+        description="Suggestion type: add_mediator, add_confounder, reverse_edge, add_conditional_independence, remove_edge"
+    )
+    description: str = Field(..., description="Plain English description of the suggestion")
+    technical_detail: str = Field(..., description="Precise causal graph operation or assumption")
+    priority: str = Field(
+        ...,
+        description="Priority level: critical, recommended, optional"
+    )
+    action: SuggestionAction = Field(..., description="Specific action to take")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "title": "Add Confounder",
+                    "value": {
+                        "type": "add_confounder",
+                        "description": "Measure competitor activity to control confounding",
+                        "technical_detail": "Add Competitors node to block backdoor path: Price ← Competitors → Revenue",
+                        "priority": "critical",
+                        "action": {
+                            "add_node": "Competitors",
+                            "add_edges": [["Competitors", "Price"], ["Competitors", "Revenue"]]
+                        }
+                    }
+                },
+                {
+                    "title": "Add Mediator",
+                    "value": {
+                        "type": "add_mediator",
+                        "description": "Add CustomerSentiment to model the causal mechanism",
+                        "technical_detail": "Replace Price→Revenue with Price→CustomerSentiment→Revenue",
+                        "priority": "recommended",
+                        "action": {
+                            "add_node": "CustomerSentiment",
+                            "add_edges": [["Price", "CustomerSentiment"], ["CustomerSentiment", "Revenue"]]
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
 class CausalValidationResponse(BaseModel):
     """
     Enhanced response model for causal validation endpoint.
@@ -179,9 +308,13 @@ class CausalValidationResponse(BaseModel):
         default=None,
         description="Why identification failed (e.g., 'no_causal_path', 'unmeasured_confounding', 'selection_bias')"
     )
-    suggestions: Optional[List[str]] = Field(
+    suggestions: Optional[List[ValidationSuggestion]] = Field(
         default=None,
-        description="Suggested remedies to achieve identifiability"
+        description="Structured, actionable suggestions to achieve identifiability"
+    )
+    legacy_suggestions: Optional[List[str]] = Field(
+        default=None,
+        description="Legacy string suggestions (deprecated, use 'suggestions' instead)"
     )
     attempted_methods: Optional[List[str]] = Field(
         default=None,
