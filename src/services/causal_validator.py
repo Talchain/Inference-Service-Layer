@@ -25,9 +25,11 @@ from src.models.responses import (
     AssumptionDetail,
     CausalValidationResponse,
     ValidationIssue,
+    ValidationSuggestion,
 )
 from src.models.shared import ConfidenceLevel, ValidationIssueType, ValidationStatus
 from src.services.explanation_generator import ExplanationGenerator
+from src.services.validation_suggestions import generate_validation_suggestions
 from src.utils.determinism import canonical_hash, make_deterministic
 from src.utils.graph_parser import edge_list_to_networkx, edge_list_to_y0, find_backdoor_paths
 from src.utils.validation import validate_dag_structure, validate_node_in_graph
@@ -514,6 +516,8 @@ class CausalValidator:
         nx_graph: nx.DiGraph
     ) -> CausalValidationResponse:
         """Create enhanced response when there's no causal path."""
+        from src.models.responses import SuggestionAction
+
         issue = ValidationIssue(
             type=ValidationIssueType.MISSING_CONNECTION,
             description=f"No causal path exists from {request.treatment} to {request.outcome}",
@@ -521,7 +525,39 @@ class CausalValidator:
             suggested_action=f"Add causal edges showing how {request.treatment} affects {request.outcome}",
         )
 
-        suggestions = [
+        # Generate structured suggestions for missing path
+        structured_suggestions = [
+            ValidationSuggestion(
+                type="add_mediator",
+                description=f"Add direct or mediated path from {request.treatment} to {request.outcome}",
+                technical_detail=(
+                    f"Currently no causal connection exists. Add edge {request.treatment}→{request.outcome} "
+                    f"or add intermediate mediating variables."
+                ),
+                priority="critical",
+                action=SuggestionAction(
+                    add_edges=[[request.treatment, request.outcome]],
+                )
+            ),
+            ValidationSuggestion(
+                type="add_mediator",
+                description=f"Add mediating variables between {request.treatment} and {request.outcome}",
+                technical_detail=(
+                    f"If {request.treatment} affects {request.outcome} indirectly, "
+                    f"model the intermediate causal mechanism with mediating variables."
+                ),
+                priority="recommended",
+                action=SuggestionAction(
+                    add_node=f"{request.treatment}Mechanism",
+                    add_edges=[
+                        [request.treatment, f"{request.treatment}Mechanism"],
+                        [f"{request.treatment}Mechanism", request.outcome]
+                    ],
+                )
+            )
+        ]
+
+        legacy_suggestions = [
             f"Add edges from {request.treatment} to {request.outcome} or through mediators",
             f"Verify that {request.treatment} actually affects {request.outcome} in your domain",
             "Review the causal structure - is the treatment-outcome relationship missing?"
@@ -537,7 +573,8 @@ class CausalValidator:
         return CausalValidationResponse(
             status=ValidationStatus.CANNOT_IDENTIFY,
             reason="no_causal_path",
-            suggestions=suggestions,
+            suggestions=structured_suggestions,
+            legacy_suggestions=legacy_suggestions,
             attempted_methods=["structural_analysis"],
             issues=[issue],
             confidence=ConfidenceLevel.HIGH,
@@ -557,21 +594,21 @@ class CausalValidator:
 
         if backdoor_paths_list:
             reason = "unmeasured_confounding"
-            suggestions = [
-                "Add measured confounders to the model to block backdoor paths",
-                "Consider using instrumental variables if available",
-                "Explore front-door criterion if mediators fully capture the pathway",
-                "Collect data on potential confounders"
-            ]
             description = "Backdoor paths exist but no valid adjustment set found with measured variables"
         else:
             reason = "identification_failed"
-            suggestions = [
-                "Simplify causal structure if possible",
-                "Verify DAG structure is correct",
-                "Consult with causal inference expert for complex cases"
-            ]
             description = "Effect cannot be identified with standard methods"
+
+        # Generate structured suggestions
+        structured_suggestions = generate_validation_suggestions(
+            graph=graph,
+            treatment=request.treatment,
+            outcome=request.outcome,
+            all_nodes=request.dag.nodes,
+        )
+
+        # Create legacy string suggestions for backward compatibility
+        legacy_suggestions = self._convert_to_legacy_suggestions(structured_suggestions)
 
         issue = ValidationIssue(
             type=ValidationIssueType.CONFOUNDING,
@@ -590,7 +627,8 @@ class CausalValidator:
         return CausalValidationResponse(
             status=ValidationStatus.CANNOT_IDENTIFY,
             reason=reason,
-            suggestions=suggestions,
+            suggestions=structured_suggestions,
+            legacy_suggestions=legacy_suggestions,
             attempted_methods=["backdoor", "y0_identification"],
             issues=[issue],
             confidence=ConfidenceLevel.MEDIUM,
@@ -661,7 +699,7 @@ class CausalValidator:
             status=ValidationStatus.DEGRADED,
             reason="y0_analysis_failed",
             fallback_assessment=fallback_assessment,
-            suggestions=[
+            legacy_suggestions=[
                 "Try simplifying the DAG structure",
                 "Verify all node names are valid identifiers",
                 "Contact support if error persists"
@@ -670,3 +708,31 @@ class CausalValidator:
             confidence=ConfidenceLevel.LOW,
             explanation=explanation,
         )
+
+    def _convert_to_legacy_suggestions(
+        self,
+        structured_suggestions: List[ValidationSuggestion]
+    ) -> List[str]:
+        """
+        Convert structured suggestions to legacy string format.
+
+        Args:
+            structured_suggestions: List of structured suggestions
+
+        Returns:
+            List of string suggestions for backward compatibility
+        """
+        legacy = []
+        for suggestion in structured_suggestions:
+            # Use the description field as the legacy string
+            legacy.append(suggestion.description)
+
+        # Add generic fallback suggestions if none were generated
+        if not legacy:
+            legacy = [
+                "Review the causal graph structure",
+                "Consider measuring additional variables",
+                "Consult with a causal inference expert"
+            ]
+
+        return legacy
