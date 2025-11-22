@@ -98,6 +98,87 @@ habermas_rounds_per_session = Histogram(
     buckets=[1, 2, 3, 5, 7, 10, 15]
 )
 
+# Production excellence metrics (Phase 3)
+
+# Batch endpoint metrics
+batch_requests_total = Counter(
+    'isl_batch_requests_total',
+    'Batch requests by type and size',
+    ['endpoint', 'batch_size_bucket']
+)
+
+batch_items_processed = Counter(
+    'isl_batch_items_processed_total',
+    'Items processed in batches',
+    ['endpoint', 'status']  # success or failed
+)
+
+batch_processing_duration = Histogram(
+    'isl_batch_processing_duration_seconds',
+    'Batch processing duration',
+    ['endpoint'],
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+)
+
+# Adaptive sampling metrics
+adaptive_sampling_convergence = Histogram(
+    'isl_adaptive_sampling_rounds',
+    'Samples until convergence in adaptive sampling',
+    buckets=[100, 200, 500, 1000, 2000, 5000, 10000]
+)
+
+adaptive_sampling_speedup = Histogram(
+    'isl_adaptive_sampling_speedup_ratio',
+    'Speedup ratio vs fixed sampling',
+    buckets=[1.0, 1.5, 2.0, 3.0, 5.0, 10.0]
+)
+
+# Cache effectiveness metrics
+cache_hit_rate = Gauge(
+    'isl_cache_hit_rate_by_endpoint',
+    'Cache hit rate per endpoint',
+    ['endpoint', 'cache_type']  # topo_sort, etc.
+)
+
+cache_operations_total = Counter(
+    'isl_cache_operations_total',
+    'Cache operations',
+    ['endpoint', 'operation', 'result']  # hit, miss, evict
+)
+
+# Memory usage metrics
+memory_usage_bytes = Gauge(
+    'isl_memory_usage_bytes',
+    'Current memory usage',
+    ['memory_type']  # rss, vms
+)
+
+memory_circuit_breaker_triggers = Counter(
+    'isl_memory_circuit_breaker_triggers_total',
+    'Circuit breaker triggers due to high memory'
+)
+
+# Request compression metrics
+response_compression_ratio = Histogram(
+    'isl_response_compression_ratio',
+    'Compression ratio for responses',
+    ['endpoint'],
+    buckets=[0.1, 0.3, 0.5, 0.7, 0.9]
+)
+
+compressed_bytes_saved = Counter(
+    'isl_compressed_bytes_saved_total',
+    'Total bytes saved via compression',
+    ['endpoint']
+)
+
+# Distributed tracing metrics
+trace_propagation_total = Counter(
+    'isl_trace_propagation_total',
+    'Trace ID propagation events',
+    ['source']  # header, generated
+)
+
 habermas_agreement_level = Histogram(
     'isl_habermas_agreement_level',
     'Agreement levels achieved',
