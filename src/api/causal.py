@@ -16,12 +16,14 @@ from src.models.metadata import create_response_metadata
 from src.models.requests import (
     BatchCounterfactualRequest,
     CausalValidationRequest,
+    ConformalCounterfactualRequest,
     CounterfactualRequest,
     TransportabilityRequest,
 )
 from src.models.responses import (
     BatchCounterfactualResponse,
     CausalValidationResponse,
+    ConformalCounterfactualResponse,
     CounterfactualResponse,
     ErrorCode,
     ErrorResponse,
@@ -30,6 +32,7 @@ from src.models.responses import (
 from src.services.batch_counterfactual_engine import BatchCounterfactualEngine
 from src.services.causal_transporter import CausalTransporter
 from src.services.causal_validator import CausalValidator
+from src.services.conformal_predictor import ConformalPredictor
 from src.services.counterfactual_engine import CounterfactualEngine
 
 router = APIRouter()
@@ -40,6 +43,7 @@ causal_validator = CausalValidator()
 counterfactual_engine = CounterfactualEngine()
 batch_counterfactual_engine = BatchCounterfactualEngine()
 causal_transporter = CausalTransporter()
+conformal_predictor = ConformalPredictor(counterfactual_engine)
 
 
 @router.post(
@@ -290,6 +294,100 @@ async def analyze_batch_counterfactual(
         raise HTTPException(
             status_code=500,
             detail="Failed to perform batch counterfactual analysis. Check logs for details.",
+        )
+
+
+@router.post(
+    "/counterfactual/conformal",
+    response_model=ConformalCounterfactualResponse,
+    summary="Conformal prediction for counterfactuals",
+    description="""
+    Generate counterfactual predictions with conformal prediction intervals.
+
+    Provides finite-sample valid prediction intervals with guaranteed coverage,
+    offering provable uncertainty quantification beyond standard Monte Carlo methods.
+
+    **Key Features:**
+    - Distribution-free (no parametric assumptions)
+    - Finite-sample validity (not asymptotic)
+    - Guaranteed coverage: P(Y ∈ interval) ≥ 1-α
+    - Adaptive to local uncertainty
+    - Comparison to Monte Carlo intervals
+
+    **Use when:** You need rigorous uncertainty guarantees for counterfactual
+    predictions, especially in high-stakes decisions where coverage matters.
+
+    **Example Use Cases:**
+    - Safety-critical predictions requiring provable bounds
+    - Regulatory compliance needing formal guarantees
+    - Scientific research requiring rigorous uncertainty quantification
+    - Model validation and calibration assessment
+
+    **Requirements:**
+    - Calibration data: At least 10 historical observations (more is better)
+    - Exchangeability: Calibration and test points from same distribution
+    """,
+    responses={
+        200: {"description": "Conformal prediction completed successfully"},
+        400: {"description": "Invalid input or insufficient calibration data"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def conformal_counterfactual_prediction(
+    request: ConformalCounterfactualRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> ConformalCounterfactualResponse:
+    """
+    Generate counterfactual with conformal prediction interval.
+
+    Args:
+        request: Conformal counterfactual request with calibration data
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        ConformalCounterfactualResponse: Prediction with guaranteed coverage
+    """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "conformal_counterfactual_request",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "confidence_level": request.confidence_level,
+                "calibration_size": len(request.calibration_data) if request.calibration_data else 0,
+            },
+        )
+
+        result = conformal_predictor.predict_with_conformal_interval(request)
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "conformal_counterfactual_completed",
+            extra={
+                "request_id": request_id,
+                "guaranteed_coverage": result.coverage_guarantee.guaranteed_coverage,
+                "calibration_size": result.calibration_quality.calibration_size,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "conformal_counterfactual_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to perform conformal prediction. Check logs for details.",
         )
 
 
