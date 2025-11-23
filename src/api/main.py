@@ -7,6 +7,7 @@ and exception handlers.
 
 import logging
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Callable
 
@@ -27,6 +28,7 @@ from .batch import router as batch_router
 from .causal import router as causal_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
+from .explain import router as explain_router
 from .health import router as health_router
 from .metrics import router as metrics_router
 # ARCHIVED: Preferences deferred to TAE PoC v02
@@ -40,6 +42,29 @@ from .validation import router as validation_router
 logger = setup_logging()
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events.
+
+    Handles initialization on startup and cleanup on shutdown.
+    """
+    # Startup
+    logger.info(
+        "application_startup",
+        extra={
+            "version": settings.VERSION,
+            "environment": "production" if not settings.RELOAD else "development",
+        },
+    )
+
+    yield
+
+    # Shutdown
+    logger.info("application_shutdown")
+
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -48,6 +73,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
+    lifespan=lifespan,
 )
 
 # Enable gzip compression (40-70% size reduction for JSON responses)
@@ -309,30 +335,17 @@ app.include_router(
     prefix=f"{settings.API_V1_PREFIX}/robustness",
     tags=["FACET Robustness"],
 )
+app.include_router(
+    explain_router,
+    prefix=f"{settings.API_V1_PREFIX}/explain",
+    tags=["Contrastive Explanations"],
+)
 # ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
 # app.include_router(
 #     deliberation_router,
 #     prefix=f"{settings.API_V1_PREFIX}/deliberation",
 #     tags=["Habermas Machine"],
 # )
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Run on application startup."""
-    logger.info(
-        "application_startup",
-        extra={
-            "version": settings.VERSION,
-            "environment": "production" if not settings.RELOAD else "development",
-        },
-    )
-
-
-@app.on_event("shutdown")
-async def shutdown_event() -> None:
-    """Run on application shutdown."""
-    logger.info("application_shutdown")
 
 
 if __name__ == "__main__":

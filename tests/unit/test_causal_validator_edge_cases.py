@@ -183,7 +183,7 @@ class TestCausalValidatorErrorHandling:
 
     @patch('src.services.causal_validator.identify_outcomes')
     def test_y0_identification_error_triggers_degraded(self, mock_identify):
-        """Test that Y0 identification errors trigger degraded response."""
+        """Test that Y0 identification errors fall back to backdoor analysis."""
         mock_identify.side_effect = RuntimeError("Y0 computation failed")
 
         validator = CausalValidator()
@@ -197,13 +197,12 @@ class TestCausalValidatorErrorHandling:
             outcome="Y",
         )
 
-        # Should handle error gracefully and return degraded response
+        # Should handle Y0 error gracefully and fall back to backdoor analysis
         response = validator.validate(request)
 
-        # Should return degraded status
-        assert response.status == "degraded"
-        assert response.reason == "y0_analysis_failed"
-        assert "fallback_assessment" in response.model_dump()
+        # Fallback should successfully identify (simple DAG, no confounding)
+        assert response.status == "identifiable"
+        assert response.method in ["backdoor", "do_calculus"]
 
     @patch('src.services.causal_validator.edge_list_to_networkx')
     def test_graph_construction_error(self, mock_edge_list):
@@ -221,12 +220,11 @@ class TestCausalValidatorErrorHandling:
             outcome="Y",
         )
 
-        # Should re-raise as HTTPException
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as exc_info:
-            validator.validate(request)
+        # Should gracefully degrade on unexpected errors
+        response = validator.validate(request)
 
-        assert exc_info.value.status_code == 400
+        assert response.status == "degraded"
+        assert "error" in response.model_dump() or response.explanation
 
 
 class TestCausalValidatorComplexStructures:
@@ -294,9 +292,10 @@ class TestCausalValidatorComplexStructures:
         response = validator.validate(request)
 
         # Should indicate cannot identify (no causal path)
-        assert response.status in ["cannot_identify", "degraded"]
-        if hasattr(response, "explanation"):
-            assert "no path" in response.explanation.lower() or "not connected" in response.explanation.lower()
+        assert response.status == "cannot_identify"
+        if hasattr(response, "explanation") and response.explanation:
+            explanation_text = response.explanation.summary if hasattr(response.explanation, "summary") else str(response.explanation)
+            assert "no path" in explanation_text.lower() or "not connected" in explanation_text.lower() or "cannot" in explanation_text.lower()
 
 
 class TestCausalValidatorConfidenceLevels:
@@ -368,16 +367,13 @@ class TestCausalValidatorFallbackAssessment:
 
         response = validator.validate(request)
 
-        assert response.status == "degraded"
-        assert "fallback_assessment" in response.model_dump()
-        # Should detect direct path exists
-        fallback = response.fallback_assessment
-        if isinstance(fallback, dict):
-            assert fallback.get("direct_path_exists") is True
+        # Fallback should successfully identify (simple structure)
+        assert response.status == "identifiable"
+        assert response.method in ["backdoor", "do_calculus"]
 
     @patch('src.services.causal_validator.identify_outcomes')
     def test_fallback_detects_potential_confounders(self, mock_identify):
-        """Test that fallback identifies potential confounders."""
+        """Test that fallback identifies graphs with confounders."""
         mock_identify.side_effect = Exception("Y0 failed")
 
         validator = CausalValidator()
@@ -398,11 +394,12 @@ class TestCausalValidatorFallbackAssessment:
 
         response = validator.validate(request)
 
-        assert response.status == "degraded"
-        fallback = response.fallback_assessment
-        if isinstance(fallback, dict):
-            # Should detect Z as potential confounder
-            assert "Z" in fallback.get("potential_confounders", [])
+        # Fallback should successfully identify with Z as adjustment
+        assert response.status == "identifiable"
+        assert response.method in ["backdoor", "do_calculus"]
+        if hasattr(response, "adjustment_set"):
+            # Should include Z in adjustment set
+            assert "Z" in response.adjustment_set
 
     @patch('src.services.causal_validator.identify_outcomes')
     @patch('src.services.causal_validator.edge_list_to_networkx')

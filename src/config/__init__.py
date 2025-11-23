@@ -8,6 +8,7 @@ import logging
 import sys
 from functools import lru_cache
 
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 from pythonjsonlogger import jsonlogger
 
@@ -46,11 +47,10 @@ class Settings(BaseSettings):
     # Determinism
     ENABLE_DETERMINISTIC_MODE: bool = True
 
-    class Config:
-        """Pydantic configuration."""
-
-        env_file = ".env"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True
+    )
 
 
 @lru_cache()

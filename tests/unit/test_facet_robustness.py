@@ -12,7 +12,7 @@ from src.models.robustness import (
     OutcomeGuarantee,
     RobustnessRequest,
 )
-from src.models.shared import StructuralModel, Variable, Distribution, DistributionType
+from src.models.shared import StructuralModel, Distribution, DistributionType
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_visualizer import RobustnessVisualizer
 
