@@ -140,14 +140,23 @@ class CausalRepresentationLearner:
         """Fallback embedding using TF-IDF."""
         from sklearn.feature_extraction.text import TfidfVectorizer
 
+        # Handle empty list
+        if not texts:
+            return np.array([]).reshape(0, 100)
+
         vectorizer = TfidfVectorizer(
             max_features=100,
             stop_words='english',
             ngram_range=(1, 2)
         )
 
-        embeddings = vectorizer.fit_transform(texts).toarray()
-        return embeddings
+        try:
+            embeddings = vectorizer.fit_transform(texts).toarray()
+            return embeddings
+        except ValueError as e:
+            # Handle case where all texts are stop words or empty
+            self.logger.warning(f"TF-IDF vectorization failed: {e}, returning zero embeddings")
+            return np.zeros((len(texts), 100))
 
     def _cluster_embeddings(
         self,

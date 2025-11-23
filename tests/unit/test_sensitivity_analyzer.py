@@ -238,9 +238,9 @@ class TestComputeSensitivityMetric:
         outcomes = [48000.0, 52000.0, 54000.0]
         violations = [0.1, 0.2, 0.3]
         violation_details = [
-            {"magnitude": 0.1, "severity": "mild", "outcome": 48000.0, "deviation_percent": 4.0},
-            {"magnitude": 0.2, "severity": "moderate", "outcome": 52000.0, "deviation_percent": 4.0},
-            {"magnitude": 0.3, "severity": "severe", "outcome": 54000.0, "deviation_percent": 8.0},
+            {"magnitude": 0.1, "severity_score": 0.33, "outcome": 48000.0, "deviation_percent": 4.0},
+            {"magnitude": 0.2, "severity_score": 0.67, "outcome": 52000.0, "deviation_percent": 4.0},
+            {"magnitude": 0.3, "severity_score": 1.0, "outcome": 54000.0, "deviation_percent": 8.0},
         ]
         
         metric = sensitivity_analyzer._compute_sensitivity_metric(
@@ -263,7 +263,7 @@ class TestComputeSensitivityMetric:
         outcomes = [50000.0, 52500.0, 55000.0]  # 0%, 5%, 10% changes
         violations = [0.0, 0.1, 0.2]  # 0%, 10%, 20% violations
         violation_details = [
-            {"magnitude": v, "severity": "mild", "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
+            {"magnitude": v, "severity_score": 0.33, "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
             for v, o in zip(violations, outcomes)
         ]
         
@@ -285,7 +285,7 @@ class TestComputeSensitivityMetric:
         outcomes = [50000.0, 60000.0, 70000.0]
         violations = [0.0, 0.1, 0.2]
         violation_details = [
-            {"magnitude": v, "severity": "mild", "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
+            {"magnitude": v, "severity_score": 0.33, "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
             for v, o in zip(violations, outcomes)
         ]
         
@@ -306,7 +306,7 @@ class TestComputeSensitivityMetric:
         outcomes = [50000.0, 50000.0, 62000.0]  # >20% deviation
         violations = [0.0, 0.1, 0.2]
         violation_details = [
-            {"magnitude": v, "severity": "mild", "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
+            {"magnitude": v, "severity_score": 0.33, "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
             for v, o in zip(violations, outcomes)
         ]
         
@@ -328,7 +328,7 @@ class TestComputeSensitivityMetric:
         outcomes = [50000.0, 50500.0, 51000.0]
         violations = [0.0, 0.1, 0.2]
         violation_details = [
-            {"magnitude": v, "severity": "mild", "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
+            {"magnitude": v, "severity_score": 0.33, "outcome": o, "deviation_percent": abs(o - baseline) / baseline * 100}
             for v, o in zip(violations, outcomes)
         ]
         

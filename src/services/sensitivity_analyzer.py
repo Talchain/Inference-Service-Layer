@@ -143,9 +143,18 @@ class EnhancedSensitivityAnalyzer:
                         violation
                     )
                     outcomes.append(outcome)
+
+                    # Convert severity enum to float (0.33=mild, 0.67=moderate, 1.0=severe)
+                    severity_map = {
+                        ViolationType.MILD: 0.33,
+                        ViolationType.MODERATE: 0.67,
+                        ViolationType.SEVERE: 1.0
+                    }
+                    severity_score = severity_map.get(violation.severity, 0.5)
+
                     violation_details.append({
                         "magnitude": violation.magnitude,
-                        "severity": violation.severity.value,
+                        "severity_score": severity_score,
                         "outcome": outcome,
                         "deviation_percent": abs(outcome - baseline_outcome) / abs(baseline_outcome) * 100
                     })
@@ -540,9 +549,20 @@ class EnhancedSensitivityAnalyzer:
                 )
 
         # Metadata
+        from src.__version__ import __version__
+        import hashlib
+        import json
+
+        config_details = {
+            "violation_levels": len(sensitivities),
+            "baseline_outcome": baseline_outcome
+        }
+
         metadata = ResponseMetadata(
-            timestamp=datetime.utcnow(),
-            version="1.0.0"
+            isl_version=__version__,
+            config_fingerprint=hashlib.md5(json.dumps(config_details, sort_keys=True).encode()).hexdigest()[:12],
+            config_details=config_details,
+            request_id="sensitivity_analysis"
         )
 
         return SensitivityReport(
