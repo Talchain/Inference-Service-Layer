@@ -12,6 +12,12 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Constants for Thompson sampling
+N_THOMPSON_SAMPLES = 100  # Number of posterior samples for Thompson sampling
+MAX_CANDIDATE_ACTIONS = 10  # Maximum number of candidate actions to evaluate
+DISTANCE_NORMALIZATION = 20.0  # Normalization factor for action distance
+INFO_GAIN_NORMALIZATION = 10.0  # Normalization factor for information gain
+
 
 class BeliefState:
     """Represents current beliefs about model parameters."""
@@ -127,17 +133,25 @@ class SequentialOptimizer:
             objective: Optimization objective
             constraints: Experiment constraints
             history: List of previous experiments
-            seed: Random seed
+            seed: Random seed for reproducibility
 
         Returns:
             RecommendedExperiment
         """
-        if seed is not None:
-            np.random.seed(seed)
+        # Use isolated random state instead of global seed
+        rng = np.random.RandomState(seed) if seed is not None else np.random.RandomState()
 
         # Thompson sampling: sample from posterior beliefs
-        n_samples = 100
         action_scores = {}
+
+        logger.info(
+            "thompson_sampling_start",
+            extra={
+                "n_samples": N_THOMPSON_SAMPLES,
+                "n_beliefs": len(beliefs.parameter_distributions),
+                "n_history": len(history) if history else 0,
+            }
+        )
 
         # Generate candidate actions
         candidate_actions = self._generate_candidate_actions(
@@ -148,15 +162,15 @@ class SequentialOptimizer:
             # Sample parameters from beliefs
             total_score = 0.0
 
-            for _ in range(n_samples):
-                params = self._sample_parameters(beliefs)
+            for _ in range(N_THOMPSON_SAMPLES):
+                params = self._sample_parameters(beliefs, rng)
 
                 # Evaluate action under sampled parameters
                 value = self._evaluate_action(action, params, objective)
                 total_score += value
 
             # Average score across samples
-            action_scores[self._action_to_key(action)] = total_score / n_samples
+            action_scores[self._action_to_key(action)] = total_score / N_THOMPSON_SAMPLES
 
         # Select best action (highest expected value)
         best_action_key = max(action_scores.items(), key=lambda x: x[1])[0]
@@ -204,14 +218,17 @@ class SequentialOptimizer:
             for value in [low, mid, high]:
                 candidates.append({var: value})
 
-        return candidates[:10]  # Limit to 10 candidates
+        return candidates[:MAX_CANDIDATE_ACTIONS]
 
-    def _sample_parameters(self, beliefs: BeliefState) -> Dict[str, float]:
+    def _sample_parameters(
+        self, beliefs: BeliefState, rng: np.random.RandomState
+    ) -> Dict[str, float]:
         """
         Sample parameters from belief distributions.
 
         Args:
             beliefs: Current beliefs
+            rng: Random state for isolated sampling
 
         Returns:
             Dict of sampled parameter values
@@ -222,11 +239,11 @@ class SequentialOptimizer:
             if dist_spec.get("type") == "normal":
                 mean = dist_spec.get("mean", 0)
                 std = dist_spec.get("std", 1)
-                samples[param] = np.random.normal(mean, std)
+                samples[param] = rng.normal(mean, std)
             elif dist_spec.get("type") == "uniform":
                 low = dist_spec.get("low", 0)
                 high = dist_spec.get("high", 1)
-                samples[param] = np.random.uniform(low, high)
+                samples[param] = rng.uniform(low, high)
 
         return samples
 
@@ -316,7 +333,15 @@ class SequentialOptimizer:
             min_distance = min(min_distance, distance)
 
         # Normalize to 0-1 range
-        information_gain = min(min_distance / 10.0, 1.0)
+        information_gain = min(min_distance / INFO_GAIN_NORMALIZATION, 1.0)
+
+        logger.debug(
+            "information_gain_estimated",
+            extra={
+                "min_distance": min_distance,
+                "information_gain": information_gain,
+            }
+        )
 
         return information_gain
 
@@ -368,7 +393,7 @@ class SequentialOptimizer:
             min_distance = min(min_distance, distance)
 
         # Normalize
-        exploration_score = min(min_distance / 20.0, 1.0)
+        exploration_score = min(min_distance / DISTANCE_NORMALIZATION, 1.0)
 
         return exploration_score
 

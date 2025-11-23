@@ -6,7 +6,7 @@ Simplified implementation focusing on score-based methods.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
 import numpy as np
@@ -32,6 +32,7 @@ class CausalDiscoveryEngine:
         variable_names: List[str],
         prior_knowledge: Optional[Dict] = None,
         threshold: float = 0.3,
+        seed: Optional[int] = None,
     ) -> Tuple[nx.DiGraph, float]:
         """
         Discover DAG structure from data using correlation-based approach.
@@ -41,11 +42,39 @@ class CausalDiscoveryEngine:
             variable_names: List of variable names
             prior_knowledge: Optional prior knowledge (forbidden/required edges)
             threshold: Correlation threshold for edge creation
+            seed: Random seed for reproducibility
 
         Returns:
             Tuple of (discovered DAG, confidence score)
         """
+        # Set random seed for reproducibility
+        if seed is not None:
+            np.random.seed(seed)
+
+        # Validate input data
+        if data.size == 0:
+            raise ValueError("Input data is empty")
+
+        if np.isnan(data).any():
+            raise ValueError("Data contains NaN values. Please clean data before discovery.")
+
+        if np.isinf(data).any():
+            raise ValueError("Data contains Inf values. Please clean data before discovery.")
+
         n, d = data.shape
+
+        # Validate variable names match data dimensions
+        if len(variable_names) != d:
+            raise ValueError(
+                f"Number of variable names ({len(variable_names)}) does not match "
+                f"number of data columns ({d})"
+            )
+
+        # Check minimum sample size
+        if n < 10:
+            logger.warning(
+                f"Small sample size ({n} < 10). Results may be unreliable."
+            )
 
         # Compute correlation matrix
         corr_matrix = np.corrcoef(data, rowvar=False)
@@ -66,13 +95,26 @@ class CausalDiscoveryEngine:
 
         # Apply prior knowledge constraints
         if prior_knowledge:
+            logger.info(
+                "applying_prior_knowledge",
+                extra={
+                    "required_edges": len(prior_knowledge.get("required_edges", [])),
+                    "forbidden_edges": len(prior_knowledge.get("forbidden_edges", [])),
+                }
+            )
             self._apply_prior_knowledge(dag, prior_knowledge)
 
         # Compute confidence score based on data fit
         confidence = self._compute_discovery_confidence(data, dag, variable_names)
 
         logger.info(
-            f"Discovered DAG with {len(dag.nodes())} nodes and {len(dag.edges())} edges"
+            "discovery_completed",
+            extra={
+                "n_nodes": len(dag.nodes()),
+                "n_edges": len(dag.edges()),
+                "confidence": confidence,
+                "is_acyclic": nx.is_directed_acyclic_graph(dag),
+            }
         )
 
         return dag, confidence
@@ -168,7 +210,7 @@ class CausalDiscoveryEngine:
         else:
             return 0.5  # Too dense
 
-    def validate_discovered_dag(self, dag: nx.DiGraph) -> Dict[str, any]:
+    def validate_discovered_dag(self, dag: nx.DiGraph) -> Dict[str, Any]:
         """
         Validate discovered DAG for acyclicity and other properties.
 

@@ -58,6 +58,70 @@ advanced_validation_suggester = AdvancedValidationSuggester()
 causal_discovery_engine = CausalDiscoveryEngine()
 sequential_optimizer = SequentialOptimizer()
 
+# Request size limits
+MAX_DAG_NODES = 100
+MAX_DATA_SAMPLES = 10000
+MAX_DATA_VARIABLES = 50
+
+
+def validate_dag_structure(dag_structure, request_id: str):
+    """
+    Validate DAG structure for common issues.
+
+    Args:
+        dag_structure: DAG structure from request
+        request_id: Request ID for logging
+
+    Raises:
+        HTTPException: If validation fails
+    """
+    import networkx as nx
+
+    # Check size limits
+    if len(dag_structure.nodes) > MAX_DAG_NODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DAG too large: {len(dag_structure.nodes)} nodes exceeds limit of {MAX_DAG_NODES}"
+        )
+
+    if len(dag_structure.nodes) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="DAG has no nodes"
+        )
+
+    # Convert to NetworkX and check for cycles
+    dag = nx.DiGraph()
+    dag.add_nodes_from(dag_structure.nodes)
+    dag.add_edges_from(dag_structure.edges)
+
+    if not nx.is_directed_acyclic_graph(dag):
+        # Find a cycle to report
+        try:
+            cycle = nx.find_cycle(dag)
+            cycle_str = " -> ".join([str(edge[0]) for edge in cycle])
+            raise HTTPException(
+                status_code=400,
+                detail=f"Graph contains cycle: {cycle_str}. Please provide a valid DAG (Directed Acyclic Graph)."
+            )
+        except nx.NetworkXNoCycle:
+            # Shouldn't happen, but handle gracefully
+            raise HTTPException(
+                status_code=400,
+                detail="Graph is not a valid DAG (contains cycles)"
+            )
+
+    logger.info(
+        "dag_validation_passed",
+        extra={
+            "request_id": request_id,
+            "num_nodes": len(dag_structure.nodes),
+            "num_edges": len(dag_structure.edges),
+        }
+    )
+
+    return dag
+
 
 @router.post(
     "/validate",
@@ -551,11 +615,21 @@ async def get_validation_strategies(
             },
         )
 
-        # Convert DAG to NetworkX format
-        import networkx as nx
-        dag = nx.DiGraph()
-        dag.add_nodes_from(request.dag.nodes)
-        dag.add_edges_from(request.dag.edges)
+        # Validate DAG structure (checks for cycles, size limits)
+        dag = validate_dag_structure(request.dag, request_id)
+
+        # Check that treatment and outcome are in the DAG
+        if request.treatment not in dag.nodes():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Treatment variable '{request.treatment}' not found in DAG nodes"
+            )
+
+        if request.outcome not in dag.nodes():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Outcome variable '{request.outcome}' not found in DAG nodes"
+            )
 
         # Get strategies and path analysis
         strategies = advanced_validation_suggester.suggest_adjustment_strategies(
@@ -685,6 +759,19 @@ async def discover_from_data(
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
     try:
+        # Validate request size
+        if len(request.data) > MAX_DATA_SAMPLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many data samples: {len(request.data)} exceeds limit of {MAX_DATA_SAMPLES}"
+            )
+
+        if len(request.variable_names) > MAX_DATA_VARIABLES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many variables: {len(request.variable_names)} exceeds limit of {MAX_DATA_VARIABLES}"
+            )
+
         logger.info(
             "discovery_from_data_request",
             extra={

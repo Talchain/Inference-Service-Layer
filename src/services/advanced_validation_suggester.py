@@ -16,6 +16,10 @@ from src.models.shared import DAGStructure
 
 logger = logging.getLogger(__name__)
 
+# Constants for configuration
+MAX_PATH_DEPTH = 10  # Maximum depth for path search
+MAX_STRATEGIES = 10  # Maximum number of strategies to return
+
 
 class AdjustmentStrategy:
     """Complete adjustment strategy for identifiability."""
@@ -99,10 +103,21 @@ class AdvancedValidationSuggester:
         Returns:
             List of adjustment strategies ranked by expected success
         """
+        logger.info(
+            "generating_adjustment_strategies",
+            extra={
+                "treatment": treatment,
+                "outcome": outcome,
+                "n_nodes": len(dag.nodes()),
+                "n_edges": len(dag.edges()),
+            }
+        )
+
         strategies = []
 
         # 1. Backdoor adjustment strategies
         backdoor_strategies = self._find_backdoor_strategies(dag, treatment, outcome)
+        logger.debug(f"Found {len(backdoor_strategies)} backdoor strategies")
         strategies.extend(backdoor_strategies)
 
         # 2. Frontdoor adjustment (if backdoor not possible)
@@ -115,10 +130,22 @@ class AdvancedValidationSuggester:
 
         # 3. Instrumental variable strategies
         iv_strategies = self._find_instrumental_strategies(dag, treatment, outcome)
+        logger.debug(f"Found {len(iv_strategies)} instrumental variable strategies")
         strategies.extend(iv_strategies)
 
         # Rank by complexity and identifiability confidence
-        return self._rank_strategies(strategies)
+        ranked_strategies = self._rank_strategies(strategies)
+
+        logger.info(
+            "strategies_generated",
+            extra={
+                "n_strategies": len(ranked_strategies),
+                "strategy_types": [s.type for s in ranked_strategies],
+                "top_identifiability": ranked_strategies[0].expected_identifiability if ranked_strategies else 0,
+            }
+        )
+
+        return ranked_strategies
 
     def analyze_paths(
         self, dag: nx.DiGraph, treatment: str, outcome: str
@@ -259,6 +286,11 @@ class AdvancedValidationSuggester:
         """
         Find instrumental variable strategies.
 
+        A valid instrument must satisfy:
+        1. Relevance: Instrument affects treatment
+        2. Exclusion: Instrument affects outcome ONLY through treatment
+        3. Independence: Instrument is independent of confounders (not checked here)
+
         Args:
             dag: NetworkX DiGraph
             treatment: Treatment variable
@@ -270,34 +302,85 @@ class AdvancedValidationSuggester:
         strategies = []
 
         # Look for potential instruments
-        # (nodes that affect treatment but not outcome directly)
         for node in dag.nodes():
             if node in [treatment, outcome]:
                 continue
 
-            # Check if node affects treatment
+            # Check relevance: node affects treatment
             affects_treatment = nx.has_path(dag, node, treatment)
 
-            # Check if node doesn't affect outcome directly (only via treatment)
-            if affects_treatment:
-                # This could be an instrument
+            if not affects_treatment:
+                continue
+
+            # Check exclusion restriction: all paths from node to outcome go through treatment
+            satisfies_exclusion = self._check_exclusion_restriction(
+                dag, node, treatment, outcome
+            )
+
+            if affects_treatment and satisfies_exclusion:
+                # Valid instrument
                 strategy = AdjustmentStrategy(
                     strategy_type="instrumental",
                     nodes_to_add=[node] if node not in dag.nodes() else [],
                     edges_to_add=[(node, treatment)] if not dag.has_edge(node, treatment) else [],
-                    explanation=f"Use {node} as instrumental variable",
+                    explanation=f"Use {node} as instrumental variable (satisfies exclusion restriction)",
                     theoretical_basis="Instrumental variables identification",
-                    expected_identifiability=0.6,  # IV often has weaker identification
+                    expected_identifiability=0.7,  # Higher confidence for valid IV
                 )
                 strategies.append(strategy)
 
         return strategies[:2]  # Return top 2 IV strategies
+
+    def _check_exclusion_restriction(
+        self, dag: nx.DiGraph, instrument: str, treatment: str, outcome: str
+    ) -> bool:
+        """
+        Check if instrument satisfies exclusion restriction.
+
+        The exclusion restriction requires that all paths from instrument to outcome
+        pass through treatment.
+
+        Args:
+            dag: NetworkX DiGraph
+            instrument: Potential instrument variable
+            treatment: Treatment variable
+            outcome: Outcome variable
+
+        Returns:
+            True if exclusion restriction is satisfied
+        """
+        if not nx.has_path(dag, instrument, outcome):
+            # No path to outcome - exclusion satisfied trivially
+            return True
+
+        # Find all paths from instrument to outcome
+        try:
+            all_paths = list(nx.all_simple_paths(dag, instrument, outcome, cutoff=MAX_PATH_DEPTH))
+        except (nx.NodeNotFound, nx.NetworkXNoPath):
+            return True
+
+        # Check that all paths go through treatment
+        for path in all_paths:
+            if treatment not in path:
+                # Found a path that doesn't go through treatment - exclusion violated
+                logger.debug(
+                    f"Instrument {instrument} violates exclusion: "
+                    f"path {' -> '.join(path)} doesn't go through {treatment}"
+                )
+                return False
+
+        return True
 
     def _find_backdoor_paths(
         self, dag: nx.DiGraph, treatment: str, outcome: str
     ) -> List[List[str]]:
         """
         Find all backdoor paths from treatment to outcome.
+
+        A backdoor path is a path that:
+        1. Starts with an arrow INTO treatment (parent -> treatment)
+        2. Reaches outcome
+        3. Does NOT traverse any descendant edge OUT of treatment
 
         Args:
             dag: NetworkX DiGraph
@@ -309,34 +392,82 @@ class AdvancedValidationSuggester:
         """
         backdoor_paths = []
 
-        # A backdoor path:
-        # 1. Starts with an arrow into treatment
-        # 2. Ends at outcome
-        # 3. Does not traverse an arrow out of treatment
+        if treatment not in dag.nodes() or outcome not in dag.nodes():
+            return backdoor_paths
 
-        # Find all nodes that point to treatment
+        # Find all nodes that point to treatment (confounders)
         treatment_parents = list(dag.predecessors(treatment))
 
+        if not treatment_parents:
+            return backdoor_paths
+
+        # For each parent, find paths to outcome
         for parent in treatment_parents:
-            # Find all paths from parent to outcome
-            try:
-                for path in nx.all_simple_paths(
-                    dag.to_undirected(), parent, outcome, cutoff=10
-                ):
-                    # Check if this path doesn't go through treatment->X
-                    # (it should only enter treatment, not exit)
-                    if treatment in path:
-                        treatment_idx = path.index(treatment)
-                        # Check path doesn't continue from treatment
-                        if treatment_idx == len(path) - 1 or path[
-                            treatment_idx + 1
-                        ] in dag.predecessors(treatment):
-                            # This is a valid backdoor path
-                            backdoor_paths.append(path)
-            except nx.NodeNotFound:
-                continue
+            # Use DFS to find paths that respect edge directions
+            visited = set()
+            current_path = [parent]
+            self._dfs_backdoor_paths(
+                dag, parent, outcome, treatment, current_path, visited, backdoor_paths
+            )
 
         return backdoor_paths
+
+    def _dfs_backdoor_paths(
+        self,
+        dag: nx.DiGraph,
+        current: str,
+        target: str,
+        treatment: str,
+        path: List[str],
+        visited: Set[str],
+        backdoor_paths: List[List[str]],
+        max_depth: int = 10,
+    ):
+        """
+        DFS helper to find backdoor paths.
+
+        Args:
+            dag: NetworkX DiGraph
+            current: Current node
+            target: Target node (outcome)
+            treatment: Treatment variable (to avoid traversing out of)
+            path: Current path
+            visited: Visited nodes in current path
+            backdoor_paths: Accumulated backdoor paths
+            max_depth: Maximum path depth
+        """
+        if len(path) > max_depth:
+            return
+
+        if current == target:
+            backdoor_paths.append(path.copy())
+            return
+
+        if current in visited:
+            return
+
+        visited.add(current)
+
+        # Explore both directions (since backdoor paths use undirected edges)
+        # But don't exit treatment via a descendant edge
+        neighbors = set()
+
+        # Add predecessors (can always traverse backwards)
+        neighbors.update(dag.predecessors(current))
+
+        # Add successors (can traverse forward unless it's from treatment)
+        if current != treatment:
+            neighbors.update(dag.successors(current))
+
+        for neighbor in neighbors:
+            if neighbor not in visited:
+                path.append(neighbor)
+                self._dfs_backdoor_paths(
+                    dag, neighbor, target, treatment, path, visited, backdoor_paths, max_depth
+                )
+                path.pop()
+
+        visited.remove(current)
 
     def _find_directed_paths(
         self, dag: nx.DiGraph, treatment: str, outcome: str
