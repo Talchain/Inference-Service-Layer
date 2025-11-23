@@ -312,3 +312,124 @@ class SensitivityAnalysisRequest(BaseModel):
             }
         }
     }
+
+
+class InterventionConstraints(BaseModel):
+    """Constraints for finding minimal interventions."""
+
+    feasible: List[str] = Field(
+        ...,
+        description="Variables that can be changed",
+        min_length=1,
+        max_length=20
+    )
+    fixed: Optional[List[str]] = Field(
+        default=None,
+        description="Variables that cannot be changed",
+        max_length=20
+    )
+    max_changes: int = Field(
+        default=1,
+        description="Maximum number of variables to change simultaneously",
+        ge=1,
+        le=5
+    )
+    minimize: str = Field(
+        default="change_magnitude",
+        description="Optimization criterion: change_magnitude, cost, or feasibility",
+    )
+    variable_bounds: Optional[Dict[str, tuple[float, float]]] = Field(
+        default=None,
+        description="Optional bounds for each variable (min, max)",
+    )
+
+    @field_validator("variable_bounds")
+    @classmethod
+    def validate_bounds_size(cls, v):
+        """Validate variable bounds dict size."""
+        if v is not None:
+            from src.utils.security_validators import validate_dict_size
+            validate_dict_size(v, "variable_bounds")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "feasible": ["Price", "Marketing"],
+                "fixed": ["Quality"],
+                "max_changes": 2,
+                "minimize": "cost",
+                "variable_bounds": {
+                    "Price": (30, 100),
+                    "Marketing": (10000, 100000),
+                },
+            }
+        }
+    }
+
+
+class ContrastiveExplanationRequest(BaseModel):
+    """Request model for contrastive explanation endpoint."""
+
+    model: StructuralModel = Field(..., description="Structural causal model")
+    current_state: Dict[str, float] = Field(
+        ...,
+        description="Current values for all variables",
+    )
+    observed_outcome: Dict[str, float] = Field(
+        ...,
+        description="Current observed outcome values",
+    )
+    target_outcome: Dict[str, tuple[float, float]] = Field(
+        ...,
+        description="Target outcome ranges (variable → (min, max))",
+    )
+    constraints: InterventionConstraints = Field(
+        ...,
+        description="Constraints on which variables can change and how",
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for deterministic results",
+    )
+
+    @field_validator("current_state", "observed_outcome", "target_outcome")
+    @classmethod
+    def validate_dict_size(cls, v, info):
+        """Validate dictionary sizes."""
+        if v is not None:
+            from src.utils.security_validators import validate_dict_size
+            field_name = info.field_name
+            validate_dict_size(v, field_name)
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model": {
+                    "variables": ["Price", "Quality", "Marketing", "Brand", "Revenue"],
+                    "equations": {
+                        "Brand": "50 + 0.3 * Quality - 0.1 * Price",
+                        "Revenue": "10000 + 800 * Price + 200 * Quality + 0.5 * Marketing + 300 * Brand",
+                    },
+                    "distributions": {
+                        "baseline_noise": {"type": "normal", "parameters": {"mean": 0, "std": 1000}}
+                    },
+                },
+                "current_state": {
+                    "Price": 40,
+                    "Quality": 7.5,
+                    "Marketing": 30000,
+                },
+                "observed_outcome": {"Revenue": 40000},
+                "target_outcome": {"Revenue": (50000, 55000)},
+                "constraints": {
+                    "feasible": ["Price", "Marketing"],
+                    "fixed": ["Quality"],
+                    "max_changes": 2,
+                    "minimize": "cost",
+                },
+                "seed": 42,
+            }
+        }
+    }

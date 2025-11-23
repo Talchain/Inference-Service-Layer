@@ -767,3 +767,180 @@ class HealthResponse(BaseModel):
             }
         }
     }
+
+
+class InterventionChange(BaseModel):
+    """A single variable change in an intervention."""
+
+    variable: str = Field(..., description="Variable name")
+    from_value: float = Field(..., description="Current value")
+    to_value: float = Field(..., description="Proposed new value")
+    delta: float = Field(..., description="Absolute change (to_value - from_value)")
+    relative_change: float = Field(..., description="Relative change as percentage")
+    unit: Optional[str] = Field(default=None, description="Optional unit of measurement")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable": "Price",
+                "from_value": 40,
+                "to_value": 45,
+                "delta": 5,
+                "relative_change": 12.5,
+                "unit": "£",
+            }
+        }
+    }
+
+
+class MinimalIntervention(BaseModel):
+    """A minimal intervention achieving target outcome."""
+
+    rank: int = Field(..., description="Rank by optimization criterion (1 = best)", ge=1)
+    changes: Dict[str, InterventionChange] = Field(
+        ...,
+        description="Variables to change and their values",
+    )
+    expected_outcome: Dict[str, float] = Field(
+        ...,
+        description="Expected outcome values after intervention",
+    )
+    confidence_interval: Dict[str, ConfidenceInterval] = Field(
+        ...,
+        description="Confidence intervals for each outcome",
+    )
+    feasibility: float = Field(
+        ...,
+        description="Feasibility score (0-1, higher = more feasible)",
+        ge=0,
+        le=1,
+    )
+    cost_estimate: str = Field(
+        ...,
+        description="Cost estimate: low, medium, high",
+    )
+    robustness: RobustnessLevel = Field(
+        ...,
+        description="Robustness level from FACET analysis",
+    )
+    robustness_score: float = Field(
+        ...,
+        description="Numerical robustness score (0-1)",
+        ge=0,
+        le=1,
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "rank": 1,
+                "changes": {
+                    "Price": {
+                        "variable": "Price",
+                        "from_value": 40,
+                        "to_value": 45,
+                        "delta": 5,
+                        "relative_change": 12.5,
+                        "unit": "£",
+                    }
+                },
+                "expected_outcome": {"Revenue": 51000},
+                "confidence_interval": {
+                    "Revenue": {"lower": 48000, "upper": 54000, "confidence_level": 0.95}
+                },
+                "feasibility": 0.95,
+                "cost_estimate": "low",
+                "robustness": "robust",
+                "robustness_score": 0.85,
+            }
+        }
+    }
+
+
+class InterventionComparison(BaseModel):
+    """Comparison of multiple interventions."""
+
+    best_by_cost: int = Field(..., description="Rank of best intervention by cost")
+    best_by_robustness: int = Field(..., description="Rank of best intervention by robustness")
+    best_by_feasibility: int = Field(..., description="Rank of best intervention by feasibility")
+    synergies: str = Field(..., description="Analysis of combining multiple interventions")
+    tradeoffs: str = Field(..., description="Key tradeoffs between interventions")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "best_by_cost": 1,
+                "best_by_robustness": 1,
+                "best_by_feasibility": 2,
+                "synergies": "Combining Price and Marketing changes yields diminishing returns (expected gain: £52k vs £51k individually)",
+                "tradeoffs": "Price increase is cheaper but less robust; Marketing spend is more robust but costlier",
+            }
+        }
+    }
+
+
+class ContrastiveExplanationResponse(BaseModel):
+    """Response model for contrastive explanation endpoint."""
+
+    minimal_interventions: List[MinimalIntervention] = Field(
+        ...,
+        description="Minimal interventions ranked by optimization criterion",
+    )
+    comparison: InterventionComparison = Field(
+        ...,
+        description="Comparison of interventions",
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation of recommendations",
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "minimal_interventions": [
+                    {
+                        "rank": 1,
+                        "changes": {
+                            "Price": {
+                                "variable": "Price",
+                                "from_value": 40,
+                                "to_value": 45,
+                                "delta": 5,
+                                "relative_change": 12.5,
+                                "unit": "£",
+                            }
+                        },
+                        "expected_outcome": {"Revenue": 51000},
+                        "confidence_interval": {
+                            "Revenue": {"lower": 48000, "upper": 54000, "confidence_level": 0.95}
+                        },
+                        "feasibility": 0.95,
+                        "cost_estimate": "low",
+                        "robustness": "robust",
+                        "robustness_score": 0.85,
+                    }
+                ],
+                "comparison": {
+                    "best_by_cost": 1,
+                    "best_by_robustness": 1,
+                    "best_by_feasibility": 1,
+                    "synergies": "Single intervention sufficient for target",
+                    "tradeoffs": "No significant tradeoffs",
+                },
+                "explanation": {
+                    "summary": "Increase Price from £40 to £45 to achieve target revenue",
+                    "reasoning": "Price has strong causal effect on Revenue. A 12.5% increase yields expected £11k revenue gain.",
+                    "technical_basis": "Binary search with FACET robustness verification",
+                    "assumptions": ["Price elasticity remains constant", "No competitive response"],
+                },
+            }
+        }
+    }
