@@ -17,6 +17,7 @@ from src.models.requests import (
     BatchCounterfactualRequest,
     CausalValidationRequest,
     CounterfactualRequest,
+    TransportabilityRequest,
 )
 from src.models.responses import (
     BatchCounterfactualResponse,
@@ -24,8 +25,10 @@ from src.models.responses import (
     CounterfactualResponse,
     ErrorCode,
     ErrorResponse,
+    TransportabilityResponse,
 )
 from src.services.batch_counterfactual_engine import BatchCounterfactualEngine
+from src.services.causal_transporter import CausalTransporter
 from src.services.causal_validator import CausalValidator
 from src.services.counterfactual_engine import CounterfactualEngine
 
@@ -36,6 +39,7 @@ logger = logging.getLogger(__name__)
 causal_validator = CausalValidator()
 counterfactual_engine = CounterfactualEngine()
 batch_counterfactual_engine = BatchCounterfactualEngine()
+causal_transporter = CausalTransporter()
 
 
 @router.post(
@@ -286,4 +290,93 @@ async def analyze_batch_counterfactual(
         raise HTTPException(
             status_code=500,
             detail="Failed to perform batch counterfactual analysis. Check logs for details.",
+        )
+
+
+@router.post(
+    "/transport",
+    response_model=TransportabilityResponse,
+    summary="Analyze causal effect transportability",
+    description="""
+    Determines whether a causal effect identified in a source domain
+    can be validly transported to a target domain.
+
+    Provides:
+    - Transportability assessment (yes/no)
+    - Transport formula if transportable
+    - Required assumptions with testability
+    - Robustness assessment
+    - Suggestions if not transportable
+
+    **Use when:** Deciding if findings from one context (e.g., UK market)
+    apply to another context (e.g., Germany market).
+
+    **Example Use Cases:**
+    - Does price sensitivity learned in UK work in France?
+    - Can clinical trial results from one population apply to another?
+    - Will marketing effects from online channels work offline?
+    """,
+    responses={
+        200: {"description": "Transportability analysis completed successfully"},
+        400: {"description": "Invalid input (e.g., malformed DAG, missing nodes)"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def analyze_transportability(
+    request: TransportabilityRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> TransportabilityResponse:
+    """
+    Analyze transportability of causal effects between domains.
+
+    Args:
+        request: Transportability request with source/target domains
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        TransportabilityResponse: Transportability analysis results
+    """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "transportability_request",
+            extra={
+                "request_id": request_id,
+                "source_domain": request.source_domain.name,
+                "target_domain": request.target_domain.name,
+                "treatment": request.treatment,
+                "outcome": request.outcome,
+            },
+        )
+
+        result = causal_transporter.analyze_transportability(request)
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "transportability_completed",
+            extra={
+                "request_id": request_id,
+                "transportable": result.transportable,
+                "method": result.method,
+                "robustness": result.robustness,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "transportability_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to perform transportability analysis. Check logs for details.",
         )

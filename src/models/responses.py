@@ -1121,3 +1121,151 @@ class BatchCounterfactualResponse(BaseModel):
             }
         }
     }
+
+
+class TransportAssumption(BaseModel):
+    """
+    Individual assumption required for transportability.
+
+    Documents what must hold for causal effects to transport
+    from source domain to target domain.
+    """
+
+    type: str = Field(
+        ...,
+        description="Assumption type (e.g., 'same_mechanism', 'no_selection_bias', 'common_support')"
+    )
+    description: str = Field(
+        ...,
+        description="Human-readable explanation of the assumption"
+    )
+    critical: bool = Field(
+        ...,
+        description="Whether this assumption is critical for transportability"
+    )
+    testable: bool = Field(
+        ...,
+        description="Whether this assumption can be empirically tested"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "same_mechanism",
+                "description": "The causal mechanism Price→Revenue is the same in both UK and Germany",
+                "critical": True,
+                "testable": False
+            }
+        }
+    }
+
+
+class TransportabilityResponse(BaseModel):
+    """
+    Response model for transportability analysis endpoint.
+
+    Indicates whether causal effects identified in source domain
+    can be transported to target domain, along with required
+    assumptions and robustness assessment.
+    """
+
+    transportable: bool = Field(
+        ...,
+        description="Whether the causal effect can be transported"
+    )
+    method: Optional[str] = Field(
+        default=None,
+        description="Transportability method used (e.g., 'selection_diagram', 'weighting', 'direct')"
+    )
+    formula: Optional[str] = Field(
+        default=None,
+        description="Transport formula if transportable"
+    )
+    required_assumptions: List[TransportAssumption] = Field(
+        default_factory=list,
+        description="Assumptions required for valid transport"
+    )
+    robustness: str = Field(
+        ...,
+        description="Robustness assessment: robust, moderate, fragile"
+    )
+    reason: Optional[str] = Field(
+        default=None,
+        description="Reason if not transportable"
+    )
+    suggestions: Optional[List[str]] = Field(
+        default=None,
+        description="Suggestions if not transportable"
+    )
+    confidence: ConfidenceLevel = Field(
+        ...,
+        description="Confidence in transportability assessment"
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "title": "Transportable Effect",
+                    "value": {
+                        "transportable": True,
+                        "method": "selection_diagram",
+                        "formula": "P_target(revenue|do(price)) = Σ_S P_source(revenue|price,S) P_target(S)",
+                        "required_assumptions": [
+                            {
+                                "type": "same_mechanism",
+                                "description": "Price→Revenue mechanism identical in UK and Germany",
+                                "critical": True,
+                                "testable": False
+                            },
+                            {
+                                "type": "no_selection_bias",
+                                "description": "Selection into domains doesn't affect mechanism",
+                                "critical": True,
+                                "testable": True
+                            }
+                        ],
+                        "robustness": "moderate",
+                        "confidence": "medium",
+                        "explanation": {
+                            "summary": "Effect can be transported by adjusting for domain selection",
+                            "reasoning": "Selection diagram shows effect is transportable via re-weighting by domain-specific covariates",
+                            "technical_basis": "Y₀ transportability algorithm with selection nodes",
+                            "assumptions": ["Same causal mechanism", "Measured selection variables"]
+                        }
+                    }
+                },
+                {
+                    "title": "Non-Transportable Effect",
+                    "value": {
+                        "transportable": False,
+                        "reason": "different_mechanisms",
+                        "suggestions": [
+                            "Collect data on market structure differences",
+                            "Test if price elasticity differs between domains",
+                            "Consider stratified analysis by market segment"
+                        ],
+                        "robustness": "fragile",
+                        "confidence": "high",
+                        "explanation": {
+                            "summary": "Effect cannot be transported due to mechanism differences",
+                            "reasoning": "Regulatory differences between UK and Germany alter Price→Revenue mechanism",
+                            "technical_basis": "Y₀ transportability algorithm - no valid transport formula found",
+                            "assumptions": ["DAG structure correct", "Selection variables complete"]
+                        }
+                    }
+                }
+            ]
+        }
+    }

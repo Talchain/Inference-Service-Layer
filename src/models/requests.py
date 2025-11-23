@@ -532,3 +532,110 @@ class BatchCounterfactualRequest(BaseModel):
             }
         }
     }
+
+
+class DataSummary(BaseModel):
+    """Summary of available data in a domain."""
+
+    n_samples: int = Field(..., description="Number of samples available", ge=0)
+    available_variables: List[str] = Field(
+        ...,
+        description="Variables measured in this domain",
+        max_length=50
+    )
+    notes: List[str] = Field(
+        default_factory=list,
+        description="Additional notes about data availability",
+        max_length=10
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "n_samples": 1000,
+                "available_variables": ["Price", "Revenue", "CustomerAge"],
+                "notes": ["Covariates only", "No outcome data"],
+            }
+        }
+    }
+
+
+class DomainSpec(BaseModel):
+    """Specification for a single domain (e.g., market, region)."""
+
+    name: str = Field(
+        ...,
+        description="Domain name",
+        min_length=1,
+        max_length=100
+    )
+    dag: DAGStructure = Field(..., description="Causal graph structure for this domain")
+    data_summary: Optional[DataSummary] = Field(
+        default=None,
+        description="Summary of available data (optional)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "UK Market",
+                "dag": {
+                    "nodes": ["Price", "Brand", "Revenue"],
+                    "edges": [["Price", "Revenue"], ["Brand", "Price"], ["Brand", "Revenue"]],
+                },
+                "data_summary": {
+                    "n_samples": 5000,
+                    "available_variables": ["Price", "Brand", "Revenue"],
+                    "notes": ["Complete data available"],
+                },
+            }
+        }
+    }
+
+
+class TransportabilityRequest(BaseModel):
+    """Request model for transportability analysis."""
+
+    source_domain: DomainSpec = Field(..., description="Source domain (where effect is identified)")
+    target_domain: DomainSpec = Field(..., description="Target domain (where effect is transported)")
+    treatment: str = Field(
+        ...,
+        description="Treatment variable",
+        min_length=1,
+        max_length=100
+    )
+    outcome: str = Field(
+        ...,
+        description="Outcome variable",
+        min_length=1,
+        max_length=100
+    )
+    selection_variables: Optional[List[str]] = Field(
+        default=None,
+        description="Variables affected by domain selection (if known)",
+        max_length=20
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "source_domain": {
+                    "name": "UK Market",
+                    "dag": {
+                        "nodes": ["Price", "Brand", "Revenue"],
+                        "edges": [["Price", "Revenue"], ["Brand", "Price"], ["Brand", "Revenue"]],
+                    },
+                },
+                "target_domain": {
+                    "name": "EU Market",
+                    "dag": {
+                        "nodes": ["Price", "Brand", "Revenue"],
+                        "edges": [["Price", "Revenue"], ["Brand", "Price"], ["Brand", "Revenue"]],
+                    },
+                },
+                "treatment": "Price",
+                "outcome": "Revenue",
+                "selection_variables": ["Brand"],
+            }
+        }
+    }
