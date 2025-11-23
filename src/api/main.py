@@ -28,6 +28,7 @@ from .batch import router as batch_router
 from .causal import router as causal_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
+from .explain import router as explain_router
 from .health import router as health_router
 from .metrics import router as metrics_router
 # ARCHIVED: Preferences deferred to TAE PoC v02
@@ -333,6 +334,11 @@ app.include_router(
     robustness_router,
     prefix=f"{settings.API_V1_PREFIX}/robustness",
     tags=["FACET Robustness"],
+)
+app.include_router(
+    explain_router,
+    prefix=f"{settings.API_V1_PREFIX}/explain",
+    tags=["Contrastive Explanations"],
 )
 # ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
 # app.include_router(
