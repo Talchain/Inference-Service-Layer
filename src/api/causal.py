@@ -24,6 +24,7 @@ from src.models.requests import (
     TransportabilityRequest,
     ValidationStrategyRequest,
 )
+from src.models.sensitivity import SensitivityRequest, SensitivityReport
 from src.models.responses import (
     BatchCounterfactualResponse,
     CausalValidationResponse,
@@ -43,6 +44,7 @@ from src.services.causal_transporter import CausalTransporter
 from src.services.causal_validator import CausalValidator
 from src.services.conformal_predictor import ConformalPredictor
 from src.services.counterfactual_engine import CounterfactualEngine
+from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
 
 router = APIRouter()
@@ -56,6 +58,7 @@ causal_transporter = CausalTransporter()
 conformal_predictor = ConformalPredictor(counterfactual_engine)
 advanced_validation_suggester = AdvancedValidationSuggester()
 causal_discovery_engine = CausalDiscoveryEngine()
+sensitivity_analyzer = EnhancedSensitivityAnalyzer()
 sequential_optimizer = SequentialOptimizer()
 
 # Request size limits
@@ -1119,4 +1122,98 @@ async def recommend_experiment(
         raise HTTPException(
             status_code=500,
             detail="Failed to recommend experiment. Check logs for details.",
+        )
+
+
+@router.post(
+    "/sensitivity/detailed",
+    response_model=SensitivityReport,
+    summary="Detailed sensitivity analysis for causal assumptions",
+    description="""
+    Quantifies how sensitive causal estimates are to assumption violations.
+
+    Moves beyond discrete robustness categories (robust/moderate/fragile)
+    to continuous sensitivity metrics with elasticity calculations.
+
+    **Features:**
+    - Quantitative sensitivity metrics (elasticity, outcome ranges)
+    - Critical assumption identification
+    - Elasticity: % change in outcome per % change in assumption violation
+    - Robustness scores (0=fragile, 1=robust)
+    - Recommendations for strengthening assumptions
+
+    **Tested Assumptions:**
+    - No unobserved confounding
+    - Linear effects
+    - No selection bias
+    - Causal sufficiency
+    - Positivity
+    - Consistency
+
+    **Use when:** You need to understand which assumptions matter most
+    for your causal estimates and how robust your results are.
+
+    **Example:** "If unobserved confounding increases by 10%, how much
+    does my outcome estimate change?"
+    """,
+    responses={
+        200: {"description": "Sensitivity analysis completed successfully"},
+        400: {"description": "Invalid input"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def analyze_detailed_sensitivity(
+    request: SensitivityRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> SensitivityReport:
+    """
+    Analyze sensitivity to causal assumptions.
+
+    Args:
+        request: Sensitivity analysis request with model and assumptions
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        SensitivityReport: Detailed sensitivity metrics for each assumption
+    """
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "sensitivity_analysis_request",
+            extra={
+                "request_id": request_id,
+                "num_assumptions": len(request.assumptions),
+                "num_violation_levels": len(request.violation_levels),
+            },
+        )
+
+        # Perform sensitivity analysis
+        result = sensitivity_analyzer.analyze_assumption_sensitivity(request)
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "sensitivity_analysis_completed",
+            extra={
+                "request_id": request_id,
+                "overall_robustness": result.overall_robustness_score,
+                "num_critical": len(result.most_critical),
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "sensitivity_analysis_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to perform sensitivity analysis. Check logs for details.",
         )
