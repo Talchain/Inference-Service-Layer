@@ -639,3 +639,105 @@ class TransportabilityRequest(BaseModel):
             }
         }
     }
+
+
+class ObservationPoint(BaseModel):
+    """
+    Single observation for calibration in conformal prediction.
+
+    Contains both inputs (intervention/context) and observed outcomes
+    used to calibrate prediction intervals.
+    """
+
+    inputs: Dict[str, float] = Field(
+        ...,
+        description="Input values (interventions or context variables)",
+    )
+    outcome: Dict[str, float] = Field(
+        ...,
+        description="Observed outcome values for this observation",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "inputs": {"Price": 45, "Quality": 8},
+                "outcome": {"Revenue": 52000},
+            }
+        }
+    }
+
+
+class ConformalCounterfactualRequest(BaseModel):
+    """
+    Request model for conformal prediction endpoint.
+
+    Provides finite-sample valid prediction intervals with
+    guaranteed coverage using conformal prediction methods.
+    """
+
+    model: StructuralModel = Field(
+        ...,
+        description="Structural causal model",
+    )
+    intervention: Dict[str, float] = Field(
+        ...,
+        description="Intervention to apply",
+    )
+    calibration_data: Optional[List[ObservationPoint]] = Field(
+        default=None,
+        description="Historical observations for calibration (optional if model has built-in calibration)",
+    )
+    confidence_level: float = Field(
+        default=0.95,
+        description="Target coverage level (1-alpha), e.g., 0.95 for 95% coverage",
+        ge=0.5,
+        le=0.999,
+    )
+    method: str = Field(
+        default="split",
+        description="Conformal method: 'split', 'cv+', or 'jackknife+'",
+    )
+    samples: int = Field(
+        default=1000,
+        description="Number of samples for Monte Carlo comparison",
+        ge=100,
+        le=10000,
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility",
+    )
+
+    @field_validator("method")
+    @classmethod
+    def validate_method(cls, v: str) -> str:
+        """Validate conformal method."""
+        allowed = ["split", "cv+", "jackknife+"]
+        if v not in allowed:
+            raise ValueError(f"Method must be one of {allowed}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model": {
+                    "variables": ["Price", "Revenue"],
+                    "equations": {"Revenue": "10000 + 500*Price"},
+                    "distributions": {
+                        "noise": {"type": "normal", "parameters": {"mean": 0, "std": 1000}}
+                    },
+                },
+                "intervention": {"Price": 50},
+                "calibration_data": [
+                    {"inputs": {"Price": 40}, "outcome": {"Revenue": 30000}},
+                    {"inputs": {"Price": 45}, "outcome": {"Revenue": 32500}},
+                    {"inputs": {"Price": 50}, "outcome": {"Revenue": 35000}},
+                ],
+                "confidence_level": 0.95,
+                "method": "split",
+                "samples": 1000,
+                "seed": 42,
+            }
+        }
+    }

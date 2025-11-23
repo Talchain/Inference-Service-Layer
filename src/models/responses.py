@@ -1269,3 +1269,239 @@ class TransportabilityResponse(BaseModel):
             ]
         }
     }
+
+
+class ConformalInterval(BaseModel):
+    """
+    Conformal prediction interval with guaranteed coverage.
+
+    Provides lower and upper bounds with finite-sample validity.
+    """
+
+    lower_bound: Dict[str, float] = Field(
+        ...,
+        description="Lower bound of prediction interval for each outcome variable",
+    )
+    upper_bound: Dict[str, float] = Field(
+        ...,
+        description="Upper bound of prediction interval for each outcome variable",
+    )
+    point_estimate: Dict[str, float] = Field(
+        ...,
+        description="Point estimate for each outcome variable",
+    )
+    interval_width: Dict[str, float] = Field(
+        ...,
+        description="Width of prediction interval (upper - lower)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "lower_bound": {"Revenue": 48000},
+                "upper_bound": {"Revenue": 56000},
+                "point_estimate": {"Revenue": 52000},
+                "interval_width": {"Revenue": 8000},
+            }
+        }
+    }
+
+
+class CoverageGuarantee(BaseModel):
+    """
+    Coverage guarantee for conformal prediction.
+
+    Documents the theoretical guarantee that the true value
+    will fall within the interval with specified probability.
+    """
+
+    nominal_coverage: float = Field(
+        ...,
+        description="Requested coverage level (e.g., 0.95)",
+    )
+    guaranteed_coverage: float = Field(
+        ...,
+        description="Provable coverage level accounting for finite samples",
+    )
+    finite_sample_valid: bool = Field(
+        ...,
+        description="Whether guarantee holds for finite samples (always True for conformal)",
+    )
+    assumptions: List[str] = Field(
+        ...,
+        description="Assumptions required for coverage guarantee",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "nominal_coverage": 0.95,
+                "guaranteed_coverage": 0.9474,
+                "finite_sample_valid": True,
+                "assumptions": [
+                    "Exchangeability of calibration and test points"
+                ],
+            }
+        }
+    }
+
+
+class CalibrationMetrics(BaseModel):
+    """
+    Metrics assessing calibration quality.
+
+    Provides statistics about the calibration set and
+    how well it covers the prediction space.
+    """
+
+    calibration_size: int = Field(
+        ...,
+        description="Number of calibration samples",
+    )
+    residual_statistics: Dict[str, float] = Field(
+        ...,
+        description="Statistics of calibration residuals (mean, std, median, iqr)",
+    )
+    interval_adaptivity: float = Field(
+        ...,
+        description="How much intervals adapt to local uncertainty (higher = more adaptive)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "calibration_size": 50,
+                "residual_statistics": {
+                    "mean": 2500,
+                    "std": 1200,
+                    "median": 2300,
+                    "iqr": 1500,
+                },
+                "interval_adaptivity": 0.48,
+            }
+        }
+    }
+
+
+class ComparisonMetrics(BaseModel):
+    """
+    Comparison of conformal vs standard Monte Carlo intervals.
+
+    Shows how conformal intervals differ from traditional
+    uncertainty quantification approaches.
+    """
+
+    monte_carlo_interval: Dict[str, ConfidenceInterval] = Field(
+        ...,
+        description="Standard Monte Carlo confidence intervals",
+    )
+    conformal_interval: Dict[str, tuple[float, float]] = Field(
+        ...,
+        description="Conformal prediction intervals",
+    )
+    width_ratio: Dict[str, float] = Field(
+        ...,
+        description="Ratio of conformal width to Monte Carlo width",
+    )
+    interpretation: str = Field(
+        ...,
+        description="Plain English interpretation of the comparison",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "monte_carlo_interval": {
+                    "Revenue": {"lower": 49000, "upper": 55000, "confidence_level": 0.95}
+                },
+                "conformal_interval": {
+                    "Revenue": (48000, 56000)
+                },
+                "width_ratio": {
+                    "Revenue": 1.33
+                },
+                "interpretation": "Conformal interval is 33% wider, providing more honest uncertainty quantification with finite-sample guarantees",
+            }
+        }
+    }
+
+
+class ConformalCounterfactualResponse(BaseModel):
+    """
+    Response model for conformal counterfactual prediction.
+
+    Provides prediction intervals with finite-sample valid
+    coverage guarantees, calibration quality metrics, and
+    comparison to standard methods.
+    """
+
+    prediction_interval: ConformalInterval = Field(
+        ...,
+        description="Conformal prediction interval",
+    )
+    coverage_guarantee: CoverageGuarantee = Field(
+        ...,
+        description="Coverage guarantee details",
+    )
+    calibration_quality: CalibrationMetrics = Field(
+        ...,
+        description="Quality metrics for calibration set",
+    )
+    comparison_to_standard: ComparisonMetrics = Field(
+        ...,
+        description="Comparison to standard Monte Carlo intervals",
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation",
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "prediction_interval": {
+                    "lower_bound": {"Revenue": 48000},
+                    "upper_bound": {"Revenue": 56000},
+                    "point_estimate": {"Revenue": 52000},
+                    "interval_width": {"Revenue": 8000},
+                },
+                "coverage_guarantee": {
+                    "nominal_coverage": 0.95,
+                    "guaranteed_coverage": 0.9474,
+                    "finite_sample_valid": True,
+                    "assumptions": ["Exchangeability of calibration and test points"],
+                },
+                "calibration_quality": {
+                    "calibration_size": 50,
+                    "residual_statistics": {
+                        "mean": 2500,
+                        "std": 1200,
+                        "median": 2300,
+                        "iqr": 1500,
+                    },
+                    "interval_adaptivity": 0.48,
+                },
+                "comparison_to_standard": {
+                    "monte_carlo_interval": {
+                        "Revenue": {"lower": 49000, "upper": 55000, "confidence_level": 0.95}
+                    },
+                    "conformal_interval": {"Revenue": (48000, 56000)},
+                    "width_ratio": {"Revenue": 1.33},
+                    "interpretation": "Conformal interval is 33% wider",
+                },
+                "explanation": {
+                    "summary": "Conformal prediction provides 94.7% guaranteed coverage",
+                    "reasoning": "Using split conformal with 50 calibration points",
+                    "technical_basis": "Finite-sample conformal prediction (Vovk et al. 2005)",
+                    "assumptions": ["Exchangeability between calibration and test data"],
+                },
+            }
+        }
+    }
