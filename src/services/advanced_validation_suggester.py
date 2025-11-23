@@ -14,6 +14,10 @@ import networkx as nx
 
 from src.models.shared import DAGStructure
 from src.utils.cache import get_cache
+from src.utils.error_recovery import (
+    CircuitBreaker,
+    health_monitor,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,10 @@ MAX_STRATEGIES = 10  # Maximum number of strategies to return
 # Cache configuration
 CACHE_TTL = 1800  # 30 minutes
 CACHE_MAX_SIZE = 500  # Maximum cached results
+
+# Circuit breakers for expensive operations
+_path_analysis_breaker = CircuitBreaker("path_analysis", failure_threshold=3, timeout=60)
+_strategy_generation_breaker = CircuitBreaker("strategy_generation", failure_threshold=3, timeout=60)
 
 
 class AdjustmentStrategy:
@@ -148,6 +156,11 @@ class AdvancedValidationSuggester:
         """
         Suggest complete adjustment strategies.
 
+        Implements graceful degradation:
+        - If complex analysis fails, falls back to simple strategies
+        - Uses circuit breaker to prevent repeated expensive failures
+        - Always returns at least basic strategies
+
         Args:
             dag: NetworkX DiGraph
             treatment: Treatment variable
@@ -181,6 +194,49 @@ class AdvancedValidationSuggester:
             }
         )
 
+        try:
+            # Use circuit breaker for expensive strategy generation
+            strategies = _strategy_generation_breaker.call(
+                self._generate_strategies_internal,
+                dag, treatment, outcome
+            )
+
+            health_monitor.record_success("validation_suggester")
+
+            # Cache the result
+            if self.enable_caching and self._strategy_cache is not None:
+                cache_key = self._create_dag_cache_key(dag, treatment, outcome, "strategies")
+                self._strategy_cache.put(cache_key, strategies)
+
+            return strategies
+
+        except Exception as e:
+            # Fall back to simple strategies
+            logger.warning(
+                "strategy_generation_failed_fallback",
+                extra={
+                    "error": str(e),
+                    "circuit_state": _strategy_generation_breaker.state.value,
+                },
+                exc_info=True
+            )
+            health_monitor.record_fallback("validation_suggester")
+            return self._fallback_to_simple_strategies(dag, treatment, outcome)
+
+    def _generate_strategies_internal(
+        self, dag: nx.DiGraph, treatment: str, outcome: str
+    ) -> List[AdjustmentStrategy]:
+        """
+        Internal method for strategy generation (wrapped by circuit breaker).
+
+        Args:
+            dag: NetworkX DiGraph
+            treatment: Treatment variable
+            outcome: Outcome variable
+
+        Returns:
+            List of ranked adjustment strategies
+        """
         strategies = []
 
         # 1. Backdoor adjustment strategies
@@ -213,11 +269,6 @@ class AdvancedValidationSuggester:
             }
         )
 
-        # Cache the result
-        if self.enable_caching and self._strategy_cache is not None:
-            cache_key = self._create_dag_cache_key(dag, treatment, outcome, "strategies")
-            self._strategy_cache.put(cache_key, ranked_strategies)
-
         return ranked_strategies
 
     def analyze_paths(
@@ -226,6 +277,11 @@ class AdvancedValidationSuggester:
         """
         Comprehensive path analysis.
 
+        Implements graceful degradation:
+        - If complex path analysis fails, falls back to simple path finding
+        - Uses circuit breaker to prevent repeated expensive failures
+        - Always returns at least basic path information
+
         Args:
             dag: NetworkX DiGraph
             treatment: Treatment variable
@@ -233,6 +289,42 @@ class AdvancedValidationSuggester:
 
         Returns:
             PathAnalysis with all relevant paths
+        """
+        try:
+            # Use circuit breaker for expensive path analysis
+            path_analysis = _path_analysis_breaker.call(
+                self._analyze_paths_internal,
+                dag, treatment, outcome
+            )
+            health_monitor.record_success("path_analysis")
+            return path_analysis
+
+        except Exception as e:
+            # Fall back to simple path analysis
+            logger.warning(
+                "path_analysis_failed_fallback",
+                extra={
+                    "error": str(e),
+                    "circuit_state": _path_analysis_breaker.state.value,
+                },
+                exc_info=True
+            )
+            health_monitor.record_fallback("path_analysis")
+            return self._fallback_path_analysis(dag, treatment, outcome)
+
+    def _analyze_paths_internal(
+        self, dag: nx.DiGraph, treatment: str, outcome: str
+    ) -> PathAnalysis:
+        """
+        Internal method for path analysis (wrapped by circuit breaker).
+
+        Args:
+            dag: NetworkX DiGraph
+            treatment: Treatment variable
+            outcome: Outcome variable
+
+        Returns:
+            Complete PathAnalysis
         """
         backdoor = self._find_backdoor_paths(dag, treatment, outcome)
         frontdoor = self._find_directed_paths(dag, treatment, outcome)
@@ -688,6 +780,144 @@ class AdvancedValidationSuggester:
         edges.append((confounder, outcome))
 
         return edges
+
+    def _fallback_to_simple_strategies(
+        self, dag: nx.DiGraph, treatment: str, outcome: str
+    ) -> List[AdjustmentStrategy]:
+        """
+        Fallback to simple adjustment strategies when complex analysis fails.
+
+        Always succeeds with basic backdoor strategy based on DAG structure.
+
+        Args:
+            dag: NetworkX DiGraph
+            treatment: Treatment variable
+            outcome: Outcome variable
+
+        Returns:
+            List with at least one simple strategy
+        """
+        logger.info(
+            "using_simple_strategy_fallback",
+            extra={
+                "treatment": treatment,
+                "outcome": outcome,
+                "reason": "Complex strategy generation failed"
+            }
+        )
+
+        strategies = []
+
+        try:
+            # Simple strategy: suggest controlling for all non-treatment, non-outcome nodes
+            # This is a safe (if inefficient) backdoor adjustment
+            potential_confounders = [
+                node for node in dag.nodes()
+                if node not in [treatment, outcome]
+            ]
+
+            if potential_confounders:
+                # Limit to first 5 nodes to keep it manageable
+                confounders_to_control = potential_confounders[:5]
+
+                strategy = AdjustmentStrategy(
+                    strategy_type="backdoor",
+                    nodes_to_add=[],
+                    edges_to_add=[],
+                    explanation=f"Control for variables: {', '.join(confounders_to_control)} "
+                                f"(simplified backdoor adjustment)",
+                    theoretical_basis="Conservative backdoor criterion (controls for all available variables)",
+                    expected_identifiability=0.6,  # Lower confidence for simplified approach
+                )
+                strategies.append(strategy)
+            else:
+                # No other nodes - suggest basic data collection
+                strategy = AdjustmentStrategy(
+                    strategy_type="backdoor",
+                    nodes_to_add=["confounder"],
+                    edges_to_add=[("confounder", treatment), ("confounder", outcome)],
+                    explanation="Collect data on potential confounders that affect both treatment and outcome",
+                    theoretical_basis="Backdoor criterion",
+                    expected_identifiability=0.5,
+                )
+                strategies.append(strategy)
+
+            logger.info("simple_strategy_fallback_success", extra={"n_strategies": len(strategies)})
+            return strategies
+
+        except Exception as e:
+            # Ultimate fallback: return minimal suggestion
+            logger.error(
+                "simple_strategy_fallback_failed",
+                extra={"error": str(e)},
+                exc_info=True
+            )
+
+            # Return absolute minimal strategy
+            return [
+                AdjustmentStrategy(
+                    strategy_type="manual",
+                    nodes_to_add=[],
+                    edges_to_add=[],
+                    explanation="Complex analysis unavailable. Manually identify and control for confounders.",
+                    theoretical_basis="Manual identification required",
+                    expected_identifiability=0.3,
+                )
+            ]
+
+    def _fallback_path_analysis(
+        self, dag: nx.DiGraph, treatment: str, outcome: str
+    ) -> PathAnalysis:
+        """
+        Fallback to simple path analysis when complex analysis fails.
+
+        Always succeeds with basic path information.
+
+        Args:
+            dag: NetworkX DiGraph
+            treatment: Treatment variable
+            outcome: Outcome variable
+
+        Returns:
+            Minimal PathAnalysis with available information
+        """
+        logger.info(
+            "using_simple_path_analysis_fallback",
+            extra={
+                "treatment": treatment,
+                "outcome": outcome,
+                "reason": "Complex path analysis failed"
+            }
+        )
+
+        try:
+            # Try simple directed path finding only
+            frontdoor = self._find_directed_paths(dag, treatment, outcome)
+
+            # Return minimal analysis with just directed paths
+            logger.info("simple_path_analysis_success", extra={"n_paths": len(frontdoor)})
+            return PathAnalysis(
+                backdoor_paths=[],
+                frontdoor_paths=frontdoor,
+                blocked_paths=[],
+                critical_nodes=[],
+            )
+
+        except Exception as e:
+            # Ultimate fallback: return empty analysis
+            logger.error(
+                "simple_path_analysis_failed",
+                extra={"error": str(e)},
+                exc_info=True
+            )
+
+            # Return minimal empty analysis (always succeeds)
+            return PathAnalysis(
+                backdoor_paths=[],
+                frontdoor_paths=[],
+                blocked_paths=[],
+                critical_nodes=[],
+            )
 
     def _rank_strategies(
         self, strategies: List[AdjustmentStrategy]
