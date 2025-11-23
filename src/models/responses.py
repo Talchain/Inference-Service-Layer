@@ -1505,3 +1505,327 @@ class ConformalCounterfactualResponse(BaseModel):
             }
         }
     }
+
+
+class AdjustmentStrategyDetail(BaseModel):
+    """
+    Complete adjustment strategy for identifiability.
+
+    Specifies exactly what nodes/edges to add to make a non-identifiable
+    DAG identifiable.
+    """
+
+    strategy_type: str = Field(
+        ...,
+        description="Strategy type: backdoor, frontdoor, or instrumental"
+    )
+    nodes_to_add: List[str] = Field(
+        ...,
+        description="Nodes that need to be added/measured"
+    )
+    edges_to_add: List[Tuple[str, str]] = Field(
+        ...,
+        description="Edges to add to the DAG"
+    )
+    explanation: str = Field(
+        ...,
+        description="Plain English explanation of the strategy"
+    )
+    theoretical_basis: str = Field(
+        ...,
+        description="Theoretical justification (e.g., Pearl's backdoor criterion)"
+    )
+    expected_identifiability: float = Field(
+        ...,
+        description="Confidence that this strategy achieves identifiability (0-1)",
+        ge=0,
+        le=1,
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "strategy_type": "backdoor",
+                "nodes_to_add": ["Competitors"],
+                "edges_to_add": [
+                    ("Competitors", "Price"),
+                    ("Competitors", "Revenue"),
+                ],
+                "explanation": "Add and measure Competitors variable, then control for it to block backdoor paths",
+                "theoretical_basis": "Pearl's backdoor criterion",
+                "expected_identifiability": 0.9,
+            }
+        }
+    }
+
+
+class PathAnalysisDetail(BaseModel):
+    """
+    Analysis of causal paths in a DAG.
+
+    Identifies backdoor paths, frontdoor paths, and critical nodes.
+    """
+
+    backdoor_paths: List[List[str]] = Field(
+        ...,
+        description="Backdoor paths from treatment to outcome"
+    )
+    frontdoor_paths: List[List[str]] = Field(
+        ...,
+        description="Directed paths from treatment to outcome"
+    )
+    blocked_paths: List[List[str]] = Field(
+        ...,
+        description="Paths that are already blocked by colliders"
+    )
+    critical_nodes: List[str] = Field(
+        ...,
+        description="Nodes that block multiple paths if controlled"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "backdoor_paths": [
+                    ["Price", "Competitors", "Revenue"]
+                ],
+                "frontdoor_paths": [
+                    ["Price", "Revenue"]
+                ],
+                "blocked_paths": [],
+                "critical_nodes": ["Competitors"],
+            }
+        }
+    }
+
+
+class ValidationStrategyResponse(BaseModel):
+    """
+    Response model for enhanced validation strategies.
+
+    Provides complete adjustment strategies and path analysis.
+    """
+
+    strategies: List[AdjustmentStrategyDetail] = Field(
+        ...,
+        description="Adjustment strategies ranked by expected success"
+    )
+    path_analysis: PathAnalysisDetail = Field(
+        ...,
+        description="Comprehensive path analysis"
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "strategies": [
+                    {
+                        "strategy_type": "backdoor",
+                        "nodes_to_add": [],
+                        "edges_to_add": [],
+                        "explanation": "Control for existing variable Competitors to block backdoor paths",
+                        "theoretical_basis": "Pearl's backdoor criterion",
+                        "expected_identifiability": 0.9,
+                    }
+                ],
+                "path_analysis": {
+                    "backdoor_paths": [["Price", "Competitors", "Revenue"]],
+                    "frontdoor_paths": [["Price", "Revenue"]],
+                    "blocked_paths": [],
+                    "critical_nodes": ["Competitors"],
+                },
+                "explanation": {
+                    "summary": "Effect is identifiable by controlling for Competitors",
+                    "reasoning": "Competitors creates a backdoor path between Price and Revenue",
+                    "technical_basis": "Backdoor path analysis and adjustment set identification",
+                    "assumptions": ["DAG structure is correct"],
+                },
+            }
+        }
+    }
+
+
+class DiscoveredDAG(BaseModel):
+    """A discovered DAG structure with confidence score."""
+
+    nodes: List[str] = Field(..., description="Variable names")
+    edges: List[Tuple[str, str]] = Field(..., description="Directed edges")
+    confidence: float = Field(
+        ...,
+        description="Confidence in this structure (0-1)",
+        ge=0,
+        le=1,
+    )
+    method: str = Field(
+        ...,
+        description="Discovery method used (correlation, knowledge, hybrid)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "nodes": ["Price", "Quality", "Revenue"],
+                "edges": [
+                    ("Price", "Revenue"),
+                    ("Quality", "Revenue"),
+                    ("Quality", "Price"),
+                ],
+                "confidence": 0.75,
+                "method": "correlation",
+            }
+        }
+    }
+
+
+class DiscoveryResponse(BaseModel):
+    """
+    Response model for causal discovery.
+
+    Returns discovered DAG structures with confidence scores.
+    """
+
+    discovered_dags: List[DiscoveredDAG] = Field(
+        ...,
+        description="Discovered DAG structures ranked by confidence"
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "discovered_dags": [
+                    {
+                        "nodes": ["Price", "Quality", "Revenue"],
+                        "edges": [
+                            ("Price", "Revenue"),
+                            ("Quality", "Revenue"),
+                        ],
+                        "confidence": 0.85,
+                        "method": "correlation",
+                    }
+                ],
+                "explanation": {
+                    "summary": "Discovered DAG structure from data with 85% confidence",
+                    "reasoning": "Strong correlations between Price→Revenue (0.82) and Quality→Revenue (0.75)",
+                    "technical_basis": "Correlation-based structure learning with threshold 0.3",
+                    "assumptions": ["Linear relationships", "No hidden confounders"],
+                },
+            }
+        }
+    }
+
+
+class RecommendedExperimentDetail(BaseModel):
+    """
+    Recommended experiment specification.
+
+    Specifies intervention values, expected outcomes, and information gain.
+    """
+
+    intervention: Dict[str, float] = Field(
+        ...,
+        description="Recommended intervention values"
+    )
+    expected_outcome: Dict[str, float] = Field(
+        ...,
+        description="Expected outcome values"
+    )
+    expected_information_gain: float = Field(
+        ...,
+        description="Expected information gain from this experiment (0-1)",
+        ge=0,
+        le=1,
+    )
+    cost_estimate: float = Field(
+        ...,
+        description="Estimated cost of the experiment"
+    )
+    rationale: str = Field(
+        ...,
+        description="Plain English rationale for this recommendation"
+    )
+    exploration_vs_exploitation: float = Field(
+        ...,
+        description="Exploration vs exploitation score (0=exploit, 1=explore)",
+        ge=0,
+        le=1,
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "intervention": {"Price": 55},
+                "expected_outcome": {"Revenue": 38000},
+                "expected_information_gain": 0.75,
+                "cost_estimate": 10000,
+                "rationale": "Explore: Test Price=55 to learn more (high information gain: 0.75)",
+                "exploration_vs_exploitation": 0.8,
+            }
+        }
+    }
+
+
+class ExperimentRecommendationResponse(BaseModel):
+    """
+    Response model for experiment recommendation.
+
+    Provides recommended next experiment using Thompson sampling.
+    """
+
+    recommendation: RecommendedExperimentDetail = Field(
+        ...,
+        description="Recommended next experiment"
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "recommendation": {
+                    "intervention": {"Price": 55},
+                    "expected_outcome": {"Revenue": 38000},
+                    "expected_information_gain": 0.75,
+                    "cost_estimate": 10000,
+                    "rationale": "Explore: Test Price=55 to learn more (high information gain: 0.75)",
+                    "exploration_vs_exploitation": 0.8,
+                },
+                "explanation": {
+                    "summary": "Recommend testing Price=55 to maximize learning",
+                    "reasoning": "This intervention has high information gain (0.75) and explores undersampled region",
+                    "technical_basis": "Thompson sampling with 100 posterior samples",
+                    "assumptions": ["Parameter beliefs accurate", "Cost-benefit tradeoff acceptable"],
+                },
+            }
+        }
+    }

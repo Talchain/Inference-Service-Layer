@@ -18,22 +18,32 @@ from src.models.requests import (
     CausalValidationRequest,
     ConformalCounterfactualRequest,
     CounterfactualRequest,
+    DiscoveryFromDataRequest,
+    DiscoveryFromKnowledgeRequest,
+    ExperimentRecommendationRequest,
     TransportabilityRequest,
+    ValidationStrategyRequest,
 )
 from src.models.responses import (
     BatchCounterfactualResponse,
     CausalValidationResponse,
     ConformalCounterfactualResponse,
     CounterfactualResponse,
+    DiscoveryResponse,
     ErrorCode,
     ErrorResponse,
+    ExperimentRecommendationResponse,
     TransportabilityResponse,
+    ValidationStrategyResponse,
 )
+from src.services.advanced_validation_suggester import AdvancedValidationSuggester
 from src.services.batch_counterfactual_engine import BatchCounterfactualEngine
+from src.services.causal_discovery_engine import CausalDiscoveryEngine
 from src.services.causal_transporter import CausalTransporter
 from src.services.causal_validator import CausalValidator
 from src.services.conformal_predictor import ConformalPredictor
 from src.services.counterfactual_engine import CounterfactualEngine
+from src.services.sequential_optimizer import SequentialOptimizer
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -44,6 +54,9 @@ counterfactual_engine = CounterfactualEngine()
 batch_counterfactual_engine = BatchCounterfactualEngine()
 causal_transporter = CausalTransporter()
 conformal_predictor = ConformalPredictor(counterfactual_engine)
+advanced_validation_suggester = AdvancedValidationSuggester()
+causal_discovery_engine = CausalDiscoveryEngine()
+sequential_optimizer = SequentialOptimizer()
 
 
 @router.post(
@@ -477,4 +490,546 @@ async def analyze_transportability(
         raise HTTPException(
             status_code=500,
             detail="Failed to perform transportability analysis. Check logs for details.",
+        )
+
+
+@router.post(
+    "/validate/strategies",
+    response_model=ValidationStrategyResponse,
+    summary="Get complete adjustment strategies for identifiability",
+    description="""
+    Provides complete adjustment strategies for non-identifiable DAGs.
+
+    Goes beyond simple validation to provide actionable suggestions on how to
+    make a non-identifiable causal effect identifiable through:
+    - Backdoor adjustment strategies
+    - Frontdoor adjustment strategies
+    - Instrumental variable strategies
+
+    Each strategy specifies exactly which nodes and edges to add to the DAG
+    to achieve identifiability, along with theoretical justification.
+
+    **Features:**
+    - Complete path analysis (backdoor, frontdoor, blocked paths)
+    - Critical node identification
+    - Ranked strategies by expected success
+    - Theoretical basis for each strategy
+
+    **Use when:** You have a non-identifiable DAG and need guidance on
+    how to modify it or what additional data to collect.
+    """,
+    responses={
+        200: {"description": "Strategy analysis completed successfully"},
+        400: {"description": "Invalid input"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def get_validation_strategies(
+    request: ValidationStrategyRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> ValidationStrategyResponse:
+    """
+    Get complete adjustment strategies for identifiability.
+
+    Args:
+        request: Validation strategy request with DAG structure
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        ValidationStrategyResponse: Complete strategies and path analysis
+    """
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "validation_strategy_request",
+            extra={
+                "request_id": request_id,
+                "treatment": request.treatment,
+                "outcome": request.outcome,
+                "num_nodes": len(request.dag.nodes),
+            },
+        )
+
+        # Convert DAG to NetworkX format
+        import networkx as nx
+        dag = nx.DiGraph()
+        dag.add_nodes_from(request.dag.nodes)
+        dag.add_edges_from(request.dag.edges)
+
+        # Get strategies and path analysis
+        strategies = advanced_validation_suggester.suggest_adjustment_strategies(
+            dag, request.treatment, request.outcome
+        )
+        path_analysis = advanced_validation_suggester.analyze_paths(
+            dag, request.treatment, request.outcome
+        )
+
+        # Convert to response models
+        from src.models.responses import AdjustmentStrategyDetail, PathAnalysisDetail, ExplanationMetadata
+        from src.models.shared import ExplanationMetadata as ExplanationMetadataShared
+
+        strategy_details = []
+        for s in strategies:
+            strategy_details.append(
+                AdjustmentStrategyDetail(
+                    strategy_type=s.type,
+                    nodes_to_add=s.nodes_to_add,
+                    edges_to_add=s.edges_to_add,
+                    explanation=s.explanation,
+                    theoretical_basis=s.theoretical_basis,
+                    expected_identifiability=s.expected_identifiability,
+                )
+            )
+
+        path_detail = PathAnalysisDetail(
+            backdoor_paths=path_analysis.backdoor_paths,
+            frontdoor_paths=path_analysis.frontdoor_paths,
+            blocked_paths=path_analysis.blocked_paths,
+            critical_nodes=path_analysis.critical_nodes,
+        )
+
+        # Create explanation
+        if strategies:
+            summary = f"Found {len(strategies)} adjustment strategies"
+            reasoning = f"Best strategy: {strategies[0].explanation}"
+        else:
+            summary = "No adjustment strategies found - effect may already be identifiable"
+            reasoning = "All paths are either blocked or direct"
+
+        explanation = ExplanationMetadataShared(
+            summary=summary,
+            reasoning=reasoning,
+            technical_basis="Path analysis and adjustment set identification",
+            assumptions=["DAG structure is correct"],
+        )
+
+        result = ValidationStrategyResponse(
+            strategies=strategy_details,
+            path_analysis=path_detail,
+            explanation=explanation,
+        )
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "validation_strategy_completed",
+            extra={
+                "request_id": request_id,
+                "num_strategies": len(strategies),
+                "num_backdoor_paths": len(path_analysis.backdoor_paths),
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "validation_strategy_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate validation strategies. Check logs for details.",
+        )
+
+
+@router.post(
+    "/discover/from-data",
+    response_model=DiscoveryResponse,
+    summary="Discover causal structure from data",
+    description="""
+    Automatically discovers DAG structures from observational data.
+
+    Uses correlation-based structure learning to suggest plausible
+    causal graphs based on statistical relationships in the data.
+
+    **Features:**
+    - Correlation-based edge detection
+    - Prior knowledge integration (required/forbidden edges)
+    - Confidence scoring for discovered structures
+    - Automatic cycle detection and acyclicity enforcement
+
+    **Use when:** You have observational data but no clear causal model,
+    or want to validate your domain knowledge against data.
+
+    **Requirements:**
+    - At least 10 observations (more is better)
+    - 2-50 variables
+    - Data should be roughly stationary
+    """,
+    responses={
+        200: {"description": "Discovery completed successfully"},
+        400: {"description": "Invalid input or insufficient data"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def discover_from_data(
+    request: DiscoveryFromDataRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> DiscoveryResponse:
+    """
+    Discover causal structure from data.
+
+    Args:
+        request: Discovery request with observational data
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        DiscoveryResponse: Discovered DAG structures with confidence
+    """
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "discovery_from_data_request",
+            extra={
+                "request_id": request_id,
+                "num_samples": len(request.data),
+                "num_variables": len(request.variable_names),
+                "threshold": request.threshold,
+            },
+        )
+
+        # Convert data to numpy array
+        import numpy as np
+        data_array = np.array(request.data)
+
+        # Discover DAG
+        dag, confidence = causal_discovery_engine.discover_from_data(
+            data=data_array,
+            variable_names=request.variable_names,
+            prior_knowledge=request.prior_knowledge,
+            threshold=request.threshold,
+            seed=request.seed,
+        )
+
+        # Convert to response
+        from src.models.responses import DiscoveredDAG, ExplanationMetadata
+        from src.models.shared import ExplanationMetadata as ExplanationMetadataShared
+
+        discovered_dag = DiscoveredDAG(
+            nodes=list(dag.nodes()),
+            edges=list(dag.edges()),
+            confidence=confidence,
+            method="correlation",
+        )
+
+        explanation = ExplanationMetadataShared(
+            summary=f"Discovered DAG structure from data with {confidence:.0%} confidence",
+            reasoning=f"Found {len(dag.edges())} edges using correlation threshold {request.threshold}",
+            technical_basis="Correlation-based structure learning",
+            assumptions=["Linear relationships", "No hidden confounders", "Stationarity"],
+        )
+
+        result = DiscoveryResponse(
+            discovered_dags=[discovered_dag],
+            explanation=explanation,
+        )
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "discovery_from_data_completed",
+            extra={
+                "request_id": request_id,
+                "num_edges": len(dag.edges()),
+                "confidence": confidence,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "discovery_from_data_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to discover causal structure from data. Check logs for details.",
+        )
+
+
+@router.post(
+    "/discover/from-knowledge",
+    response_model=DiscoveryResponse,
+    summary="Discover causal structure from domain knowledge",
+    description="""
+    Suggests DAG structures based on domain knowledge description.
+
+    Uses heuristics and pattern matching to generate plausible causal
+    structures from natural language descriptions.
+
+    **Features:**
+    - Multiple candidate DAGs ranked by plausibility
+    - Prior knowledge integration
+    - Common causal patterns (chains, forks, colliders)
+
+    **Use when:** You have domain knowledge but need help formalizing
+    it into a DAG structure.
+
+    **Example:** "Price affects revenue, quality affects both price and
+    revenue" → generates candidate DAGs
+    """,
+    responses={
+        200: {"description": "Discovery completed successfully"},
+        400: {"description": "Invalid input"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def discover_from_knowledge(
+    request: DiscoveryFromKnowledgeRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> DiscoveryResponse:
+    """
+    Discover causal structure from domain knowledge.
+
+    Args:
+        request: Discovery request with domain description
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        DiscoveryResponse: Candidate DAG structures with confidence
+    """
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "discovery_from_knowledge_request",
+            extra={
+                "request_id": request_id,
+                "num_variables": len(request.variable_names),
+                "top_k": request.top_k,
+            },
+        )
+
+        # Discover DAGs from knowledge
+        dags = causal_discovery_engine.discover_from_knowledge(
+            domain_description=request.domain_description,
+            variable_names=request.variable_names,
+            prior_knowledge=request.prior_knowledge,
+            top_k=request.top_k,
+        )
+
+        # Convert to response
+        from src.models.responses import DiscoveredDAG, ExplanationMetadata
+        from src.models.shared import ExplanationMetadata as ExplanationMetadataShared
+
+        discovered_dags = []
+        for dag, confidence in dags:
+            discovered_dags.append(
+                DiscoveredDAG(
+                    nodes=list(dag.nodes()),
+                    edges=list(dag.edges()),
+                    confidence=confidence,
+                    method="knowledge",
+                )
+            )
+
+        explanation = ExplanationMetadataShared(
+            summary=f"Generated {len(discovered_dags)} candidate DAG structures from domain knowledge",
+            reasoning="Used heuristic patterns to match domain description",
+            technical_basis="Knowledge-guided structure generation with common causal patterns",
+            assumptions=["Domain description is accurate"],
+        )
+
+        result = DiscoveryResponse(
+            discovered_dags=discovered_dags,
+            explanation=explanation,
+        )
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "discovery_from_knowledge_completed",
+            extra={
+                "request_id": request_id,
+                "num_dags": len(discovered_dags),
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "discovery_from_knowledge_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to discover causal structure from knowledge. Check logs for details.",
+        )
+
+
+@router.post(
+    "/experiment/recommend",
+    response_model=ExperimentRecommendationResponse,
+    summary="Recommend next experiment using Thompson sampling",
+    description="""
+    Recommends the next experiment to run using Thompson sampling.
+
+    Balances exploration (learning about parameters) with exploitation
+    (optimizing the outcome) to maximize long-term value of experimentation.
+
+    **Features:**
+    - Thompson sampling for optimal exploration/exploitation
+    - Bayesian belief updating
+    - Information gain estimation
+    - Cost-benefit analysis
+    - Rationale generation
+
+    **Use when:** Running sequential experiments where you want to
+    learn efficiently while also optimizing outcomes.
+
+    **Example Use Cases:**
+    - A/B testing campaigns
+    - Clinical trial design
+    - Product optimization experiments
+    - Scientific inquiry with limited budget
+    """,
+    responses={
+        200: {"description": "Recommendation generated successfully"},
+        400: {"description": "Invalid input"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def recommend_experiment(
+    request: ExperimentRecommendationRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> ExperimentRecommendationResponse:
+    """
+    Recommend next experiment using Thompson sampling.
+
+    Args:
+        request: Experiment recommendation request with beliefs and constraints
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        ExperimentRecommendationResponse: Recommended experiment with rationale
+    """
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "experiment_recommendation_request",
+            extra={
+                "request_id": request_id,
+                "num_beliefs": len(request.beliefs),
+                "budget": request.constraints.budget,
+                "time_horizon": request.constraints.time_horizon,
+            },
+        )
+
+        # Convert request models to service models
+        from src.services.sequential_optimizer import (
+            BeliefState,
+            OptimizationObjective,
+            ExperimentConstraints,
+        )
+
+        # Build parameter distributions
+        parameter_distributions = {}
+        for belief in request.beliefs:
+            parameter_distributions[belief.parameter_name] = {
+                "type": belief.distribution_type,
+                **belief.parameters,
+            }
+
+        beliefs = BeliefState(parameter_distributions)
+
+        objective = OptimizationObjective(
+            target_variable=request.objective.target_variable,
+            goal=request.objective.goal,
+            target_value=request.objective.target_value,
+        )
+
+        constraints = ExperimentConstraints(
+            budget=request.constraints.budget,
+            time_horizon=request.constraints.time_horizon,
+            feasible_interventions=request.constraints.feasible_interventions,
+        )
+
+        # Convert history if present
+        history = []
+        if request.history:
+            for h in request.history:
+                history.append({
+                    "intervention": h.intervention,
+                    "outcome": h.outcome,
+                    "cost": h.cost,
+                })
+
+        # Get recommendation
+        recommendation = sequential_optimizer.recommend_next_experiment(
+            beliefs=beliefs,
+            objective=objective,
+            constraints=constraints,
+            history=history if history else None,
+            seed=request.seed,
+        )
+
+        # Convert to response
+        from src.models.responses import RecommendedExperimentDetail, ExplanationMetadata
+        from src.models.shared import ExplanationMetadata as ExplanationMetadataShared
+
+        rec_detail = RecommendedExperimentDetail(
+            intervention=recommendation.intervention,
+            expected_outcome=recommendation.expected_outcome,
+            expected_information_gain=recommendation.expected_information_gain,
+            cost_estimate=recommendation.cost_estimate,
+            rationale=recommendation.rationale,
+            exploration_vs_exploitation=recommendation.exploration_vs_exploitation,
+        )
+
+        exploration_type = "explore" if recommendation.exploration_vs_exploitation > 0.5 else "exploit"
+        explanation = ExplanationMetadataShared(
+            summary=f"Recommend {exploration_type} strategy: {recommendation.rationale}",
+            reasoning=f"Information gain: {recommendation.expected_information_gain:.2f}, Cost: {recommendation.cost_estimate:.0f}",
+            technical_basis="Thompson sampling with 100 posterior samples",
+            assumptions=["Parameter beliefs accurate", "Cost estimates reasonable"],
+        )
+
+        result = ExperimentRecommendationResponse(
+            recommendation=rec_detail,
+            explanation=explanation,
+        )
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "experiment_recommendation_completed",
+            extra={
+                "request_id": request_id,
+                "information_gain": recommendation.expected_information_gain,
+                "exploration_score": recommendation.exploration_vs_exploitation,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "experiment_recommendation_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to recommend experiment. Check logs for details.",
         )

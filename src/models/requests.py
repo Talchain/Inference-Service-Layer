@@ -741,3 +741,311 @@ class ConformalCounterfactualRequest(BaseModel):
             }
         }
     }
+
+
+class ValidationStrategyRequest(BaseModel):
+    """
+    Request model for enhanced Y₀ validation strategies.
+
+    Provides complete adjustment strategies for non-identifiable DAGs.
+    """
+
+    dag: DAGStructure = Field(..., description="Directed acyclic graph structure")
+    treatment: str = Field(
+        ...,
+        description="Treatment variable name",
+        min_length=1,
+        max_length=100
+    )
+    outcome: str = Field(
+        ...,
+        description="Outcome variable name",
+        min_length=1,
+        max_length=100
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "dag": {
+                    "nodes": ["Price", "Competitors", "Revenue"],
+                    "edges": [
+                        ["Price", "Revenue"],
+                        ["Competitors", "Revenue"],
+                    ],
+                },
+                "treatment": "Price",
+                "outcome": "Revenue",
+            }
+        }
+    }
+
+
+class DiscoveryFromDataRequest(BaseModel):
+    """
+    Request model for causal discovery from observational data.
+
+    Automatically suggests DAG structures from data.
+    """
+
+    data: List[List[float]] = Field(
+        ...,
+        description="Data matrix (rows = samples, columns = variables)",
+        min_length=10,
+        max_length=10000
+    )
+    variable_names: List[str] = Field(
+        ...,
+        description="Names of variables (must match data columns)",
+        min_length=2,
+        max_length=50
+    )
+    prior_knowledge: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Prior knowledge about structure (required_edges, forbidden_edges)",
+    )
+    threshold: float = Field(
+        default=0.3,
+        description="Correlation threshold for edge detection",
+        ge=0.0,
+        le=1.0,
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "data": [
+                    [40, 7.5, 30000],
+                    [45, 8.0, 32500],
+                    [50, 8.5, 35000],
+                ],
+                "variable_names": ["Price", "Quality", "Revenue"],
+                "prior_knowledge": {
+                    "required_edges": [["Price", "Revenue"]],
+                    "forbidden_edges": [["Revenue", "Price"]],
+                },
+                "threshold": 0.3,
+                "seed": 42,
+            }
+        }
+    }
+
+
+class DiscoveryFromKnowledgeRequest(BaseModel):
+    """
+    Request model for knowledge-guided causal discovery.
+
+    Uses domain knowledge to suggest DAG structures.
+    """
+
+    domain_description: str = Field(
+        ...,
+        description="Natural language description of the domain",
+        min_length=10,
+        max_length=2000
+    )
+    variable_names: List[str] = Field(
+        ...,
+        description="Names of variables in the domain",
+        min_length=2,
+        max_length=50
+    )
+    prior_knowledge: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Prior knowledge about structure",
+    )
+    top_k: int = Field(
+        default=3,
+        description="Number of candidate DAGs to return",
+        ge=1,
+        le=10,
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "domain_description": "An e-commerce pricing model where price affects revenue, quality affects both price and revenue",
+                "variable_names": ["Price", "Quality", "Revenue"],
+                "prior_knowledge": {
+                    "required_edges": [["Price", "Revenue"]],
+                },
+                "top_k": 3,
+            }
+        }
+    }
+
+
+class BeliefDistribution(BaseModel):
+    """Parameter belief distribution for sequential optimization."""
+
+    parameter_name: str = Field(..., description="Parameter name")
+    distribution_type: str = Field(
+        ...,
+        description="Distribution type: normal, uniform, beta"
+    )
+    parameters: Dict[str, float] = Field(
+        ...,
+        description="Distribution parameters (mean/std for normal, low/high for uniform, etc.)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_name": "effect_price",
+                "distribution_type": "normal",
+                "parameters": {"mean": 500, "std": 50},
+            }
+        }
+    }
+
+
+class OptimizationObjectiveSpec(BaseModel):
+    """Optimization objective specification."""
+
+    target_variable: str = Field(
+        ...,
+        description="Variable to optimize",
+        min_length=1,
+        max_length=100
+    )
+    goal: str = Field(
+        ...,
+        description="Optimization goal: maximize, minimize, or target"
+    )
+    target_value: Optional[float] = Field(
+        default=None,
+        description="Target value (required if goal=target)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "target_variable": "Revenue",
+                "goal": "maximize",
+            }
+        }
+    }
+
+
+class ExperimentConstraintsSpec(BaseModel):
+    """Constraints on experiments."""
+
+    budget: float = Field(..., description="Total remaining budget", gt=0)
+    time_horizon: int = Field(
+        ...,
+        description="Number of experiments remaining",
+        ge=1,
+        le=100
+    )
+    feasible_interventions: Dict[str, tuple[float, float]] = Field(
+        ...,
+        description="Feasible ranges for each intervention variable (min, max)",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "budget": 100000,
+                "time_horizon": 5,
+                "feasible_interventions": {
+                    "Price": (30, 100),
+                    "Marketing": (10000, 100000),
+                },
+            }
+        }
+    }
+
+
+class ExperimentHistoryPoint(BaseModel):
+    """A single historical experiment for sequential optimization."""
+
+    intervention: Dict[str, float] = Field(
+        ...,
+        description="Intervention values",
+    )
+    outcome: Dict[str, float] = Field(
+        ...,
+        description="Observed outcome values",
+    )
+    cost: Optional[float] = Field(
+        default=None,
+        description="Actual cost of the experiment",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "intervention": {"Price": 45},
+                "outcome": {"Revenue": 32500},
+                "cost": 5000,
+            }
+        }
+    }
+
+
+class ExperimentRecommendationRequest(BaseModel):
+    """
+    Request model for sequential experiment recommendation.
+
+    Uses Thompson sampling to recommend next experiment.
+    """
+
+    beliefs: List[BeliefDistribution] = Field(
+        ...,
+        description="Current beliefs about model parameters",
+        min_length=1,
+        max_length=30
+    )
+    objective: OptimizationObjectiveSpec = Field(
+        ...,
+        description="Optimization objective",
+    )
+    constraints: ExperimentConstraintsSpec = Field(
+        ...,
+        description="Experiment constraints",
+    )
+    history: Optional[List[ExperimentHistoryPoint]] = Field(
+        default=None,
+        description="Previous experiment results",
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "beliefs": [
+                    {
+                        "parameter_name": "effect_price",
+                        "distribution_type": "normal",
+                        "parameters": {"mean": 500, "std": 50},
+                    }
+                ],
+                "objective": {
+                    "target_variable": "Revenue",
+                    "goal": "maximize",
+                },
+                "constraints": {
+                    "budget": 100000,
+                    "time_horizon": 5,
+                    "feasible_interventions": {
+                        "Price": (30, 100),
+                    },
+                },
+                "history": [
+                    {
+                        "intervention": {"Price": 45},
+                        "outcome": {"Revenue": 32500},
+                        "cost": 5000,
+                    }
+                ],
+                "seed": 42,
+            }
+        }
+    }
