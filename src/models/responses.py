@@ -944,3 +944,180 @@ class ContrastiveExplanationResponse(BaseModel):
             }
         }
     }
+
+
+class ScenarioResult(BaseModel):
+    """Result for a single counterfactual scenario."""
+
+    scenario_id: str = Field(..., description="Scenario identifier")
+    intervention: Dict[str, float] = Field(..., description="Intervention values")
+    label: Optional[str] = Field(default=None, description="Human-readable label")
+    prediction: PredictionResults = Field(..., description="Prediction results")
+    uncertainty: UncertaintyBreakdown = Field(..., description="Uncertainty breakdown")
+    robustness: RobustnessAnalysis = Field(..., description="Robustness analysis")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "scenario_id": "aggressive_pricing",
+                "intervention": {"Price": 50},
+                "label": "10% price increase",
+                "prediction": {
+                    "point_estimate": 35000,
+                    "confidence_interval": {"lower": 33000, "upper": 37000},
+                    "sensitivity_range": {"optimistic": 38000, "pessimistic": 32000, "explanation": "Range accounts for uncertainty"},
+                },
+                "uncertainty": {
+                    "overall": "medium",
+                    "sources": [],
+                },
+                "robustness": {
+                    "score": "robust",
+                    "critical_assumptions": [],
+                },
+            }
+        }
+    }
+
+
+class PairwiseInteraction(BaseModel):
+    """Pairwise interaction between two variables."""
+
+    variables: Tuple[str, str] = Field(..., description="Pair of variables")
+    type: str = Field(
+        ...,
+        description="Interaction type: synergistic, antagonistic, or additive"
+    )
+    effect_size: float = Field(..., description="Interaction effect size in outcome units")
+    significance: float = Field(..., description="Significance score (0-1)", ge=0, le=1)
+    explanation: str = Field(..., description="Plain English explanation")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variables": ("Price", "Quality"),
+                "type": "synergistic",
+                "effect_size": 5000,
+                "significance": 0.85,
+                "explanation": "Price and Quality interact synergistically: combined effect (£55k) exceeds sum of individual effects (£48k)",
+            }
+        }
+    }
+
+
+class InteractionAnalysis(BaseModel):
+    """Analysis of variable interactions."""
+
+    pairwise: List[PairwiseInteraction] = Field(
+        default_factory=list,
+        description="Pairwise interactions detected",
+    )
+    summary: str = Field(..., description="Plain English summary of interactions")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "pairwise": [
+                    {
+                        "variables": ("Price", "Quality"),
+                        "type": "synergistic",
+                        "effect_size": 5000,
+                        "significance": 0.85,
+                        "explanation": "Price and Quality interact synergistically",
+                    }
+                ],
+                "summary": "Strong synergistic interaction between Price and Quality (£5k additional gain)",
+            }
+        }
+    }
+
+
+class ScenarioComparison(BaseModel):
+    """Comparison of multiple scenarios."""
+
+    best_outcome: str = Field(..., description="Scenario ID with best outcome")
+    most_robust: str = Field(..., description="Scenario ID with highest robustness")
+    marginal_gains: Dict[str, float] = Field(
+        ...,
+        description="Marginal uplift of each scenario vs baseline",
+    )
+    ranking: List[str] = Field(..., description="Scenarios ranked by outcome")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "best_outcome": "combined",
+                "most_robust": "baseline",
+                "marginal_gains": {
+                    "increase": 5000,
+                    "combined": 12000,
+                },
+                "ranking": ["combined", "increase", "baseline"],
+            }
+        }
+    }
+
+
+class BatchCounterfactualResponse(BaseModel):
+    """Response model for batch counterfactual analysis."""
+
+    scenarios: List[ScenarioResult] = Field(
+        ...,
+        description="Results for each scenario",
+    )
+    interactions: Optional[InteractionAnalysis] = Field(
+        default=None,
+        description="Interaction analysis (if enabled)",
+    )
+    comparison: ScenarioComparison = Field(
+        ...,
+        description="Comparison across scenarios",
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Overall explanation",
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "scenarios": [
+                    {
+                        "scenario_id": "baseline",
+                        "intervention": {"Price": 40},
+                        "label": "Current pricing",
+                        "prediction": {"point_estimate": 30000, "confidence_interval": {"lower": 28000, "upper": 32000}},
+                    },
+                    {
+                        "scenario_id": "increase",
+                        "intervention": {"Price": 50},
+                        "label": "10% increase",
+                        "prediction": {"point_estimate": 35000, "confidence_interval": {"lower": 33000, "upper": 37000}},
+                    },
+                ],
+                "interactions": {
+                    "pairwise": [],
+                    "summary": "No significant interactions detected",
+                },
+                "comparison": {
+                    "best_outcome": "increase",
+                    "most_robust": "baseline",
+                    "marginal_gains": {"increase": 5000},
+                    "ranking": ["increase", "baseline"],
+                },
+                "explanation": {
+                    "summary": "Price increase yields £5k marginal gain with moderate robustness",
+                    "reasoning": "10% price increase produces consistent revenue uplift across scenarios",
+                    "technical_basis": "Batch counterfactual analysis with interaction detection",
+                    "assumptions": ["Structural equations correct", "No external shocks"],
+                },
+            }
+        }
+    }

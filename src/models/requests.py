@@ -433,3 +433,102 @@ class ContrastiveExplanationRequest(BaseModel):
             }
         }
     }
+
+
+class ScenarioSpec(BaseModel):
+    """Specification for a single counterfactual scenario."""
+
+    id: str = Field(
+        ...,
+        description="User-defined scenario identifier",
+        min_length=1,
+        max_length=100
+    )
+    intervention: Dict[str, float] = Field(
+        ...,
+        description="Intervention values for this scenario",
+    )
+    label: Optional[str] = Field(
+        default=None,
+        description="Optional human-readable label",
+        max_length=200
+    )
+
+    @field_validator("intervention")
+    @classmethod
+    def validate_intervention_size(cls, v):
+        """Validate intervention dict size."""
+        from src.utils.security_validators import validate_dict_size
+        validate_dict_size(v, "intervention")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "aggressive_pricing",
+                "intervention": {"Price": 50, "Marketing": 50000},
+                "label": "Aggressive market expansion strategy",
+            }
+        }
+    }
+
+
+class BatchCounterfactualRequest(BaseModel):
+    """Request model for batch counterfactual analysis."""
+
+    model: StructuralModel = Field(..., description="Structural causal model")
+    scenarios: List[ScenarioSpec] = Field(
+        ...,
+        description="List of scenarios to evaluate",
+        min_length=2,
+        max_length=20
+    )
+    outcome: str = Field(
+        ...,
+        description="Outcome variable to predict",
+        min_length=1,
+        max_length=100
+    )
+    analyze_interactions: bool = Field(
+        default=True,
+        description="Whether to detect variable interactions",
+    )
+    robustness_radius: float = Field(
+        default=0.1,
+        description="Perturbation radius for robustness analysis",
+        gt=0,
+        le=0.5,
+    )
+    samples: int = Field(
+        default=1000,
+        description="Monte Carlo samples per scenario",
+        ge=100,
+        le=10000,
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for deterministic results",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "model": {
+                    "variables": ["Price", "Quality", "Revenue"],
+                    "equations": {"Revenue": "10000 + 500*Price + 200*Quality"},
+                    "distributions": {
+                        "noise": {"type": "normal", "parameters": {"mean": 0, "std": 1000}}
+                    },
+                },
+                "scenarios": [
+                    {"id": "baseline", "intervention": {"Price": 40}, "label": "Current pricing"},
+                    {"id": "increase", "intervention": {"Price": 50}, "label": "10% increase"},
+                    {"id": "combined", "intervention": {"Price": 50, "Quality": 8.5}, "label": "Price + Quality"},
+                ],
+                "outcome": "Revenue",
+                "analyze_interactions": True,
+                "samples": 1000,
+                "seed": 42,
+            }
+        }
+    }
