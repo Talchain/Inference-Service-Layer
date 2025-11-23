@@ -1,0 +1,130 @@
+# Prometheus alert rules for ISL
+
+groups:
+  - name: isl_performance
+    interval: 30s
+    rules:
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 3
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High API latency detected"
+          description: "P95 latency is {{ $value }}s (threshold: 3s) for {{ $labels.endpoint }}"
+
+      - alert: CriticalLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical API latency"
+          description: "P95 latency is {{ $value }}s (threshold: 5s) for {{ $labels.endpoint }}"
+
+  - name: isl_errors
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_errors_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%) for {{ $labels.endpoint }}"
+
+      - alert: CriticalErrorRate
+        expr: rate(http_errors_total[5m]) > 0.10
+        for: 2m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Critical error rate"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 10%) for {{ $labels.endpoint }}"
+
+  - name: isl_circuit_breakers
+    interval: 30s
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: isl_circuit_breaker_state == 2
+        for: 2m
+        labels:
+          severity: warning
+          component: error_recovery
+        annotations:
+          summary: "Circuit breaker opened"
+          description: "Circuit breaker '{{ $labels.name }}' is OPEN - service experiencing failures"
+
+      - alert: CircuitBreakerStuckOpen
+        expr: isl_circuit_breaker_state == 2
+        for: 10m
+        labels:
+          severity: critical
+          component: error_recovery
+        annotations:
+          summary: "Circuit breaker stuck open"
+          description: "Circuit breaker '{{ $labels.name }}' has been OPEN for >10 minutes"
+
+  - name: isl_service_health
+    interval: 30s
+    rules:
+      - alert: ServiceDegraded
+        expr: isl_service_health_status < 1
+        for: 5m
+        labels:
+          severity: warning
+          component: service_health
+        annotations:
+          summary: "Service degraded"
+          description: "Service '{{ $labels.service }}' is in DEGRADED state"
+
+      - alert: ServiceFailing
+        expr: isl_service_health_status == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: service_health
+        annotations:
+          summary: "Service failing"
+          description: "Service '{{ $labels.service }}' is FAILING (success rate <50%)"
+
+  - name: isl_cache
+    interval: 30s
+    rules:
+      - alert: LowCacheHitRate
+        expr: isl_cache_hit_rate < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+        annotations:
+          summary: "Low cache hit rate"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} (threshold: 50%)"
+
+  - name: isl_resources
+    interval: 30s
+    rules:
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes > 2147483648
+        for: 5m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanize1024 }}B (threshold: 2GB)"
+
+      - alert: HighActiveRequests
+        expr: active_requests > 50
+        for: 5m
+        labels:
+          severity: warning
+          component: resources
+        annotations:
+          summary: "High number of active requests"
+          description: "{{ $value }} active requests (threshold: 50)"
