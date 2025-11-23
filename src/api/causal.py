@@ -24,6 +24,7 @@ from src.models.requests import (
     TransportabilityRequest,
     ValidationStrategyRequest,
 )
+from src.models.representation import FactorExtractionRequest
 from src.models.sensitivity import SensitivityRequest, SensitivityReport
 from src.models.responses import (
     BatchCounterfactualResponse,
@@ -1216,4 +1217,133 @@ async def analyze_detailed_sensitivity(
         raise HTTPException(
             status_code=500,
             detail="Failed to perform sensitivity analysis. Check logs for details.",
+        )
+
+
+@router.post(
+    "/extract-factors",
+    summary="Extract causal factors from unstructured data",
+    description="""
+    Extract latent causal factors from unstructured text data using representation learning.
+
+    Uses text embedding and clustering to identify themes/factors in:
+    - Support tickets
+    - Customer reviews
+    - User feedback
+    - Survey responses
+    - Error logs
+
+    **Features:**
+    - Automatic factor identification
+    - Keyword extraction per factor  
+    - Suggested DAG structure
+    - Factor prevalence and strength scores
+
+    **Use when:** You have qualitative data and want to identify potential
+    causal factors to include in your model.
+
+    **Example:** Support tickets → ["usability_issues", "performance_problems"]
+    → suggested DAG with these as causes of churn
+    """,
+    responses={
+        200: {"description": "Factor extraction completed successfully"},
+        400: {"description": "Invalid input (e.g., not enough data)"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def extract_causal_factors(
+    request: FactorExtractionRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+):
+    """
+    Extract causal factors from unstructured data.
+
+    Args:
+        request: Factor extraction request with text data
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        ExtractedFactors: Identified factors with suggested DAG
+    """
+    from src.models.representation import ExtractedFactors, CausalFactor
+    from src.services.causal_representation_learner import CausalRepresentationLearner
+
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    # Initialize learner (could be module-level singleton)
+    learner = CausalRepresentationLearner()
+
+    try:
+        logger.info(
+            "factor_extraction_request",
+            extra={
+                "request_id": request_id,
+                "data_type": request.data_type,
+                "num_texts": len(request.texts),
+                "n_factors": request.n_factors,
+            },
+        )
+
+        # Extract factors
+        factors_data, suggested_dag, confidence = learner.extract_factors(
+            data=request.texts,
+            domain_hints=[request.domain] if request.domain else None,
+            n_factors=request.n_factors,
+            min_cluster_size=request.min_cluster_size,
+            outcome_variable=request.outcome_variable
+        )
+
+        # Convert to response models
+        factors = [CausalFactor(**f) for f in factors_data]
+
+        # Convert DAG to DAGStructure if present
+        dag_structure = None
+        if suggested_dag:
+            from src.models.shared import DAGStructure
+            dag_structure = DAGStructure(
+                nodes=suggested_dag["nodes"],
+                edges=[tuple(e) for e in suggested_dag["edges"]]
+            )
+
+        # Create summary
+        factor_names = [f.name for f in factors[:3]]
+        summary = f"Identified {len(factors)} factors from {len(request.texts)} texts"
+        if factors:
+            summary += f": {', '.join(factor_names)}"
+            if len(factors) > 3:
+                summary += f" and {len(factors) - 3} more"
+
+        result = ExtractedFactors(
+            factors=factors,
+            suggested_dag=dag_structure,
+            confidence=confidence,
+            method="Sentence embedding + clustering",
+            summary=summary
+        )
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "factor_extraction_completed",
+            extra={
+                "request_id": request_id,
+                "num_factors": len(factors),
+                "confidence": confidence,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "factor_extraction_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to extract causal factors. Check logs for details.",
         )
