@@ -13,12 +13,17 @@ from typing import Dict, List, Optional, Set, Tuple
 import networkx as nx
 
 from src.models.shared import DAGStructure
+from src.utils.cache import get_cache
 
 logger = logging.getLogger(__name__)
 
 # Constants for configuration
 MAX_PATH_DEPTH = 10  # Maximum depth for path search
 MAX_STRATEGIES = 10  # Maximum number of strategies to return
+
+# Cache configuration
+CACHE_TTL = 1800  # 30 minutes
+CACHE_MAX_SIZE = 500  # Maximum cached results
 
 
 class AdjustmentStrategy:
@@ -83,11 +88,59 @@ class AdvancedValidationSuggester:
 
     Provides complete adjustment strategies, not just single-node suggestions.
     Includes path analysis and strategy validation.
+
+    Features:
+    - Caching of expensive path operations
+    - Caching of strategy generation
+    - Performance optimization for repeated queries
     """
 
-    def __init__(self):
-        """Initialize advanced validation suggester."""
-        pass
+    def __init__(self, enable_caching: bool = True):
+        """
+        Initialize advanced validation suggester.
+
+        Args:
+            enable_caching: Whether to enable result caching (default: True)
+        """
+        self.enable_caching = enable_caching
+
+        # Initialize caches for expensive operations
+        if enable_caching:
+            self._path_cache = get_cache(
+                "validation_paths", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL
+            )
+            self._strategy_cache = get_cache(
+                "validation_strategies", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL
+            )
+            logger.info("caching_enabled", extra={"service": "AdvancedValidationSuggester"})
+        else:
+            self._path_cache = None
+            self._strategy_cache = None
+
+    def _create_dag_cache_key(self, dag: nx.DiGraph, treatment: str, outcome: str, operation: str) -> Dict:
+        """
+        Create cache key for DAG-based operations.
+
+        Args:
+            dag: NetworkX DiGraph
+            treatment: Treatment variable
+            outcome: Outcome variable
+            operation: Operation name
+
+        Returns:
+            Cache key dict
+        """
+        # Create stable representation of DAG structure
+        nodes = sorted(dag.nodes())
+        edges = sorted(dag.edges())
+
+        return {
+            "operation": operation,
+            "nodes": nodes,
+            "edges": edges,
+            "treatment": treatment,
+            "outcome": outcome,
+        }
 
     def suggest_adjustment_strategies(
         self, dag: nx.DiGraph, treatment: str, outcome: str
@@ -103,6 +156,21 @@ class AdvancedValidationSuggester:
         Returns:
             List of adjustment strategies ranked by expected success
         """
+        # Check cache first
+        if self.enable_caching and self._strategy_cache is not None:
+            cache_key = self._create_dag_cache_key(dag, treatment, outcome, "strategies")
+            cached_result = self._strategy_cache.get(cache_key)
+            if cached_result is not None:
+                logger.info(
+                    "strategy_cache_hit",
+                    extra={
+                        "treatment": treatment,
+                        "outcome": outcome,
+                        "n_strategies": len(cached_result),
+                    }
+                )
+                return cached_result
+
         logger.info(
             "generating_adjustment_strategies",
             extra={
@@ -144,6 +212,11 @@ class AdvancedValidationSuggester:
                 "top_identifiability": ranked_strategies[0].expected_identifiability if ranked_strategies else 0,
             }
         )
+
+        # Cache the result
+        if self.enable_caching and self._strategy_cache is not None:
+            cache_key = self._create_dag_cache_key(dag, treatment, outcome, "strategies")
+            self._strategy_cache.put(cache_key, ranked_strategies)
 
         return ranked_strategies
 
@@ -390,6 +463,21 @@ class AdvancedValidationSuggester:
         Returns:
             List of backdoor paths (each path is a list of nodes)
         """
+        # Check cache first
+        if self.enable_caching and self._path_cache is not None:
+            cache_key = self._create_dag_cache_key(dag, treatment, outcome, "backdoor_paths")
+            cached_result = self._path_cache.get(cache_key)
+            if cached_result is not None:
+                logger.debug(
+                    "backdoor_path_cache_hit",
+                    extra={
+                        "treatment": treatment,
+                        "outcome": outcome,
+                        "n_paths": len(cached_result),
+                    }
+                )
+                return cached_result
+
         backdoor_paths = []
 
         if treatment not in dag.nodes() or outcome not in dag.nodes():
@@ -409,6 +497,11 @@ class AdvancedValidationSuggester:
             self._dfs_backdoor_paths(
                 dag, parent, outcome, treatment, current_path, visited, backdoor_paths
             )
+
+        # Cache the result
+        if self.enable_caching and self._path_cache is not None:
+            cache_key = self._create_dag_cache_key(dag, treatment, outcome, "backdoor_paths")
+            self._path_cache.put(cache_key, backdoor_paths)
 
         return backdoor_paths
 

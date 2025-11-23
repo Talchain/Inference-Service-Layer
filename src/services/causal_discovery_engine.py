@@ -5,13 +5,21 @@ Provides data-driven and knowledge-guided DAG discovery.
 Simplified implementation focusing on score-based methods.
 """
 
+import hashlib
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
 import numpy as np
 
+from src.utils.cache import get_cache
+from src.services.advanced_discovery_algorithms import AdvancedCausalDiscovery
+
 logger = logging.getLogger(__name__)
+
+# Cache configuration
+CACHE_TTL = 3600  # 1 hour (discoveries are expensive, cache longer)
+CACHE_MAX_SIZE = 200  # Smaller cache for discovery results
 
 
 class CausalDiscoveryEngine:
@@ -20,11 +28,73 @@ class CausalDiscoveryEngine:
 
     Supports data-driven discovery using correlation-based methods
     and knowledge-guided discovery with domain constraints.
+
+    Features:
+    - Caching of discovery results for performance
+    - Deterministic results with seed parameter
     """
 
-    def __init__(self):
-        """Initialize causal discovery engine."""
-        pass
+    def __init__(self, enable_caching: bool = True, enable_advanced: bool = False):
+        """
+        Initialize causal discovery engine.
+
+        Args:
+            enable_caching: Whether to enable result caching (default: True)
+            enable_advanced: Whether to enable advanced algorithms (NOTEARS, PC) (default: False)
+        """
+        self.enable_caching = enable_caching
+        self.enable_advanced = enable_advanced
+
+        # Initialize cache for expensive discovery operations
+        if enable_caching:
+            self._discovery_cache = get_cache(
+                "causal_discovery", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL
+            )
+            logger.info("caching_enabled", extra={"service": "CausalDiscoveryEngine"})
+        else:
+            self._discovery_cache = None
+
+        # Initialize advanced algorithms if enabled
+        if enable_advanced:
+            self._advanced_discovery = AdvancedCausalDiscovery()
+            logger.info("advanced_algorithms_enabled", extra={"service": "CausalDiscoveryEngine"})
+        else:
+            self._advanced_discovery = None
+
+    def _create_data_cache_key(
+        self,
+        data: np.ndarray,
+        variable_names: List[str],
+        prior_knowledge: Optional[Dict],
+        threshold: float,
+        seed: Optional[int],
+    ) -> Dict:
+        """
+        Create cache key for data-driven discovery.
+
+        Args:
+            data: Data matrix
+            variable_names: Variable names
+            prior_knowledge: Prior knowledge constraints
+            threshold: Correlation threshold
+            seed: Random seed
+
+        Returns:
+            Cache key dict
+        """
+        # Create hash of data (more stable than storing full array)
+        data_hash = hashlib.sha256(data.tobytes()).hexdigest()[:16]
+
+        # Create stable key
+        return {
+            "operation": "discover_from_data",
+            "data_hash": data_hash,
+            "data_shape": data.shape,
+            "variable_names": sorted(variable_names),
+            "prior_knowledge": prior_knowledge,
+            "threshold": threshold,
+            "seed": seed,
+        }
 
     def discover_from_data(
         self,
@@ -47,6 +117,23 @@ class CausalDiscoveryEngine:
         Returns:
             Tuple of (discovered DAG, confidence score)
         """
+        # Check cache first (before validation to avoid repeated validation overhead)
+        cache_key = None
+        if self.enable_caching and self._discovery_cache is not None:
+            cache_key = self._create_data_cache_key(
+                data, variable_names, prior_knowledge, threshold, seed
+            )
+            cached_result = self._discovery_cache.get(cache_key)
+            if cached_result is not None:
+                logger.info(
+                    "discovery_cache_hit",
+                    extra={
+                        "n_variables": len(variable_names),
+                        "n_samples": data.shape[0],
+                    }
+                )
+                return cached_result
+
         # Set random seed for reproducibility
         if seed is not None:
             np.random.seed(seed)
@@ -117,7 +204,78 @@ class CausalDiscoveryEngine:
             }
         )
 
+        # Cache the result
+        if self.enable_caching and self._discovery_cache is not None and cache_key is not None:
+            self._discovery_cache.put(cache_key, (dag, confidence))
+
         return dag, confidence
+
+    def discover_advanced(
+        self,
+        data: np.ndarray,
+        variable_names: List[str],
+        algorithm: str = "notears",
+        **kwargs,
+    ) -> Tuple[nx.DiGraph, float]:
+        """
+        Discover DAG structure using advanced algorithms (NOTEARS, PC).
+
+        Args:
+            data: n×d data matrix (n samples, d variables)
+            variable_names: List of variable names
+            algorithm: Algorithm to use (notears, pc, auto)
+            **kwargs: Algorithm-specific parameters
+
+        Returns:
+            Tuple of (discovered DAG, score)
+
+        Raises:
+            ValueError: If advanced algorithms not enabled
+        """
+        if not self.enable_advanced or self._advanced_discovery is None:
+            raise ValueError(
+                "Advanced algorithms not enabled. Initialize with enable_advanced=True"
+            )
+
+        logger.info(
+            "advanced_discovery_start",
+            extra={
+                "algorithm": algorithm,
+                "n_samples": data.shape[0],
+                "n_variables": data.shape[1],
+            }
+        )
+
+        if algorithm == "auto":
+            # Try multiple algorithms and return best
+            results = self._advanced_discovery.auto_discover(data, variable_names)
+            if results:
+                best_dag, best_score, best_algorithm = results[0]
+                logger.info(
+                    "advanced_discovery_complete",
+                    extra={
+                        "best_algorithm": best_algorithm,
+                        "n_edges": len(best_dag.edges()),
+                        "score": best_score,
+                    }
+                )
+                return best_dag, best_score
+            else:
+                raise RuntimeError("All advanced algorithms failed")
+        else:
+            # Use specific algorithm
+            dag, score = self._advanced_discovery.discover(
+                data, variable_names, algorithm, **kwargs
+            )
+            logger.info(
+                "advanced_discovery_complete",
+                extra={
+                    "algorithm": algorithm,
+                    "n_edges": len(dag.edges()),
+                    "score": score,
+                }
+            )
+            return dag, score
 
     def discover_from_knowledge(
         self,
