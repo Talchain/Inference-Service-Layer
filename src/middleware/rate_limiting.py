@@ -115,6 +115,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     Applies rate limiting to all requests.
     """
 
+    def _get_client_identifier(self, request: Request) -> str:
+        """
+        Extract client IP address, handling proxy headers.
+
+        Checks X-Forwarded-For and X-Real-IP headers for requests
+        behind load balancers or proxies (AWS ALB, Kubernetes ingress, etc.)
+
+        Args:
+            request: FastAPI Request object
+
+        Returns:
+            Client IP address as string
+        """
+        # Check X-Forwarded-For first (from proxy/load balancer)
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            # Take first IP (client IP, rest are proxies)
+            # Format: "client_ip, proxy1_ip, proxy2_ip"
+            return forwarded_for.split(",")[0].strip()
+
+        # Check X-Real-IP header (alternative proxy header)
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+
+        # Fall back to direct connection IP
+        return request.client.host if request.client else "unknown"
+
     async def dispatch(self, request: Request, call_next):
         """
         Process request with rate limiting.
@@ -130,9 +158,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/health", "/metrics"]:
             return await call_next(request)
 
-        # Identify by IP address
-        # In production: Consider X-Forwarded-For header
-        identifier = request.client.host if request.client else "unknown"
+        # Identify by IP address (handles proxy headers)
+        identifier = self._get_client_identifier(request)
 
         # Check rate limit
         allowed, retry_after = rate_limiter.check_rate_limit(identifier)

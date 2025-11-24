@@ -5,7 +5,7 @@ version: '3.8'
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.48.0  # Pinned version for reproducibility
     container_name: isl-prometheus
     ports:
       - "9090:9090"
@@ -24,7 +24,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.2.2  # Pinned version for reproducibility
     container_name: isl-grafana
     ports:
       - "3000:3000"
@@ -33,7 +33,10 @@ services:
       - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
       - grafana-data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      # SECURITY: Change default password for production!
+      # Generate secure password: openssl rand -base64 32
+      # Set in .env file: GRAFANA_PASSWORD=your_secure_password
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=http://localhost:3000
       - GF_INSTALL_PLUGINS=grafana-piechart-panel
@@ -44,7 +47,7 @@ services:
       - prometheus
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.26.0  # Pinned version for reproducibility
     container_name: isl-alertmanager
     ports:
       - "9093:9093"
@@ -60,7 +63,7 @@ services:
 
   # Optional: Node Exporter for system metrics
   node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.7.0  # Pinned version for reproducibility
     container_name: isl-node-exporter
     ports:
       - "9100:9100"

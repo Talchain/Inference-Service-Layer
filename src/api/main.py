@@ -96,9 +96,32 @@ CORS_ORIGINS = [
     "http://localhost:8080",  # Alternative dev port
 ]
 
-# In development mode, allow all origins for easier testing
-if settings.RELOAD:
-    CORS_ORIGINS = ["*"]
+# Configure CORS - NEVER use wildcard in production
+# Get allowed origins from environment variable or use safe defaults
+CORS_ORIGINS_ENV = os.getenv("CORS_ORIGINS", "")
+if CORS_ORIGINS_ENV:
+    # Parse comma-separated list from environment
+    CORS_ORIGINS = [origin.strip() for origin in CORS_ORIGINS_ENV.split(",")]
+elif settings.RELOAD:
+    # Development mode - localhost only (NOT wildcard for security)
+    CORS_ORIGINS = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8080",
+    ]
+else:
+    # Keep production defaults
+    CORS_ORIGINS = [
+        "https://plot.olumi.ai",
+        "https://tae.olumi.ai",
+        "https://cee.olumi.ai",
+        "http://localhost:3000",
+        "http://localhost:8080",
+    ]
+
+# Security validation: prevent wildcard in production
+if not settings.RELOAD and "*" in CORS_ORIGINS:
+    raise ValueError("SECURITY: Wildcard CORS not allowed in production!")
 
 app.add_middleware(
     CORSMiddleware,
