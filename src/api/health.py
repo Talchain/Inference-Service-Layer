@@ -45,6 +45,33 @@ async def health_check() -> HealthResponse:
 
 
 @router.get(
+    "/ready",
+    response_model=HealthResponse,
+    summary="Readiness check",
+    description="Returns service readiness status for Kubernetes-style readiness probes.",
+    responses={
+        200: {"description": "Service is ready to accept traffic"},
+    },
+)
+async def readiness_check() -> HealthResponse:
+    """
+    Check service readiness.
+
+    Returns same response as /health but semantically indicates
+    readiness to accept traffic (useful for Kubernetes readiness probes).
+
+    Returns:
+        HealthResponse: Readiness status with version and timestamp
+    """
+    return HealthResponse(
+        status="healthy",
+        version=__version__,
+        timestamp=datetime.utcnow().isoformat() + "Z",
+        config_fingerprint=generate_config_fingerprint(),
+    )
+
+
+@router.get(
     "/cache/stats",
     response_model=Dict[str, Any],
     summary="Cache statistics",
