@@ -5,7 +5,15 @@
 set -e
 
 BASE_URL="${1:-http://localhost:8000}"
-API_KEY="${2:-isl_prod_7k9mP2nX8vQ4rL6wF3jH5tY1cB0zS}"
+API_KEY="${2:-${ISL_API_KEY:-}}"
+
+# Validate API key is provided
+if [ -z "$API_KEY" ]; then
+    echo "⚠️  WARNING: No API key provided"
+    echo "  Usage: ./quick_check.sh <base_url> <api_key>"
+    echo "  Or set ISL_API_KEY environment variable"
+    echo ""
+fi
 
 echo "🔍 ISL Quick Smoke Test"
 echo "========================"

@@ -214,6 +214,21 @@ class ExplanationMetadata(BaseModel):
     technical_basis: str = Field(..., description="Mathematical/technical justification")
     assumptions: List[str] = Field(..., description="Key assumptions made in analysis")
 
+    # Enhanced explanation fields (Feature 6)
+    simple_explanation: Optional[str] = Field(
+        None,
+        description="Non-technical explanation for general audience",
+        max_length=200
+    )
+    learn_more_url: Optional[str] = Field(
+        None,
+        description="Link to documentation for this concept"
+    )
+    visual_type: Optional[str] = Field(
+        None,
+        description="Suggested visualization type (e.g., 'path_diagram', 'interval_plot')"
+    )
+
     model_config = {
         "json_schema_extra": {
             "example": {
@@ -225,6 +240,9 @@ class ExplanationMetadata(BaseModel):
                     "No unmeasured confounding",
                     "Correct causal structure specified",
                 ],
+                "simple_explanation": "We can estimate this effect by controlling for Brand.",
+                "learn_more_url": "https://docs.inference-service-layer.com/docs/methods/backdoor-adjustment",
+                "visual_type": "dag_with_adjustment"
             }
         }
     }
