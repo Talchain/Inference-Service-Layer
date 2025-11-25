@@ -19,6 +19,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import get_settings, setup_logging
+from src.middleware.auth import APIKeyAuthMiddleware
 from src.middleware.circuit_breaker import MemoryCircuitBreaker
 from src.middleware.rate_limiting import RateLimitMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
@@ -133,6 +134,10 @@ app.add_middleware(
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Request-Id", "X-Trace-Id"],
     max_age=600,  # Cache preflight requests for 10 minutes
 )
+
+# API Key Authentication (validates X-API-Key header)
+# Public endpoints (/health, /metrics, /docs) are exempt
+app.add_middleware(APIKeyAuthMiddleware)
 
 # Add rate limiting middleware (before request logging)
 app.add_middleware(RateLimitMiddleware)
