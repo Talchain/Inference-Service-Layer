@@ -6,6 +6,7 @@ and exception handlers.
 """
 
 import logging
+import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -18,8 +19,10 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import get_settings, setup_logging
+from src.middleware.auth import APIKeyAuthMiddleware
 from src.middleware.circuit_breaker import MemoryCircuitBreaker
 from src.middleware.rate_limiting import RateLimitMiddleware
+from src.middleware.request_limits import RequestSizeLimitMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
 from src.utils.tracing import TracingMiddleware
 
@@ -41,6 +44,15 @@ from .validation import router as validation_router
 # Setup logging
 logger = setup_logging()
 settings = get_settings()
+
+# Validate production configuration
+config_errors = settings.validate_production_config()
+if config_errors:
+    for error in config_errors:
+        logger.error(f"Configuration error: {error}")
+    if settings.is_production():
+        logger.critical("Invalid configuration for production environment. Exiting.")
+        sys.exit(1)
 
 
 @asynccontextmanager
@@ -83,29 +95,38 @@ app.add_middleware(
     compresslevel=6     # Balance speed vs compression (1-9, 6 is good default)
 )
 
+# Request size limit (DoS protection - reject oversized requests)
+app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=settings.MAX_REQUEST_SIZE_MB)
+
 # Memory circuit breaker (reject requests when memory >85%)
 app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 
 # Distributed tracing (adds X-Trace-Id to all requests/responses)
 app.add_middleware(TracingMiddleware)
 
-# Configure CORS middleware
-# For production: Set specific origins via environment variable
-CORS_ORIGINS = [
-    "http://localhost:3000",  # Local development
-    "http://localhost:8080",  # Alternative dev port
-]
+# API Key Authentication (validates X-API-Key header)
+# Note: Only enforced if ISL_API_KEYS environment variable is set
+app.add_middleware(APIKeyAuthMiddleware, api_keys=settings.ISL_API_KEYS)
 
-# In development mode, allow all origins for easier testing
-if settings.RELOAD:
-    CORS_ORIGINS = ["*"]
+# Configure CORS middleware using settings
+# SECURITY: No wildcard origins - explicit origins only
+CORS_ORIGINS = settings.get_cors_origins_list()
+
+# Log CORS configuration
+logger.info(
+    "CORS configured",
+    extra={
+        "origins": CORS_ORIGINS,
+        "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
+    }
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-API-Key"],  # Allow X-API-Key header
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Request-Id", "X-Trace-Id"],
     max_age=600,  # Cache preflight requests for 10 minutes
 )

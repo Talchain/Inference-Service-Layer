@@ -1,0 +1,137 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly on Sundays at midnight UTC
+    - cron: '0 0 * * 0'
+
+jobs:
+  dependency-scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Install security tools
+        run: |
+          poetry run pip install safety pip-audit
+
+      - name: Run safety check
+        run: |
+          poetry run safety check --full-report || true
+        continue-on-error: true
+
+      - name: Run pip-audit
+        run: |
+          poetry run pip-audit --strict --progress-spinner off
+        continue-on-error: true
+
+  code-security-scan:
+    name: Code Security Scan (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install bandit
+        run: pip install bandit[toml]
+
+      - name: Run bandit security scan
+        run: |
+          bandit -r src/ -f json -o bandit-report.json || true
+          bandit -r src/ -f txt --severity-level medium
+
+      - name: Upload bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+  sast-scan:
+    name: SAST Analysis (Semgrep)
+    runs-on: ubuntu-latest
+    container:
+      image: returntocorp/semgrep
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan --config auto --config p/python --config p/security-audit \
+            --json --output semgrep-results.json src/ || true
+          semgrep scan --config auto --config p/python --config p/security-audit src/
+        continue-on-error: true
+
+      - name: Upload Semgrep results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: semgrep-results
+          path: semgrep-results.json
+
+  security-summary:
+    name: Security Summary
+    needs: [dependency-scan, code-security-scan, secrets-scan, sast-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check security scan results
+        run: |
+          echo "## Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Scan | ${{ needs.dependency-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Code Security (Bandit) | ${{ needs.code-security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets Detection | ${{ needs.secrets-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST (Semgrep) | ${{ needs.sast-scan.result }} |" >> $GITHUB_STEP_SUMMARY
