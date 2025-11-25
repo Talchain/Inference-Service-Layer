@@ -1,7 +1,10 @@
 """
 API Key Authentication Middleware.
 
-Validates X-API-Key header against configured API key from environment.
+Validates X-API-Key header against configured API keys from environment.
+Supports multiple comma-separated API keys for different clients.
+
+Example: ISL_API_KEY=plot_key,cee_key,ui_key
 """
 
 import os
@@ -17,6 +20,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     Middleware to validate API key authentication.
 
     Checks for X-API-Key header and validates against ISL_API_KEY environment variable.
+    Supports comma-separated API keys for multiple clients (e.g., ISL_API_KEY=plot_key,cee_key).
     Public endpoints (/health, /ready, /metrics, /docs, /redoc, /openapi.json) are exempt.
     """
 
@@ -32,12 +36,16 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
     def __init__(self, app):
         super().__init__(app)
-        self.api_key = os.getenv("ISL_API_KEY")
+        api_key_env = os.getenv("ISL_API_KEY")
 
-        if not self.api_key:
+        if not api_key_env:
             raise ValueError(
                 "ISL_API_KEY environment variable must be set for API key authentication"
             )
+
+        # Support comma-separated API keys for multiple clients
+        # Example: ISL_API_KEY=plot_key,cee_key,ui_key
+        self.valid_api_keys = {key.strip() for key in api_key_env.split(",") if key.strip()}
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """
@@ -72,8 +80,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Validate API key
-        if api_key != self.api_key:
+        # Validate API key (check if it's in the set of valid keys)
+        if api_key not in self.valid_api_keys:
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
                 content={
