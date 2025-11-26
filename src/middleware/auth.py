@@ -12,7 +12,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.utils.secure_logging import get_security_audit_logger
+
 logger = logging.getLogger(__name__)
+security_audit = get_security_audit_logger()
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -122,14 +125,16 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         # Get API key from header
         api_key = request.headers.get("X-API-Key")
 
+        client_ip = self._get_client_ip(request)
+
         # Validate API key
         if not api_key:
-            logger.warning(
-                "Missing API key",
-                extra={
-                    "path": request.url.path,
-                    "client_ip": self._get_client_ip(request),
-                },
+            # Log authentication failure via security audit logger
+            security_audit.log_authentication_attempt(
+                success=False,
+                client_ip=client_ip,
+                reason="missing_api_key",
+                path=request.url.path,
             )
             return JSONResponse(
                 status_code=401,
@@ -143,14 +148,13 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             )
 
         if api_key not in self._api_keys:
-            logger.warning(
-                "Invalid API key",
-                extra={
-                    "path": request.url.path,
-                    "client_ip": self._get_client_ip(request),
-                    # Log first 4 chars of key for debugging (safe)
-                    "key_prefix": api_key[:4] + "..." if len(api_key) > 4 else "***",
-                },
+            # Log authentication failure via security audit logger
+            security_audit.log_authentication_attempt(
+                success=False,
+                client_ip=client_ip,
+                api_key_prefix=api_key[:8] if len(api_key) >= 8 else api_key,
+                reason="invalid_api_key",
+                path=request.url.path,
             )
             return JSONResponse(
                 status_code=401,
@@ -163,7 +167,15 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # API key is valid, continue processing
+        # API key is valid - log successful authentication
+        security_audit.log_authentication_attempt(
+            success=True,
+            client_ip=client_ip,
+            api_key_prefix=api_key[:8] if len(api_key) >= 8 else api_key,
+            path=request.url.path,
+        )
+
+        # Continue processing
         return await call_next(request)
 
     def _get_client_ip(self, request: Request) -> str:

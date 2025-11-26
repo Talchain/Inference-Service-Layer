@@ -16,8 +16,10 @@ from prometheus_client import Counter
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import get_settings
+from src.utils.secure_logging import get_security_audit_logger
 
 logger = logging.getLogger(__name__)
+security_audit = get_security_audit_logger()
 
 # Prometheus metrics for rate limiting
 rate_limit_hits = Counter(
@@ -315,14 +317,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             rate_limit_hits.labels(identifier_type=identifier_type).inc()
             rate_limit_checks.labels(result="blocked").inc()
 
-            # Log rate limit violation
-            logger.warning(
-                "Rate limit exceeded",
-                extra={
-                    "identifier_type": identifier_type,
-                    "path": request.url.path,
-                    "retry_after": retry_after
-                }
+            # Get client IP for audit logging
+            client_ip = self._get_client_ip(request)
+
+            # Log rate limit violation via security audit logger
+            settings = get_settings()
+            security_audit.log_rate_limit_exceeded(
+                client_ip=client_ip,
+                identifier=identifier,
+                limit=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
+                window_seconds=60,
+                path=request.url.path,
             )
 
             # Return 429 Too Many Requests

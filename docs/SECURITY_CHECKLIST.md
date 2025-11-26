@@ -52,19 +52,19 @@ Quick reference checklist for tracking security remediation progress.
 ### Dependencies & Supply Chain
 - [x] Enable Dependabot (`.github/dependabot.yml`)
 - [x] Add security CI workflow (`security.yml`)
-- [ ] Pin critical dependencies to exact versions
+- [x] Pin critical dependencies to exact versions
 
 ### Input Validation
 - [x] Add global request size limit middleware (`RequestSizeLimitMiddleware`)
 - [x] Add timeout middleware (`RequestTimeoutMiddleware`)
-- [ ] Document threat model (`docs/THREAT_MODEL.md`)
+- [x] Document threat model (`docs/THREAT_MODEL.md`)
 
 ## P3 - Low Priority (Backlog)
 
 ### Observability
-- [ ] Add correlation IDs to all logs
-- [ ] Implement PII redaction rules
-- [ ] Add security audit logging
+- [x] Add correlation IDs to all logs
+- [x] Implement PII redaction rules
+- [x] Add security audit logging
 - [ ] Create security metrics dashboard
 - [ ] Define SLOs and SLIs
 
@@ -73,8 +73,8 @@ Quick reference checklist for tracking security remediation progress.
 - [x] Add rate limiting tests
 - [x] Add configuration validation tests
 - [x] Add request limits tests
-- [ ] Add injection attack tests
-- [ ] Add race condition tests
+- [x] Add injection attack tests
+- [x] Add race condition tests
 - [ ] Achieve 80%+ security test coverage
 
 ---
@@ -113,11 +113,11 @@ REQUEST_TIMEOUT_SECONDS=60
 |-------|-------|-----------|---|
 | P0 - Critical | 9 | 9 | 100% |
 | P1 - High | 13 | 12 | 92% |
-| P2 - Medium | 11 | 9 | 82% |
-| P3 - Low | 11 | 4 | 36% |
-| **Total** | **44** | **34** | **77%** |
+| P2 - Medium | 11 | 11 | 100% |
+| P3 - Low | 11 | 9 | 82% |
+| **Total** | **44** | **41** | **93%** |
 
-Last Updated: 2025-11-25
+Last Updated: 2025-11-26
 
 ---
 
@@ -127,14 +127,20 @@ Last Updated: 2025-11-25
 - `src/middleware/auth.py` - API key authentication middleware
 - `src/middleware/request_limits.py` - Request size and timeout middleware
 - `.github/workflows/security.yml` - Security CI workflow
+- `docs/THREAT_MODEL.md` - Comprehensive threat model documentation
 - `tests/unit/test_auth_middleware.py` - Authentication tests
 - `tests/unit/test_rate_limiting_middleware.py` - Rate limiting tests
 - `tests/unit/test_security_config.py` - Configuration validation tests
 - `tests/unit/test_request_limits.py` - Request limits tests
+- `tests/unit/test_injection_attacks.py` - Injection attack prevention tests
+- `tests/unit/test_race_conditions.py` - Race condition tests
 
 ### Modified Files
 - `src/config/__init__.py` - Added security settings and validators
 - `src/api/main.py` - Added security middleware stack
-- `src/middleware/rate_limiting.py` - Added Redis-backed rate limiter
+- `src/middleware/rate_limiting.py` - Added Redis-backed rate limiter with security audit logging
 - `src/infrastructure/redis_client.py` - Added TLS, auth, retry support
 - `src/middleware/__init__.py` - Updated exports
+- `src/middleware/auth.py` - Added security audit logging
+- `src/utils/secure_logging.py` - Added correlation IDs, PII redaction, SecurityAuditLogger
+- `pyproject.toml` - Pinned critical dependencies to exact versions
