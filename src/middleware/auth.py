@@ -1,31 +1,33 @@
 """
 API Key Authentication Middleware.
 
-Validates X-API-Key header against configured API keys from environment.
-Supports multiple comma-separated API keys for different clients.
-
-Example: ISL_API_KEY=plot_key,cee_key,ui_key
+Provides X-API-Key header validation for protected endpoints.
 """
 
+import logging
 import os
-from typing import Callable
+from typing import Optional, Set
 
-from fastapi import Request, Response, status
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from src.utils.secure_logging import get_security_audit_logger
+
+logger = logging.getLogger(__name__)
+security_audit = get_security_audit_logger()
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     """
-    Middleware to validate API key authentication.
+    Middleware to validate X-API-Key header against configured API keys.
 
-    Checks for X-API-Key header and validates against ISL_API_KEY environment variable.
-    Supports comma-separated API keys for multiple clients (e.g., ISL_API_KEY=plot_key,cee_key).
-    Public endpoints (/health, /ready, /metrics, /docs, /redoc, /openapi.json) are exempt.
+    Public endpoints are exempt from authentication.
+    Supports multiple API keys via comma-separated ISL_API_KEYS environment variable.
     """
 
     # Endpoints that don't require authentication
-    PUBLIC_ENDPOINTS = {
+    PUBLIC_PATHS: Set[str] = {
         "/health",
         "/ready",
         "/metrics",
@@ -34,64 +36,185 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/openapi.json",
     }
 
-    def __init__(self, app):
-        super().__init__(app)
-        api_key_env = os.getenv("ISL_API_KEY")
+    # Prefixes that don't require authentication
+    PUBLIC_PREFIXES: tuple = (
+        "/docs",
+        "/redoc",
+    )
 
-        if not api_key_env:
-            raise ValueError(
-                "ISL_API_KEY environment variable must be set for API key authentication"
+    def __init__(self, app, api_keys: Optional[str] = None):
+        """
+        Initialize the middleware.
+
+        Args:
+            app: The FastAPI application
+            api_keys: Comma-separated list of valid API keys.
+                     If None, reads from ISL_API_KEYS environment variable.
+        """
+        super().__init__(app)
+        self._api_keys = self._load_api_keys(api_keys)
+        self._auth_enabled = len(self._api_keys) > 0
+
+        if self._auth_enabled:
+            logger.info(
+                "API key authentication enabled",
+                extra={"num_keys": len(self._api_keys)},
+            )
+        else:
+            logger.warning(
+                "API key authentication DISABLED - no ISL_API_KEYS configured"
             )
 
-        # Support comma-separated API keys for multiple clients
-        # Example: ISL_API_KEY=plot_key,cee_key,ui_key
-        self.valid_api_keys = {key.strip() for key in api_key_env.split(",") if key.strip()}
-
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    def _load_api_keys(self, api_keys: Optional[str]) -> Set[str]:
         """
-        Validate API key for protected endpoints.
+        Load API keys from parameter or environment variable.
+
+        Args:
+            api_keys: Comma-separated API keys or None to read from env
+
+        Returns:
+            Set of valid API keys
+        """
+        keys_str = api_keys or os.getenv("ISL_API_KEYS", "")
+        if not keys_str:
+            return set()
+
+        # Split by comma, strip whitespace, filter empty strings
+        keys = {k.strip() for k in keys_str.split(",") if k.strip()}
+        return keys
+
+    def _is_public_path(self, path: str) -> bool:
+        """
+        Check if the path is a public endpoint.
+
+        Args:
+            path: The request path
+
+        Returns:
+            True if the path is public, False otherwise
+        """
+        # Exact match for public paths
+        if path in self.PUBLIC_PATHS:
+            return True
+
+        # Prefix match for documentation paths
+        if path.startswith(self.PUBLIC_PREFIXES):
+            return True
+
+        return False
+
+    async def dispatch(self, request: Request, call_next):
+        """
+        Process the request with API key authentication.
 
         Args:
             request: The incoming request
-            call_next: The next middleware/route handler
+            call_next: The next middleware/handler
 
         Returns:
-            Response from the next handler or 401/403 error
+            Response from next handler or 401 error
         """
-        # Allow public endpoints without authentication
-        if request.url.path in self.PUBLIC_ENDPOINTS:
+        # Skip authentication for public endpoints
+        if self._is_public_path(request.url.path):
             return await call_next(request)
 
-        # Allow OPTIONS requests (CORS preflight)
-        if request.method == "OPTIONS":
+        # Skip authentication if no API keys configured (development mode)
+        if not self._auth_enabled:
             return await call_next(request)
 
-        # Extract API key from header
+        # Get API key from header
         api_key = request.headers.get("X-API-Key")
 
+        client_ip = self._get_client_ip(request)
+
+        # Validate API key
         if not api_key:
+            # Log authentication failure via security audit logger
+            security_audit.log_authentication_attempt(
+                success=False,
+                client_ip=client_ip,
+                reason="missing_api_key",
+                path=request.url.path,
+            )
             return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
+                status_code=401,
                 content={
-                    "error_code": "AUTHENTICATION_REQUIRED",
-                    "message": "Missing X-API-Key header",
+                    "schema": "error.v1",
+                    "code": "UNAUTHORIZED",
+                    "message": "Missing API key. Provide X-API-Key header.",
                     "retryable": False,
-                    "suggested_action": "include_api_key_header",
+                    "suggested_action": "provide_api_key",
                 },
             )
 
-        # Validate API key (check if it's in the set of valid keys)
-        if api_key not in self.valid_api_keys:
+        if api_key not in self._api_keys:
+            # Log authentication failure via security audit logger
+            security_audit.log_authentication_attempt(
+                success=False,
+                client_ip=client_ip,
+                api_key_prefix=api_key[:8] if len(api_key) >= 8 else api_key,
+                reason="invalid_api_key",
+                path=request.url.path,
+            )
             return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
+                status_code=401,
                 content={
-                    "error_code": "INVALID_API_KEY",
-                    "message": "Invalid API key",
+                    "schema": "error.v1",
+                    "code": "UNAUTHORIZED",
+                    "message": "Invalid API key.",
                     "retryable": False,
-                    "suggested_action": "use_valid_api_key",
+                    "suggested_action": "check_api_key",
                 },
             )
 
-        # API key is valid, proceed to next handler
-        response = await call_next(request)
-        return response
+        # API key is valid - log successful authentication
+        security_audit.log_authentication_attempt(
+            success=True,
+            client_ip=client_ip,
+            api_key_prefix=api_key[:8] if len(api_key) >= 8 else api_key,
+            path=request.url.path,
+        )
+
+        # Continue processing
+        return await call_next(request)
+
+    def _get_client_ip(self, request: Request) -> str:
+        """
+        Get client IP address, respecting proxy headers.
+
+        Args:
+            request: The incoming request
+
+        Returns:
+            Client IP address
+        """
+        # Check X-Forwarded-For header first (set by proxies/load balancers)
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            # X-Forwarded-For can contain multiple IPs: client, proxy1, proxy2
+            # The first IP is the original client
+            return forwarded_for.split(",")[0].strip()
+
+        # Check X-Real-IP header (set by nginx)
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip.strip()
+
+        # Fall back to direct client IP
+        if request.client:
+            return request.client.host
+
+        return "unknown"
+
+
+def get_api_keys() -> Set[str]:
+    """
+    Get the configured API keys.
+
+    Returns:
+        Set of valid API keys from ISL_API_KEYS environment variable
+    """
+    keys_str = os.getenv("ISL_API_KEYS", "")
+    if not keys_str:
+        return set()
+    return {k.strip() for k in keys_str.split(",") if k.strip()}
