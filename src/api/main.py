@@ -22,7 +22,7 @@ from src.config import get_settings, setup_logging
 from src.middleware.auth import APIKeyAuthMiddleware
 from src.middleware.circuit_breaker import MemoryCircuitBreaker
 from src.middleware.rate_limiting import RateLimitMiddleware
-from src.middleware.request_limits import RequestSizeLimitMiddleware
+from src.middleware.request_limits import RequestSizeLimitMiddleware, RequestTimeoutMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
 from src.utils.tracing import TracingMiddleware
 
@@ -98,6 +98,10 @@ app.add_middleware(
 # Request size limit (DoS protection - reject oversized requests)
 app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=settings.MAX_REQUEST_SIZE_MB)
 
+# Request timeout (resource protection - cancel long-running requests)
+# Default: 60s, configurable via REQUEST_TIMEOUT_SECONDS
+app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=settings.REQUEST_TIMEOUT_SECONDS)
+
 # Memory circuit breaker (reject requests when memory >85%)
 app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 
@@ -105,8 +109,9 @@ app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 app.add_middleware(TracingMiddleware)
 
 # API Key Authentication (validates X-API-Key header)
-# Note: Only enforced if ISL_API_KEYS environment variable is set
-app.add_middleware(APIKeyAuthMiddleware, api_keys=settings.ISL_API_KEYS)
+# Note: Only enforced if ISL_API_KEYS or ISL_API_KEY environment variable is set
+# Supports both ISL_API_KEYS (preferred) and ISL_API_KEY (legacy) for backward compatibility
+app.add_middleware(APIKeyAuthMiddleware, api_keys=settings.ISL_API_KEYS or settings.ISL_API_KEY)
 
 # Configure CORS middleware using settings
 # SECURITY: No wildcard origins - explicit origins only
