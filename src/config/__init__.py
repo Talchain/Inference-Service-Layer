@@ -39,9 +39,14 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Authentication
+    # Supports both ISL_API_KEYS (preferred) and ISL_API_KEY (legacy) for backward compatibility
     ISL_API_KEYS: Optional[str] = Field(
         default=None,
         description="Comma-separated list of valid API keys for authentication"
+    )
+    ISL_API_KEY: Optional[str] = Field(
+        default=None,
+        description="Legacy: Single API key for authentication (use ISL_API_KEYS instead)"
     )
 
     # CORS Configuration
@@ -151,8 +156,8 @@ class Settings(BaseSettings):
             return errors
 
         # Required settings in production
-        if not self.ISL_API_KEYS:
-            errors.append("ISL_API_KEYS is required in production")
+        if not self.ISL_API_KEYS and not self.ISL_API_KEY:
+            errors.append("ISL_API_KEYS (or ISL_API_KEY) is required in production")
 
         if "*" in self.CORS_ORIGINS:
             errors.append("Wildcard CORS origins not allowed in production")

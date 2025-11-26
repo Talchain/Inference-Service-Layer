@@ -23,7 +23,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     Middleware to validate X-API-Key header against configured API keys.
 
     Public endpoints are exempt from authentication.
-    Supports multiple API keys via comma-separated ISL_API_KEYS environment variable.
+    Supports multiple API keys via comma-separated environment variable.
+    Checks ISL_API_KEYS first, then falls back to ISL_API_KEY for backward compatibility.
     """
 
     # Endpoints that don't require authentication
@@ -62,7 +63,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             )
         else:
             logger.warning(
-                "API key authentication DISABLED - no ISL_API_KEYS configured"
+                "API key authentication DISABLED - no ISL_API_KEYS or ISL_API_KEY configured"
             )
 
     def _load_api_keys(self, api_keys: Optional[str]) -> Set[str]:
@@ -75,7 +76,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         Returns:
             Set of valid API keys
         """
-        keys_str = api_keys or os.getenv("ISL_API_KEYS", "")
+        # Check ISL_API_KEYS first, then fall back to ISL_API_KEY for backward compatibility
+        keys_str = api_keys or os.getenv("ISL_API_KEYS") or os.getenv("ISL_API_KEY", "")
         if not keys_str:
             return set()
 
@@ -212,9 +214,10 @@ def get_api_keys() -> Set[str]:
     Get the configured API keys.
 
     Returns:
-        Set of valid API keys from ISL_API_KEYS environment variable
+        Set of valid API keys from ISL_API_KEYS or ISL_API_KEY environment variable
     """
-    keys_str = os.getenv("ISL_API_KEYS", "")
+    # Check ISL_API_KEYS first, then fall back to ISL_API_KEY for backward compatibility
+    keys_str = os.getenv("ISL_API_KEYS") or os.getenv("ISL_API_KEY", "")
     if not keys_str:
         return set()
     return {k.strip() for k in keys_str.split(",") if k.strip()}

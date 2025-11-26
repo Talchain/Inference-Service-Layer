@@ -15,9 +15,26 @@ class TestAPIKeyAuthMiddleware:
 
     def test_load_api_keys_from_env(self):
         """Test loading API keys from environment variable."""
-        with patch.dict("os.environ", {"ISL_API_KEYS": "key1,key2,key3"}):
+        with patch.dict("os.environ", {"ISL_API_KEYS": "key1,key2,key3"}, clear=True):
             keys = get_api_keys()
             assert keys == {"key1", "key2", "key3"}
+
+    def test_load_api_keys_from_legacy_env(self):
+        """Test loading API key from legacy ISL_API_KEY environment variable."""
+        with patch.dict("os.environ", {"ISL_API_KEY": "legacy_key"}, clear=True):
+            keys = get_api_keys()
+            assert keys == {"legacy_key"}
+
+    def test_load_api_keys_prefers_new_over_legacy(self):
+        """Test that ISL_API_KEYS takes precedence over ISL_API_KEY."""
+        with patch.dict("os.environ", {
+            "ISL_API_KEYS": "new_key1,new_key2",
+            "ISL_API_KEY": "legacy_key"
+        }, clear=True):
+            keys = get_api_keys()
+            # Should use ISL_API_KEYS, not ISL_API_KEY
+            assert keys == {"new_key1", "new_key2"}
+            assert "legacy_key" not in keys
 
     def test_load_api_keys_empty(self):
         """Test loading when no API keys configured."""
