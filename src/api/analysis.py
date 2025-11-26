@@ -14,13 +14,14 @@ from fastapi import APIRouter, Header, HTTPException
 from src.models.metadata import create_response_metadata
 from src.models.requests import SensitivityAnalysisRequest
 from src.models.responses import SensitivityAnalysisResponse
-from src.services.sensitivity_analyzer import SensitivityAnalyzer
+from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Initialize service
-sensitivity_analyzer = SensitivityAnalyzer()
+# Using EnhancedSensitivityAnalyzer (aliased for compatibility)
+sensitivity_analyzer = EnhancedSensitivityAnalyzer()
 
 
 @router.post(

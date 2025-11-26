@@ -5,7 +5,9 @@
 ### Environment Configuration
 - [ ] **API Key Configured**
   - Add ISL API key to PLoT environment variables
-  - Key: `ISL_API_KEY=isl_prod_7k9mP2nX8vQ4rL6wF3jH5tY1cB0zS`
+  - Key: `ISL_API_KEY=<your-production-api-key-here>`
+  - **IMPORTANT**: Generate a strong random API key for production
+  - Use: `openssl rand -hex 32` to generate a secure key
   - Location: `.env` or Kubernetes secrets
   - Verify key works: `curl -H "X-API-Key: $ISL_API_KEY" https://isl.olumi.com/health`
 
