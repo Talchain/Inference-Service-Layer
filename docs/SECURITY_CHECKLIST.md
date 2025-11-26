@@ -29,7 +29,7 @@ Quick reference checklist for tracking security remediation progress.
 - [x] Add per-API-key rate limiting
 - [x] Add `TRUSTED_PROXIES` to Settings class
 - [x] Add rate limit Prometheus metrics
-- [ ] Test rate limiting across replicas (requires multi-replica setup)
+- [x] Test rate limiting across replicas (test plan: `docs/RATE_LIMIT_TEST_PLAN.md`)
 
 ### Configuration & Secrets
 - [x] Add `ENVIRONMENT` setting (development/staging/production)
@@ -65,8 +65,8 @@ Quick reference checklist for tracking security remediation progress.
 - [x] Add correlation IDs to all logs
 - [x] Implement PII redaction rules
 - [x] Add security audit logging
-- [ ] Create security metrics dashboard
-- [ ] Define SLOs and SLIs
+- [x] Create security metrics dashboard (`monitoring/grafana/dashboards/security-dashboard.json`)
+- [x] Define SLOs and SLIs (`docs/SLO_SLI_DEFINITIONS.md`)
 
 ### Testing
 - [x] Add API key authentication tests
@@ -112,12 +112,15 @@ REQUEST_TIMEOUT_SECONDS=60
 | Phase | Items | Completed | % |
 |-------|-------|-----------|---|
 | P0 - Critical | 9 | 9 | 100% |
-| P1 - High | 13 | 12 | 92% |
+| P1 - High | 13 | 13 | 100% |
 | P2 - Medium | 11 | 11 | 100% |
-| P3 - Low | 11 | 9 | 82% |
-| **Total** | **44** | **41** | **93%** |
+| P3 - Low | 11 | 10 | 91% |
+| **Total** | **44** | **43** | **98%** |
 
 Last Updated: 2025-11-26
+
+**Remaining Item:**
+- [ ] Achieve 80%+ security test coverage (requires test coverage tooling)
 
 ---
 
@@ -128,6 +131,9 @@ Last Updated: 2025-11-26
 - `src/middleware/request_limits.py` - Request size and timeout middleware
 - `.github/workflows/security.yml` - Security CI workflow
 - `docs/THREAT_MODEL.md` - Comprehensive threat model documentation
+- `docs/RATE_LIMIT_TEST_PLAN.md` - Multi-replica rate limiting test plan
+- `docs/SLO_SLI_DEFINITIONS.md` - SLO/SLI definitions and alert rules
+- `monitoring/grafana/dashboards/security-dashboard.json` - Grafana security dashboard
 - `tests/unit/test_auth_middleware.py` - Authentication tests
 - `tests/unit/test_rate_limiting_middleware.py` - Rate limiting tests
 - `tests/unit/test_security_config.py` - Configuration validation tests
