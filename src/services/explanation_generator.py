@@ -428,3 +428,209 @@ class ExplanationGenerator:
             recommendations.append("Explanation meets quality standards.")
 
         return recommendations
+
+    def generate_counterfactual_explanation(
+        self,
+        outcome: str,
+        intervention: Dict[str, float],
+        point_estimate: float,
+        ci_lower: float,
+        ci_upper: float,
+        uncertainty_level: str,
+        robustness_level: str,
+    ) -> "ExplanationMetadata":
+        """
+        Generate explanation for counterfactual analysis.
+
+        Args:
+            outcome: The outcome variable name
+            intervention: Dict of intervention variable names to values
+            point_estimate: Point estimate of the counterfactual outcome
+            ci_lower: Lower bound of confidence interval
+            ci_upper: Upper bound of confidence interval
+            uncertainty_level: Level of uncertainty (e.g., "low", "medium", "high")
+            robustness_level: Robustness score level (e.g., "high", "medium", "low")
+
+        Returns:
+            ExplanationMetadata object with structured explanation
+        """
+        from src.models.shared import ExplanationMetadata
+
+        # Format intervention as readable string
+        intervention_str = ", ".join(
+            f"{var}={val}" for var, val in intervention.items()
+        )
+
+        # Build summary
+        summary = f"Predicted {outcome} = {point_estimate:.2f} when setting {intervention_str}"
+
+        # Build reasoning
+        reasoning_parts = [
+            f"Setting {intervention_str} yields a predicted {outcome} of {point_estimate:.2f}.",
+            f"The 95% confidence interval is [{ci_lower:.2f}, {ci_upper:.2f}].",
+        ]
+
+        if uncertainty_level == "low":
+            reasoning_parts.append("The prediction has low uncertainty, indicating high confidence.")
+        elif uncertainty_level == "high":
+            reasoning_parts.append("Note: This prediction has high uncertainty; interpret with caution.")
+
+        if robustness_level == "high":
+            reasoning_parts.append("The result is robust to assumption violations.")
+        elif robustness_level == "low":
+            reasoning_parts.append("Warning: The result is sensitive to assumptions.")
+
+        reasoning = " ".join(reasoning_parts)
+
+        # Build technical basis
+        technical_basis = (
+            f"Monte Carlo simulation with intervention do({intervention_str}). "
+            f"Point estimate: {point_estimate:.4f}, CI: [{ci_lower:.4f}, {ci_upper:.4f}]. "
+            f"Uncertainty level: {uncertainty_level}, Robustness: {robustness_level}."
+        )
+
+        # Key assumptions
+        assumptions = [
+            "Structural causal model correctly specified",
+            "No unmeasured confounding",
+            "Intervention feasibility assumed",
+        ]
+
+        # Simple explanation for non-technical audience
+        simple_explanation = f"If we set {intervention_str}, we predict {outcome} would be about {point_estimate:.0f}."
+
+        return ExplanationMetadata(
+            summary=summary,
+            reasoning=reasoning,
+            technical_basis=technical_basis,
+            assumptions=assumptions,
+            simple_explanation=simple_explanation,
+            learn_more_url="https://docs.inference-service-layer.com/docs/methods/counterfactuals",
+            visual_type="uncertainty_plot",
+        )
+
+    def generate_causal_validation_explanation(
+        self,
+        status: str,
+        treatment: str,
+        outcome: str,
+        adjustment_sets: Optional[List[List[str]]] = None,
+        minimal_set: Optional[List[str]] = None,
+        issues: Optional[List[Dict]] = None,
+    ) -> "ExplanationMetadata":
+        """
+        Generate explanation for causal validation results.
+
+        Args:
+            status: Validation status ("identifiable", "cannot_identify", "degraded")
+            treatment: Treatment variable name
+            outcome: Outcome variable name
+            adjustment_sets: List of valid adjustment sets (for identifiable)
+            minimal_set: Minimal adjustment set (for identifiable)
+            issues: List of validation issues (for cannot_identify)
+
+        Returns:
+            ExplanationMetadata object with structured explanation
+        """
+        from src.models.shared import ExplanationMetadata
+
+        if status == "identifiable":
+            minimal_str = ", ".join(minimal_set) if minimal_set else "none"
+            summary = f"Effect of {treatment} on {outcome} is identifiable by controlling for {minimal_str}"
+
+            reasoning = (
+                f"The causal effect of {treatment} on {outcome} can be identified. "
+                f"By controlling for the variables {{{minimal_str}}}, we can block all confounding paths "
+                f"and isolate the true causal effect."
+            )
+
+            technical_basis = (
+                f"Backdoor criterion satisfied with adjustment set {{{minimal_str}}}. "
+                f"Found {len(adjustment_sets or [])} valid adjustment sets."
+            )
+
+            assumptions = [
+                "No unmeasured confounding given the specified adjustment set",
+                "Causal graph correctly specified",
+                "Positivity: all covariate combinations have non-zero probability",
+            ]
+
+            simple_explanation = f"We can estimate this causal effect by controlling for {minimal_str}."
+
+            return ExplanationMetadata(
+                summary=summary,
+                reasoning=reasoning,
+                technical_basis=technical_basis,
+                assumptions=assumptions,
+                simple_explanation=simple_explanation,
+                learn_more_url="https://docs.inference-service-layer.com/docs/methods/backdoor-adjustment",
+                visual_type="dag_with_adjustment",
+            )
+
+        elif status == "cannot_identify":
+            summary = f"Effect of {treatment} on {outcome} cannot be identified"
+
+            if issues:
+                issue_descriptions = [issue.get("description", "Unknown issue") for issue in issues]
+                issues_text = "; ".join(issue_descriptions)
+            else:
+                issues_text = "Unblocked confounding paths exist"
+
+            reasoning = (
+                f"The causal effect of {treatment} on {outcome} cannot be reliably estimated. "
+                f"Issues found: {issues_text}. "
+                "Consider collecting additional data or revising the causal model."
+            )
+
+            technical_basis = (
+                f"No valid adjustment set exists to block all backdoor paths from {treatment} to {outcome}. "
+                "Graph analysis indicates unmeasured confounding or structural issues."
+            )
+
+            assumptions = [
+                "Current graph structure is correctly specified",
+                "Listed variables are the only relevant factors",
+            ]
+
+            simple_explanation = "We cannot reliably estimate this causal effect due to confounding."
+
+            return ExplanationMetadata(
+                summary=summary,
+                reasoning=reasoning,
+                technical_basis=technical_basis,
+                assumptions=assumptions,
+                simple_explanation=simple_explanation,
+                learn_more_url="https://docs.inference-service-layer.com/docs/concepts/identification",
+                visual_type="path_diagram",
+            )
+
+        else:  # degraded
+            summary = f"Analysis of {treatment} → {outcome} completed with degraded accuracy"
+
+            reasoning = (
+                f"The analysis for the effect of {treatment} on {outcome} was completed, "
+                "but encountered issues that may affect reliability. "
+                "Results should be interpreted with caution."
+            )
+
+            technical_basis = (
+                "Primary analysis method encountered errors. "
+                "Fallback assessment was used to provide partial results."
+            )
+
+            assumptions = [
+                "Fallback assessment may miss some edge cases",
+                "Results are approximate and should be verified",
+            ]
+
+            simple_explanation = "We completed the analysis but with reduced confidence in the results."
+
+            return ExplanationMetadata(
+                summary=summary,
+                reasoning=reasoning,
+                technical_basis=technical_basis,
+                assumptions=assumptions,
+                simple_explanation=simple_explanation,
+                learn_more_url="https://docs.inference-service-layer.com/docs/concepts/identification",
+                visual_type="dag_with_issues",
+            )

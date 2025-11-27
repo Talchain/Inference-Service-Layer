@@ -101,15 +101,16 @@ class TestProductionConfigValidation:
             assert "wildcard" in str(exc_info.value).lower()
 
     def test_production_warns_default_cors(self):
-        """Test that production warns about default CORS origins."""
+        """Test that production warns about localhost CORS origins."""
         with patch.dict("os.environ", {
             "ENVIRONMENT": "production",
             "ISL_API_KEYS": "valid_key",
             "CORS_ORIGINS": "http://localhost:3000,http://localhost:8080",
+            "REDIS_HOST": "redis.example.com",
         }):
             settings = Settings()
             errors = settings.validate_production_config()
-            assert any("CORS_ORIGINS" in e for e in errors)
+            assert any("localhost" in e.lower() for e in errors)
 
     def test_production_valid_config(self):
         """Test that valid production config passes."""
@@ -117,6 +118,7 @@ class TestProductionConfigValidation:
             "ENVIRONMENT": "production",
             "ISL_API_KEYS": "secret_key_1,secret_key_2",
             "CORS_ORIGINS": "https://app.example.com,https://admin.example.com",
+            "REDIS_HOST": "redis.example.com",
         }):
             settings = Settings()
             errors = settings.validate_production_config()
