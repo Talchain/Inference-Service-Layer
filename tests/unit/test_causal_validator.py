@@ -641,13 +641,14 @@ def test_explanation_includes_degraded_status():
     """Test that ExplanationGenerator handles degraded status."""
     from src.services.explanation_generator import ExplanationGenerator
 
-    explanation = ExplanationGenerator.generate_causal_validation_explanation(
+    generator = ExplanationGenerator()
+    explanation = generator.generate_causal_validation_explanation(
         status="degraded",
         treatment="X",
         outcome="Y",
     )
 
-    assert "degraded" in explanation.summary.lower() or "unavailable" in explanation.summary.lower()
-    assert "fallback" in explanation.technical_basis.lower() or "y0" in explanation.technical_basis.lower()
+    assert "degraded" in explanation.summary.lower()
+    assert "fallback" in explanation.technical_basis.lower()
     assert len(explanation.assumptions) > 0
-    assert "manual" in explanation.summary.lower() or "manual" in explanation.reasoning.lower()
+    assert "caution" in explanation.reasoning.lower() or "reliability" in explanation.reasoning.lower()
