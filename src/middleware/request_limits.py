@@ -4,11 +4,14 @@ Request size limit and timeout middleware.
 Provides protection against:
 - Oversized request bodies (DoS via large payloads)
 - Long-running requests (resource exhaustion)
+
+Supports per-endpoint timeout configuration for computation-heavy operations.
 """
 
 import asyncio
 import logging
-from typing import Set
+import re
+from typing import Dict, Optional, Set
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -17,6 +20,27 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+# Per-endpoint timeout configuration (in seconds)
+# Computation-heavy endpoints get longer timeouts
+ENDPOINT_TIMEOUTS: Dict[str, int] = {
+    # Validation endpoints - fast
+    "/api/v1/validation/": 30,
+
+    # Counterfactual endpoints - can be slow due to Monte Carlo
+    "/api/v1/counterfactual/": 120,
+    "/api/v1/counterfactual/batch": 180,
+
+    # Sensitivity analysis - computation heavy
+    "/api/v1/sensitivity/": 120,
+
+    # Discovery endpoints - may involve LLM calls
+    "/api/v1/discovery/": 90,
+
+    # Explanations - moderate
+    "/api/v1/explanations/": 60,
+}
 
 
 class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
@@ -98,32 +122,65 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
     Middleware to enforce request timeout.
 
     Cancels requests that take longer than the configured timeout.
+    Supports per-endpoint timeout configuration for computation-heavy operations.
     """
 
     # Endpoints exempt from timeout (for long-running operations)
     EXEMPT_PATHS: Set[str] = {"/health", "/ready", "/metrics"}
 
-    def __init__(self, app, timeout_seconds: int = None):
+    def __init__(self, app, timeout_seconds: int = None, endpoint_timeouts: Dict[str, int] = None):
         """
         Initialize the middleware.
 
         Args:
             app: The FastAPI application
-            timeout_seconds: Maximum request processing time in seconds.
+            timeout_seconds: Default maximum request processing time in seconds.
                            If None, reads from settings.
+            endpoint_timeouts: Optional dict of endpoint patterns to timeout values.
+                             Uses ENDPOINT_TIMEOUTS by default.
         """
         super().__init__(app)
         settings = get_settings()
-        self.timeout_seconds = timeout_seconds or settings.REQUEST_TIMEOUT_SECONDS
+        self.default_timeout = timeout_seconds or settings.REQUEST_TIMEOUT_SECONDS
+        self.endpoint_timeouts = endpoint_timeouts or ENDPOINT_TIMEOUTS
 
         logger.info(
             "Request timeout configured",
-            extra={"timeout_seconds": self.timeout_seconds}
+            extra={
+                "default_timeout_seconds": self.default_timeout,
+                "endpoint_specific_timeouts": len(self.endpoint_timeouts),
+            }
         )
+
+    def _get_timeout_for_path(self, path: str) -> int:
+        """
+        Get the timeout for a specific path.
+
+        Checks endpoint-specific timeouts first (longest prefix match),
+        then falls back to default timeout.
+
+        Args:
+            path: Request path
+
+        Returns:
+            Timeout in seconds
+        """
+        # Find the longest matching prefix
+        best_match = None
+        best_match_len = 0
+
+        for pattern, timeout in self.endpoint_timeouts.items():
+            if path.startswith(pattern) and len(pattern) > best_match_len:
+                best_match = timeout
+                best_match_len = len(pattern)
+
+        return best_match if best_match is not None else self.default_timeout
 
     async def dispatch(self, request: Request, call_next):
         """
         Process request with timeout enforcement.
+
+        Uses per-endpoint timeouts for computation-heavy operations.
 
         Args:
             request: FastAPI request
@@ -136,10 +193,13 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
+        # Get endpoint-specific timeout
+        timeout = self._get_timeout_for_path(request.url.path)
+
         try:
             return await asyncio.wait_for(
                 call_next(request),
-                timeout=self.timeout_seconds
+                timeout=timeout
             )
         except asyncio.TimeoutError:
             logger.error(
@@ -147,7 +207,8 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
                 extra={
                     "path": request.url.path,
                     "method": request.method,
-                    "timeout_seconds": self.timeout_seconds,
+                    "timeout_seconds": timeout,
+                    "is_endpoint_specific": timeout != self.default_timeout,
                 }
             )
             return JSONResponse(
@@ -155,7 +216,7 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
                 content={
                     "schema": "error.v1",
                     "code": "REQUEST_TIMEOUT",
-                    "message": f"Request processing timed out after {self.timeout_seconds} seconds.",
+                    "message": f"Request processing timed out after {timeout} seconds.",
                     "retryable": True,
                     "suggested_action": "retry_with_simpler_input",
                 }

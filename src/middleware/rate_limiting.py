@@ -238,6 +238,7 @@ def get_rate_limiter() -> RedisRateLimiter:
     Get the global rate limiter instance.
 
     Initializes with Redis if available, otherwise uses in-memory fallback.
+    In production, Redis should be required (enforced at startup).
 
     Returns:
         RedisRateLimiter instance
@@ -260,9 +261,23 @@ def get_rate_limiter() -> RedisRateLimiter:
             if redis_client:
                 logger.info("Rate limiter using Redis backend")
             else:
-                logger.info("Rate limiter using in-memory backend (Redis unavailable)")
+                # In production, this should not happen (startup validation prevents it)
+                # But log a critical warning if it does
+                if settings.is_production():
+                    logger.critical(
+                        "SECURITY WARNING: Rate limiter using in-memory backend in production. "
+                        "Distributed rate limiting is INEFFECTIVE across replicas."
+                    )
+                else:
+                    logger.info("Rate limiter using in-memory backend (Redis unavailable)")
         except Exception as e:
-            logger.warning(f"Failed to initialize Redis rate limiter: {e}")
+            if settings.is_production():
+                logger.critical(
+                    f"SECURITY WARNING: Failed to initialize Redis rate limiter in production: {e}. "
+                    "Falling back to in-memory (INEFFECTIVE across replicas)."
+                )
+            else:
+                logger.warning(f"Failed to initialize Redis rate limiter: {e}")
             _rate_limiter = RedisRateLimiter(
                 redis_client=None,
                 requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
