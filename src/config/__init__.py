@@ -147,6 +147,9 @@ class Settings(BaseSettings):
         """
         Validate configuration for production environment.
 
+        Implements fail-closed security: missing or insecure config
+        will prevent startup in production.
+
         Returns:
             List of validation error messages (empty if valid)
         """
@@ -155,15 +158,26 @@ class Settings(BaseSettings):
         if not self.is_production():
             return errors
 
-        # Required settings in production
+        # Required settings in production (fail-closed)
         if not self.ISL_API_KEYS and not self.ISL_API_KEY:
             errors.append("ISL_API_KEYS (or ISL_API_KEY) is required in production")
 
         if "*" in self.CORS_ORIGINS:
             errors.append("Wildcard CORS origins not allowed in production")
 
-        if not self.CORS_ORIGINS or self.CORS_ORIGINS == "http://localhost:3000,http://localhost:8080":
-            errors.append("CORS_ORIGINS should be configured for production domains")
+        # Fail-closed: localhost origins not allowed in production
+        cors_origins = self.get_cors_origins_list()
+        localhost_origins = [o for o in cors_origins if "localhost" in o or "127.0.0.1" in o]
+        if localhost_origins:
+            errors.append(f"Localhost CORS origins not allowed in production: {localhost_origins}")
+
+        if not self.CORS_ORIGINS:
+            errors.append("CORS_ORIGINS must be configured in production")
+
+        # Redis is required in production for distributed rate limiting
+        # In-memory rate limiting is ineffective across multiple replicas
+        if not self.REDIS_HOST or self.REDIS_HOST == "localhost":
+            errors.append("REDIS_HOST must be configured for production (not localhost)")
 
         return errors
 

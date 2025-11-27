@@ -52,7 +52,7 @@ class TestRequestTimeoutMiddleware:
             app = MagicMock()
             middleware = RequestTimeoutMiddleware(app)
 
-            assert middleware.timeout_seconds == 60
+            assert middleware.default_timeout == 60
 
     def test_custom_timeout(self):
         """Test custom timeout from constructor."""
@@ -61,13 +61,29 @@ class TestRequestTimeoutMiddleware:
             app = MagicMock()
             middleware = RequestTimeoutMiddleware(app, timeout_seconds=30)
 
-            assert middleware.timeout_seconds == 30
+            assert middleware.default_timeout == 30
 
     def test_exempt_paths(self):
         """Test health/metrics endpoints are exempt from timeout."""
         assert "/health" in RequestTimeoutMiddleware.EXEMPT_PATHS
         assert "/ready" in RequestTimeoutMiddleware.EXEMPT_PATHS
         assert "/metrics" in RequestTimeoutMiddleware.EXEMPT_PATHS
+
+    def test_endpoint_specific_timeouts(self):
+        """Test endpoint-specific timeout configuration."""
+        with patch("src.middleware.request_limits.get_settings") as mock_settings:
+            mock_settings.return_value.REQUEST_TIMEOUT_SECONDS = 60
+            app = MagicMock()
+            middleware = RequestTimeoutMiddleware(app)
+
+            # Validation should have shorter timeout
+            assert middleware._get_timeout_for_path("/api/v1/validation/assumptions") == 30
+
+            # Counterfactual should have longer timeout
+            assert middleware._get_timeout_for_path("/api/v1/counterfactual/generate") == 120
+
+            # Unknown path should use default
+            assert middleware._get_timeout_for_path("/unknown/path") == 60
 
 
 class TestRequestLimitsIntegration:
