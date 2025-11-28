@@ -232,17 +232,52 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
 # Exception handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    """Handle HTTPException with structured error response."""
+    """Handle HTTPException with Olumi Error Schema v1.0."""
+    from src.models.responses import RecoveryHints
+    from src.utils.tracing import get_trace_id
+
+    # Extract request ID from headers (X-Request-Id or X-Trace-Id)
+    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
+    # Map status codes to appropriate error codes
+    if exc.status_code == 400:
+        code = ErrorCode.INVALID_INPUT.value
+        reason = "bad_request"
+    elif exc.status_code == 404:
+        code = ErrorCode.NODE_NOT_FOUND.value
+        reason = "not_found"
+    elif exc.status_code == 422:
+        code = ErrorCode.VALIDATION_ERROR.value
+        reason = "validation_failed"
+    elif exc.status_code == 429:
+        code = ErrorCode.RATE_LIMIT_EXCEEDED.value
+        reason = "rate_limit"
+    elif exc.status_code == 503:
+        code = ErrorCode.SERVICE_UNAVAILABLE.value
+        reason = "service_unavailable"
+    elif exc.status_code == 504:
+        code = ErrorCode.TIMEOUT.value
+        reason = "timeout"
+    else:
+        code = ErrorCode.VALIDATION_ERROR.value
+        reason = "http_error"
+
     error_response = ErrorResponse(
-        error_code=ErrorCode.VALIDATION_ERROR,
-        message=exc.detail,
-        retryable=False,
-        suggested_action="fix_input",
+        code=code,
+        message=str(exc.detail),
+        reason=reason,
+        recovery=RecoveryHints(
+            hints=["Check your request parameters", "Refer to API documentation"],
+            suggestion="Fix the input and retry",
+        ),
+        retryable=exc.status_code in [429, 503, 504],
+        source="isl",
+        request_id=request_id,
     )
 
     return JSONResponse(
         status_code=exc.status_code,
-        content=error_response.model_dump(),
+        content=error_response.model_dump(exclude_none=True),
     )
 
 
@@ -250,44 +285,107 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    """Handle Pydantic validation errors."""
+    """Handle Pydantic validation errors with Olumi Error Schema v1.0."""
+    from src.models.responses import RecoveryHints
+    from src.utils.tracing import get_trace_id
+
+    # Extract request ID
+    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
+    # Extract validation failures
+    errors = exc.errors()
+    validation_failures = [
+        f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
+        for err in errors
+    ]
+
+    # Create recovery hints
+    hints = []
+    if any("missing" in err["type"] for err in errors):
+        hints.append("Ensure all required fields are provided")
+    if any("type_error" in err["type"] for err in errors):
+        hints.append("Check data types match the expected schema")
+    if any("value_error" in err["type"] for err in errors):
+        hints.append("Verify values are within valid ranges")
+    if not hints:
+        hints.append("Check the API documentation for correct request format")
+
     error_response = ErrorResponse(
-        error_code=ErrorCode.VALIDATION_ERROR,
+        code=ErrorCode.VALIDATION_ERROR.value,
         message="Request validation failed",
-        details={"errors": exc.errors()},
+        reason="invalid_schema",
+        recovery=RecoveryHints(
+            hints=hints,
+            suggestion="Fix validation errors and retry",
+            example="See validation_failures field for specific issues",
+        ),
+        validation_failures=validation_failures,
         retryable=False,
-        suggested_action="fix_input",
+        source="isl",
+        request_id=request_id,
     )
 
     return JSONResponse(
         status_code=422,
-        content=error_response.model_dump(),
+        content=error_response.model_dump(exclude_none=True),
     )
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Handle all unhandled exceptions."""
+    """Handle all unhandled exceptions with Olumi Error Schema v1.0."""
+    from src.models.responses import RecoveryHints
+    from src.utils.tracing import get_trace_id
+
+    # Extract request ID
+    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
     logger.error(
         "unhandled_exception",
         extra={
             "path": request.url.path,
             "method": request.method,
             "error": str(exc),
+            "request_id": request_id,
         },
         exc_info=True,
     )
 
+    # Determine error code based on exception type
+    exc_type_name = type(exc).__name__
+    if "timeout" in exc_type_name.lower() or "Timeout" in str(exc):
+        code = ErrorCode.TIMEOUT.value
+        reason = "computation_timeout"
+        retryable = True
+    elif "memory" in exc_type_name.lower() or "Memory" in str(exc):
+        code = ErrorCode.MEMORY_LIMIT.value
+        reason = "memory_exceeded"
+        retryable = False
+    else:
+        code = ErrorCode.COMPUTATION_ERROR.value
+        reason = "internal_error"
+        retryable = True
+
     error_response = ErrorResponse(
-        error_code=ErrorCode.COMPUTATION_ERROR,
-        message="An unexpected error occurred",
-        retryable=True,
-        suggested_action="retry_with_same_input",
+        code=code,
+        message="An unexpected error occurred during computation",
+        reason=reason,
+        recovery=RecoveryHints(
+            hints=[
+                "Check server logs for details",
+                "Simplify your request if possible",
+                "Contact support if the error persists"
+            ],
+            suggestion="Retry with the same input or contact support",
+        ),
+        retryable=retryable,
+        source="isl",
+        request_id=request_id,
     )
 
     return JSONResponse(
         status_code=500,
-        content=error_response.model_dump(),
+        content=error_response.model_dump(exclude_none=True),
     )
 
 
