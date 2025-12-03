@@ -328,6 +328,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         allowed, retry_after = limiter.check_rate_limit(identifier)
 
         if not allowed:
+            # Extract request ID for correlation
+            from src.utils.tracing import get_trace_id
+            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
             # Record metrics
             rate_limit_hits.labels(identifier_type=identifier_type).inc()
             rate_limit_checks.labels(result="blocked").inc()
@@ -343,18 +347,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 limit=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
                 window_seconds=60,
                 path=request.url.path,
+                request_id=request_id
             )
 
-            # Return 429 Too Many Requests
+            # Return 429 Too Many Requests with Olumi Error Schema v1.0
+            from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
+
+            error_response = ErrorResponse(
+                code=ErrorCode.RATE_LIMIT_EXCEEDED.value,
+                message=f"Rate limit exceeded. Please wait {retry_after} seconds before retrying.",
+                reason="too_many_requests",
+                recovery=RecoveryHints(
+                    hints=[
+                        f"Wait {retry_after} seconds before retrying",
+                        "Reduce request frequency",
+                        "Consider implementing client-side rate limiting"
+                    ],
+                    suggestion=f"Retry after {retry_after} seconds",
+                ),
+                retryable=True,
+                source="isl",
+                request_id=request_id,
+            )
+
             return JSONResponse(
                 status_code=429,
-                content={
-                    "schema": "error.v1",
-                    "code": "RATE_LIMIT_EXCEEDED",
-                    "message": "Too many requests. Please wait before trying again.",
-                    "retry_after": retry_after,
-                    "suggested_action": "retry_later"
-                },
+                content=error_response.model_dump(exclude_none=True),
                 headers={"Retry-After": str(retry_after)}
             )
 

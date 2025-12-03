@@ -53,6 +53,10 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
         mem = psutil.virtual_memory()
 
         if mem.percent > self.threshold:
+            # Extract request ID for correlation
+            from src.utils.tracing import get_trace_id
+            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
             # Log periodically (not on every request to avoid log spam)
             import time
             now = time.time()
@@ -63,23 +67,34 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
                         "memory_percent": mem.percent,
                         "threshold": self.threshold,
                         "available_mb": mem.available / 1024 / 1024,
+                        "request_id": request_id,
                     }
                 )
                 self.last_log_time = now
 
-            # Return 503 Service Unavailable
+            # Return 503 Service Unavailable with Olumi Error Schema v1.0
+            from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
+
+            error_response = ErrorResponse(
+                code=ErrorCode.SERVICE_UNAVAILABLE.value,
+                message=f"Service temporarily unavailable due to high memory usage ({round(mem.percent, 1)}%)",
+                reason="memory_circuit_breaker_open",
+                recovery=RecoveryHints(
+                    hints=[
+                        "Wait 30 seconds before retrying",
+                        "Simplify your request to reduce memory usage",
+                        "Consider reducing batch sizes or complexity"
+                    ],
+                    suggestion="Retry after 30 seconds when memory usage decreases",
+                ),
+                retryable=True,
+                source="isl",
+                request_id=request_id,
+            )
+
             return JSONResponse(
                 status_code=503,
-                content={
-                    "error": {
-                        "code": "SERVICE_UNAVAILABLE",
-                        "message": "Service temporarily unavailable due to high memory usage",
-                        "memory_percent": round(mem.percent, 1),
-                        "threshold_percent": self.threshold,
-                        "suggested_action": "retry_later",
-                        "retry_after": 30  # Suggest retry after 30 seconds
-                    }
-                },
+                content=error_response.model_dump(exclude_none=True),
                 headers={"Retry-After": "30"}
             )
 
@@ -130,18 +145,38 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
             self.last_health_check = now
 
         if not self.is_healthy:
-            logger.warning("circuit_breaker_health_check_failed")
+            # Extract request ID for correlation
+            from src.utils.tracing import get_trace_id
+            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
+            logger.warning(
+                "circuit_breaker_health_check_failed",
+                extra={"request_id": request_id}
+            )
+
+            # Return 503 with Olumi Error Schema v1.0
+            from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
+
+            error_response = ErrorResponse(
+                code=ErrorCode.SERVICE_UNAVAILABLE.value,
+                message="Service temporarily unavailable due to health check failure",
+                reason="health_circuit_breaker_open",
+                recovery=RecoveryHints(
+                    hints=[
+                        "Wait 30 seconds before retrying",
+                        "Check service status page",
+                        "Contact support if issue persists"
+                    ],
+                    suggestion="Retry after 30 seconds",
+                ),
+                retryable=True,
+                source="isl",
+                request_id=request_id,
+            )
 
             return JSONResponse(
                 status_code=503,
-                content={
-                    "error": {
-                        "code": "SERVICE_UNHEALTHY",
-                        "message": "Service temporarily unavailable",
-                        "suggested_action": "retry_later",
-                        "retry_after": 30
-                    }
-                },
+                content=error_response.model_dump(exclude_none=True),
                 headers={"Retry-After": "30"}
             )
 

@@ -59,8 +59,12 @@ def trace_operation(operation_name: str, request_id: str) -> Generator[None, Non
 # Distributed Tracing Functions
 
 def generate_trace_id() -> str:
-    """Generate a unique trace ID."""
-    return f"trace_{uuid.uuid4().hex[:16]}"
+    """
+    Generate a unique request ID.
+
+    Format: req_{uuid16} to align with platform standard.
+    """
+    return f"req_{uuid.uuid4().hex[:16]}"
 
 
 def get_trace_id() -> str:
@@ -88,13 +92,23 @@ def set_user_id(user_id: str) -> None:
 
 
 class TracingMiddleware(BaseHTTPMiddleware):
-    """Middleware to add distributed tracing to all requests."""
+    """
+    Middleware to add distributed tracing to all requests.
+
+    Supports both X-Request-Id (platform standard) and X-Trace-Id (ISL legacy).
+    Priority: X-Request-Id > X-Trace-Id > generated
+    """
 
     async def dispatch(self, request: Request, call_next):
         """Process request with tracing."""
-        # Extract trace ID from header or generate new one
-        trace_id = request.headers.get('X-Trace-Id') or generate_trace_id()
-        set_trace_id(trace_id)
+        # Extract request ID from headers (priority: X-Request-Id > X-Trace-Id)
+        # This aligns with Olumi platform standard while maintaining backward compatibility
+        request_id = (
+            request.headers.get('X-Request-Id') or
+            request.headers.get('X-Trace-Id') or
+            generate_trace_id()
+        )
+        set_trace_id(request_id)
 
         # Extract user ID if present
         user_id = request.headers.get('X-User-Id')
@@ -104,7 +118,9 @@ class TracingMiddleware(BaseHTTPMiddleware):
         # Process request
         response = await call_next(request)
 
-        # Add trace ID to response headers
-        response.headers['X-Trace-Id'] = trace_id
+        # Add correlation IDs to response headers
+        # Include both for compatibility during migration
+        response.headers['X-Request-Id'] = request_id
+        response.headers['X-Trace-Id'] = request_id  # Deprecated, for backward compatibility
 
         return response

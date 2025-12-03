@@ -24,41 +24,185 @@ from .shared import (
 
 
 class ErrorCode(str, Enum):
-    """Error codes for structured error responses."""
+    """
+    ISL-specific error codes following Olumi platform standard.
 
-    INVALID_DAG = "invalid_dag_structure"
-    INVALID_MODEL = "invalid_structural_model"
-    COMPUTATION_ERROR = "computation_error"
-    Y0_ERROR = "y0_library_error"
-    FACET_ERROR = "facet_computation_error"
-    VALIDATION_ERROR = "validation_error"
+    All codes use ISL_ prefix for clarity in multi-service debugging.
+    """
+
+    # DAG Structure Errors
+    INVALID_DAG = "ISL_INVALID_DAG"
+    DAG_CYCLIC = "ISL_DAG_CYCLIC"
+    DAG_EMPTY = "ISL_DAG_EMPTY"
+    DAG_DISCONNECTED = "ISL_DAG_DISCONNECTED"
+    NODE_NOT_FOUND = "ISL_NODE_NOT_FOUND"
+
+    # Model Errors
+    INVALID_MODEL = "ISL_INVALID_MODEL"
+    INVALID_EQUATION = "ISL_INVALID_EQUATION"
+    INVALID_DISTRIBUTION = "ISL_INVALID_DISTRIBUTION"
+    MISSING_VARIABLE = "ISL_MISSING_VARIABLE"
+
+    # Validation Errors
+    VALIDATION_ERROR = "ISL_VALIDATION_ERROR"
+    CAUSAL_NOT_IDENTIFIABLE = "ISL_CAUSAL_NOT_IDENTIFIABLE"
+    NO_ADJUSTMENT_SET = "ISL_NO_ADJUSTMENT_SET"
+    UNMEASURED_CONFOUNDING = "ISL_UNMEASURED_CONFOUNDING"
+
+    # Computation Errors
+    COMPUTATION_ERROR = "ISL_COMPUTATION_ERROR"
+    Y0_ERROR = "ISL_Y0_ERROR"
+    FACET_ERROR = "ISL_FACET_ERROR"
+    MONTE_CARLO_ERROR = "ISL_MONTE_CARLO_ERROR"
+    CONVERGENCE_ERROR = "ISL_CONVERGENCE_ERROR"
+
+    # Input Errors
+    INVALID_INPUT = "ISL_INVALID_INPUT"
+    INVALID_PROBABILITY = "ISL_INVALID_PROBABILITY"
+    INVALID_CONFIDENCE_LEVEL = "ISL_INVALID_CONFIDENCE_LEVEL"
+    BATCH_SIZE_EXCEEDED = "ISL_BATCH_SIZE_EXCEEDED"
+
+    # Resource Errors
+    TIMEOUT = "ISL_TIMEOUT"
+    MEMORY_LIMIT = "ISL_MEMORY_LIMIT"
+    RATE_LIMIT_EXCEEDED = "ISL_RATE_LIMIT_EXCEEDED"
+    SERVICE_UNAVAILABLE = "ISL_SERVICE_UNAVAILABLE"
+
+    # Cache Errors
+    CACHE_ERROR = "ISL_CACHE_ERROR"
+    REDIS_ERROR = "ISL_REDIS_ERROR"
+
+
+class RecoveryHints(BaseModel):
+    """Recovery hints for error resolution."""
+
+    hints: List[str] = Field(..., description="List of actionable hints")
+    suggestion: str = Field(..., description="Primary suggestion")
+    example: Optional[str] = Field(default=None, description="Example fix")
 
 
 class ErrorResponse(BaseModel):
-    """Structured error response."""
+    """
+    Olumi Error Response (v1.0) - ISL Implementation.
 
-    error_code: ErrorCode = Field(..., description="Machine-readable error code")
+    Follows the canonical error schema for all Olumi services.
+    See platform error schema standard for full specification.
+    """
+
+    # Domain-specific fields (ISL defines these)
+    code: str = Field(..., description="Error code (e.g., 'ISL_INVALID_DAG')")
     message: str = Field(..., description="Human-readable error message")
-    details: Optional[Dict[str, Any]] = Field(
+    reason: Optional[str] = Field(
         default=None,
-        description="Additional error details",
+        description="Fine-grained reason code for the error"
     )
-    trace_id: str = Field(
-        default_factory=lambda: str(uuid4()),
-        description="Unique trace ID for debugging",
+
+    # Service-specific details (optional)
+    recovery: Optional[RecoveryHints] = Field(
+        default=None,
+        description="Recovery suggestions and hints"
     )
-    retryable: bool = Field(..., description="Whether the request can be retried")
-    suggested_action: str = Field(..., description="Suggested action to resolve error")
+
+    # ISL domain-specific fields
+    validation_failures: Optional[List[str]] = Field(
+        default=None,
+        description="List of validation failures (ISL-specific)"
+    )
+    node_count: Optional[int] = Field(
+        default=None,
+        description="Number of nodes in DAG (for structure errors)"
+    )
+    edge_count: Optional[int] = Field(
+        default=None,
+        description="Number of edges in DAG (for structure errors)"
+    )
+    missing_nodes: Optional[List[str]] = Field(
+        default=None,
+        description="List of missing nodes referenced in equations"
+    )
+    attempted_methods: Optional[List[str]] = Field(
+        default=None,
+        description="Identification methods attempted (for validation errors)"
+    )
+
+    # Platform-required fields (all services MUST include)
+    retryable: bool = Field(..., description="Can client retry this request?")
+    source: str = Field(default="isl", description="Service that generated error")
+    request_id: str = Field(
+        default_factory=lambda: f"req_{uuid4().hex[:16]}",
+        description="Request ID for correlation (from X-Request-Id header)"
+    )
+    degraded: Optional[bool] = Field(
+        default=False,
+        description="Result is partial/incomplete"
+    )
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "error_code": "invalid_dag_structure",
-                "message": "DAG contains cycles",
-                "trace_id": "550e8400-e29b-41d4-a716-446655440000",
-                "retryable": False,
-                "suggested_action": "fix_input",
-            }
+            "examples": [
+                {
+                    "title": "DAG Structure Error",
+                    "value": {
+                        "code": "ISL_DAG_CYCLIC",
+                        "reason": "cycle_detected",
+                        "message": "DAG contains cycles and cannot be processed",
+                        "recovery": {
+                            "hints": [
+                                "Check for circular dependencies in your model",
+                                "Use a DAG visualization tool to identify cycles"
+                            ],
+                            "suggestion": "Remove edges that create cycles",
+                            "example": "If A→B→C→A exists, remove one edge"
+                        },
+                        "validation_failures": ["Cycle: Price → Revenue → CustomerSatisfaction → Price"],
+                        "node_count": 5,
+                        "edge_count": 6,
+                        "retryable": False,
+                        "source": "isl",
+                        "request_id": "req_abc123def456",
+                        "degraded": False
+                    }
+                },
+                {
+                    "title": "Validation Error",
+                    "value": {
+                        "code": "ISL_CAUSAL_NOT_IDENTIFIABLE",
+                        "reason": "unmeasured_confounding",
+                        "message": "Causal effect cannot be identified",
+                        "recovery": {
+                            "hints": [
+                                "Add measured confounders to the model",
+                                "Consider using instrumental variables",
+                                "Explore front-door criterion"
+                            ],
+                            "suggestion": "Measure and include confounding variables"
+                        },
+                        "attempted_methods": ["backdoor", "front_door", "do_calculus"],
+                        "retryable": False,
+                        "source": "isl",
+                        "request_id": "req_xyz789",
+                        "degraded": False
+                    }
+                },
+                {
+                    "title": "Timeout Error",
+                    "value": {
+                        "code": "ISL_TIMEOUT",
+                        "message": "Computation exceeded time budget",
+                        "recovery": {
+                            "hints": [
+                                "Simplify your causal model",
+                                "Reduce Monte Carlo iterations"
+                            ],
+                            "suggestion": "Retry with a simpler model"
+                        },
+                        "retryable": True,
+                        "source": "isl",
+                        "request_id": "req_timeout123",
+                        "degraded": False
+                    }
+                }
+            ]
         }
     }
 
@@ -1826,6 +1970,212 @@ class ExperimentRecommendationResponse(BaseModel):
                     "technical_basis": "Thompson sampling with 100 posterior samples",
                     "assumptions": ["Parameter beliefs accurate", "Cost-benefit tradeoff acceptable"],
                 },
+            }
+        }
+    }
+
+
+# ============================================================================
+# CEE Enhancement Endpoints (Phase 0) - Response Models
+# ============================================================================
+
+
+class AssumptionSensitivity(BaseModel):
+    """Sensitivity information for a single assumption/variable."""
+
+    variable: str = Field(..., description="Node ID or variable name", max_length=100)
+    sensitivity: float = Field(
+        ...,
+        description="Sensitivity score (0-1), higher = more sensitive",
+        ge=0.0,
+        le=1.0
+    )
+    impact: str = Field(..., description="Description of impact", max_length=500)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable": "n_market_size",
+                "sensitivity": 0.92,
+                "impact": "10% change in market size estimate leads to 25% swing in projected ROI"
+            }
+        }
+    }
+
+
+class SensitivityDetailedResponse(BaseModel):
+    """Response model for detailed sensitivity analysis."""
+
+    assumptions: List[AssumptionSensitivity] = Field(
+        ...,
+        description="List of assumptions with sensitivity analysis"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "assumptions": [
+                    {
+                        "variable": "n_market_size",
+                        "sensitivity": 0.92,
+                        "impact": "10% change in market size estimate leads to 25% swing in projected ROI"
+                    },
+                    {
+                        "variable": "n_adoption_rate",
+                        "sensitivity": 0.78,
+                        "impact": "Adoption rate uncertainty accounts for most outcome variance"
+                    }
+                ]
+            }
+        }
+    }
+
+
+class ContrastiveAlternative(BaseModel):
+    """Single contrastive alternative suggestion."""
+
+    change: str = Field(..., description="What to change", max_length=1000)
+    outcome_diff: str = Field(
+        ...,
+        description="How outcome would differ",
+        max_length=1000
+    )
+    feasibility: float = Field(
+        ...,
+        description="Implementation feasibility (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "change": "Increase initial marketing budget by 40%",
+                "outcome_diff": "Would increase market penetration from 12% to 18% in Q1",
+                "feasibility": 0.85
+            }
+        }
+    }
+
+
+class ContrastiveResponse(BaseModel):
+    """Response model for contrastive explanation."""
+
+    alternatives: List[ContrastiveAlternative] = Field(
+        ...,
+        description="List of actionable alternatives"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "alternatives": [
+                    {
+                        "change": "Increase initial marketing budget by 40%",
+                        "outcome_diff": "Would increase market penetration from 12% to 18% in Q1",
+                        "feasibility": 0.85
+                    },
+                    {
+                        "change": "Partner with established distributor",
+                        "outcome_diff": "Would reduce time-to-market by 3 months but increase costs 15%",
+                        "feasibility": 0.60
+                    }
+                ]
+            }
+        }
+    }
+
+
+class ConformalResponse(BaseModel):
+    """Response model for conformal prediction."""
+
+    prediction_interval: List[float] = Field(
+        ...,
+        description="Numeric bounds [lower, upper]",
+        min_length=2,
+        max_length=2
+    )
+    confidence_level: float = Field(
+        ...,
+        description="Confidence level (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+    uncertainty_source: str = Field(
+        ...,
+        description="Main source of uncertainty",
+        max_length=500
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "prediction_interval": [45000, 78000],
+                "confidence_level": 0.90,
+                "uncertainty_source": "Market demand volatility and competitor response timing"
+            }
+        }
+    }
+
+
+class ValidationImprovement(BaseModel):
+    """Single model improvement suggestion."""
+
+    type: str = Field(
+        ...,
+        description="Category (e.g., data_collection, model_structure, sensitivity_test)",
+        max_length=100
+    )
+    description: str = Field(
+        ...,
+        description="What to do",
+        max_length=1000
+    )
+    priority: str = Field(
+        ...,
+        description="Implementation priority",
+        pattern="^(high|medium|low)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "data_collection",
+                "description": "Gather historical adoption data from 3-5 comparable product launches to calibrate adoption rate assumptions",
+                "priority": "high"
+            }
+        }
+    }
+
+
+class ValidationStrategiesResponse(BaseModel):
+    """Response model for validation strategies."""
+
+    suggested_improvements: List[ValidationImprovement] = Field(
+        ...,
+        description="List of suggested model improvements"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "suggested_improvements": [
+                    {
+                        "type": "data_collection",
+                        "description": "Gather historical adoption data from 3-5 comparable product launches to calibrate adoption rate assumptions",
+                        "priority": "high"
+                    },
+                    {
+                        "type": "model_structure",
+                        "description": "Add explicit node for competitor response to capture strategic interaction effects",
+                        "priority": "medium"
+                    },
+                    {
+                        "type": "sensitivity_test",
+                        "description": "Test model robustness by varying market size estimate ±20%",
+                        "priority": "low"
+                    }
+                ]
             }
         }
     }
