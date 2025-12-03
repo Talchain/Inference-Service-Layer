@@ -24,7 +24,7 @@ python-json-logger = "2.0.7"
 python-dotenv = "1.0.1"
 # Phase 1 dependencies - pinned for security
 redis = "5.0.3"
-prometheus-client = "0.20.0"
+prometheus-client = "0.23.1"
 psutil = "^5.9.0"
 # Phase 4A LLM dependencies - pinned for security
 openai = "1.12.0"
