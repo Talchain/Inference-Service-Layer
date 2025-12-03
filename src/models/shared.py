@@ -263,3 +263,148 @@ class SensitivityRange(BaseModel):
             }
         }
     }
+
+
+class NodeKind(str, Enum):
+    """Node kind for GraphV1."""
+
+    GOAL = "goal"
+    DECISION = "decision"
+    OPTION = "option"
+    OUTCOME = "outcome"
+    RISK = "risk"
+    ACTION = "action"
+
+
+class GraphNodeV1(BaseModel):
+    """Node in GraphV1 structure."""
+
+    id: str = Field(..., description="Unique node identifier", max_length=100)
+    kind: NodeKind = Field(..., description="Type of node")
+    label: str = Field(..., description="Human-readable label", max_length=500)
+    body: Optional[str] = Field(None, description="Detailed description", max_length=5000)
+    belief: Optional[float] = Field(
+        None,
+        description="Belief probability (0-1) for probabilistic nodes",
+        ge=0.0,
+        le=1.0
+    )
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Additional metadata")
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        """Validate node ID is a safe identifier."""
+        from src.utils.security_validators import validate_node_names
+        validate_node_names([v])
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "n_market_size",
+                "kind": "outcome",
+                "label": "Market Size Estimate",
+                "body": "Total addressable market for product launch",
+                "belief": 0.85,
+                "metadata": {"unit": "millions", "currency": "USD"}
+            }
+        }
+    }
+
+
+class GraphEdgeV1(BaseModel):
+    """Edge in GraphV1 structure."""
+
+    from_: str = Field(..., alias="from", description="Source node ID", max_length=100)
+    to: str = Field(..., description="Target node ID", max_length=100)
+    weight: Optional[float] = Field(
+        None,
+        description="Edge weight (-3 to +3)",
+        ge=-3.0,
+        le=3.0
+    )
+    label: Optional[str] = Field(None, description="Edge label", max_length=500)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "from": "n_marketing_budget",
+                "to": "n_market_penetration",
+                "weight": 2.5,
+                "label": "Strong positive influence"
+            }
+        }
+    }
+
+
+class GraphV1(BaseModel):
+    """
+    GraphV1 structure for CEE decision reviews.
+
+    Represents causal decision graphs with typed nodes and weighted edges.
+    """
+
+    nodes: List[GraphNodeV1] = Field(
+        ...,
+        description="List of graph nodes",
+        min_length=1,
+        max_length=100
+    )
+    edges: List[GraphEdgeV1] = Field(
+        ...,
+        description="List of directed edges",
+        max_length=300
+    )
+
+    @field_validator("nodes")
+    @classmethod
+    def validate_unique_node_ids(cls, v: List[GraphNodeV1]) -> List[GraphNodeV1]:
+        """Validate node IDs are unique."""
+        node_ids = [node.id for node in v]
+        if len(node_ids) != len(set(node_ids)):
+            duplicates = [id for id in node_ids if node_ids.count(id) > 1]
+            raise ValueError(f"Duplicate node IDs found: {duplicates}")
+        return v
+
+    @field_validator("edges")
+    @classmethod
+    def validate_edges_reference_nodes(cls, v: List[GraphEdgeV1], info) -> List[GraphEdgeV1]:
+        """Validate edges reference existing nodes."""
+        if 'nodes' in info.data:
+            node_ids = {node.id for node in info.data['nodes']}
+            for edge in v:
+                if edge.from_ not in node_ids:
+                    raise ValueError(f"Edge references non-existent node: {edge.from_}")
+                if edge.to not in node_ids:
+                    raise ValueError(f"Edge references non-existent node: {edge.to}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "nodes": [
+                    {
+                        "id": "n_launch_product",
+                        "kind": "decision",
+                        "label": "Launch New Product",
+                        "body": "Decision to launch product in Q1"
+                    },
+                    {
+                        "id": "n_market_success",
+                        "kind": "outcome",
+                        "label": "Market Success",
+                        "belief": 0.75
+                    }
+                ],
+                "edges": [
+                    {
+                        "from": "n_launch_product",
+                        "to": "n_market_success",
+                        "weight": 2.0,
+                        "label": "Expected positive impact"
+                    }
+                ]
+            }
+        }
+    }
