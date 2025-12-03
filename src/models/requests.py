@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 
-from .shared import DAGStructure, Distribution, DistributionType, StructuralModel
+from .shared import DAGStructure, Distribution, DistributionType, GraphV1, StructuralModel
 
 
 class CausalValidationRequest(BaseModel):
@@ -1046,6 +1046,177 @@ class ExperimentRecommendationRequest(BaseModel):
                     }
                 ],
                 "seed": 42,
+            }
+        }
+    }
+
+
+# ============================================================================
+# CEE Enhancement Endpoints (Phase 0)
+# ============================================================================
+
+
+class SensitivityDetailedRequest(BaseModel):
+    """Request model for detailed sensitivity analysis endpoint."""
+
+    graph: GraphV1 = Field(..., description="Decision graph structure")
+    timeout: Optional[int] = Field(
+        default=12000,
+        description="Request timeout in milliseconds",
+        ge=1000,
+        le=30000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {
+                            "id": "n_market_size",
+                            "kind": "outcome",
+                            "label": "Market Size",
+                            "belief": 0.75
+                        },
+                        {
+                            "id": "n_roi",
+                            "kind": "outcome",
+                            "label": "ROI"
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "from": "n_market_size",
+                            "to": "n_roi",
+                            "weight": 2.5
+                        }
+                    ]
+                },
+                "timeout": 12000
+            }
+        }
+    }
+
+
+class ContrastiveRequest(BaseModel):
+    """Request model for contrastive explanation endpoint."""
+
+    graph: GraphV1 = Field(..., description="Decision graph structure")
+    target_outcome: str = Field(
+        ...,
+        description="Desired outcome or node ID to analyze",
+        max_length=100
+    )
+    timeout: Optional[int] = Field(
+        default=12000,
+        description="Request timeout in milliseconds",
+        ge=1000,
+        le=30000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {
+                            "id": "n_launch_product",
+                            "kind": "decision",
+                            "label": "Launch Product"
+                        },
+                        {
+                            "id": "n_market_success",
+                            "kind": "outcome",
+                            "label": "Market Success"
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "from": "n_launch_product",
+                            "to": "n_market_success",
+                            "weight": 2.0
+                        }
+                    ]
+                },
+                "target_outcome": "n_market_success",
+                "timeout": 12000
+            }
+        }
+    }
+
+
+class ConformalRequest(BaseModel):
+    """Request model for conformal prediction endpoint."""
+
+    graph: GraphV1 = Field(..., description="Decision graph structure")
+    variable: str = Field(
+        ...,
+        description="Variable or outcome to predict",
+        max_length=100
+    )
+    timeout: Optional[int] = Field(
+        default=12000,
+        description="Request timeout in milliseconds",
+        ge=1000,
+        le=30000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {
+                            "id": "n_revenue",
+                            "kind": "outcome",
+                            "label": "Revenue"
+                        }
+                    ],
+                    "edges": []
+                },
+                "variable": "n_revenue",
+                "timeout": 12000
+            }
+        }
+    }
+
+
+class ValidationStrategiesRequest(BaseModel):
+    """Request model for validation strategies endpoint."""
+
+    graph: GraphV1 = Field(..., description="Decision graph structure")
+    timeout: Optional[int] = Field(
+        default=12000,
+        description="Request timeout in milliseconds",
+        ge=1000,
+        le=30000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {
+                            "id": "n_decision",
+                            "kind": "decision",
+                            "label": "Strategic Decision"
+                        },
+                        {
+                            "id": "n_outcome",
+                            "kind": "outcome",
+                            "label": "Business Outcome"
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "from": "n_decision",
+                            "to": "n_outcome",
+                            "weight": 1.5
+                        }
+                    ]
+                },
+                "timeout": 12000
             }
         }
     }

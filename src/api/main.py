@@ -26,6 +26,7 @@ from src.utils.tracing import TracingMiddleware
 from .analysis import router as analysis_router
 from .batch import router as batch_router
 from .causal import router as causal_router
+from .cee import router as cee_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
 from .explain import router as explain_router
@@ -437,6 +438,11 @@ app.include_router(
     explain_router,
     prefix=f"{settings.API_V1_PREFIX}/explain",
     tags=["Contrastive Explanations"],
+)
+app.include_router(
+    cee_router,
+    prefix=f"{settings.API_V1_PREFIX}",
+    tags=["CEE Enhancement"],
 )
 # ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
 # app.include_router(

@@ -1973,3 +1973,209 @@ class ExperimentRecommendationResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# CEE Enhancement Endpoints (Phase 0) - Response Models
+# ============================================================================
+
+
+class AssumptionSensitivity(BaseModel):
+    """Sensitivity information for a single assumption/variable."""
+
+    variable: str = Field(..., description="Node ID or variable name", max_length=100)
+    sensitivity: float = Field(
+        ...,
+        description="Sensitivity score (0-1), higher = more sensitive",
+        ge=0.0,
+        le=1.0
+    )
+    impact: str = Field(..., description="Description of impact", max_length=500)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable": "n_market_size",
+                "sensitivity": 0.92,
+                "impact": "10% change in market size estimate leads to 25% swing in projected ROI"
+            }
+        }
+    }
+
+
+class SensitivityDetailedResponse(BaseModel):
+    """Response model for detailed sensitivity analysis."""
+
+    assumptions: List[AssumptionSensitivity] = Field(
+        ...,
+        description="List of assumptions with sensitivity analysis"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "assumptions": [
+                    {
+                        "variable": "n_market_size",
+                        "sensitivity": 0.92,
+                        "impact": "10% change in market size estimate leads to 25% swing in projected ROI"
+                    },
+                    {
+                        "variable": "n_adoption_rate",
+                        "sensitivity": 0.78,
+                        "impact": "Adoption rate uncertainty accounts for most outcome variance"
+                    }
+                ]
+            }
+        }
+    }
+
+
+class ContrastiveAlternative(BaseModel):
+    """Single contrastive alternative suggestion."""
+
+    change: str = Field(..., description="What to change", max_length=1000)
+    outcome_diff: str = Field(
+        ...,
+        description="How outcome would differ",
+        max_length=1000
+    )
+    feasibility: float = Field(
+        ...,
+        description="Implementation feasibility (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "change": "Increase initial marketing budget by 40%",
+                "outcome_diff": "Would increase market penetration from 12% to 18% in Q1",
+                "feasibility": 0.85
+            }
+        }
+    }
+
+
+class ContrastiveResponse(BaseModel):
+    """Response model for contrastive explanation."""
+
+    alternatives: List[ContrastiveAlternative] = Field(
+        ...,
+        description="List of actionable alternatives"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "alternatives": [
+                    {
+                        "change": "Increase initial marketing budget by 40%",
+                        "outcome_diff": "Would increase market penetration from 12% to 18% in Q1",
+                        "feasibility": 0.85
+                    },
+                    {
+                        "change": "Partner with established distributor",
+                        "outcome_diff": "Would reduce time-to-market by 3 months but increase costs 15%",
+                        "feasibility": 0.60
+                    }
+                ]
+            }
+        }
+    }
+
+
+class ConformalResponse(BaseModel):
+    """Response model for conformal prediction."""
+
+    prediction_interval: List[float] = Field(
+        ...,
+        description="Numeric bounds [lower, upper]",
+        min_length=2,
+        max_length=2
+    )
+    confidence_level: float = Field(
+        ...,
+        description="Confidence level (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+    uncertainty_source: str = Field(
+        ...,
+        description="Main source of uncertainty",
+        max_length=500
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "prediction_interval": [45000, 78000],
+                "confidence_level": 0.90,
+                "uncertainty_source": "Market demand volatility and competitor response timing"
+            }
+        }
+    }
+
+
+class ValidationImprovement(BaseModel):
+    """Single model improvement suggestion."""
+
+    type: str = Field(
+        ...,
+        description="Category (e.g., data_collection, model_structure, sensitivity_test)",
+        max_length=100
+    )
+    description: str = Field(
+        ...,
+        description="What to do",
+        max_length=1000
+    )
+    priority: str = Field(
+        ...,
+        description="Implementation priority",
+        pattern="^(high|medium|low)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "data_collection",
+                "description": "Gather historical adoption data from 3-5 comparable product launches to calibrate adoption rate assumptions",
+                "priority": "high"
+            }
+        }
+    }
+
+
+class ValidationStrategiesResponse(BaseModel):
+    """Response model for validation strategies."""
+
+    suggested_improvements: List[ValidationImprovement] = Field(
+        ...,
+        description="List of suggested model improvements"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "suggested_improvements": [
+                    {
+                        "type": "data_collection",
+                        "description": "Gather historical adoption data from 3-5 comparable product launches to calibrate adoption rate assumptions",
+                        "priority": "high"
+                    },
+                    {
+                        "type": "model_structure",
+                        "description": "Add explicit node for competitor response to capture strategic interaction effects",
+                        "priority": "medium"
+                    },
+                    {
+                        "type": "sensitivity_test",
+                        "description": "Test model robustness by varying market size estimate ±20%",
+                        "priority": "low"
+                    }
+                ]
+            }
+        }
+    }
