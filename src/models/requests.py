@@ -1220,3 +1220,54 @@ class ValidationStrategiesRequest(BaseModel):
             }
         }
     }
+
+
+class ParameterRecommendationRequest(BaseModel):
+    """Request model for parameter recommendation endpoint."""
+
+    graph: GraphV1 = Field(..., description="Decision graph structure")
+    timeout: Optional[int] = Field(
+        default=12000,
+        description="Request timeout in milliseconds",
+        ge=1000,
+        le=30000
+    )
+    current_parameters: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Optional current parameter values to compare against"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {
+                            "id": "n_decision",
+                            "kind": "decision",
+                            "label": "Launch Product",
+                            "belief": 0.8
+                        },
+                        {
+                            "id": "n_outcome",
+                            "kind": "outcome",
+                            "label": "Market Success",
+                            "belief": 0.6
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "from": "n_decision",
+                            "to": "n_outcome",
+                            "weight": 2.0
+                        }
+                    ]
+                },
+                "timeout": 12000,
+                "current_parameters": {
+                    "n_decision_to_n_outcome_weight": 2.0,
+                    "n_decision_belief": 0.8
+                }
+            }
+        }
+    }

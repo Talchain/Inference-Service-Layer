@@ -2179,3 +2179,115 @@ class ValidationStrategiesResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Parameter Recommendation Endpoint - Response Models
+# ============================================================================
+
+
+class ParameterRecommendation(BaseModel):
+    """Single parameter recommendation with range and rationale."""
+
+    parameter: str = Field(
+        ...,
+        description="Parameter name (e.g., 'n_decision_to_n_outcome_weight')",
+        max_length=200
+    )
+    parameter_type: str = Field(
+        ...,
+        description="Type of parameter",
+        pattern="^(weight|belief)$"
+    )
+    current_value: Optional[float] = Field(
+        default=None,
+        description="Current parameter value (if provided in request)"
+    )
+    recommended_range: List[float] = Field(
+        ...,
+        description="Recommended range [min, max]",
+        min_length=2,
+        max_length=2
+    )
+    recommended_typical: float = Field(
+        ...,
+        description="Typical/center value of recommended range"
+    )
+    rationale: str = Field(
+        ...,
+        description="Explanation of why this range is recommended",
+        max_length=500
+    )
+    importance: float = Field(
+        ...,
+        description="Parameter importance (0-1, from sensitivity analysis)",
+        ge=0.0,
+        le=1.0
+    )
+    confidence: str = Field(
+        ...,
+        description="Confidence in recommendation",
+        pattern="^(high|medium|low)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter": "n_decision_to_n_outcome_weight",
+                "parameter_type": "weight",
+                "current_value": 2.0,
+                "recommended_range": [1.2, 1.8],
+                "recommended_typical": 1.5,
+                "rationale": "Critical path edge connecting decision to outcome - requires strong causal influence",
+                "importance": 0.92,
+                "confidence": "high"
+            }
+        }
+    }
+
+
+class ParameterRecommendationResponse(BaseModel):
+    """Response model for parameter recommendation endpoint."""
+
+    recommendations: List[ParameterRecommendation] = Field(
+        ...,
+        description="List of parameter recommendations sorted by importance"
+    )
+    graph_characteristics: Dict[str, Any] = Field(
+        ...,
+        description="Metadata about graph structure"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "recommendations": [
+                    {
+                        "parameter": "n_decision_to_n_outcome_weight",
+                        "parameter_type": "weight",
+                        "current_value": 2.0,
+                        "recommended_range": [1.2, 1.8],
+                        "recommended_typical": 1.5,
+                        "rationale": "Critical path edge connecting decision to outcome - requires strong causal influence",
+                        "importance": 0.92,
+                        "confidence": "high"
+                    },
+                    {
+                        "parameter": "n_decision_belief",
+                        "parameter_type": "belief",
+                        "current_value": 0.8,
+                        "recommended_range": [0.75, 0.95],
+                        "recommended_typical": 0.85,
+                        "rationale": "Treatment node - high certainty recommended for robust analysis",
+                        "importance": 0.78,
+                        "confidence": "high"
+                    }
+                ],
+                "graph_characteristics": {
+                    "num_critical_edges": 3,
+                    "max_path_length": 4,
+                    "avg_centrality": 0.42
+                }
+            }
+        }
+    }
