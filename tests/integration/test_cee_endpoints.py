@@ -275,3 +275,78 @@ async def test_all_endpoints_support_request_id_header(simple_graph):
                 headers={"X-Request-Id": "test_request_123"}
             )
             assert response.status_code == 200, f"Failed for {endpoint}"
+
+
+@pytest.mark.asyncio
+async def test_validation_detects_missing_weights():
+    """Flags when >50% edges lack weights and references parameter-recommendations."""
+    graph = GraphV1.model_validate({
+        "nodes": [
+            {"id": "n1", "kind": "decision", "label": "A"},
+            {"id": "n2", "kind": "action", "label": "B"},
+            {"id": "n3", "kind": "action", "label": "C"},
+            {"id": "n4", "kind": "outcome", "label": "D"},
+        ],
+        "edges": [
+            {"from": "n1", "to": "n2", "weight": 1.0},  # Has weight
+            {"from": "n1", "to": "n3"},  # Missing weight
+            {"from": "n2", "to": "n4"},  # Missing weight
+            {"from": "n3", "to": "n4"},  # Missing weight
+        ]
+    })
+
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/validation/strategies",
+            json={"graph": graph.model_dump(by_alias=True)}
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check for missing weights recommendation
+    missing_weight_rec = next(
+        (rec for rec in data["suggested_improvements"] if "50%" in rec["description"]),
+        None
+    )
+    assert missing_weight_rec is not None, "Should detect missing weights"
+    assert "parameter-recommendations" in missing_weight_rec["description"]
+    assert missing_weight_rec["priority"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_validation_detects_uniform_weights():
+    """Flags when all edges have same weight and references parameter-recommendations."""
+    graph = GraphV1.model_validate({
+        "nodes": [
+            {"id": "n1", "kind": "decision", "label": "A"},
+            {"id": "n2", "kind": "action", "label": "B"},
+            {"id": "n3", "kind": "action", "label": "C"},
+            {"id": "n4", "kind": "outcome", "label": "D"},
+        ],
+        "edges": [
+            {"from": "n1", "to": "n2", "weight": 0.5},
+            {"from": "n1", "to": "n3", "weight": 0.5},
+            {"from": "n2", "to": "n4", "weight": 0.5},
+            {"from": "n3", "to": "n4", "weight": 0.5},
+        ]
+    })
+
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/validation/strategies",
+            json={"graph": graph.model_dump(by_alias=True)}
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Check for uniform weights recommendation
+    uniform_weight_rec = next(
+        (rec for rec in data["suggested_improvements"] if "uniform weight" in rec["description"]),
+        None
+    )
+    assert uniform_weight_rec is not None, "Should detect uniform weights"
+    assert "0.5" in uniform_weight_rec["description"]
+    assert "parameter-recommendations" in uniform_weight_rec["description"]
+    assert uniform_weight_rec["priority"] == "medium"

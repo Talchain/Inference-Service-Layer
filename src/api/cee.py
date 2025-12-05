@@ -639,4 +639,26 @@ def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
             )
         )
 
+    # Check for missing weights
+    edges_with_weights = [e for e in graph.edges if e.weight is not None]
+    if len(edges_with_weights) < len(graph.edges) * 0.5:
+        recommendations.append(
+            ValidationImprovement(
+                type="model_structure",
+                description="Over 50% of edges lack explicit weights. Call /api/v1/causal/parameter-recommendations for suggested ranges based on causal topology.",
+                priority="high"
+            )
+        )
+
+    # Check for uniform weights (all edges have same value)
+    weights = [e.weight for e in edges_with_weights]
+    if weights and len(set(weights)) == 1 and len(weights) > 2:
+        recommendations.append(
+            ValidationImprovement(
+                type="model_structure",
+                description=f"All {len(weights)} edges have uniform weight ({weights[0]}). Call /api/v1/causal/parameter-recommendations to differentiate based on causal importance.",
+                priority="medium"
+            )
+        )
+
     return recommendations
