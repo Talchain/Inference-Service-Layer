@@ -21,6 +21,7 @@ from src.models.requests import (
     DiscoveryFromDataRequest,
     DiscoveryFromKnowledgeRequest,
     ExperimentRecommendationRequest,
+    ParameterRecommendationRequest,
     TransportabilityRequest,
     ValidationStrategyRequest,
 )
@@ -35,6 +36,7 @@ from src.models.responses import (
     ErrorCode,
     ErrorResponse,
     ExperimentRecommendationResponse,
+    ParameterRecommendationResponse,
     TransportabilityResponse,
     ValidationStrategyResponse,
 )
@@ -45,6 +47,7 @@ from src.services.causal_transporter import CausalTransporter
 from src.services.causal_validator import CausalValidator
 from src.services.conformal_predictor import ConformalPredictor
 from src.services.counterfactual_engine import CounterfactualEngine
+from src.services.parameter_recommender import generate_parameter_recommendations
 from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
 
@@ -1127,6 +1130,90 @@ async def recommend_experiment(
 
 
 @router.post(
+    "/parameter-recommendations",
+    response_model=ParameterRecommendationResponse,
+    summary="Parameter range recommendations",
+    description="""
+    Suggest optimal weight and belief ranges based on causal graph topology.
+
+    Provides:
+    - Weight ranges for edges based on critical path analysis
+    - Belief ranges for nodes based on causal role
+    - Importance rankings for all parameters
+    - Rationale for each recommendation
+
+    **Use when:** Calibrating parameter values or validating existing estimates.
+    """,
+    responses={
+        200: {"description": "Parameter recommendations generated successfully"},
+        400: {"description": "Invalid graph structure"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def recommend_parameters(
+    request: ParameterRecommendationRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> ParameterRecommendationResponse:
+    """
+    Generate parameter recommendations for decision graph.
+
+    Args:
+        request: Parameter recommendation request with GraphV1 structure
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        ParameterRecommendationResponse: Parameter recommendations with ranges
+    """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "parameter_recommendation_request",
+            extra={
+                "request_id": request_id,
+                "num_nodes": len(request.graph.nodes),
+                "num_edges": len(request.graph.edges),
+                "has_current_params": request.current_parameters is not None,
+                "timeout": request.timeout,
+            },
+        )
+
+        # Generate recommendations
+        recommendations, graph_characteristics = generate_parameter_recommendations(
+            graph=request.graph,
+            current_parameters=request.current_parameters,
+        )
+
+        logger.info(
+            "parameter_recommendation_completed",
+            extra={
+                "request_id": request_id,
+                "num_recommendations": len(recommendations),
+                "num_critical_edges": graph_characteristics.get("num_critical_edges", 0),
+                "max_path_length": graph_characteristics.get("max_path_length", 0),
+            },
+        )
+
+        return ParameterRecommendationResponse(
+            recommendations=recommendations,
+            graph_characteristics=graph_characteristics,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "parameter_recommendation_error",
+            extra={"request_id": request_id, "error": str(e)},
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Parameter recommendation failed: {str(e)}"
+        )
+
+
+@router.post(
     "/sensitivity/detailed",
     response_model=SensitivityReport,
     summary="Detailed sensitivity analysis for causal assumptions",
@@ -1235,7 +1322,7 @@ async def analyze_detailed_sensitivity(
 
     **Features:**
     - Automatic factor identification
-    - Keyword extraction per factor  
+    - Keyword extraction per factor
     - Suggested DAG structure
     - Factor prevalence and strength scores
 

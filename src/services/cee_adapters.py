@@ -280,3 +280,110 @@ def format_graph_summary(graph: GraphV1) -> str:
         f"Graph with {len(graph.nodes)} nodes ({type_summary}) "
         f"and {len(graph.edges)} edges"
     )
+
+
+def find_critical_path_edges(G: nx.DiGraph, treatment: str, outcome: str) -> List[Tuple[str, str]]:
+    """
+    Identify edges on critical paths from treatment to outcome.
+
+    Args:
+        G: NetworkX directed graph
+        treatment: Treatment/decision node ID
+        outcome: Outcome node ID
+
+    Returns:
+        List of (from_node, to_node) tuples for critical path edges
+    """
+    critical_edges = set()
+
+    try:
+        if nx.has_path(G, treatment, outcome):
+            # Find all simple paths from treatment to outcome
+            paths = list(nx.all_simple_paths(G, treatment, outcome, cutoff=10))
+
+            # Add all edges that appear in any path
+            for path in paths:
+                for i in range(len(path) - 1):
+                    critical_edges.add((path[i], path[i + 1]))
+    except (nx.NetworkXError, nx.NodeNotFound):
+        # If nodes don't exist or no path, return empty set
+        pass
+
+    return list(critical_edges)
+
+
+def calculate_node_centralities(G: nx.DiGraph) -> Dict[str, float]:
+    """
+    Calculate centrality metrics for all nodes.
+
+    Args:
+        G: NetworkX directed graph
+
+    Returns:
+        Dict mapping node ID to centrality score (0-1)
+    """
+    centralities = {}
+
+    try:
+        # Use betweenness centrality as primary metric
+        betweenness = nx.betweenness_centrality(G)
+        degree_cent = nx.degree_centrality(G)
+
+        # Combine metrics (weighted average)
+        for node in G.nodes():
+            centralities[node] = 0.6 * betweenness.get(node, 0) + 0.4 * degree_cent.get(node, 0)
+    except:
+        # Fallback to degree centrality only
+        try:
+            centralities = nx.degree_centrality(G)
+        except:
+            # Last resort: all nodes get 0.5
+            for node in G.nodes():
+                centralities[node] = 0.5
+
+    return centralities
+
+
+def identify_node_role(
+    node_id: str,
+    graph: GraphV1,
+    treatment: str,
+    outcome: str
+) -> str:
+    """
+    Identify the role of a node in the causal graph.
+
+    Args:
+        node_id: Node ID to classify
+        graph: GraphV1 structure
+        treatment: Treatment node ID
+        outcome: Outcome node ID
+
+    Returns:
+        Role string: 'treatment', 'outcome', 'mediator', 'confounder', 'other'
+    """
+    if node_id == treatment:
+        return 'treatment'
+    elif node_id == outcome:
+        return 'outcome'
+
+    # Check if node is on path between treatment and outcome
+    G = graph_v1_to_networkx(graph)
+
+    try:
+        if nx.has_path(G, treatment, outcome):
+            paths = list(nx.all_simple_paths(G, treatment, outcome, cutoff=10))
+            for path in paths:
+                if node_id in path:
+                    return 'mediator'
+
+        # Check if node influences both treatment and outcome (confounder)
+        has_path_to_treatment = nx.has_path(G, node_id, treatment)
+        has_path_to_outcome = nx.has_path(G, node_id, outcome)
+
+        if has_path_to_treatment and has_path_to_outcome:
+            return 'confounder'
+    except (nx.NetworkXError, nx.NodeNotFound):
+        pass
+
+    return 'other'
