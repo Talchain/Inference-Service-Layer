@@ -1,0 +1,133 @@
+{
+  "timestamp": "2025-11-23T19:14:32.648289Z",
+  "base_url": "http://localhost:8000",
+  "endpoints": [
+    {
+      "endpoint": "Causal Validation",
+      "method": "POST",
+      "path": "/api/v1/causal/validate",
+      "iterations": 10,
+      "success_rate": 0.0,
+      "latency": {
+        "mean": 11.370396199998822,
+        "median": 10.01678099999026,
+        "p95": 26.913099000012153,
+        "p99": 26.913099000012153,
+        "min": 7.8409310000324695,
+        "max": 26.913099000012153
+      },
+      "memory": {
+        "mean_mb": 1.67578125,
+        "max_mb": 1.67578125
+      },
+      "cpu_profile_top_20": "         35344 function calls (35067 primitive calls) in 1.123 seconds\n\n   Ordered by: cumulative time\n   List reduced from 982 to 20 due to restriction <20>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      113    0.002    0.000    1.115    0.010 /usr/lib/python3.11/asyncio/base_events.py:1859(_run_once)\n      113    0.001    0.000    1.057    0.009 /usr/lib/python3.11/selectors.py:451(select)\n      113    1.056    0.009    1.056    0.009 {method 'poll' of 'select.epoll' objects}\n      121    0.000    0.000    0.056    0.000 /usr/lib/python3.11/asyncio/events.py:82(_run)\n      121    0.000    0.000    0.056    0.000 {method 'run' of '_contextvars.Context' objects}\n       84    0.000    0.000    0.054    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1485(request)\n       84    0.000    0.000    0.050    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:294(main)\n       84    0.000    0.000    0.050    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:143(profile_all)\n       84    0.000    0.000    0.050    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:46(profile_endpoint)\n       84    0.000    0.000    0.049    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1594(send)\n       72    0.000    0.000    0.041    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1645(_send_handling_auth)\n       72    0.000    0.000    0.041    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1679(_send_handling_redirects)\n       72    0.000    0.000    0.041    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1717(_send_single_request)\n       72    0.000    0.000    0.034    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_transports/default.py:374(handle_async_request)\n       72    0.000    0.000    0.033    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:199(handle_async_request)\n       72    0.000    0.000    0.022    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection.py:69(handle_async_request)\n       60    0.001    0.000    0.018    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:65(handle_async_request)\n       20    0.000    0.000    0.011    0.001 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:270(_assign_requests_to_connections)\n      230    0.000    0.000    0.009    0.000 /usr/local/lib/python3.11/dist-packages/anyio/_core/_eventloop.py:145(get_asynclib)\n       10    0.000    0.000    0.007    0.001 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:23(assign_to_connection)\n\n\n"
+    },
+    {
+      "endpoint": "Validation Strategies",
+      "method": "POST",
+      "path": "/api/v1/validation/strategies",
+      "iterations": 10,
+      "success_rate": 0.0,
+      "latency": {
+        "mean": 8.056013000015128,
+        "median": 8.110986000019693,
+        "p95": 9.266783000043688,
+        "p99": 9.266783000043688,
+        "min": 7.276634999982434,
+        "max": 9.266783000043688
+      },
+      "memory": {
+        "mean_mb": 0.0,
+        "max_mb": 0.0
+      },
+      "cpu_profile_top_20": "         31935 function calls (31713 primitive calls) in 1.092 seconds\n\n   Ordered by: cumulative time\n   List reduced from 538 to 20 due to restriction <20>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      103    0.001    0.000    1.091    0.011 /usr/lib/python3.11/asyncio/base_events.py:1859(_run_once)\n      103    0.001    0.000    1.038    0.010 /usr/lib/python3.11/selectors.py:451(select)\n      103    1.038    0.010    1.038    0.010 {method 'poll' of 'select.epoll' objects}\n      103    0.000    0.000    0.050    0.000 /usr/lib/python3.11/asyncio/events.py:82(_run)\n      103    0.000    0.000    0.050    0.000 {method 'run' of '_contextvars.Context' objects}\n       82    0.000    0.000    0.045    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:294(main)\n       82    0.000    0.000    0.044    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:143(profile_all)\n       82    0.000    0.000    0.044    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:46(profile_endpoint)\n       82    0.000    0.000    0.042    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1485(request)\n       82    0.000    0.000    0.037    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1594(send)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1645(_send_handling_auth)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1679(_send_handling_redirects)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1717(_send_single_request)\n       70    0.000    0.000    0.023    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_transports/default.py:374(handle_async_request)\n       70    0.000    0.000    0.022    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:199(handle_async_request)\n       70    0.000    0.000    0.018    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection.py:69(handle_async_request)\n       60    0.001    0.000    0.017    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:65(handle_async_request)\n       22    0.000    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_models.py:974(aread)\n       22    0.000    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_models.py:979(<listcomp>)\n       32    0.000    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_models.py:982(aiter_bytes)\n\n\n"
+    },
+    {
+      "endpoint": "Counterfactual",
+      "method": "POST",
+      "path": "/api/v1/causal/counterfactual",
+      "iterations": 10,
+      "success_rate": 0.0,
+      "latency": {
+        "mean": 8.37719410000659,
+        "median": 7.86128900000449,
+        "p95": 13.489028999970287,
+        "p99": 13.489028999970287,
+        "min": 7.358903000010741,
+        "max": 13.489028999970287
+      },
+      "memory": {
+        "mean_mb": 0.0,
+        "max_mb": 0.0
+      },
+      "cpu_profile_top_20": "         31669 function calls (31449 primitive calls) in 1.091 seconds\n\n   Ordered by: cumulative time\n   List reduced from 538 to 20 due to restriction <20>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      100    0.001    0.000    1.089    0.011 /usr/lib/python3.11/asyncio/base_events.py:1859(_run_once)\n      100    0.001    0.000    1.039    0.010 /usr/lib/python3.11/selectors.py:451(select)\n      100    1.039    0.010    1.039    0.010 {method 'poll' of 'select.epoll' objects}\n      100    0.000    0.000    0.048    0.000 /usr/lib/python3.11/asyncio/events.py:82(_run)\n      100    0.000    0.000    0.048    0.000 {method 'run' of '_contextvars.Context' objects}\n       80    0.000    0.000    0.043    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:294(main)\n       80    0.000    0.000    0.043    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:143(profile_all)\n       80    0.000    0.000    0.043    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:46(profile_endpoint)\n       80    0.000    0.000    0.041    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1485(request)\n       80    0.000    0.000    0.036    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1594(send)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1645(_send_handling_auth)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1679(_send_handling_redirects)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1717(_send_single_request)\n       70    0.000    0.000    0.023    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_transports/default.py:374(handle_async_request)\n       70    0.000    0.000    0.022    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:199(handle_async_request)\n       70    0.000    0.000    0.018    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection.py:69(handle_async_request)\n       60    0.001    0.000    0.017    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:65(handle_async_request)\n       50    0.000    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:163(_send_event)\n       30    0.001    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:170(_receive_response_headers)\n       20    0.000    0.000    0.006    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_models.py:974(aread)\n\n\n"
+    },
+    {
+      "endpoint": "Conformal Prediction",
+      "method": "POST",
+      "path": "/api/v1/causal/conformal",
+      "iterations": 10,
+      "success_rate": 0.0,
+      "latency": {
+        "mean": 8.086655299990753,
+        "median": 7.72553600000947,
+        "p95": 9.794540999962464,
+        "p99": 9.794540999962464,
+        "min": 7.139893999976721,
+        "max": 9.794540999962464
+      },
+      "memory": {
+        "mean_mb": 0.0,
+        "max_mb": 0.0
+      },
+      "cpu_profile_top_20": "         31369 function calls (31149 primitive calls) in 1.091 seconds\n\n   Ordered by: cumulative time\n   List reduced from 538 to 20 due to restriction <20>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      100    0.001    0.000    1.090    0.011 /usr/lib/python3.11/asyncio/base_events.py:1859(_run_once)\n      100    0.001    0.000    1.038    0.010 /usr/lib/python3.11/selectors.py:451(select)\n      100    1.037    0.010    1.037    0.010 {method 'poll' of 'select.epoll' objects}\n      100    0.000    0.000    0.050    0.001 /usr/lib/python3.11/asyncio/events.py:82(_run)\n      100    0.000    0.000    0.050    0.001 {method 'run' of '_contextvars.Context' objects}\n       80    0.000    0.000    0.045    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:294(main)\n       80    0.000    0.000    0.045    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:143(profile_all)\n       80    0.000    0.000    0.045    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:46(profile_endpoint)\n       80    0.000    0.000    0.043    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1485(request)\n       80    0.000    0.000    0.037    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1594(send)\n       70    0.000    0.000    0.030    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1645(_send_handling_auth)\n       70    0.000    0.000    0.030    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1679(_send_handling_redirects)\n       70    0.000    0.000    0.030    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1717(_send_single_request)\n       70    0.000    0.000    0.024    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_transports/default.py:374(handle_async_request)\n       70    0.000    0.000    0.023    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:199(handle_async_request)\n       70    0.000    0.000    0.019    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection.py:69(handle_async_request)\n       60    0.001    0.000    0.018    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:65(handle_async_request)\n       50    0.000    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:163(_send_event)\n       30    0.001    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:170(_receive_response_headers)\n       50    0.000    0.000    0.006    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:209(_receive_event)\n\n\n"
+    },
+    {
+      "endpoint": "Batch Counterfactuals",
+      "method": "POST",
+      "path": "/api/v1/batch/counterfactuals",
+      "iterations": 10,
+      "success_rate": 0.0,
+      "latency": {
+        "mean": 7.764295899994522,
+        "median": 7.766306999997141,
+        "p95": 8.15620699995634,
+        "p99": 8.15620699995634,
+        "min": 7.386115999963749,
+        "max": 8.15620699995634
+      },
+      "memory": {
+        "mean_mb": 0.0,
+        "max_mb": 0.0
+      },
+      "cpu_profile_top_20": "         31669 function calls (31449 primitive calls) in 1.090 seconds\n\n   Ordered by: cumulative time\n   List reduced from 538 to 20 due to restriction <20>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n      100    0.001    0.000    1.089    0.011 /usr/lib/python3.11/asyncio/base_events.py:1859(_run_once)\n      100    0.001    0.000    1.038    0.010 /usr/lib/python3.11/selectors.py:451(select)\n      100    1.038    0.010    1.038    0.010 {method 'poll' of 'select.epoll' objects}\n      100    0.000    0.000    0.048    0.000 /usr/lib/python3.11/asyncio/events.py:82(_run)\n      100    0.000    0.000    0.048    0.000 {method 'run' of '_contextvars.Context' objects}\n       80    0.000    0.000    0.043    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:294(main)\n       80    0.000    0.000    0.043    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:143(profile_all)\n       80    0.000    0.000    0.043    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:46(profile_endpoint)\n       80    0.000    0.000    0.041    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1485(request)\n       80    0.000    0.000    0.036    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1594(send)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1645(_send_handling_auth)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1679(_send_handling_redirects)\n       70    0.000    0.000    0.029    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1717(_send_single_request)\n       70    0.000    0.000    0.024    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_transports/default.py:374(handle_async_request)\n       70    0.000    0.000    0.022    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:199(handle_async_request)\n       70    0.000    0.000    0.019    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection.py:69(handle_async_request)\n       60    0.001    0.000    0.017    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:65(handle_async_request)\n       50    0.000    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:163(_send_event)\n       30    0.001    0.000    0.007    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:170(_receive_response_headers)\n       50    0.000    0.000    0.006    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:209(_receive_event)\n\n\n"
+    },
+    {
+      "endpoint": "Causal Discovery",
+      "method": "POST",
+      "path": "/api/v1/causal/discover",
+      "iterations": 5,
+      "success_rate": 0.0,
+      "latency": {
+        "mean": 8.51895199999717,
+        "median": 8.217672000000675,
+        "p95": 10.387283000000025,
+        "p99": 10.387283000000025,
+        "min": 7.198923000032664,
+        "max": 10.387283000000025
+      },
+      "memory": {
+        "mean_mb": 0.0,
+        "max_mb": 0.0
+      },
+      "cpu_profile_top_20": "         15669 function calls (15559 primitive calls) in 0.548 seconds\n\n   Ordered by: cumulative time\n   List reduced from 538 to 20 due to restriction <20>\n\n   ncalls  tottime  percall  cumtime  percall filename:lineno(function)\n       50    0.001    0.000    0.547    0.011 /usr/lib/python3.11/asyncio/base_events.py:1859(_run_once)\n       50    0.000    0.000    0.522    0.010 /usr/lib/python3.11/selectors.py:451(select)\n       50    0.521    0.010    0.521    0.010 {method 'poll' of 'select.epoll' objects}\n       50    0.000    0.000    0.024    0.000 /usr/lib/python3.11/asyncio/events.py:82(_run)\n       50    0.000    0.000    0.024    0.000 {method 'run' of '_contextvars.Context' objects}\n       40    0.000    0.000    0.022    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:294(main)\n       40    0.000    0.000    0.022    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:143(profile_all)\n       40    0.000    0.000    0.022    0.001 /home/user/Inference-Service-Layer/scripts/performance/profile_endpoints.py:46(profile_endpoint)\n       40    0.000    0.000    0.022    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1485(request)\n       40    0.000    0.000    0.018    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1594(send)\n       35    0.000    0.000    0.015    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1645(_send_handling_auth)\n       35    0.000    0.000    0.015    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1679(_send_handling_redirects)\n       35    0.000    0.000    0.015    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:1717(_send_single_request)\n       35    0.000    0.000    0.012    0.000 /usr/local/lib/python3.11/dist-packages/httpx/_transports/default.py:374(handle_async_request)\n       35    0.000    0.000    0.012    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection_pool.py:199(handle_async_request)\n       35    0.000    0.000    0.009    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/connection.py:69(handle_async_request)\n       30    0.000    0.000    0.009    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:65(handle_async_request)\n       25    0.000    0.000    0.003    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:163(_send_event)\n        5    0.000    0.000    0.003    0.001 /usr/local/lib/python3.11/dist-packages/httpx/_client.py:340(build_request)\n       15    0.001    0.000    0.003    0.000 /usr/local/lib/python3.11/dist-packages/httpcore/_async/http11.py:170(_receive_response_headers)\n\n\n"
+    }
+  ],
+  "summary": {
+    "total_endpoints": 6,
+    "average_p50": 8.283095166670288,
+    "average_p95": 13.001156999990826,
+    "slowest_endpoint": "Causal Validation",
+    "meets_p50_target": true
+  }
+}

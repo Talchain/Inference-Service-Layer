@@ -1,0 +1,13 @@
+# Performance profiling and load testing requirements
+
+# Load testing
+locust>=2.15.0
+
+# Profiling
+psutil>=5.9.0
+memory-profiler>=0.61.0
+
+# Already in main requirements but needed for testing
+httpx>=0.25.0
+pytest>=7.4.0
+pytest-asyncio>=0.21.0

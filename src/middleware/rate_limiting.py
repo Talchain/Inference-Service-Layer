@@ -1,30 +1,44 @@
 """
 Rate limiting middleware for DoS protection.
 
-Implements simple in-memory rate limiting (100 req/min per IP).
-For production with multiple replicas, use Redis-backed rate limiting.
+Implements distributed rate limiting using Redis with in-memory fallback.
+Supports proxy-aware IP detection and per-API-key rate limiting.
 """
 
-import time
 import logging
+import time
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from prometheus_client import Counter
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.config import get_settings
+from src.utils.secure_logging import get_security_audit_logger
+
 logger = logging.getLogger(__name__)
+security_audit = get_security_audit_logger()
+
+# Prometheus metrics for rate limiting
+rate_limit_hits = Counter(
+    "isl_rate_limit_hits_total",
+    "Total number of rate limit violations",
+    ["identifier_type"],  # "ip" or "api_key"
+)
+rate_limit_checks = Counter(
+    "isl_rate_limit_checks_total",
+    "Total number of rate limit checks",
+    ["result"],  # "allowed" or "blocked"
+)
 
 
 class RateLimiter:
     """
-    Simple in-memory rate limiter.
+    In-memory rate limiter using sliding window.
 
-    For production with multiple replicas, consider:
-    - slowapi (Redis-backed)
-    - fastapi-limiter (Redis-backed)
-    - Cloud-native rate limiting (API Gateway)
+    For production with multiple replicas, use RedisRateLimiter.
     """
 
     def __init__(self, requests_per_minute: int = 100):
@@ -42,16 +56,10 @@ class RateLimiter:
         Check if request is within rate limit.
 
         Args:
-            identifier: Client identifier (IP address)
+            identifier: Client identifier (IP address or API key)
 
         Returns:
             Tuple of (allowed: bool, retry_after_seconds: int)
-
-        Example:
-            >>> limiter = RateLimiter(requests_per_minute=100)
-            >>> allowed, retry_after = limiter.check_rate_limit("192.168.1.1")
-            >>> if not allowed:
-            ...     print(f"Rate limited. Retry after {retry_after}s")
         """
         now = time.time()
         minute_ago = now - 60
@@ -81,11 +89,7 @@ class RateLimiter:
             identifier: Client identifier
 
         Returns:
-            Dict with current_requests and limit
-
-        Example:
-            >>> limiter.get_stats("192.168.1.1")
-            {'current_requests': 15, 'limit': 100, 'remaining': 85}
+            Dict with current_requests, limit, and remaining
         """
         now = time.time()
         minute_ago = now - 60
@@ -103,17 +107,195 @@ class RateLimiter:
         }
 
 
+class RedisRateLimiter:
+    """
+    Redis-backed rate limiter using sliding window algorithm.
+
+    Provides distributed rate limiting that works across multiple replicas.
+    Falls back to in-memory rate limiting if Redis is unavailable.
+    """
+
+    def __init__(
+        self,
+        redis_client,
+        requests_per_minute: int = 100,
+        fallback: Optional[RateLimiter] = None
+    ):
+        """
+        Initialize Redis rate limiter.
+
+        Args:
+            redis_client: Redis client instance (can be None)
+            requests_per_minute: Maximum requests per minute per identifier
+            fallback: Fallback in-memory rate limiter
+        """
+        self.redis = redis_client
+        self.requests_per_minute = requests_per_minute
+        self.fallback = fallback or RateLimiter(requests_per_minute)
+        self.key_prefix = "isl:ratelimit:"
+        self.window_seconds = 60
+
+    def check_rate_limit(self, identifier: str) -> Tuple[bool, int]:
+        """
+        Check if request is within rate limit using Redis sorted sets.
+
+        Uses sliding window algorithm with Redis ZADD/ZREMRANGEBYSCORE.
+
+        Args:
+            identifier: Client identifier (IP or API key)
+
+        Returns:
+            Tuple of (allowed: bool, retry_after_seconds: int)
+        """
+        if not self.redis:
+            return self.fallback.check_rate_limit(identifier)
+
+        try:
+            key = f"{self.key_prefix}{identifier}"
+            now = time.time()
+            window_start = now - self.window_seconds
+
+            # Use pipeline for atomic operations
+            pipe = self.redis.pipeline()
+
+            # Remove old entries
+            pipe.zremrangebyscore(key, 0, window_start)
+
+            # Add current request
+            pipe.zadd(key, {str(now): now})
+
+            # Count requests in window
+            pipe.zcard(key)
+
+            # Set TTL to auto-expire
+            pipe.expire(key, self.window_seconds + 1)
+
+            results = pipe.execute()
+            count = results[2]
+
+            if count > self.requests_per_minute:
+                # Over limit - calculate retry_after
+                # Get oldest entry to determine when window clears
+                oldest = self.redis.zrange(key, 0, 0, withscores=True)
+                if oldest:
+                    retry_after = int(self.window_seconds - (now - oldest[0][1])) + 1
+                else:
+                    retry_after = self.window_seconds
+                return False, max(1, retry_after)
+
+            return True, 0
+
+        except Exception as e:
+            logger.warning(
+                f"Redis rate limit check failed, using fallback: {e}",
+                extra={"identifier": identifier[:16] + "..." if len(identifier) > 16 else identifier}
+            )
+            return self.fallback.check_rate_limit(identifier)
+
+    def get_stats(self, identifier: str) -> Dict[str, int]:
+        """
+        Get rate limiting stats for identifier.
+
+        Args:
+            identifier: Client identifier
+
+        Returns:
+            Dict with current_requests, limit, and remaining
+        """
+        if not self.redis:
+            return self.fallback.get_stats(identifier)
+
+        try:
+            key = f"{self.key_prefix}{identifier}"
+            now = time.time()
+            window_start = now - self.window_seconds
+
+            # Clean and count in pipeline
+            pipe = self.redis.pipeline()
+            pipe.zremrangebyscore(key, 0, window_start)
+            pipe.zcard(key)
+            results = pipe.execute()
+
+            current_requests = results[1]
+
+            return {
+                "current_requests": current_requests,
+                "limit": self.requests_per_minute,
+                "remaining": max(0, self.requests_per_minute - current_requests)
+            }
+        except Exception:
+            return self.fallback.get_stats(identifier)
+
+
 # Global rate limiter instance
-# For production: Replace with Redis-backed implementation
-rate_limiter = RateLimiter(requests_per_minute=100)
+# Will be initialized with Redis client if available
+_rate_limiter: Optional[RedisRateLimiter] = None
+_in_memory_limiter: Optional[RateLimiter] = None
+
+
+def get_rate_limiter() -> RedisRateLimiter:
+    """
+    Get the global rate limiter instance.
+
+    Initializes with Redis if available, otherwise uses in-memory fallback.
+    In production, Redis should be required (enforced at startup).
+
+    Returns:
+        RedisRateLimiter instance
+    """
+    global _rate_limiter, _in_memory_limiter
+
+    if _rate_limiter is None:
+        settings = get_settings()
+        _in_memory_limiter = RateLimiter(settings.RATE_LIMIT_REQUESTS_PER_MINUTE)
+
+        # Try to get Redis client
+        try:
+            from src.infrastructure.redis_client import get_redis_client
+            redis_client = get_redis_client()
+            _rate_limiter = RedisRateLimiter(
+                redis_client=redis_client,
+                requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
+                fallback=_in_memory_limiter
+            )
+            if redis_client:
+                logger.info("Rate limiter using Redis backend")
+            else:
+                # In production, this should not happen (startup validation prevents it)
+                # But log a critical warning if it does
+                if settings.is_production():
+                    logger.critical(
+                        "SECURITY WARNING: Rate limiter using in-memory backend in production. "
+                        "Distributed rate limiting is INEFFECTIVE across replicas."
+                    )
+                else:
+                    logger.info("Rate limiter using in-memory backend (Redis unavailable)")
+        except Exception as e:
+            if settings.is_production():
+                logger.critical(
+                    f"SECURITY WARNING: Failed to initialize Redis rate limiter in production: {e}. "
+                    "Falling back to in-memory (INEFFECTIVE across replicas)."
+                )
+            else:
+                logger.warning(f"Failed to initialize Redis rate limiter: {e}")
+            _rate_limiter = RedisRateLimiter(
+                redis_client=None,
+                requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
+                fallback=_in_memory_limiter
+            )
+
+    return _rate_limiter
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
     FastAPI middleware for rate limiting.
 
-    Applies rate limiting to all requests.
+    Applies rate limiting to all requests using either IP address or API key.
     """
+
+    # Endpoints exempt from rate limiting
+    EXEMPT_PATHS: Set[str] = {"/health", "/ready", "/metrics"}
 
     async def dispatch(self, request: Request, call_next):
         """
@@ -126,31 +308,46 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Response (200 if allowed, 429 if rate limited)
         """
-        # Skip rate limiting for health checks
-        if request.url.path in ["/health", "/metrics"]:
+        # Skip rate limiting for exempt endpoints
+        if request.url.path in self.EXEMPT_PATHS:
             return await call_next(request)
 
-        # Identify by IP address
-        # In production: Consider X-Forwarded-For header
-        identifier = request.client.host if request.client else "unknown"
+        # Get rate limiter
+        limiter = get_rate_limiter()
+
+        # Determine identifier (prefer API key over IP)
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            identifier = f"key:{api_key[:16]}"  # Truncate for safety
+            identifier_type = "api_key"
+        else:
+            identifier = f"ip:{self._get_client_ip(request)}"
+            identifier_type = "ip"
 
         # Check rate limit
-        allowed, retry_after = rate_limiter.check_rate_limit(identifier)
+        allowed, retry_after = limiter.check_rate_limit(identifier)
 
         if not allowed:
             # Extract request ID for correlation
             from src.utils.tracing import get_trace_id
             request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
 
-            # Log rate limit violation
-            logger.warning(
-                "Rate limit exceeded",
-                extra={
-                    "client_ip": identifier,
-                    "path": request.url.path,
-                    "retry_after": retry_after,
-                    "request_id": request_id
-                }
+            # Record metrics
+            rate_limit_hits.labels(identifier_type=identifier_type).inc()
+            rate_limit_checks.labels(result="blocked").inc()
+
+            # Get client IP for audit logging
+            client_ip = self._get_client_ip(request)
+
+            # Log rate limit violation via security audit logger
+            settings = get_settings()
+            security_audit.log_rate_limit_exceeded(
+                client_ip=client_ip,
+                identifier=identifier,
+                limit=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
+                window_seconds=60,
+                path=request.url.path,
+                request_id=request_id
             )
 
             # Return 429 Too Many Requests with Olumi Error Schema v1.0
@@ -179,26 +376,93 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 headers={"Retry-After": str(retry_after)}
             )
 
+        # Record allowed request
+        rate_limit_checks.labels(result="allowed").inc()
+
         # Allow request
         response = await call_next(request)
 
         # Add rate limit headers to response
-        stats = rate_limiter.get_stats(identifier)
+        stats = limiter.get_stats(identifier)
         response.headers["X-RateLimit-Limit"] = str(stats["limit"])
         response.headers["X-RateLimit-Remaining"] = str(stats["remaining"])
 
         return response
 
+    def _get_client_ip(self, request: Request) -> str:
+        """
+        Get client IP address, respecting proxy headers.
 
-def get_rate_limiter() -> RateLimiter:
-    """
-    Get global rate limiter instance.
+        Supports X-Forwarded-For and X-Real-IP headers from trusted proxies.
 
-    Returns:
-        RateLimiter instance
+        Args:
+            request: The incoming request
 
-    Example:
-        >>> limiter = get_rate_limiter()
-        >>> limiter.get_stats("192.168.1.1")
-    """
-    return rate_limiter
+        Returns:
+            Client IP address
+        """
+        settings = get_settings()
+        trusted_proxies = settings.get_trusted_proxies_list()
+
+        # Check X-Forwarded-For header (set by proxies/load balancers)
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        if forwarded_for:
+            # X-Forwarded-For can contain multiple IPs: client, proxy1, proxy2
+            # Parse the chain and find the first non-trusted IP
+            ips = [ip.strip() for ip in forwarded_for.split(",")]
+
+            # If we have trusted proxies configured, walk back through the chain
+            if trusted_proxies:
+                for ip in reversed(ips):
+                    if not self._is_trusted_proxy(ip, trusted_proxies):
+                        return ip
+                # All IPs are trusted, return the first one (original client)
+                return ips[0]
+            else:
+                # No trusted proxies configured, return the first IP
+                return ips[0]
+
+        # Check X-Real-IP header (set by nginx)
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip.strip()
+
+        # Fall back to direct client IP
+        if request.client:
+            return request.client.host
+
+        return "unknown"
+
+    def _is_trusted_proxy(self, ip: str, trusted_proxies: List[str]) -> bool:
+        """
+        Check if an IP is in the trusted proxy list.
+
+        Args:
+            ip: IP address to check
+            trusted_proxies: List of trusted proxy IPs or CIDRs
+
+        Returns:
+            True if IP is trusted, False otherwise
+        """
+        import ipaddress
+
+        try:
+            check_ip = ipaddress.ip_address(ip)
+
+            for proxy in trusted_proxies:
+                try:
+                    # Check if it's a CIDR range
+                    if "/" in proxy:
+                        network = ipaddress.ip_network(proxy, strict=False)
+                        if check_ip in network:
+                            return True
+                    else:
+                        # Single IP
+                        if check_ip == ipaddress.ip_address(proxy):
+                            return True
+                except ValueError:
+                    continue
+
+            return False
+        except ValueError:
+            return False

@@ -25,6 +25,8 @@ from src.models.requests import (
     TransportabilityRequest,
     ValidationStrategyRequest,
 )
+from src.models.representation import FactorExtractionRequest
+from src.models.sensitivity import SensitivityRequest, SensitivityReport
 from src.models.responses import (
     BatchCounterfactualResponse,
     CausalValidationResponse,
@@ -46,6 +48,7 @@ from src.services.causal_validator import CausalValidator
 from src.services.conformal_predictor import ConformalPredictor
 from src.services.counterfactual_engine import CounterfactualEngine
 from src.services.parameter_recommender import generate_parameter_recommendations
+from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
 
 router = APIRouter()
@@ -59,6 +62,7 @@ causal_transporter = CausalTransporter()
 conformal_predictor = ConformalPredictor(counterfactual_engine)
 advanced_validation_suggester = AdvancedValidationSuggester()
 causal_discovery_engine = CausalDiscoveryEngine()
+sensitivity_analyzer = EnhancedSensitivityAnalyzer()
 sequential_optimizer = SequentialOptimizer()
 
 # Request size limits
@@ -1206,4 +1210,227 @@ async def recommend_parameters(
         )
         raise HTTPException(
             status_code=500, detail=f"Parameter recommendation failed: {str(e)}"
+        )
+
+
+@router.post(
+    "/sensitivity/detailed",
+    response_model=SensitivityReport,
+    summary="Detailed sensitivity analysis for causal assumptions",
+    description="""
+    Quantifies how sensitive causal estimates are to assumption violations.
+
+    Moves beyond discrete robustness categories (robust/moderate/fragile)
+    to continuous sensitivity metrics with elasticity calculations.
+
+    **Features:**
+    - Quantitative sensitivity metrics (elasticity, outcome ranges)
+    - Critical assumption identification
+    - Elasticity: % change in outcome per % change in assumption violation
+    - Robustness scores (0=fragile, 1=robust)
+    - Recommendations for strengthening assumptions
+
+    **Tested Assumptions:**
+    - No unobserved confounding
+    - Linear effects
+    - No selection bias
+    - Causal sufficiency
+    - Positivity
+    - Consistency
+
+    **Use when:** You need to understand which assumptions matter most
+    for your causal estimates and how robust your results are.
+
+    **Example:** "If unobserved confounding increases by 10%, how much
+    does my outcome estimate change?"
+    """,
+    responses={
+        200: {"description": "Sensitivity analysis completed successfully"},
+        400: {"description": "Invalid input"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def analyze_detailed_sensitivity(
+    request: SensitivityRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> SensitivityReport:
+    """
+    Analyze sensitivity to causal assumptions.
+
+    Args:
+        request: Sensitivity analysis request with model and assumptions
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        SensitivityReport: Detailed sensitivity metrics for each assumption
+    """
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "sensitivity_analysis_request",
+            extra={
+                "request_id": request_id,
+                "num_assumptions": len(request.assumptions),
+                "num_violation_levels": len(request.violation_levels),
+            },
+        )
+
+        # Perform sensitivity analysis
+        result = sensitivity_analyzer.analyze_assumption_sensitivity(request)
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "sensitivity_analysis_completed",
+            extra={
+                "request_id": request_id,
+                "overall_robustness": result.overall_robustness_score,
+                "num_critical": len(result.most_critical),
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "sensitivity_analysis_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to perform sensitivity analysis. Check logs for details.",
+        )
+
+
+@router.post(
+    "/extract-factors",
+    summary="Extract causal factors from unstructured data",
+    description="""
+    Extract latent causal factors from unstructured text data using representation learning.
+
+    Uses text embedding and clustering to identify themes/factors in:
+    - Support tickets
+    - Customer reviews
+    - User feedback
+    - Survey responses
+    - Error logs
+
+    **Features:**
+    - Automatic factor identification
+    - Keyword extraction per factor
+    - Suggested DAG structure
+    - Factor prevalence and strength scores
+
+    **Use when:** You have qualitative data and want to identify potential
+    causal factors to include in your model.
+
+    **Example:** Support tickets → ["usability_issues", "performance_problems"]
+    → suggested DAG with these as causes of churn
+    """,
+    responses={
+        200: {"description": "Factor extraction completed successfully"},
+        400: {"description": "Invalid input (e.g., not enough data)"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def extract_causal_factors(
+    request: FactorExtractionRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+):
+    """
+    Extract causal factors from unstructured data.
+
+    Args:
+        request: Factor extraction request with text data
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        ExtractedFactors: Identified factors with suggested DAG
+    """
+    from src.models.representation import ExtractedFactors, CausalFactor
+    from src.services.causal_representation_learner import CausalRepresentationLearner
+
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    # Initialize learner (could be module-level singleton)
+    learner = CausalRepresentationLearner()
+
+    try:
+        logger.info(
+            "factor_extraction_request",
+            extra={
+                "request_id": request_id,
+                "data_type": request.data_type,
+                "num_texts": len(request.texts),
+                "n_factors": request.n_factors,
+            },
+        )
+
+        # Extract factors
+        factors_data, suggested_dag, confidence = learner.extract_factors(
+            data=request.texts,
+            domain_hints=[request.domain] if request.domain else None,
+            n_factors=request.n_factors,
+            min_cluster_size=request.min_cluster_size,
+            outcome_variable=request.outcome_variable
+        )
+
+        # Convert to response models
+        factors = [CausalFactor(**f) for f in factors_data]
+
+        # Convert DAG to DAGStructure if present
+        dag_structure = None
+        if suggested_dag:
+            from src.models.shared import DAGStructure
+            dag_structure = DAGStructure(
+                nodes=suggested_dag["nodes"],
+                edges=[tuple(e) for e in suggested_dag["edges"]]
+            )
+
+        # Create summary
+        factor_names = [f.name for f in factors[:3]]
+        summary = f"Identified {len(factors)} factors from {len(request.texts)} texts"
+        if factors:
+            summary += f": {', '.join(factor_names)}"
+            if len(factors) > 3:
+                summary += f" and {len(factors) - 3} more"
+
+        result = ExtractedFactors(
+            factors=factors,
+            suggested_dag=dag_structure,
+            confidence=confidence,
+            method="Sentence embedding + clustering",
+            summary=summary
+        )
+
+        # Inject metadata
+        result.metadata = create_response_metadata(request_id)
+
+        logger.info(
+            "factor_extraction_completed",
+            extra={
+                "request_id": request_id,
+                "num_factors": len(factors),
+                "confidence": confidence,
+            },
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "factor_extraction_error",
+            extra={"request_id": request_id},
+            exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to extract causal factors. Check logs for details.",
         )
