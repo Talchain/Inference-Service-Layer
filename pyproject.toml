@@ -41,6 +41,8 @@ mypy = "^1.7.0"
 # Phase 1 testing dependencies
 pytest-redis = "^3.0.2"
 fakeredis = "^2.20.0"
+# Property-based testing
+hypothesis = "^6.92.0"
 # Developer tooling
 typer = "^0.9.0"
 rich = "^13.7.0"

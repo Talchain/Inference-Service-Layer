@@ -46,7 +46,7 @@ class ContrastiveExplainer:
         cf_engine: Optional[CounterfactualEngine] = None,
         robustness_analyzer: Optional[RobustnessAnalyzer] = None,
         explanation_generator: Optional[ExplanationGenerator] = None,
-    ):
+    ) -> None:
         """
         Initialize contrastive explainer.
 

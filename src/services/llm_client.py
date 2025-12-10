@@ -45,7 +45,7 @@ class CostTracker:
         "claude-3-sonnet": {"input": 0.003, "output": 0.015},
     }
 
-    def __init__(self, redis_client=None):
+    def __init__(self, redis_client=None) -> None:
         """Initialize cost tracker."""
         self.redis = redis_client or get_redis_client()
 
@@ -128,7 +128,7 @@ class LLMClient:
         cost_tracker: Optional[CostTracker] = None,
         redis_client=None,
         memory_cache=None,
-    ):
+    ) -> None:
         """Initialize LLM client."""
         self.config = config or get_llm_config()
         self.cost_tracker = cost_tracker or CostTracker(redis_client)
@@ -372,7 +372,7 @@ class LLMClient:
 
         return None
 
-    def _cache_response(self, cache_key: str, response: Dict):
+    def _cache_response(self, cache_key: str, response: Dict) -> None:
         """
         Cache LLM response.
 

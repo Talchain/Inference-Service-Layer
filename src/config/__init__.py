@@ -119,12 +119,25 @@ class Settings(BaseSettings):
     @field_validator("CORS_ORIGINS")
     @classmethod
     def validate_cors_origins(cls, v, info):
-        """Validate CORS origins don't contain wildcards in production."""
+        """Validate CORS origins don't contain wildcards and use HTTPS in production."""
+        # Get environment from info.data if available
+        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+
         if "*" in v:
-            # Get environment from info.data if available
-            env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
             if env == "production":
                 raise ValueError("Wildcard CORS origins not allowed in production")
+
+        # In production, enforce HTTPS for all origins
+        if env == "production" and v:
+            origins = [origin.strip() for origin in v.split(",") if origin.strip()]
+            for origin in origins:
+                # Allow localhost for testing, but all others must be HTTPS
+                if not origin.startswith("http://localhost") and not origin.startswith("https://"):
+                    raise ValueError(
+                        f"Production CORS origins must use HTTPS: {origin}. "
+                        "HTTP origins are not secure for cross-origin requests in production."
+                    )
+
         return v
 
     def get_cors_origins_list(self) -> List[str]:

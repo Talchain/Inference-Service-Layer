@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .isl_metadata import ISLResponseMetadata
 from .metadata import ResponseMetadata
 from .shared import (
     ConfidenceInterval,
@@ -2010,6 +2011,10 @@ class SensitivityDetailedResponse(BaseModel):
         ...,
         description="List of assumptions with sensitivity analysis"
     )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -2065,6 +2070,10 @@ class ContrastiveResponse(BaseModel):
         ...,
         description="List of actionable alternatives"
     )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -2105,6 +2114,10 @@ class ConformalResponse(BaseModel):
         ...,
         description="Main source of uncertainty",
         max_length=500
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2154,6 +2167,10 @@ class ValidationStrategiesResponse(BaseModel):
     suggested_improvements: List[ValidationImprovement] = Field(
         ...,
         description="List of suggested model improvements"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2292,6 +2309,680 @@ class ParameterRecommendationResponse(BaseModel):
         }
     }
 
+
+# ============================================================================
+# Dominance Detection Endpoint - Response Models
+# ============================================================================
+
+
+class DominanceRelation(BaseModel):
+    """Information about a dominated option."""
+
+    dominated_option_id: str = Field(
+        ...,
+        description="ID of the option that is dominated"
+    )
+    dominated_option_label: str = Field(
+        ...,
+        description="Label of the option that is dominated"
+    )
+    dominated_by: List[str] = Field(
+        ...,
+        description="List of option IDs that dominate this option"
+    )
+    degree: int = Field(
+        ...,
+        description="Number of options that dominate this option",
+        ge=0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "dominated_option_id": "opt_b",
+                "dominated_option_label": "Option B: Conservative Growth",
+                "dominated_by": ["opt_c", "opt_a"],
+                "degree": 2
+            }
+        }
+    }
+
+
+class DominanceResponse(BaseModel):
+    """Response model for dominance detection endpoint."""
+
+    dominated: List[DominanceRelation] = Field(
+        ...,
+        description="Options that are dominated by others (sorted by degree, descending)"
+    )
+    non_dominated_ids: List[str] = Field(
+        ...,
+        description="Option IDs that are not dominated (Pareto frontier)"
+    )
+    total_options: int = Field(
+        ...,
+        description="Total number of options analyzed",
+        ge=2
+    )
+    frontier_size: int = Field(
+        ...,
+        description="Number of options on Pareto frontier",
+        ge=1
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "dominated": [
+                    {
+                        "dominated_option_id": "opt_b",
+                        "dominated_option_label": "Option B: Conservative Growth",
+                        "dominated_by": ["opt_c"],
+                        "degree": 1
+                    }
+                ],
+                "non_dominated_ids": ["opt_a", "opt_c"],
+                "total_options": 3,
+                "frontier_size": 2,
+                "metadata": {
+                    "request_id": "req_abc123",
+                    "computation_time_ms": 2.5,
+                    "isl_version": "2.0",
+                    "algorithm": "pairwise_dominance",
+                    "cache_hit": False
+                }
+            }
+        }
+    }
+
+
+# ============================================================================
+# Pareto Frontier Endpoint - Response Models
+# ============================================================================
+
+
+class ParetoFrontierOption(BaseModel):
+    """Single option on the Pareto frontier with scores."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    scores: Dict[str, float] = Field(
+        ...,
+        description="Normalized scores by criterion_id"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_a",
+                "option_label": "Option A: Aggressive Growth",
+                "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+            }
+        }
+    }
+
+
+class ParetoResponse(BaseModel):
+    """Response model for Pareto frontier endpoint."""
+
+    frontier: List[ParetoFrontierOption] = Field(
+        ...,
+        description="Options on the Pareto frontier (non-dominated options)"
+    )
+    dominated: List[DominanceRelation] = Field(
+        ...,
+        description="Options that are dominated (sorted by degree, descending)"
+    )
+    frontier_size: int = Field(
+        ...,
+        description="Number of options on Pareto frontier",
+        ge=1
+    )
+    total_options: int = Field(
+        ...,
+        description="Total number of options analyzed",
+        ge=2
+    )
+    frontier_truncated: bool = Field(
+        default=False,
+        description="True if frontier was truncated due to max_frontier_size limit"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "frontier": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A: Aggressive Growth",
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                    },
+                    {
+                        "option_id": "opt_c",
+                        "option_label": "Option C: Balanced Approach",
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
+                    }
+                ],
+                "dominated": [
+                    {
+                        "dominated_option_id": "opt_b",
+                        "dominated_option_label": "Option B: Conservative Growth",
+                        "dominated_by": ["opt_c"],
+                        "degree": 1
+                    }
+                ],
+                "frontier_size": 2,
+                "total_options": 3,
+                "frontier_truncated": False,
+                "metadata": {
+                    "request_id": "req_abc123",
+                    "computation_time_ms": 2.8,
+                    "isl_version": "2.0",
+                    "algorithm": "skyline_pareto",
+                    "cache_hit": False
+                }
+            }
+        }
+    }
+
+
+# ============================================================================
+# Multi-Criteria Aggregation Endpoint - Response Models
+# ============================================================================
+
+
+class AggregatedRanking(BaseModel):
+    """Aggregated ranking for a single option."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    rank: int = Field(..., description="Rank (1-based, 1 = best)", ge=1)
+    aggregated_score: float = Field(
+        ...,
+        description="Final aggregated score (0-100 scale)",
+        ge=0.0,
+        le=100.0
+    )
+    scores_by_criterion: Dict[str, float] = Field(
+        ...,
+        description="Normalized scores (0-1) used in aggregation by criterion_id"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_a",
+                "option_label": "Option A: Aggressive Growth",
+                "rank": 1,
+                "aggregated_score": 72.5,
+                "scores_by_criterion": {
+                    "revenue": 0.85,
+                    "risk": 0.40,
+                    "timeline": 0.70
+                }
+            }
+        }
+    }
+
+
+class TradeOff(BaseModel):
+    """Trade-off between two options."""
+
+    option_a_id: str = Field(..., description="First option ID")
+    option_a_label: str = Field(..., description="First option label")
+    option_b_id: str = Field(..., description="Second option ID")
+    option_b_label: str = Field(..., description="Second option label")
+    a_better_on: List[str] = Field(
+        ...,
+        description="Criterion IDs where option A scores higher"
+    )
+    b_better_on: List[str] = Field(
+        ...,
+        description="Criterion IDs where option B scores higher"
+    )
+    max_difference: float = Field(
+        ...,
+        description="Largest score gap across criteria",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_a_id": "opt_a",
+                "option_a_label": "Option A: Aggressive Growth",
+                "option_b_id": "opt_b",
+                "option_b_label": "Option B: Conservative Growth",
+                "a_better_on": ["revenue", "timeline"],
+                "b_better_on": ["risk"],
+                "max_difference": 0.45
+            }
+        }
+    }
+
+
+class ValidationWarning(BaseModel):
+    """Warning about validation actions taken."""
+
+    code: str = Field(
+        ...,
+        description="Warning code",
+        pattern="^(WEIGHTS_NORMALIZED|OPTION_MISMATCH|SCORE_CLAMPED|MISSING_CRITERION)$"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message",
+        max_length=500
+    )
+    affected_items: Optional[List[str]] = Field(
+        None,
+        description="IDs of affected items (options, criteria, etc.)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "WEIGHTS_NORMALIZED",
+                "message": "Weights normalized from sum=0.95 to sum=1.0",
+                "affected_items": ["revenue", "risk"]
+            }
+        }
+    }
+
+
+class MultiCriteriaResponse(BaseModel):
+    """Response model for multi-criteria aggregation endpoint."""
+
+    aggregated_rankings: List[AggregatedRanking] = Field(
+        ...,
+        description="Options ranked by aggregated score (sorted best to worst)"
+    )
+    trade_offs: List[TradeOff] = Field(
+        ...,
+        description="Significant trade-offs between top options"
+    )
+    warnings: Optional[List[ValidationWarning]] = Field(
+        None,
+        description="Warnings about auto-corrections or validation issues"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "aggregated_rankings": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A",
+                        "rank": 1,
+                        "aggregated_score": 72.5,
+                        "scores_by_criterion": {"revenue": 0.85, "risk": 0.40}
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B",
+                        "rank": 2,
+                        "aggregated_score": 68.0,
+                        "scores_by_criterion": {"revenue": 0.60, "risk": 0.80}
+                    }
+                ],
+                "trade_offs": [
+                    {
+                        "option_a_id": "opt_a",
+                        "option_a_label": "Option A",
+                        "option_b_id": "opt_b",
+                        "option_b_label": "Option B",
+                        "a_better_on": ["revenue"],
+                        "b_better_on": ["risk"],
+                        "max_difference": 0.40
+                    }
+                ],
+                "warnings": [
+                    {
+                        "code": "WEIGHTS_NORMALIZED",
+                        "message": "Weights normalized from sum=0.95 to sum=1.0",
+                        "affected_items": ["revenue", "risk"]
+                    }
+                ],
+                "metadata": {
+                    "request_id": "req_abc123",
+                    "computation_time_ms": 5.2,
+                    "isl_version": "2.0",
+                    "algorithm": "weighted_sum",
+                    "cache_hit": False
+                }
+            }
+        }
+    }
+
+
+# ============================================================================
+# Risk Adjustment Endpoint - Response Models
+# ============================================================================
+
+
+class AdjustedScore(BaseModel):
+    """Risk-adjusted score for a single option."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    original_score: float = Field(
+        ...,
+        description="Original score (mean or p50)",
+        ge=0.0,
+        le=1.0
+    )
+    certainty_equivalent: float = Field(
+        ...,
+        description="Risk-adjusted certainty equivalent score",
+        ge=0.0,
+        le=1.0
+    )
+    adjustment: float = Field(
+        ...,
+        description="Adjustment amount (CE - original, can be negative)"
+    )
+    variance: Optional[float] = Field(
+        None,
+        description="Variance of original distribution (if mean/std_dev provided)",
+        ge=0.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_aggressive",
+                "option_label": "Aggressive Growth Strategy",
+                "original_score": 0.80,
+                "certainty_equivalent": 0.60,
+                "adjustment": -0.20,
+                "variance": 0.04
+            }
+        }
+    }
+
+
+class RankingChange(BaseModel):
+    """Details about ranking changes after risk adjustment."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Option label")
+    original_rank: int = Field(..., description="Rank before adjustment (1-based)", ge=1)
+    adjusted_rank: int = Field(..., description="Rank after adjustment (1-based)", ge=1)
+    rank_change: int = Field(
+        ...,
+        description="Change in rank (positive = improved, negative = worsened)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_conservative",
+                "option_label": "Conservative Growth Strategy",
+                "original_rank": 2,
+                "adjusted_rank": 1,
+                "rank_change": 1
+            }
+        }
+    }
+
+
+class RiskAdjustmentResponse(BaseModel):
+    """Response model for risk adjustment endpoint."""
+
+    adjusted_scores: List[AdjustedScore] = Field(
+        ...,
+        description="Options with risk-adjusted scores (sorted by CE, descending)"
+    )
+    rankings_changed: bool = Field(
+        ...,
+        description="True if rankings changed after risk adjustment"
+    )
+    ranking_changes: Optional[List[RankingChange]] = Field(
+        None,
+        description="Detailed ranking changes (only if rankings_changed=True)"
+    )
+    risk_interpretation: str = Field(
+        ...,
+        description="Plain English interpretation of risk adjustment impact",
+        max_length=1000
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "adjusted_scores": [
+                    {
+                        "option_id": "opt_conservative",
+                        "option_label": "Conservative Growth Strategy",
+                        "original_score": 0.60,
+                        "certainty_equivalent": 0.59,
+                        "adjustment": -0.01,
+                        "variance": 0.0025
+                    },
+                    {
+                        "option_id": "opt_aggressive",
+                        "option_label": "Aggressive Growth Strategy",
+                        "original_score": 0.80,
+                        "certainty_equivalent": 0.60,
+                        "adjustment": -0.20,
+                        "variance": 0.04
+                    },
+                    {
+                        "option_id": "opt_balanced",
+                        "option_label": "Balanced Approach",
+                        "original_score": 0.70,
+                        "certainty_equivalent": 0.58,
+                        "adjustment": -0.12,
+                        "variance": 0.0225
+                    }
+                ],
+                "rankings_changed": True,
+                "ranking_changes": [
+                    {
+                        "option_id": "opt_conservative",
+                        "option_label": "Conservative Growth Strategy",
+                        "original_rank": 3,
+                        "adjusted_rank": 1,
+                        "rank_change": 2
+                    },
+                    {
+                        "option_id": "opt_aggressive",
+                        "option_label": "Aggressive Growth Strategy",
+                        "original_rank": 1,
+                        "adjusted_rank": 2,
+                        "rank_change": -1
+                    }
+                ],
+                "risk_interpretation": "Risk aversion (coefficient=2.0) significantly penalizes high-variance options. Conservative strategy moves from rank 3 to rank 1 after adjustment, while aggressive strategy drops from rank 1 to rank 2 due to high variance (0.04).",
+                "metadata": {
+                    "request_id": "req_risk_abc123",
+                    "computation_time_ms": 1.8,
+                    "isl_version": "2.0",
+                    "algorithm": "mean_variance_risk_averse",
+                    "cache_hit": False
+                }
+            }
+        }
+    }
+
+
+# ============================================================================
+# Threshold Identification Endpoint - Response Models
+# ============================================================================
+
+
+class RankingThreshold(BaseModel):
+    """A parameter threshold where ranking changes."""
+
+    parameter_id: str = Field(..., description="Parameter identifier")
+    parameter_label: str = Field(..., description="Parameter label")
+    threshold_value: float = Field(
+        ...,
+        description="Parameter value where ranking changes"
+    )
+    ranking_before: List[str] = Field(
+        ...,
+        description="Option ranking before threshold (option_ids, best to worst)"
+    )
+    ranking_after: List[str] = Field(
+        ...,
+        description="Option ranking after threshold (option_ids, best to worst)"
+    )
+    options_affected: List[str] = Field(
+        ...,
+        description="Option IDs whose ranks changed at this threshold"
+    )
+    score_gap: Optional[float] = Field(
+        None,
+        description="Score difference between swapped options at threshold",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_id": "price",
+                "parameter_label": "Product Price",
+                "threshold_value": 50.0,
+                "ranking_before": ["opt_a", "opt_c", "opt_b"],
+                "ranking_after": ["opt_b", "opt_a", "opt_c"],
+                "options_affected": ["opt_a", "opt_b"],
+                "score_gap": 0.05
+            }
+        }
+    }
+
+
+class ParameterSensitivity(BaseModel):
+    """Sensitivity analysis for a parameter."""
+
+    parameter_id: str = Field(..., description="Parameter identifier")
+    parameter_label: str = Field(..., description="Parameter label")
+    changes_count: int = Field(
+        ...,
+        description="Number of ranking changes across parameter sweep",
+        ge=0
+    )
+    most_sensitive_range: Optional[List[float]] = Field(
+        None,
+        description="Parameter range [min, max] where most changes occur (if any changes)",
+        min_length=2,
+        max_length=2
+    )
+    sensitivity_score: float = Field(
+        ...,
+        description="Normalized sensitivity score (0-1, higher = more sensitive)",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_id": "price",
+                "parameter_label": "Product Price",
+                "changes_count": 2,
+                "most_sensitive_range": [45.0, 55.0],
+                "sensitivity_score": 0.85
+            }
+        }
+    }
+
+
+class ThresholdIdentificationResponse(BaseModel):
+    """Response model for threshold identification endpoint."""
+
+    thresholds: List[RankingThreshold] = Field(
+        ...,
+        description="Ranking thresholds across all parameters (sorted by parameter, then value)"
+    )
+    sensitivity_ranking: List[ParameterSensitivity] = Field(
+        ...,
+        description="Parameters ranked by sensitivity (most sensitive first)"
+    )
+    total_thresholds: int = Field(
+        ...,
+        description="Total number of thresholds found across all parameters",
+        ge=0
+    )
+    monotonic_parameters: List[str] = Field(
+        ...,
+        description="Parameter IDs with no ranking changes (monotonic)"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "thresholds": [
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "threshold_value": 50.0,
+                        "ranking_before": ["opt_a", "opt_c", "opt_b"],
+                        "ranking_after": ["opt_b", "opt_a", "opt_c"],
+                        "options_affected": ["opt_a", "opt_b"],
+                        "score_gap": 0.05
+                    },
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "threshold_value": 60.0,
+                        "ranking_before": ["opt_b", "opt_a", "opt_c"],
+                        "ranking_after": ["opt_b", "opt_c", "opt_a"],
+                        "options_affected": ["opt_a", "opt_c"],
+                        "score_gap": 0.02
+                    }
+                ],
+                "sensitivity_ranking": [
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "changes_count": 2,
+                        "most_sensitive_range": [45.0, 65.0],
+                        "sensitivity_score": 1.0
+                    },
+                    {
+                        "parameter_id": "marketing_spend",
+                        "parameter_label": "Marketing Spend",
+                        "changes_count": 0,
+                        "most_sensitive_range": None,
+                        "sensitivity_score": 0.0
+                    }
+                ],
+                "total_thresholds": 2,
+                "monotonic_parameters": ["marketing_spend"],
+                "metadata": {
+                    "request_id": "req_threshold_abc123",
+                    "computation_time_ms": 3.5,
+                    "isl_version": "2.0",
+                    "algorithm": "sequential_ranking_comparison",
+                    "cache_hit": False
+                }
+            }
+        }
+    }
 
 # ============================================================================
 # Phase 4: Sequential Decisions & Conditional Recommendations - Response Models

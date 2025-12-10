@@ -47,7 +47,7 @@ class NOTEARSDiscovery:
         max_iter: int = NOTEARS_MAX_ITER,
         h_tol: float = NOTEARS_H_TOL,
         rho_max: float = NOTEARS_RHO_MAX,
-    ):
+    ) -> None:
         """
         Initialize NOTEARS discovery.
 
@@ -325,7 +325,7 @@ class PCAlgorithm:
     then orients edges using orientation rules.
     """
 
-    def __init__(self, alpha: float = PC_ALPHA):
+    def __init__(self, alpha: float = PC_ALPHA) -> None:
         """
         Initialize PC algorithm.
 
@@ -439,7 +439,7 @@ class AdvancedCausalDiscovery:
     Provides access to multiple algorithms and automatic algorithm selection.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize advanced causal discovery."""
         self.notears = NOTEARSDiscovery()
         self.pc = PCAlgorithm()
