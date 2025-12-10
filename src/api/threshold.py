@@ -13,7 +13,7 @@ from fastapi import APIRouter, Header
 from src.models.requests import ThresholdIdentificationRequest
 from src.models.responses import ThresholdIdentificationResponse
 from src.services.threshold_identifier import threshold_identifier
-from src.utils.metadata_builder import MetadataBuilder
+from src.models.isl_metadata import MetadataBuilder
 
 router = APIRouter()
 

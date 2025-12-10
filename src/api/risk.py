@@ -13,7 +13,7 @@ from fastapi import APIRouter, Header
 from src.models.requests import RiskAdjustmentRequest
 from src.models.responses import RiskAdjustmentResponse
 from src.services.risk_adjuster import risk_adjuster
-from src.utils.metadata_builder import MetadataBuilder
+from src.models.isl_metadata import MetadataBuilder
 
 router = APIRouter()
 
