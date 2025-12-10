@@ -32,6 +32,7 @@ from .causal import router as causal_router
 from .cee import router as cee_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
+from .dominance import router as dominance_router
 from .explain import router as explain_router
 from .health import router as health_router
 from .metrics import router as metrics_router
@@ -454,6 +455,11 @@ app.include_router(
     analysis_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Sensitivity Analysis"],
+)
+app.include_router(
+    dominance_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
 )
 app.include_router(
     robustness_router,

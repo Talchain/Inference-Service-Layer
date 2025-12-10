@@ -2308,3 +2308,93 @@ class ParameterRecommendationResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Dominance Detection Endpoint - Response Models
+# ============================================================================
+
+
+class DominanceRelation(BaseModel):
+    """Information about a dominated option."""
+
+    dominated_option_id: str = Field(
+        ...,
+        description="ID of the option that is dominated"
+    )
+    dominated_option_label: str = Field(
+        ...,
+        description="Label of the option that is dominated"
+    )
+    dominated_by: List[str] = Field(
+        ...,
+        description="List of option IDs that dominate this option"
+    )
+    degree: int = Field(
+        ...,
+        description="Number of options that dominate this option",
+        ge=0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "dominated_option_id": "opt_b",
+                "dominated_option_label": "Option B: Conservative Growth",
+                "dominated_by": ["opt_c", "opt_a"],
+                "degree": 2
+            }
+        }
+    }
+
+
+class DominanceResponse(BaseModel):
+    """Response model for dominance detection endpoint."""
+
+    dominated: List[DominanceRelation] = Field(
+        ...,
+        description="Options that are dominated by others (sorted by degree, descending)"
+    )
+    non_dominated_ids: List[str] = Field(
+        ...,
+        description="Option IDs that are not dominated (Pareto frontier)"
+    )
+    total_options: int = Field(
+        ...,
+        description="Total number of options analyzed",
+        ge=2
+    )
+    frontier_size: int = Field(
+        ...,
+        description="Number of options on Pareto frontier",
+        ge=1
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "dominated": [
+                    {
+                        "dominated_option_id": "opt_b",
+                        "dominated_option_label": "Option B: Conservative Growth",
+                        "dominated_by": ["opt_c"],
+                        "degree": 1
+                    }
+                ],
+                "non_dominated_ids": ["opt_a", "opt_c"],
+                "total_options": 3,
+                "frontier_size": 2,
+                "metadata": {
+                    "request_id": "req_abc123",
+                    "computation_time_ms": 2.5,
+                    "isl_version": "2.0",
+                    "algorithm": "pairwise_dominance",
+                    "cache_hit": False
+                }
+            }
+        }
+    }

@@ -1271,3 +1271,131 @@ class ParameterRecommendationRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Dominance Detection Endpoint - Request Models
+# ============================================================================
+
+
+class DominanceOption(BaseModel):
+    """Single option with scores across multiple criteria."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique option identifier",
+        min_length=1,
+        max_length=200
+    )
+    option_label: str = Field(
+        ...,
+        description="Human-readable option label",
+        min_length=1,
+        max_length=500
+    )
+    scores: Dict[str, float] = Field(
+        ...,
+        description="Normalized scores (0-1) by criterion_id"
+    )
+
+    @field_validator("scores")
+    @classmethod
+    def validate_scores(cls, v):
+        """Validate scores are normalized 0-1 and finite."""
+        if not v:
+            raise ValueError("scores cannot be empty")
+
+        for criterion_id, score in v.items():
+            if not isinstance(score, (int, float)):
+                raise ValueError(f"Score for {criterion_id} must be numeric")
+            if not (0.0 <= score <= 1.0):
+                raise ValueError(f"Score for {criterion_id} must be in range [0, 1], got {score}")
+            if not float('-inf') < score < float('inf'):
+                raise ValueError(f"Score for {criterion_id} must be finite, got {score}")
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_launch_q1",
+                "option_label": "Launch in Q1 2025",
+                "scores": {
+                    "revenue": 0.85,
+                    "risk": 0.60,
+                    "timeline": 0.90
+                }
+            }
+        }
+    }
+
+
+class DominanceRequest(BaseModel):
+    """Request model for dominance detection endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing (auto-generated if not provided)"
+    )
+    options: List[DominanceOption] = Field(
+        ...,
+        description="Options to analyze for dominance relationships",
+        min_length=2,
+        max_length=100
+    )
+    criteria: List[str] = Field(
+        ...,
+        description="Criterion IDs to consider (must match keys in option scores)",
+        min_length=1,
+        max_length=10
+    )
+
+    @field_validator("options")
+    @classmethod
+    def validate_option_consistency(cls, v, info):
+        """Validate all options have scores for all criteria."""
+        if len(v) < 2:
+            raise ValueError("At least 2 options required for dominance analysis")
+
+        # Get criteria from context if available
+        criteria = info.data.get("criteria", [])
+        if criteria:
+            for option in v:
+                missing = set(criteria) - set(option.scores.keys())
+                if missing:
+                    raise ValueError(
+                        f"Option {option.option_id} missing scores for criteria: {missing}"
+                    )
+                extra = set(option.scores.keys()) - set(criteria)
+                if extra:
+                    raise ValueError(
+                        f"Option {option.option_id} has scores for unexpected criteria: {extra}"
+                    )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_abc123",
+                "options": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A: Aggressive Growth",
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B: Conservative Growth",
+                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90}
+                    },
+                    {
+                        "option_id": "opt_c",
+                        "option_label": "Option C: Balanced Approach",
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
+                    }
+                ],
+                "criteria": ["revenue", "risk", "timeline"]
+            }
+        }
+    }
