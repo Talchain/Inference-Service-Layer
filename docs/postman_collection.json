@@ -1,0 +1,282 @@
+{
+  "info": {
+    "name": "Inference Service Layer (ISL) API",
+    "description": "Multi-criteria decision analysis endpoints for the Inference Service Layer. Provides dominance detection, Pareto frontier analysis, risk adjustment, threshold identification, and multi-criteria aggregation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "2.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "staging_url",
+      "value": "https://isl-staging.onrender.com",
+      "type": "string"
+    },
+    {
+      "key": "production_url",
+      "value": "https://isl-production.onrender.com",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Analysis Endpoints",
+      "item": [
+        {
+          "name": "Dominance Detection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}",
+                "description": "Optional request ID for tracing"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"options\": [\n    {\n      \"option_id\": \"opt_a\",\n      \"option_label\": \"Option A: High revenue, high risk\",\n      \"scores\": {\n        \"revenue\": 0.90,\n        \"risk\": 0.40,\n        \"timeline\": 0.70\n      }\n    },\n    {\n      \"option_id\": \"opt_b\",\n      \"option_label\": \"Option B: Medium across all\",\n      \"scores\": {\n        \"revenue\": 0.60,\n        \"risk\": 0.60,\n        \"timeline\": 0.60\n      }\n    },\n    {\n      \"option_id\": \"opt_c\",\n      \"option_label\": \"Option C: Dominates B on all criteria\",\n      \"scores\": {\n        \"revenue\": 0.75,\n        \"risk\": 0.75,\n        \"timeline\": 0.80\n      }\n    },\n    {\n      \"option_id\": \"opt_d\",\n      \"option_label\": \"Option D: Low revenue, high risk\",\n      \"scores\": {\n        \"revenue\": 0.30,\n        \"risk\": 0.85,\n        \"timeline\": 0.50\n      }\n    }\n  ],\n  \"criteria\": [\"revenue\", \"risk\", \"timeline\"]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/analysis/dominance",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "analysis", "dominance"]
+            },
+            "description": "Identifies which options are dominated by others. Option B dominates A if B ≥ A on all criteria AND B > A on at least one.\n\n**Returns:**\n- Dominated options with their dominators and degree\n- Non-dominated options (Pareto frontier)\n- Performance metadata with computation time\n\n**Limits:** 2-100 options, 1-10 criteria\n**Algorithm:** O(n²) pairwise comparison"
+          },
+          "response": [
+            {
+              "name": "Success - With Dominance",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/v1/analysis/dominance",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "analysis", "dominance"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"dominated\": [\n    {\n      \"dominated_option_id\": \"opt_b\",\n      \"dominated_option_label\": \"Option B: Medium across all\",\n      \"dominated_by\": [\"opt_c\"],\n      \"degree\": 1\n    }\n  ],\n  \"non_dominated_ids\": [\"opt_a\", \"opt_c\", \"opt_d\"],\n  \"total_options\": 4,\n  \"frontier_size\": 3,\n  \"metadata\": {\n    \"request_id\": \"req_abc123\",\n    \"computation_time_ms\": 2.34,\n    \"isl_version\": \"2.0\",\n    \"algorithm\": \"pairwise_dominance\",\n    \"cache_hit\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Pareto Frontier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"options\": [\n    {\n      \"option_id\": \"opt_a\",\n      \"option_label\": \"High revenue, low risk\",\n      \"scores\": {\n        \"revenue\": 0.90,\n        \"risk\": 0.40\n      }\n    },\n    {\n      \"option_id\": \"opt_b\",\n      \"option_label\": \"Medium revenue, medium risk\",\n      \"scores\": {\n        \"revenue\": 0.60,\n        \"risk\": 0.60\n      }\n    },\n    {\n      \"option_id\": \"opt_c\",\n      \"option_label\": \"Low revenue, high risk\",\n      \"scores\": {\n        \"revenue\": 0.40,\n        \"risk\": 0.90\n      }\n    },\n    {\n      \"option_id\": \"opt_d\",\n      \"option_label\": \"Balanced option\",\n      \"scores\": {\n        \"revenue\": 0.70,\n        \"risk\": 0.70\n      }\n    }\n  ],\n  \"criteria\": [\"revenue\", \"risk\"],\n  \"max_frontier_size\": 20\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/analysis/pareto",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "analysis", "pareto"]
+            },
+            "description": "Computes the Pareto frontier - the set of non-dominated options.\n\n**Returns:**\n- Frontier options with full scores\n- Dominated options with dominators\n- Frontier truncation flag if > max_frontier_size\n\n**Use when:** Narrowing down to optimal choices or exploring trade-offs\n\n**Limits:** 2-100 options, 1-10 criteria, max_frontier_size default 20\n**Algorithm:** O(n²) dominance detection"
+          },
+          "response": [
+            {
+              "name": "Success - Pareto Frontier",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/v1/analysis/pareto",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "analysis", "pareto"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"frontier\": [\n    {\n      \"option_id\": \"opt_a\",\n      \"option_label\": \"High revenue, low risk\",\n      \"scores\": {\"revenue\": 0.90, \"risk\": 0.40}\n    },\n    {\n      \"option_id\": \"opt_c\",\n      \"option_label\": \"Low revenue, high risk\",\n      \"scores\": {\"revenue\": 0.40, \"risk\": 0.90}\n    },\n    {\n      \"option_id\": \"opt_d\",\n      \"option_label\": \"Balanced option\",\n      \"scores\": {\"revenue\": 0.70, \"risk\": 0.70}\n    }\n  ],\n  \"dominated\": [\n    {\n      \"dominated_option_id\": \"opt_b\",\n      \"dominated_option_label\": \"Medium revenue, medium risk\",\n      \"dominated_by\": [\"opt_d\"],\n      \"degree\": 1\n    }\n  ],\n  \"frontier_size\": 3,\n  \"total_options\": 4,\n  \"frontier_truncated\": false,\n  \"metadata\": {\n    \"request_id\": \"req_def456\",\n    \"computation_time_ms\": 1.89,\n    \"isl_version\": \"2.0\",\n    \"algorithm\": \"skyline_pareto\",\n    \"cache_hit\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Risk Adjustment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"options\": [\n    {\n      \"option_id\": \"opt_a\",\n      \"option_label\": \"Stable Investment\",\n      \"mean\": 100.0,\n      \"std_dev\": 10.0\n    },\n    {\n      \"option_id\": \"opt_b\",\n      \"option_label\": \"Volatile Investment\",\n      \"mean\": 120.0,\n      \"std_dev\": 30.0\n    },\n    {\n      \"option_id\": \"opt_c\",\n      \"option_label\": \"Conservative Bond\",\n      \"mean\": 80.0,\n      \"std_dev\": 5.0\n    }\n  ],\n  \"risk_coefficient\": 0.5,\n  \"risk_type\": \"risk_averse\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/analysis/risk-adjust",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "analysis", "risk-adjust"]
+            },
+            "description": "Computes certainty equivalents based on user risk profiles using mean-variance approach.\n\n**Risk Types:**\n- `risk_averse`: Penalizes variance (CE = mean - coefficient/2 × variance)\n- `risk_neutral`: No adjustment (CE = mean)\n- `risk_seeking`: Rewards variance (CE = mean + coefficient/2 × variance)\n\n**Input Formats:**\n- Direct: `mean` and `std_dev`\n- Percentiles: `p10`, `p50`, `p90` (auto-converted)\n\n**Returns:**\n- Adjusted scores with certainty equivalents\n- Ranking changes if any\n- Risk interpretation\n\n**Typical coefficients:** 0.1-2.0 (higher = more risk sensitivity)"
+          },
+          "response": [
+            {
+              "name": "Success - Risk Averse",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/v1/analysis/risk-adjust",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "analysis", "risk-adjust"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"adjusted_scores\": [\n    {\n      \"option_id\": \"opt_a\",\n      \"option_label\": \"Stable Investment\",\n      \"original_score\": 100.0,\n      \"certainty_equivalent\": 95.0,\n      \"adjustment\": -5.0,\n      \"variance\": 100.0,\n      \"rank\": 1\n    },\n    {\n      \"option_id\": \"opt_c\",\n      \"option_label\": \"Conservative Bond\",\n      \"original_score\": 80.0,\n      \"certainty_equivalent\": 78.75,\n      \"adjustment\": -1.25,\n      \"variance\": 25.0,\n      \"rank\": 2\n    },\n    {\n      \"option_id\": \"opt_b\",\n      \"option_label\": \"Volatile Investment\",\n      \"original_score\": 120.0,\n      \"certainty_equivalent\": 75.0,\n      \"adjustment\": -45.0,\n      \"variance\": 900.0,\n      \"rank\": 3\n    }\n  ],\n  \"rankings_changed\": true,\n  \"ranking_changes\": [\n    {\n      \"option_id\": \"opt_b\",\n      \"option_label\": \"Volatile Investment\",\n      \"before_rank\": 1,\n      \"after_rank\": 3,\n      \"reason\": \"High variance penalized for risk averse profile\"\n    }\n  ],\n  \"risk_interpretation\": \"Risk averse profile: Higher variance options penalized. Coefficient 0.5 applies moderate risk penalty.\",\n  \"metadata\": {\n    \"request_id\": \"req_ghi789\",\n    \"computation_time_ms\": 0.87,\n    \"isl_version\": \"2.0\",\n    \"algorithm\": \"mean_variance_risk_averse\",\n    \"cache_hit\": false\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Threshold Identification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parameter_sweeps\": [\n    {\n      \"parameter_id\": \"risk_tolerance\",\n      \"parameter_label\": \"Risk Tolerance Level\",\n      \"values\": [0.1, 0.3, 0.5, 0.7, 0.9],\n      \"scores_by_value\": {\n        \"0.1\": {\n          \"opt_a\": 0.85,\n          \"opt_b\": 0.60,\n          \"opt_c\": 0.70\n        },\n        \"0.3\": {\n          \"opt_a\": 0.80,\n          \"opt_b\": 0.65,\n          \"opt_c\": 0.72\n        },\n        \"0.5\": {\n          \"opt_a\": 0.75,\n          \"opt_b\": 0.70,\n          \"opt_c\": 0.74\n        },\n        \"0.7\": {\n          \"opt_a\": 0.68,\n          \"opt_b\": 0.78,\n          \"opt_c\": 0.76\n        },\n        \"0.9\": {\n          \"opt_a\": 0.60,\n          \"opt_b\": 0.85,\n          \"opt_c\": 0.78\n        }\n      }\n    },\n    {\n      \"parameter_id\": \"weight_revenue\",\n      \"parameter_label\": \"Revenue Weight\",\n      \"values\": [0.2, 0.4, 0.6, 0.8],\n      \"scores_by_value\": {\n        \"0.2\": {\n          \"opt_a\": 0.65,\n          \"opt_b\": 0.70,\n          \"opt_c\": 0.68\n        },\n        \"0.4\": {\n          \"opt_a\": 0.72,\n          \"opt_b\": 0.68,\n          \"opt_c\": 0.70\n        },\n        \"0.6\": {\n          \"opt_a\": 0.78,\n          \"opt_b\": 0.65,\n          \"opt_c\": 0.71\n        },\n        \"0.8\": {\n          \"opt_a\": 0.85,\n          \"opt_b\": 0.60,\n          \"opt_c\": 0.72\n        }\n      }\n    }\n  ],\n  \"baseline_ranking\": [\"opt_a\", \"opt_c\", \"opt_b\"],\n  \"confidence_threshold\": 0.05\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/analysis/thresholds",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "analysis", "thresholds"]
+            },
+            "description": "Identifies parameter values where option rankings change, enabling sensitivity analysis.\n\n**Algorithm:** Sequential ranking comparison\n- Compares rankings at consecutive parameter values\n- Detects where rankings diverge from baseline (if provided)\n- Honors caller-provided sweep order (ascending, descending, or custom)\n\n**Returns:**\n- Thresholds where rankings change\n- Parameter sensitivity ranking\n- Total threshold count\n- Monotonic parameters (no ranking changes)\n\n**Use when:**\n- Understanding parameter sensitivity\n- Finding decision boundaries\n- Validating model robustness\n\n**Options:**\n- `baseline_ranking`: Fixed reference ranking to compare against\n- `confidence_threshold`: Minimum score difference to distinguish ranks (default 0.05)\n- `values`: Process in any order (ascending, descending, custom)"
+          },
+          "response": [
+            {
+              "name": "Success - With Thresholds",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/v1/analysis/thresholds",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "analysis", "thresholds"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"thresholds\": [\n    {\n      \"parameter_id\": \"risk_tolerance\",\n      \"threshold_value\": 0.7,\n      \"ranking_before\": [\"opt_a\", \"opt_c\", \"opt_b\"],\n      \"ranking_after\": [\"opt_b\", \"opt_c\", \"opt_a\"],\n      \"options_affected\": [\"opt_a\", \"opt_b\"],\n      \"score_gap\": 0.10\n    },\n    {\n      \"parameter_id\": \"weight_revenue\",\n      \"threshold_value\": 0.4,\n      \"ranking_before\": [\"opt_b\", \"opt_c\", \"opt_a\"],\n      \"ranking_after\": [\"opt_a\", \"opt_c\", \"opt_b\"],\n      \"options_affected\": [\"opt_a\", \"opt_b\"],\n      \"score_gap\": 0.04\n    }\n  ],\n  \"sensitivity_ranking\": [\n    {\n      \"parameter_id\": \"risk_tolerance\",\n      \"parameter_label\": \"Risk Tolerance Level\",\n      \"threshold_count\": 1,\n      \"sensitivity_score\": 0.20\n    },\n    {\n      \"parameter_id\": \"weight_revenue\",\n      \"parameter_label\": \"Revenue Weight\",\n      \"threshold_count\": 1,\n      \"sensitivity_score\": 0.25\n    }\n  ],\n  \"total_thresholds\": 2,\n  \"monotonic_parameters\": [],\n  \"metadata\": {\n    \"request_id\": \"req_jkl012\",\n    \"computation_time_ms\": 3.45,\n    \"isl_version\": \"2.0\",\n    \"algorithm\": \"sequential_ranking_comparison\",\n    \"cache_hit\": false\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Aggregation Endpoints",
+      "item": [
+        {
+          "name": "Multi-Criteria Aggregation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Request-Id",
+                "value": "{{$guid}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"criterion_results\": [\n    {\n      \"criterion_id\": \"revenue\",\n      \"criterion_label\": \"Revenue Potential\",\n      \"weight\": 0.5,\n      \"direction\": \"maximize\",\n      \"option_scores\": {\n        \"opt_a\": 0.90,\n        \"opt_b\": 0.60,\n        \"opt_c\": 0.75\n      }\n    },\n    {\n      \"criterion_id\": \"risk\",\n      \"criterion_label\": \"Risk Level\",\n      \"weight\": 0.3,\n      \"direction\": \"minimize\",\n      \"option_scores\": {\n        \"opt_a\": 0.70,\n        \"opt_b\": 0.40,\n        \"opt_c\": 0.60\n      }\n    },\n    {\n      \"criterion_id\": \"timeline\",\n      \"criterion_label\": \"Time to Market\",\n      \"weight\": 0.2,\n      \"direction\": \"minimize\",\n      \"option_scores\": {\n        \"opt_a\": 0.50,\n        \"opt_b\": 0.80,\n        \"opt_c\": 0.65\n      }\n    }\n  ],\n  \"aggregation_method\": \"weighted_sum\",\n  \"normalize_scores\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/aggregation/multi-criteria",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "aggregation", "multi-criteria"]
+            },
+            "description": "Aggregates scores across multiple criteria using configurable methods.\n\n**Aggregation Methods:**\n1. **weighted_sum** (default): Linear combination, compensatory\n   - Use when: Criteria can trade off, most business decisions\n   - Formula: Σ(weight_i × score_i)\n\n2. **weighted_product**: Geometric aggregation, penalizes zeros\n   - Use when: All criteria must be decent, balanced performance needed\n   - Formula: Π(score_i^weight_i)\n\n3. **lexicographic**: Strict priority hierarchy, non-compensatory\n   - Use when: Clear hierarchy exists, safety/compliance decisions\n   - Logic: Sort by criterion_1, break ties with criterion_2, etc.\n\n**Features:**\n- Auto-normalizes weights if sum ≠ 1.0\n- Handles missing scores gracefully\n- Identifies trade-offs between top options\n- Provides per-criterion contribution breakdown\n\n**Limits:** 2-100 options, 1-10 criteria"
+          },
+          "response": [
+            {
+              "name": "Success - Weighted Sum",
+              "originalRequest": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{base_url}}/api/v1/aggregation/multi-criteria",
+                  "host": ["{{base_url}}"],
+                  "path": ["api", "v1", "aggregation", "multi-criteria"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"aggregated_rankings\": [\n    {\n      \"option_id\": \"opt_a\",\n      \"rank\": 1,\n      \"aggregated_score\": 0.84,\n      \"normalized_scores\": {\n        \"revenue\": 0.90,\n        \"risk\": 0.30,\n        \"timeline\": 0.50\n      },\n      \"criterion_contributions\": {\n        \"revenue\": 0.45,\n        \"risk\": 0.09,\n        \"timeline\": 0.10\n      }\n    },\n    {\n      \"option_id\": \"opt_c\",\n      \"rank\": 2,\n      \"aggregated_score\": 0.73,\n      \"normalized_scores\": {\n        \"revenue\": 0.75,\n        \"risk\": 0.40,\n        \"timeline\": 0.35\n      },\n      \"criterion_contributions\": {\n        \"revenue\": 0.375,\n        \"risk\": 0.12,\n        \"timeline\": 0.07\n      }\n    },\n    {\n      \"option_id\": \"opt_b\",\n      \"rank\": 3,\n      \"aggregated_score\": 0.58,\n      \"normalized_scores\": {\n        \"revenue\": 0.60,\n        \"risk\": 0.60,\n        \"timeline\": 0.20\n      },\n      \"criterion_contributions\": {\n        \"revenue\": 0.30,\n        \"risk\": 0.18,\n        \"timeline\": 0.04\n      }\n    }\n  ],\n  \"trade_offs\": [\n    {\n      \"option_a_id\": \"opt_a\",\n      \"option_b_id\": \"opt_c\",\n      \"score_difference\": 0.11,\n      \"criteria_favoring_a\": [\"revenue\"],\n      \"criteria_favoring_b\": [\"risk\", \"timeline\"],\n      \"explanation\": \"opt_a ranks higher primarily due to revenue (0.90 vs 0.75)\"\n    }\n  ],\n  \"weights_normalized\": false,\n  \"original_weights\": null,\n  \"metadata\": {\n    \"request_id\": \"req_mno345\",\n    \"computation_time_ms\": 1.23,\n    \"isl_version\": \"2.0\",\n    \"algorithm\": \"weighted_sum\",\n    \"cache_hit\": false\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Health check endpoint for monitoring and load balancers"
+          },
+          "response": [
+            {
+              "name": "Healthy",
+              "originalRequest": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{base_url}}/health",
+                  "host": ["{{base_url}}"],
+                  "path": ["health"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"status\": \"healthy\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

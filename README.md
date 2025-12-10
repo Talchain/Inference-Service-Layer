@@ -28,11 +28,46 @@ curl -X POST http://localhost:8000/api/v1/validation/assumptions \
 
 | Capability | Endpoint | Description |
 |------------|----------|-------------|
+| **Multi-Criteria Analysis** | `/api/v1/analysis/*` | Dominance, Pareto, risk adjustment, thresholds |
+| **Aggregation** | `/api/v1/aggregation/*` | Multi-criteria scoring (sum/product/lexicographic) |
 | **Validation** | `/api/v1/validation/*` | Validate causal DAGs |
 | **Counterfactuals** | `/api/v1/counterfactual/*` | "What-if" analysis |
 | **Sensitivity** | `/api/v1/sensitivity/*` | Test assumption robustness |
 | **Explanations** | `/api/v1/explanations/*` | Multi-level explanations |
 | **Discovery** | `/api/v1/discovery/*` | Extract factors from text |
+
+---
+
+## API Testing & Development
+
+### Postman Collection
+
+Import the complete API collection for interactive testing and development:
+
+```bash
+# Import into Postman
+1. Open Postman → Import
+2. Select "docs/postman_collection.json"
+3. Choose environment:
+   - Local: http://localhost:8000
+   - Staging: https://isl-staging.onrender.com
+   - Production: https://isl-production.onrender.com
+```
+
+**Included Endpoints:**
+- ✅ Dominance Detection - Identify dominated options
+- ✅ Pareto Frontier - Find non-dominated options
+- ✅ Risk Adjustment - Certainty equivalents with risk profiles
+- ✅ Threshold Identification - Parameter sensitivity analysis
+- ✅ Multi-Criteria Aggregation - Weighted sum/product/lexicographic
+
+**Features:**
+- Pre-configured example requests for all endpoints
+- Environment variables for easy switching between deployments
+- Sample responses with realistic data
+- Auto-generated request IDs
+
+**Collection file:** `docs/postman_collection.json`
 
 ---
 
