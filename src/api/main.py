@@ -100,6 +100,42 @@ app.add_middleware(
     compresslevel=6     # Balance speed vs compression (1-9, 6 is good default)
 )
 
+
+# Security headers middleware (defense in depth)
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next: Callable) -> Response:
+    """
+    Add security headers to all responses.
+
+    Headers added:
+    - X-Content-Type-Options: nosniff (prevent MIME sniffing)
+    - X-Frame-Options: DENY (prevent clickjacking)
+    - X-XSS-Protection: 1; mode=block (legacy XSS protection)
+    - Strict-Transport-Security: HSTS for HTTPS (if applicable)
+    - Content-Security-Policy: Restrictive CSP for API-only service
+    """
+    response = await call_next(request)
+
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # Legacy XSS protection (still useful for older browsers)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # HSTS: Force HTTPS for 1 year (only if request is HTTPS)
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # CSP: API-only service shouldn't load any resources
+    # This prevents any content injection attacks
+    response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+
+    return response
+
+
 # Request size limit (DoS protection - reject oversized requests)
 app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=settings.MAX_REQUEST_SIZE_MB)
 
@@ -136,7 +172,17 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*", "X-API-Key"],  # Allow X-API-Key header
+    # Explicit headers only (no wildcard for security)
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-API-Key",
+        "X-Request-Id",
+        "X-Correlation-Id",
+        "Accept",
+        "Accept-Language",
+        "Content-Language",
+    ],
     expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Request-Id", "X-Trace-Id"],
     max_age=600,  # Cache preflight requests for 10 minutes
 )

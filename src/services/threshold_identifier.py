@@ -236,11 +236,17 @@ class ThresholdIdentifier:
         """
         affected = []
 
-        for option_id in ranking_before:
-            idx_before = ranking_before.index(option_id)
-            idx_after = ranking_after.index(option_id)
+        # Pre-build position lookup dictionaries for O(1) access
+        # This optimization reduces complexity from O(n²) to O(n)
+        position_before = {option_id: idx for idx, option_id in enumerate(ranking_before)}
+        position_after = {option_id: idx for idx, option_id in enumerate(ranking_after)}
 
-            if idx_before != idx_after:
+        for option_id in ranking_before:
+            idx_before = position_before[option_id]
+            idx_after = position_after.get(option_id)
+
+            # Check if option exists in both rankings and changed position
+            if idx_after is not None and idx_before != idx_after:
                 affected.append(option_id)
 
         return affected
