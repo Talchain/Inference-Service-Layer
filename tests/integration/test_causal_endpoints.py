@@ -43,10 +43,9 @@ async def test_causal_validation_pricing_scenario(client, pricing_dag):
     assert len(data["adjustment_sets"]) > 0
 
 
-@pytest.mark.skip(reason="Known Starlette async middleware bug with early validation errors (anyio.EndOfStream). See https://github.com/encode/starlette/issues/1678. Endpoint works correctly in production.")
 @pytest.mark.asyncio
 async def test_causal_validation_invalid_dag(client):
-    """Test causal validation with invalid DAG."""
+    """Test causal validation with invalid DAG (Pydantic validation error)."""
     response = await client.post(
         "/api/v1/causal/validate",
         json={
@@ -56,7 +55,13 @@ async def test_causal_validation_invalid_dag(client):
         },
     )
 
-    assert response.status_code == 400
+    # FastAPI/Pydantic returns 422 for validation errors
+    assert response.status_code == 422
+    data = response.json()
+    # ISL uses custom error response format
+    assert "code" in data
+    assert data["code"] == "ISL_VALIDATION_ERROR"
+    assert "message" in data
 
 
 @pytest.mark.asyncio
