@@ -2821,3 +2821,165 @@ class RiskAdjustmentResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Threshold Identification Endpoint - Response Models
+# ============================================================================
+
+
+class RankingThreshold(BaseModel):
+    """A parameter threshold where ranking changes."""
+
+    parameter_id: str = Field(..., description="Parameter identifier")
+    parameter_label: str = Field(..., description="Parameter label")
+    threshold_value: float = Field(
+        ...,
+        description="Parameter value where ranking changes"
+    )
+    ranking_before: List[str] = Field(
+        ...,
+        description="Option ranking before threshold (option_ids, best to worst)"
+    )
+    ranking_after: List[str] = Field(
+        ...,
+        description="Option ranking after threshold (option_ids, best to worst)"
+    )
+    options_affected: List[str] = Field(
+        ...,
+        description="Option IDs whose ranks changed at this threshold"
+    )
+    score_gap: Optional[float] = Field(
+        None,
+        description="Score difference between swapped options at threshold",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_id": "price",
+                "parameter_label": "Product Price",
+                "threshold_value": 50.0,
+                "ranking_before": ["opt_a", "opt_c", "opt_b"],
+                "ranking_after": ["opt_b", "opt_a", "opt_c"],
+                "options_affected": ["opt_a", "opt_b"],
+                "score_gap": 0.05
+            }
+        }
+    }
+
+
+class ParameterSensitivity(BaseModel):
+    """Sensitivity analysis for a parameter."""
+
+    parameter_id: str = Field(..., description="Parameter identifier")
+    parameter_label: str = Field(..., description="Parameter label")
+    changes_count: int = Field(
+        ...,
+        description="Number of ranking changes across parameter sweep",
+        ge=0
+    )
+    most_sensitive_range: Optional[List[float]] = Field(
+        None,
+        description="Parameter range [min, max] where most changes occur (if any changes)",
+        min_length=2,
+        max_length=2
+    )
+    sensitivity_score: float = Field(
+        ...,
+        description="Normalized sensitivity score (0-1, higher = more sensitive)",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_id": "price",
+                "parameter_label": "Product Price",
+                "changes_count": 2,
+                "most_sensitive_range": [45.0, 55.0],
+                "sensitivity_score": 0.85
+            }
+        }
+    }
+
+
+class ThresholdIdentificationResponse(BaseModel):
+    """Response model for threshold identification endpoint."""
+
+    thresholds: List[RankingThreshold] = Field(
+        ...,
+        description="Ranking thresholds across all parameters (sorted by parameter, then value)"
+    )
+    sensitivity_ranking: List[ParameterSensitivity] = Field(
+        ...,
+        description="Parameters ranked by sensitivity (most sensitive first)"
+    )
+    total_thresholds: int = Field(
+        ...,
+        description="Total number of thresholds found across all parameters",
+        ge=0
+    )
+    monotonic_parameters: List[str] = Field(
+        ...,
+        description="Parameter IDs with no ranking changes (monotonic)"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "thresholds": [
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "threshold_value": 50.0,
+                        "ranking_before": ["opt_a", "opt_c", "opt_b"],
+                        "ranking_after": ["opt_b", "opt_a", "opt_c"],
+                        "options_affected": ["opt_a", "opt_b"],
+                        "score_gap": 0.05
+                    },
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "threshold_value": 60.0,
+                        "ranking_before": ["opt_b", "opt_a", "opt_c"],
+                        "ranking_after": ["opt_b", "opt_c", "opt_a"],
+                        "options_affected": ["opt_a", "opt_c"],
+                        "score_gap": 0.02
+                    }
+                ],
+                "sensitivity_ranking": [
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "changes_count": 2,
+                        "most_sensitive_range": [45.0, 65.0],
+                        "sensitivity_score": 1.0
+                    },
+                    {
+                        "parameter_id": "marketing_spend",
+                        "parameter_label": "Marketing Spend",
+                        "changes_count": 0,
+                        "most_sensitive_range": None,
+                        "sensitivity_score": 0.0
+                    }
+                ],
+                "total_thresholds": 2,
+                "monotonic_parameters": ["marketing_spend"],
+                "metadata": {
+                    "request_id": "req_threshold_abc123",
+                    "computation_time_ms": 3.5,
+                    "isl_version": "2.0",
+                    "algorithm": "sequential_ranking_comparison",
+                    "cache_hit": False
+                }
+            }
+        }
+    }

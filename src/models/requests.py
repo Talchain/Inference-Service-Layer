@@ -1828,3 +1828,149 @@ class RiskAdjustmentRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Threshold Identification Endpoint - Request Models
+# ============================================================================
+
+
+class ParameterSweep(BaseModel):
+    """Parameter sweep with scores at different parameter values."""
+
+    parameter_id: str = Field(
+        ...,
+        description="Parameter identifier",
+        min_length=1,
+        max_length=200
+    )
+    parameter_label: str = Field(
+        ...,
+        description="Human-readable parameter label",
+        min_length=1,
+        max_length=500
+    )
+    values: List[float] = Field(
+        ...,
+        description="Parameter values tested (in sweep order)",
+        min_length=2,
+        max_length=1000
+    )
+    scores_by_value: Dict[str, Dict[str, float]] = Field(
+        ...,
+        description="Scores for each option at each parameter value. "
+                    "Format: {parameter_value: {option_id: score}}"
+    )
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_unique(cls, v):
+        """Validate that parameter values are unique."""
+        if len(v) != len(set(v)):
+            raise ValueError("Parameter values must be unique")
+        return v
+
+    @field_validator("scores_by_value")
+    @classmethod
+    def validate_scores_by_value(cls, v, info):
+        """Validate that scores_by_value has entries for all values."""
+        values = info.data.get("values", [])
+        if values:
+            # Check that all values have score entries
+            values_str = [str(val) for val in values]
+            for val_str in values_str:
+                if val_str not in v:
+                    raise ValueError(
+                        f"scores_by_value missing entry for parameter value {val_str}"
+                    )
+
+            # Check that all score dictionaries have same option_ids
+            if v:
+                first_options = set(next(iter(v.values())).keys())
+                for val_str, scores in v.items():
+                    if set(scores.keys()) != first_options:
+                        raise ValueError(
+                            f"All parameter values must have scores for same options. "
+                            f"Value {val_str} has different options."
+                        )
+
+                # Validate score ranges
+                for val_str, scores in v.items():
+                    for option_id, score in scores.items():
+                        if not isinstance(score, (int, float)):
+                            raise ValueError(
+                                f"Score for {option_id} at {val_str} must be numeric"
+                            )
+                        if not (0.0 <= score <= 1.0):
+                            raise ValueError(
+                                f"Score for {option_id} at {val_str} must be in [0, 1], got {score}"
+                            )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_id": "price",
+                "parameter_label": "Product Price",
+                "values": [30.0, 40.0, 50.0, 60.0, 70.0],
+                "scores_by_value": {
+                    "30.0": {"opt_a": 0.90, "opt_b": 0.60, "opt_c": 0.75},
+                    "40.0": {"opt_a": 0.85, "opt_b": 0.70, "opt_c": 0.75},
+                    "50.0": {"opt_a": 0.75, "opt_b": 0.80, "opt_c": 0.70},
+                    "60.0": {"opt_a": 0.65, "opt_b": 0.85, "opt_c": 0.65},
+                    "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60}
+                }
+            }
+        }
+    }
+
+
+class ThresholdIdentificationRequest(BaseModel):
+    """Request model for threshold identification endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing"
+    )
+    parameter_sweeps: List[ParameterSweep] = Field(
+        ...,
+        description="Parameter sweeps with scores at different values",
+        min_length=1,
+        max_length=20
+    )
+    baseline_ranking: Optional[List[str]] = Field(
+        default=None,
+        description="Optional baseline ranking (option_ids in rank order). "
+                    "If not provided, uses ranking at first parameter value."
+    )
+    confidence_threshold: Optional[float] = Field(
+        default=0.1,
+        description="Minimum score difference to consider ranking change meaningful",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_threshold_abc123",
+                "parameter_sweeps": [
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "values": [30.0, 40.0, 50.0, 60.0, 70.0],
+                        "scores_by_value": {
+                            "30.0": {"opt_a": 0.90, "opt_b": 0.60, "opt_c": 0.75},
+                            "40.0": {"opt_a": 0.85, "opt_b": 0.70, "opt_c": 0.75},
+                            "50.0": {"opt_a": 0.75, "opt_b": 0.80, "opt_c": 0.70},
+                            "60.0": {"opt_a": 0.65, "opt_b": 0.85, "opt_c": 0.65},
+                            "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60}
+                        }
+                    }
+                ],
+                "baseline_ranking": ["opt_a", "opt_c", "opt_b"],
+                "confidence_threshold": 0.1
+            }
+        }
+    }

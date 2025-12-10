@@ -43,6 +43,7 @@ from .risk import router as risk_router
 from .robustness import router as robustness_router
 from .teaching import router as teaching_router
 from .team import router as team_router
+from .threshold import router as threshold_router
 from .validation import router as validation_router
 
 # Setup logging
@@ -465,6 +466,11 @@ app.include_router(
 )
 app.include_router(
     risk_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
+)
+app.include_router(
+    threshold_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Multi-Criteria Analysis"],
 )
