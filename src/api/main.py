@@ -51,6 +51,88 @@ from .validation import router as validation_router
 logger = setup_logging()
 settings = get_settings()
 
+
+# =============================================================================
+# Sentry Error Tracking
+# =============================================================================
+def _init_sentry() -> None:
+    """
+    Initialize Sentry error tracking if enabled.
+
+    Configures:
+    - FastAPI and Starlette integrations
+    - Performance tracing
+    - Request ID correlation
+    - Release tracking
+    """
+    if not settings.SENTRY_ENABLED:
+        logger.info("Sentry error tracking disabled")
+        return
+
+    if not settings.SENTRY_DSN:
+        logger.warning("SENTRY_ENABLED=true but SENTRY_DSN not configured - Sentry disabled")
+        return
+
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+
+        def before_send_filter(event, hint):
+            """Add request_id to Sentry events and filter sensitive data."""
+            from src.utils.tracing import get_trace_id
+
+            # Add request_id for correlation
+            request_id = get_trace_id()
+            if request_id:
+                event.setdefault("tags", {})["request_id"] = request_id
+                event.setdefault("extra", {})["request_id"] = request_id
+
+            # Filter sensitive data from request headers
+            if "request" in event:
+                headers = event["request"].get("headers", {})
+                if isinstance(headers, dict):
+                    headers.pop("Authorization", None)
+                    headers.pop("X-API-Key", None)
+                    headers.pop("x-api-key", None)
+
+            return event
+
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.SENTRY_ENVIRONMENT or settings.ENVIRONMENT,
+            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+            profiles_sample_rate=settings.SENTRY_PROFILES_SAMPLE_RATE,
+            integrations=[
+                FastApiIntegration(transaction_style="endpoint"),
+                StarletteIntegration(transaction_style="endpoint"),
+            ],
+            before_send=before_send_filter,
+            release=f"isl@{settings.VERSION}",
+            send_default_pii=False,  # Don't send PII by default
+        )
+
+        logger.info(
+            "Sentry error tracking initialized",
+            extra={
+                "environment": settings.SENTRY_ENVIRONMENT or settings.ENVIRONMENT,
+                "traces_sample_rate": settings.SENTRY_TRACES_SAMPLE_RATE,
+                "release": f"isl@{settings.VERSION}",
+            }
+        )
+
+    except ImportError:
+        logger.warning(
+            "SENTRY_ENABLED=true but sentry-sdk not installed. "
+            "Run: poetry add sentry-sdk[fastapi]"
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize Sentry: {e}")
+
+
+# Initialize Sentry before app creation
+_init_sentry()
+
 # Validate production configuration
 config_errors = settings.validate_production_config()
 if config_errors:
@@ -151,9 +233,13 @@ app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 app.add_middleware(TracingMiddleware)
 
 # API Key Authentication (validates X-API-Key header)
-# Note: Only enforced if ISL_API_KEYS or ISL_API_KEY environment variable is set
+# SECURITY: Authentication is enabled by default. Explicit opt-out via ISL_AUTH_DISABLED=true.
 # Supports both ISL_API_KEYS (preferred) and ISL_API_KEY (legacy) for backward compatibility
-app.add_middleware(APIKeyAuthMiddleware, api_keys=settings.ISL_API_KEYS or settings.ISL_API_KEY)
+app.add_middleware(
+    APIKeyAuthMiddleware,
+    api_keys=settings.ISL_API_KEYS or settings.ISL_API_KEY,
+    auth_disabled=settings.ISL_AUTH_DISABLED
+)
 
 # Configure CORS middleware using settings
 # SECURITY: No wildcard origins - explicit origins only
