@@ -1271,3 +1271,459 @@ class ParameterRecommendationRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Phase 4: Sequential Decisions & Conditional Recommendations
+# ============================================================================
+
+
+class RiskMetrics(BaseModel):
+    """Risk metrics for an option."""
+
+    variance: Optional[float] = Field(
+        default=None,
+        description="Variance of the outcome distribution"
+    )
+    downside_risk: Optional[float] = Field(
+        default=None,
+        description="Expected loss below a threshold (CVaR/VaR)"
+    )
+    probability_of_loss: Optional[float] = Field(
+        default=None,
+        description="Probability of negative outcome",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variance": 10000.0,
+                "downside_risk": 5000.0,
+                "probability_of_loss": 0.15
+            }
+        }
+    }
+
+
+class RankedOption(BaseModel):
+    """A ranked option for conditional recommendation analysis."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique identifier for the option",
+        min_length=1,
+        max_length=100
+    )
+    label: str = Field(
+        ...,
+        description="Human-readable label for the option",
+        min_length=1,
+        max_length=200
+    )
+    expected_value: float = Field(
+        ...,
+        description="Expected value/utility of this option"
+    )
+    distribution: Distribution = Field(
+        ...,
+        description="Probability distribution of outcomes"
+    )
+    risk_metrics: Optional[RiskMetrics] = Field(
+        default=None,
+        description="Optional risk metrics for the option"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_a",
+                "label": "Launch Product A",
+                "expected_value": 50000.0,
+                "distribution": {
+                    "type": "normal",
+                    "parameters": {"mean": 50000, "std": 10000}
+                },
+                "risk_metrics": {
+                    "variance": 100000000,
+                    "downside_risk": 30000,
+                    "probability_of_loss": 0.1
+                }
+            }
+        }
+    }
+
+
+class ConditionalRecommendRequest(BaseModel):
+    """Request model for conditional recommendation endpoint."""
+
+    run_id: str = Field(
+        ...,
+        description="Unique identifier for this analysis run",
+        min_length=1,
+        max_length=100
+    )
+    ranked_options: List[RankedOption] = Field(
+        ...,
+        description="List of options ranked by expected value",
+        min_length=2,
+        max_length=20
+    )
+    parameters_to_condition_on: Optional[List[str]] = Field(
+        default=None,
+        description="Parameters to generate conditions for (auto-detect if None)",
+        max_length=20
+    )
+    condition_types: List[str] = Field(
+        default=["threshold", "dominance", "risk_profile"],
+        description="Types of conditions to generate",
+        max_length=5
+    )
+    max_conditions: int = Field(
+        default=5,
+        description="Maximum number of conditions to return",
+        ge=1,
+        le=20
+    )
+
+    @field_validator("condition_types")
+    @classmethod
+    def validate_condition_types(cls, v: List[str]) -> List[str]:
+        """Validate condition types are valid."""
+        allowed = {"threshold", "dominance", "risk_profile", "scenario"}
+        for ct in v:
+            if ct not in allowed:
+                raise ValueError(f"Invalid condition type: {ct}. Allowed: {allowed}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "run_id": "analysis_001",
+                "ranked_options": [
+                    {
+                        "option_id": "option_a",
+                        "label": "Aggressive Expansion",
+                        "expected_value": 75000.0,
+                        "distribution": {"type": "normal", "parameters": {"mean": 75000, "std": 20000}}
+                    },
+                    {
+                        "option_id": "option_b",
+                        "label": "Conservative Growth",
+                        "expected_value": 50000.0,
+                        "distribution": {"type": "normal", "parameters": {"mean": 50000, "std": 5000}}
+                    }
+                ],
+                "parameters_to_condition_on": ["market_size", "competitor_response"],
+                "condition_types": ["threshold", "risk_profile"],
+                "max_conditions": 5
+            }
+        }
+    }
+
+
+class SequentialGraphNode(BaseModel):
+    """Node in a sequential decision graph."""
+
+    id: str = Field(
+        ...,
+        description="Unique node identifier",
+        min_length=1,
+        max_length=100
+    )
+    type: str = Field(
+        ...,
+        description="Node type: 'decision', 'chance', or 'terminal'",
+        pattern="^(decision|chance|terminal)$"
+    )
+    label: str = Field(
+        ...,
+        description="Human-readable label",
+        max_length=200
+    )
+    payoff: Optional[float] = Field(
+        default=None,
+        description="Payoff value (for terminal nodes)"
+    )
+    probabilities: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Outcome probabilities (for chance nodes)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "invest_decision",
+                "type": "decision",
+                "label": "Investment Decision",
+                "payoff": None,
+                "probabilities": None
+            }
+        }
+    }
+
+
+class SequentialGraphEdge(BaseModel):
+    """Edge in a sequential decision graph."""
+
+    from_node: str = Field(
+        ...,
+        alias="from",
+        description="Source node ID",
+        max_length=100
+    )
+    to_node: str = Field(
+        ...,
+        alias="to",
+        description="Target node ID",
+        max_length=100
+    )
+    action: Optional[str] = Field(
+        default=None,
+        description="Action label (for decision edges)",
+        max_length=200
+    )
+    outcome: Optional[str] = Field(
+        default=None,
+        description="Outcome label (for chance edges)",
+        max_length=200
+    )
+    probability: Optional[float] = Field(
+        default=None,
+        description="Transition probability",
+        ge=0.0,
+        le=1.0
+    )
+    immediate_payoff: Optional[float] = Field(
+        default=0.0,
+        description="Immediate payoff for this transition"
+    )
+
+    model_config = {
+        "populate_by_name": True,  # Allow both field name and alias
+        "json_schema_extra": {
+            "example": {
+                "from": "invest_decision",
+                "to": "market_outcome",
+                "action": "invest",
+                "probability": None,
+                "immediate_payoff": -10000
+            }
+        }
+    }
+
+
+class SequentialGraph(BaseModel):
+    """Sequential decision graph structure."""
+
+    nodes: List[SequentialGraphNode] = Field(
+        ...,
+        description="List of graph nodes",
+        min_length=2,
+        max_length=100
+    )
+    edges: List[SequentialGraphEdge] = Field(
+        ...,
+        description="List of directed edges",
+        max_length=300
+    )
+    stage_assignments: Dict[str, int] = Field(
+        ...,
+        description="Mapping of node IDs to stage indices"
+    )
+
+    @field_validator("nodes")
+    @classmethod
+    def validate_unique_node_ids(cls, v: List[SequentialGraphNode]) -> List[SequentialGraphNode]:
+        """Validate node IDs are unique."""
+        node_ids = [node.id for node in v]
+        if len(node_ids) != len(set(node_ids)):
+            duplicates = [id for id in node_ids if node_ids.count(id) > 1]
+            raise ValueError(f"Duplicate node IDs found: {duplicates}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "nodes": [
+                    {"id": "start", "type": "decision", "label": "Initial Investment"},
+                    {"id": "market", "type": "chance", "label": "Market Outcome"},
+                    {"id": "expand", "type": "decision", "label": "Expand Decision"},
+                    {"id": "success", "type": "terminal", "label": "Success", "payoff": 100000},
+                    {"id": "failure", "type": "terminal", "label": "Failure", "payoff": -20000}
+                ],
+                "edges": [
+                    {"from": "start", "to": "market", "action": "invest", "immediate_payoff": -10000},
+                    {"from": "market", "to": "expand", "outcome": "favorable", "probability": 0.6},
+                    {"from": "market", "to": "failure", "outcome": "unfavorable", "probability": 0.4},
+                    {"from": "expand", "to": "success", "action": "expand"},
+                    {"from": "expand", "to": "failure", "action": "exit"}
+                ],
+                "stage_assignments": {"start": 0, "market": 1, "expand": 1, "success": 2, "failure": 2}
+            }
+        }
+    }
+
+
+class DecisionStage(BaseModel):
+    """A stage in a sequential decision problem."""
+
+    stage_index: int = Field(
+        ...,
+        description="Zero-based stage index",
+        ge=0
+    )
+    stage_label: str = Field(
+        ...,
+        description="Human-readable label for the stage",
+        max_length=200
+    )
+    decision_nodes: List[str] = Field(
+        ...,
+        description="Node IDs that are decisions at this stage",
+        max_length=20
+    )
+    resolution_nodes: List[str] = Field(
+        default_factory=list,
+        description="Uncertainty nodes resolved by this stage",
+        max_length=20
+    )
+    time_horizon: Optional[str] = Field(
+        default=None,
+        description="Time horizon: 'immediate', 'short_term', 'long_term'",
+        pattern="^(immediate|short_term|long_term)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "stage_index": 0,
+                "stage_label": "Initial Investment Decision",
+                "decision_nodes": ["invest_decision"],
+                "resolution_nodes": [],
+                "time_horizon": "immediate"
+            }
+        }
+    }
+
+
+class SequentialAnalysisRequest(BaseModel):
+    """Request model for sequential decision analysis endpoint."""
+
+    graph: SequentialGraph = Field(
+        ...,
+        description="Sequential decision graph"
+    )
+    stages: List[DecisionStage] = Field(
+        ...,
+        description="Definition of decision stages",
+        min_length=1,
+        max_length=10
+    )
+    discount_factor: float = Field(
+        default=0.95,
+        description="Time preference discount factor (0-1)",
+        gt=0.0,
+        le=1.0
+    )
+    risk_tolerance: Optional[str] = Field(
+        default="neutral",
+        description="Risk tolerance: 'averse', 'neutral', 'seeking'",
+        pattern="^(averse|neutral|seeking)$"
+    )
+    monte_carlo_samples: int = Field(
+        default=1000,
+        description="Number of Monte Carlo samples for uncertainty",
+        ge=100,
+        le=10000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "invest", "type": "decision", "label": "Invest Decision"},
+                        {"id": "market", "type": "chance", "label": "Market Outcome"},
+                        {"id": "pricing", "type": "decision", "label": "Pricing Decision"},
+                        {"id": "high_return", "type": "terminal", "label": "High Return", "payoff": 100000},
+                        {"id": "low_return", "type": "terminal", "label": "Low Return", "payoff": 20000},
+                        {"id": "loss", "type": "terminal", "label": "Loss", "payoff": -30000}
+                    ],
+                    "edges": [
+                        {"from": "invest", "to": "market", "action": "invest", "immediate_payoff": -50000},
+                        {"from": "market", "to": "pricing", "outcome": "favorable", "probability": 0.7},
+                        {"from": "market", "to": "loss", "outcome": "unfavorable", "probability": 0.3},
+                        {"from": "pricing", "to": "high_return", "action": "premium"},
+                        {"from": "pricing", "to": "low_return", "action": "economy"}
+                    ],
+                    "stage_assignments": {
+                        "invest": 0,
+                        "market": 1,
+                        "pricing": 1,
+                        "high_return": 2,
+                        "low_return": 2,
+                        "loss": 2
+                    }
+                },
+                "stages": [
+                    {"stage_index": 0, "stage_label": "Investment", "decision_nodes": ["invest"]},
+                    {"stage_index": 1, "stage_label": "Pricing", "decision_nodes": ["pricing"], "resolution_nodes": ["market"]},
+                    {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []}
+                ],
+                "discount_factor": 0.95,
+                "risk_tolerance": "neutral",
+                "monte_carlo_samples": 1000
+            }
+        }
+    }
+
+
+class StageSensitivityRequest(BaseModel):
+    """Request model for stage-by-stage sensitivity analysis."""
+
+    graph: SequentialGraph = Field(
+        ...,
+        description="Sequential decision graph"
+    )
+    stages: List[DecisionStage] = Field(
+        ...,
+        description="Definition of decision stages",
+        min_length=1,
+        max_length=10
+    )
+    parameters_to_vary: Optional[List[str]] = Field(
+        default=None,
+        description="Parameters to vary (auto-detect if None)",
+        max_length=20
+    )
+    variation_range: float = Field(
+        default=0.2,
+        description="Fractional variation to apply (e.g., 0.2 = ±20%)",
+        gt=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "decide", "type": "decision", "label": "Decision"},
+                        {"id": "outcome", "type": "terminal", "label": "Outcome", "payoff": 50000}
+                    ],
+                    "edges": [
+                        {"from": "decide", "to": "outcome", "action": "proceed"}
+                    ],
+                    "stage_assignments": {"decide": 0, "outcome": 1}
+                },
+                "stages": [
+                    {"stage_index": 0, "stage_label": "Decision", "decision_nodes": ["decide"]},
+                    {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []}
+                ],
+                "parameters_to_vary": ["market_probability", "payoff"],
+                "variation_range": 0.2
+            }
+        }
+    }
