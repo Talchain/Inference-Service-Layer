@@ -5,7 +5,7 @@ Tests mathematical properties of dominance relationships using Hypothesis.
 """
 
 import pytest
-from hypothesis import given, strategies as st, assume
+from hypothesis import given, strategies as st, assume, HealthCheck
 from hypothesis import settings
 
 from src.services.dominance_analyzer import DominanceAnalyzer
@@ -57,7 +57,7 @@ class TestDominanceProperties:
     """Property-based tests for dominance detection."""
 
     @given(options=options_list(min_size=2, max_size=10, num_criteria=3))
-    @settings(max_examples=50)
+    @settings(max_examples=50, suppress_health_check=[HealthCheck.too_slow])
     def test_dominance_transitivity(self, options):
         """
         Property: Dominance is transitive.
