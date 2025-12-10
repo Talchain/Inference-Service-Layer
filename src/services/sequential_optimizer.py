@@ -22,7 +22,7 @@ INFO_GAIN_NORMALIZATION = 10.0  # Normalization factor for information gain
 class BeliefState:
     """Represents current beliefs about model parameters."""
 
-    def __init__(self, parameter_distributions: Dict[str, Dict]):
+    def __init__(self, parameter_distributions: Dict[str, Dict]) -> None:
         """
         Initialize belief state.
 
@@ -38,7 +38,7 @@ class OptimizationObjective:
 
     def __init__(
         self, target_variable: str, goal: str, target_value: Optional[float] = None
-    ):
+    ) -> None:
         """
         Initialize optimization objective.
 
@@ -60,7 +60,7 @@ class ExperimentConstraints:
         budget: float,
         time_horizon: int,
         feasible_interventions: Dict[str, Tuple[float, float]],
-    ):
+    ) -> None:
         """
         Initialize experiment constraints.
 
@@ -85,7 +85,7 @@ class RecommendedExperiment:
         cost_estimate: float,
         rationale: str,
         exploration_vs_exploitation: float,
-    ):
+    ) -> None:
         """
         Initialize recommended experiment.
 
@@ -113,7 +113,7 @@ class SequentialOptimizer:
     exploitation (optimizing outcome).
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize sequential optimizer."""
         pass
 

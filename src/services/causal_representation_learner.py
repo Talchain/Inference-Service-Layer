@@ -29,7 +29,7 @@ class CausalRepresentationLearner:
     5. DAG suggestion (correlation-based)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the causal representation learner."""
         self.logger = logger
         self._embedder = None

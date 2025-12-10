@@ -41,7 +41,7 @@ class BatchCounterfactualEngine:
         self,
         cf_engine: Optional[CounterfactualEngine] = None,
         explanation_generator: Optional[ExplanationGenerator] = None,
-    ):
+    ) -> None:
         """
         Initialize batch counterfactual engine.
 
