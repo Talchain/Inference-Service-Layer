@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .isl_metadata import ISLResponseMetadata
 from .metadata import ResponseMetadata
 from .shared import (
     ConfidenceInterval,
@@ -2010,6 +2011,10 @@ class SensitivityDetailedResponse(BaseModel):
         ...,
         description="List of assumptions with sensitivity analysis"
     )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -2065,6 +2070,10 @@ class ContrastiveResponse(BaseModel):
         ...,
         description="List of actionable alternatives"
     )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -2105,6 +2114,10 @@ class ConformalResponse(BaseModel):
         ...,
         description="Main source of uncertainty",
         max_length=500
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2154,6 +2167,10 @@ class ValidationStrategiesResponse(BaseModel):
     suggested_improvements: List[ValidationImprovement] = Field(
         ...,
         description="List of suggested model improvements"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
     )
 
     model_config = {

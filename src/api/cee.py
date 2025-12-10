@@ -17,6 +17,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
+from src.models.isl_metadata import MetadataBuilder
 from src.models.requests import (
     ConformalRequest,
     ContrastiveRequest,
@@ -85,6 +86,9 @@ async def analyze_sensitivity_detailed(
     # Generate request ID if not provided
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
+    # Initialize metadata builder
+    metadata_builder = MetadataBuilder(request_id)
+
     try:
         logger.info(
             "cee_sensitivity_detailed_request",
@@ -106,7 +110,9 @@ async def analyze_sensitivity_detailed(
                 extra={"request_id": request_id}
             )
             # Return empty result if no assumptions
-            return SensitivityDetailedResponse(assumptions=[])
+            response = SensitivityDetailedResponse(assumptions=[])
+            response.metadata = metadata_builder.build(algorithm="assumption_extraction")
+            return response
 
         # Analyze each assumption
         # For now, use simple heuristics based on graph structure
@@ -144,7 +150,9 @@ async def analyze_sensitivity_detailed(
             }
         )
 
-        return SensitivityDetailedResponse(assumptions=assumption_results)
+        response = SensitivityDetailedResponse(assumptions=assumption_results)
+        response.metadata = metadata_builder.build(algorithm="topology_sensitivity")
+        return response
 
     except HTTPException:
         raise
@@ -197,6 +205,9 @@ async def generate_contrastive(
     # Generate request ID if not provided
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
+    # Initialize metadata builder
+    metadata_builder = MetadataBuilder(request_id)
+
     try:
         logger.info(
             "cee_contrastive_request",
@@ -228,7 +239,9 @@ async def generate_contrastive(
             }
         )
 
-        return ContrastiveResponse(alternatives=alternatives)
+        response = ContrastiveResponse(alternatives=alternatives)
+        response.metadata = metadata_builder.build(algorithm="contrastive_explanation")
+        return response
 
     except HTTPException:
         raise
@@ -281,6 +294,9 @@ async def predict_conformal(
     # Generate request ID if not provided
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
+    # Initialize metadata builder
+    metadata_builder = MetadataBuilder(request_id)
+
     try:
         logger.info(
             "cee_conformal_request",
@@ -314,11 +330,13 @@ async def predict_conformal(
             }
         )
 
-        return ConformalResponse(
+        response = ConformalResponse(
             prediction_interval=interval,
             confidence_level=0.90,
             uncertainty_source=uncertainty_source
         )
+        response.metadata = metadata_builder.build(algorithm="conformal_prediction")
+        return response
 
     except HTTPException:
         raise
@@ -370,6 +388,9 @@ async def suggest_validation_strategies(
     """
     # Generate request ID if not provided
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    # Initialize metadata builder
+    metadata_builder = MetadataBuilder(request_id)
 
     try:
         logger.info(
@@ -423,7 +444,9 @@ async def suggest_validation_strategies(
             }
         )
 
-        return ValidationStrategiesResponse(suggested_improvements=improvements)
+        response = ValidationStrategiesResponse(suggested_improvements=improvements)
+        response.metadata = metadata_builder.build(algorithm="validation_strategies")
+        return response
 
     except HTTPException:
         raise
