@@ -95,6 +95,30 @@ CORS_ORIGINS=https://your-app.com # Allowed origins
 ISL_API_KEY=single_key           # Legacy single key (still supported)
 REQUEST_TIMEOUT_SECONDS=60       # Request timeout
 REDIS_HOST=localhost             # Redis for caching
+
+# Error Tracking (optional)
+SENTRY_ENABLED=true              # Enable Sentry
+SENTRY_DSN=https://...@sentry.io # Sentry DSN
+```
+
+### Authentication
+
+API authentication is **enabled by default** when `ISL_API_KEYS` is configured.
+
+| Environment | Configuration |
+|-------------|---------------|
+| **Production** | Set `ISL_API_KEYS` (required) |
+| **Staging** | Set `ISL_API_KEYS` (recommended) |
+| **Local Dev** | Set `ISL_AUTH_DISABLED=true` to bypass auth |
+
+**Public endpoints** (no auth required): `/health`, `/metrics`, `/docs`, `/openapi.json`
+
+```bash
+# Local development - bypass auth
+ISL_AUTH_DISABLED=true
+
+# Production - keys required
+ISL_API_KEYS=prod_key_1,prod_key_2
 ```
 
 ---

@@ -44,22 +44,25 @@ The Inference Service Layer demonstrates **excellent DevOps maturity** with comp
 
 | Question | Answer |
 |----------|--------|
-| **Do you log `X-Request-Id` / correlation IDs?** | **Yes** - Uses `X-Trace-Id` header for distributed tracing |
+| **Do you log `X-Request-Id` / correlation IDs?** | **Yes** - Supports both `X-Request-Id` (preferred) and `X-Trace-Id` (legacy) |
 | **Do you expose `/metrics` (Prometheus)?** | **Yes** - Full Prometheus endpoint at `/metrics` |
-| **Do you use Sentry or equivalent?** | **Partial** - Code references Sentry but not fully configured |
+| **Do you use Sentry or equivalent?** | **Yes** - Sentry SDK integrated, enable via `SENTRY_ENABLED=true` |
 | **Do you have runbooks documented?** | **Yes** - See [docs/operations/](docs/operations/) |
 
 ### Distributed Tracing
 
 **Implementation:** `src/utils/tracing.py`
 
-- **Trace ID Generation**: Automatic generation of unique trace IDs (`trace_{uuid}`)
-- **Header Support**:
-  - `X-Trace-Id`: Correlation ID for request tracking
+- **Request ID Format**: `req_{uuid16}` (e.g., `req_a1b2c3d4e5f67890`)
+- **Header Support** (priority order):
+  - `X-Request-Id`: Primary correlation ID (platform standard)
+  - `X-Trace-Id`: Legacy alias (deprecated, for backward compatibility)
   - `X-User-Id`: User context propagation
 - **Context Propagation**: ContextVar-based trace storage across async operations
-- **Response Headers**: Trace IDs returned in response headers for client correlation
+- **Response Headers**: Both `X-Request-Id` and `X-Trace-Id` returned for compatibility
 - **Middleware**: `TracingMiddleware` automatically manages trace context
+
+> **Note:** The legacy `trace_{uuid}` format is deprecated. New code uses `req_{uuid16}` format.
 
 **Test Coverage:** Integration tests validate trace ID propagation (`tests/integration/test_production_excellence.py:140-167`)
 
@@ -318,11 +321,10 @@ poetry run pre-commit run --all-files
    - **Recommendation**: Generate Postman collection from `docs/openapi.json`
    - **Effort**: 2-3 hours
 
-3. **Correlation ID Standardization** ⚠️
-   - **Gap**: Uses `X-Trace-Id` instead of standard `X-Request-Id`
-   - **Impact**: May not align with platform-wide correlation ID standards
-   - **Recommendation**: Support both headers, document standard for all services
-   - **Effort**: 1 hour
+3. **Correlation ID Standardization** ✅ RESOLVED
+   - **Status**: Now supports both `X-Request-Id` (primary) and `X-Trace-Id` (legacy)
+   - **Format**: `req_{uuid16}` (e.g., `req_a1b2c3d4e5f67890`)
+   - **Implementation**: `src/utils/tracing.py` - TracingMiddleware
 
 4. **Dependency Automation** ⚠️
    - **Gap**: No Dependabot or Renovate for automated dependency updates
@@ -384,9 +386,9 @@ poetry run pre-commit run --all-files
    - **Benefit**: Real-time error notifications with stack traces
    - **Owner**: ISL Team
 
-3. **Request ID Alignment** 🎯
-   - **Action**: Support both `X-Request-Id` and `X-Trace-Id`
-   - **Benefit**: Seamless integration with platform standards
+3. **Request ID Alignment** ✅ COMPLETE
+   - **Status**: ISL now supports both `X-Request-Id` (primary) and `X-Trace-Id` (legacy)
+   - **Format**: `req_{uuid16}` format aligned with platform standard
    - **Owner**: Platform Coordination + ISL Team
 
 4. **Runbook Updates** 🎯
@@ -510,23 +512,23 @@ poetry run pre-commit run --all-files
 ### For Correlation ID Propagation
 
 **Current Implementation:**
-- ✅ `X-Trace-Id` header extraction
+- ✅ `X-Request-Id` header extraction (primary)
+- ✅ `X-Trace-Id` header extraction (legacy fallback)
 - ✅ `X-User-Id` header extraction
 - ✅ Trace context propagation via ContextVar
 - ✅ Trace ID injection into logs
-- ✅ Trace ID returned in response headers
+- ✅ Both `X-Request-Id` and `X-Trace-Id` returned in response headers
 
-**Platform Alignment Needed:**
-- 🔄 Standardize on `X-Request-Id` or `X-Trace-Id`
-- 🔄 Document header propagation requirements
-- 🔄 Define trace ID format (currently `trace_{uuid16}`)
+**Platform Alignment Status:** ✅ COMPLETE
 
-**Suggested Standard:**
+**Current Standard:**
 ```
-X-Request-Id: req_{uuid}        # Primary correlation ID (platform-wide)
-X-Trace-Id: trace_{uuid}        # ISL-specific trace ID (optional)
+X-Request-Id: req_{uuid16}      # Primary correlation ID (platform-wide) - PREFERRED
+X-Trace-Id: req_{uuid16}        # Legacy alias (deprecated, for backward compatibility)
 X-User-Id: user_{uuid}          # User context (optional)
 ```
+
+**Implementation:** `src/utils/tracing.py` - TracingMiddleware accepts both headers (priority: X-Request-Id > X-Trace-Id) and returns both in responses for compatibility.
 
 ---
 
@@ -621,7 +623,7 @@ X-User-Id: user_{uuid}          # User context (optional)
 
 ### Immediate (This Week)
 
-- [ ] **Review correlation ID standard**: Align on `X-Request-Id` vs `X-Trace-Id`
+- [x] **Review correlation ID standard**: ✅ ISL now supports both `X-Request-Id` (primary) and `X-Trace-Id` (legacy)
 - [ ] **Generate Postman collection**: Use OpenAPI spec to create shared collection
 - [ ] **Document service dependencies**: Map out ISL → PLoT → Backend interactions
 - [ ] **Share docker-compose service definition**: Add ISL to platform docker-compose

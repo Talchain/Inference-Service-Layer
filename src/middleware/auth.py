@@ -26,6 +26,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     Public endpoints are exempt from authentication.
     Supports multiple API keys via comma-separated environment variable.
     Checks ISL_API_KEYS first, then falls back to ISL_API_KEY for backward compatibility.
+
+    SECURITY: Authentication is enabled by default. Explicit opt-out via ISL_AUTH_DISABLED=true.
     """
 
     # Endpoints that don't require authentication
@@ -44,7 +46,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/redoc",
     )
 
-    def __init__(self, app, api_keys: Optional[str] = None):
+    def __init__(self, app, api_keys: Optional[str] = None, auth_disabled: bool = False):
         """
         Initialize the middleware.
 
@@ -52,19 +54,28 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             app: The FastAPI application
             api_keys: Comma-separated list of valid API keys.
                      If None, reads from ISL_API_KEYS environment variable.
+            auth_disabled: Explicitly disable authentication (for local development only)
         """
         super().__init__(app)
+        self._auth_disabled = auth_disabled or os.getenv("ISL_AUTH_DISABLED", "false").lower() == "true"
         self._api_keys = self._load_api_keys(api_keys)
-        self._auth_enabled = len(self._api_keys) > 0
+        self._auth_enabled = len(self._api_keys) > 0 and not self._auth_disabled
 
-        if self._auth_enabled:
+        if self._auth_disabled:
+            logger.warning(
+                "⚠️  API key authentication DISABLED via ISL_AUTH_DISABLED=true - "
+                "NOT FOR PRODUCTION USE"
+            )
+        elif self._auth_enabled:
             logger.info(
                 "API key authentication enabled",
                 extra={"num_keys": len(self._api_keys)},
             )
         else:
+            # No keys configured and auth not explicitly disabled
             logger.warning(
-                "API key authentication DISABLED - no ISL_API_KEYS or ISL_API_KEY configured"
+                "API key authentication DISABLED - no ISL_API_KEYS configured. "
+                "Set ISL_API_KEYS or ISL_AUTH_DISABLED=true to suppress this warning."
             )
 
     def _load_api_keys(self, api_keys: Optional[str]) -> Set[str]:
@@ -119,6 +130,10 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         """
         # Skip authentication for public endpoints
         if self._is_public_path(request.url.path):
+            return await call_next(request)
+
+        # Skip authentication if explicitly disabled
+        if self._auth_disabled:
             return await call_next(request)
 
         # Skip authentication if no API keys configured (development mode)

@@ -48,6 +48,32 @@ class Settings(BaseSettings):
         default=None,
         description="Legacy: Single API key for authentication (use ISL_API_KEYS instead)"
     )
+    ISL_AUTH_DISABLED: bool = Field(
+        default=False,
+        description="Explicitly disable authentication (for local development only)"
+    )
+
+    # Sentry Error Tracking
+    SENTRY_ENABLED: bool = Field(
+        default=False,
+        description="Enable Sentry error tracking"
+    )
+    SENTRY_DSN: Optional[str] = Field(
+        default=None,
+        description="Sentry Data Source Name"
+    )
+    SENTRY_ENVIRONMENT: Optional[str] = Field(
+        default=None,
+        description="Sentry environment (defaults to ENVIRONMENT)"
+    )
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(
+        default=0.1,
+        description="Percentage of transactions to trace (0.0-1.0)"
+    )
+    SENTRY_PROFILES_SAMPLE_RATE: float = Field(
+        default=0.1,
+        description="Percentage of transactions to profile (0.0-1.0)"
+    )
 
     # CORS Configuration
     CORS_ORIGINS: str = Field(
