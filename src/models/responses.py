@@ -2398,3 +2398,97 @@ class DominanceResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Pareto Frontier Endpoint - Response Models
+# ============================================================================
+
+
+class ParetoFrontierOption(BaseModel):
+    """Single option on the Pareto frontier with scores."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    scores: Dict[str, float] = Field(
+        ...,
+        description="Normalized scores by criterion_id"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_a",
+                "option_label": "Option A: Aggressive Growth",
+                "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+            }
+        }
+    }
+
+
+class ParetoResponse(BaseModel):
+    """Response model for Pareto frontier endpoint."""
+
+    frontier: List[ParetoFrontierOption] = Field(
+        ...,
+        description="Options on the Pareto frontier (non-dominated options)"
+    )
+    dominated: List[DominanceRelation] = Field(
+        ...,
+        description="Options that are dominated (sorted by degree, descending)"
+    )
+    frontier_size: int = Field(
+        ...,
+        description="Number of options on Pareto frontier",
+        ge=1
+    )
+    total_options: int = Field(
+        ...,
+        description="Total number of options analyzed",
+        ge=2
+    )
+    frontier_truncated: bool = Field(
+        default=False,
+        description="True if frontier was truncated due to max_frontier_size limit"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "frontier": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A: Aggressive Growth",
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                    },
+                    {
+                        "option_id": "opt_c",
+                        "option_label": "Option C: Balanced Approach",
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
+                    }
+                ],
+                "dominated": [
+                    {
+                        "dominated_option_id": "opt_b",
+                        "dominated_option_label": "Option B: Conservative Growth",
+                        "dominated_by": ["opt_c"],
+                        "degree": 1
+                    }
+                ],
+                "frontier_size": 2,
+                "total_options": 3,
+                "frontier_truncated": False,
+                "metadata": {
+                    "request_id": "req_abc123",
+                    "computation_time_ms": 2.8,
+                    "isl_version": "2.0",
+                    "algorithm": "skyline_pareto",
+                    "cache_hit": False
+                }
+            }
+        }
+    }

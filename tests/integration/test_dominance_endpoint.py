@@ -457,3 +457,271 @@ async def test_dominated_relation_fields():
             assert "degree" in dom_relation
             assert isinstance(dom_relation["dominated_by"], list)
             assert isinstance(dom_relation["degree"], int)
+
+
+# ============================================================================
+# Pareto Frontier Endpoint Tests
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_pareto_frontier_basic():
+    """Test basic Pareto frontier computation."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": [
+                    {"option_id": "opt_a", "option_label": "High revenue, low risk", "scores": {"revenue": 0.90, "risk": 0.40}},
+                    {"option_id": "opt_b", "option_label": "Low revenue, high risk", "scores": {"revenue": 0.40, "risk": 0.90}},
+                    {"option_id": "opt_c", "option_label": "Medium both", "scores": {"revenue": 0.60, "risk": 0.60}}
+                ],
+                "criteria": ["revenue", "risk"]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # All three should be on frontier (trade-offs)
+        assert len(data["frontier"]) >= 2
+        assert data["frontier_size"] >= 2
+        assert data["total_options"] == 3
+        assert not data["frontier_truncated"]
+
+        # Check frontier options have full details
+        for frontier_opt in data["frontier"]:
+            assert "option_id" in frontier_opt
+            assert "option_label" in frontier_opt
+            assert "scores" in frontier_opt
+
+        # Metadata should be present
+        assert "metadata" in data
+        assert data["metadata"]["algorithm"] == "skyline_pareto"
+
+
+@pytest.mark.asyncio
+async def test_pareto_clear_domination():
+    """Test Pareto with clear domination (small frontier)."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": [
+                    {"option_id": "opt_best", "option_label": "Best on all", "scores": {"a": 0.95, "b": 0.90, "c": 0.85}},
+                    {"option_id": "opt_medium", "option_label": "Medium", "scores": {"a": 0.60, "b": 0.65, "c": 0.55}},
+                    {"option_id": "opt_poor", "option_label": "Poor", "scores": {"a": 0.30, "b": 0.35, "c": 0.25}}
+                ],
+                "criteria": ["a", "b", "c"]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Only opt_best should be on frontier
+        assert data["frontier_size"] == 1
+        assert len(data["frontier"]) == 1
+        assert data["frontier"][0]["option_id"] == "opt_best"
+
+        # Others should be dominated
+        assert len(data["dominated"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_pareto_max_frontier_size():
+    """Test frontier truncation with max_frontier_size."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        # Create many non-dominated options (all have trade-offs)
+        options = [
+            {"option_id": f"opt_{i}", "option_label": f"Option {i}",
+             "scores": {"x": i/10.0, "y": 1.0 - i/10.0}}
+            for i in range(11)  # 11 options, all on frontier
+        ]
+
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": options,
+                "criteria": ["x", "y"],
+                "max_frontier_size": 5  # Limit to 5
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Frontier should be truncated
+        assert data["frontier_size"] == 11  # True size
+        assert len(data["frontier"]) == 5  # Truncated size
+        assert data["frontier_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_pareto_default_max_frontier_size():
+    """Test that default max_frontier_size is 20."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        # Create 25 non-dominated options
+        options = [
+            {"option_id": f"opt_{i}", "option_label": f"Option {i}",
+             "scores": {"x": i/25.0, "y": 1.0 - i/25.0}}
+            for i in range(25)
+        ]
+
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": options,
+                "criteria": ["x", "y"]
+                # No max_frontier_size specified, should default to 20
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Should be truncated to default 20
+        assert data["frontier_size"] == 25
+        assert len(data["frontier"]) == 20
+        assert data["frontier_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_pareto_single_criterion():
+    """Test Pareto with single criterion (linear ordering)."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": [
+                    {"option_id": "opt_high", "option_label": "High", "scores": {"metric": 0.90}},
+                    {"option_id": "opt_medium", "option_label": "Medium", "scores": {"metric": 0.60}},
+                    {"option_id": "opt_low", "option_label": "Low", "scores": {"metric": 0.30}}
+                ],
+                "criteria": ["metric"]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Only highest should be on frontier with single criterion
+        assert data["frontier_size"] == 1
+        assert data["frontier"][0]["option_id"] == "opt_high"
+
+
+@pytest.mark.asyncio
+async def test_pareto_all_on_frontier():
+    """Test case where all options are on Pareto frontier."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": [
+                    {"option_id": "opt_a", "option_label": "A", "scores": {"x": 0.9, "y": 0.3}},
+                    {"option_id": "opt_b", "option_label": "B", "scores": {"x": 0.5, "y": 0.7}},
+                    {"option_id": "opt_c", "option_label": "C", "scores": {"x": 0.3, "y": 0.9}}
+                ],
+                "criteria": ["x", "y"]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # All should be on frontier
+        assert data["frontier_size"] == 3
+        assert len(data["frontier"]) == 3
+        assert len(data["dominated"]) == 0
+
+
+@pytest.mark.asyncio
+async def test_pareto_validation_minimum_options():
+    """Test that < 2 options fails validation."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": [
+                    {"option_id": "opt_a", "option_label": "Only one", "scores": {"x": 0.5}}
+                ],
+                "criteria": ["x"]
+            }
+        )
+
+        assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_pareto_validation_maximum_options():
+    """Test that > 100 options fails validation."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        options = [
+            {"option_id": f"opt_{i}", "option_label": f"Option {i}", "scores": {"x": i/101.0}}
+            for i in range(101)
+        ]
+
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": options,
+                "criteria": ["x"]
+            }
+        )
+
+        assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_pareto_request_id_tracking():
+    """Test that request_id is properly tracked."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "request_id": "test_pareto_123",
+                "options": [
+                    {"option_id": "opt_a", "option_label": "A", "scores": {"x": 0.8}},
+                    {"option_id": "opt_b", "option_label": "B", "scores": {"x": 0.6}}
+                ],
+                "criteria": ["x"]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["metadata"]["request_id"] == "test_pareto_123"
+
+
+@pytest.mark.asyncio
+async def test_pareto_response_completeness():
+    """Test that all required response fields are present."""
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/analysis/pareto",
+            json={
+                "options": [
+                    {"option_id": "opt_a", "option_label": "A", "scores": {"x": 0.9, "y": 0.4}},
+                    {"option_id": "opt_b", "option_label": "B", "scores": {"x": 0.4, "y": 0.9}}
+                ],
+                "criteria": ["x", "y"]
+            }
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Check all required fields
+        assert "frontier" in data
+        assert "dominated" in data
+        assert "frontier_size" in data
+        assert "total_options" in data
+        assert "frontier_truncated" in data
+        assert "metadata" in data
+
+        # Check frontier option structure
+        for frontier_opt in data["frontier"]:
+            assert "option_id" in frontier_opt
+            assert "option_label" in frontier_opt
+            assert "scores" in frontier_opt
+            assert isinstance(frontier_opt["scores"], dict)

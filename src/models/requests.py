@@ -1399,3 +1399,86 @@ class DominanceRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Pareto Frontier Endpoint - Request Models
+# ============================================================================
+
+
+class ParetoRequest(BaseModel):
+    """Request model for Pareto frontier endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing (auto-generated if not provided)"
+    )
+    options: List[DominanceOption] = Field(
+        ...,
+        description="Options to analyze for Pareto frontier",
+        min_length=2,
+        max_length=100
+    )
+    criteria: List[str] = Field(
+        ...,
+        description="Criterion IDs to consider (must match keys in option scores)",
+        min_length=1,
+        max_length=10
+    )
+    max_frontier_size: Optional[int] = Field(
+        default=20,
+        description="Maximum number of frontier options to return (for large frontiers)",
+        ge=1,
+        le=100
+    )
+
+    @field_validator("options")
+    @classmethod
+    def validate_option_consistency(cls, v, info):
+        """Validate all options have scores for all criteria."""
+        if len(v) < 2:
+            raise ValueError("At least 2 options required for Pareto analysis")
+
+        # Get criteria from context if available
+        criteria = info.data.get("criteria", [])
+        if criteria:
+            for option in v:
+                missing = set(criteria) - set(option.scores.keys())
+                if missing:
+                    raise ValueError(
+                        f"Option {option.option_id} missing scores for criteria: {missing}"
+                    )
+                extra = set(option.scores.keys()) - set(criteria)
+                if extra:
+                    raise ValueError(
+                        f"Option {option.option_id} has scores for unexpected criteria: {extra}"
+                    )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_abc123",
+                "options": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A: Aggressive Growth",
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B: Conservative Growth",
+                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90}
+                    },
+                    {
+                        "option_id": "opt_c",
+                        "option_label": "Option C: Balanced Approach",
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
+                    }
+                ],
+                "criteria": ["revenue", "risk", "timeline"],
+                "max_frontier_size": 20
+            }
+        }
+    }
