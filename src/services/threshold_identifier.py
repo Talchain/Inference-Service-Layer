@@ -28,9 +28,15 @@ class ThresholdIdentifier:
         """
         Identify thresholds across all parameter sweeps.
 
+        Compares rankings at each parameter value against a baseline to detect
+        where option rankings change. The baseline is either provided explicitly
+        or derived from the first parameter value.
+
         Args:
             parameter_sweeps: List of parameter sweeps to analyze
-            baseline_ranking: Optional baseline ranking (if None, uses first value)
+            baseline_ranking: Optional baseline ranking to compare against.
+                If provided, first threshold is where ranking diverges from baseline.
+                If None, uses ranking at first parameter value as baseline.
             confidence_threshold: Minimum score difference to report change
 
         Returns:
@@ -48,6 +54,7 @@ class ThresholdIdentifier:
             # Identify thresholds for this parameter
             thresholds = self._identify_parameter_thresholds(
                 sweep=sweep,
+                baseline_ranking=baseline_ranking,
                 confidence_threshold=confidence_threshold
             )
 
@@ -88,13 +95,21 @@ class ThresholdIdentifier:
     def _identify_parameter_thresholds(
         self,
         sweep: ParameterSweep,
+        baseline_ranking: Optional[List[str]],
         confidence_threshold: float
     ) -> List[RankingThreshold]:
         """
         Identify thresholds for a single parameter sweep.
 
+        Processes parameter values in the order provided by the caller
+        (ascending, descending, or custom order). Caller is responsible
+        for ordering values appropriately for their use case.
+
         Args:
             sweep: Parameter sweep to analyze
+            baseline_ranking: Optional baseline ranking to compare against.
+                If provided, used as initial comparison point.
+                If None, ranking at first value is used as baseline.
             confidence_threshold: Minimum score difference to report
 
         Returns:
@@ -102,13 +117,25 @@ class ThresholdIdentifier:
         """
         thresholds = []
 
-        # Get sorted parameter values
-        values = sorted(sweep.values)
+        # Process values in caller-provided order (no sorting)
+        values = sweep.values
 
-        # Track previous ranking
-        prev_ranking = None
+        # Initialize comparison ranking
+        if baseline_ranking is not None:
+            # Use provided baseline as initial comparison point
+            prev_ranking = baseline_ranking
+            start_index = 0
+        else:
+            # Use ranking at first value as baseline
+            first_value_str = str(values[0])
+            first_scores = sweep.scores_by_value[first_value_str]
+            prev_ranking = self._rank_options(first_scores, confidence_threshold)
+            start_index = 1
 
-        for i, value in enumerate(values):
+        # Compare each subsequent value against previous ranking
+        for i in range(start_index, len(values)):
+            value = values[i]
+
             # Get scores at this parameter value
             value_str = str(value)
             scores = sweep.scores_by_value[value_str]
@@ -117,27 +144,26 @@ class ThresholdIdentifier:
             current_ranking = self._rank_options(scores, confidence_threshold)
 
             # Compare to previous ranking
-            if prev_ranking is not None:
-                if current_ranking != prev_ranking:
-                    # Ranking changed - this is a threshold
-                    affected_options = self._find_affected_options(
-                        prev_ranking, current_ranking
-                    )
+            if current_ranking != prev_ranking:
+                # Ranking changed - this is a threshold
+                affected_options = self._find_affected_options(
+                    prev_ranking, current_ranking
+                )
 
-                    # Compute score gap between most affected options
-                    score_gap = self._compute_score_gap(
-                        scores, affected_options
-                    )
+                # Compute score gap between most affected options
+                score_gap = self._compute_score_gap(
+                    scores, affected_options
+                )
 
-                    thresholds.append(RankingThreshold(
-                        parameter_id=sweep.parameter_id,
-                        parameter_label=sweep.parameter_label,
-                        threshold_value=value,
-                        ranking_before=prev_ranking,
-                        ranking_after=current_ranking,
-                        options_affected=affected_options,
-                        score_gap=score_gap
-                    ))
+                thresholds.append(RankingThreshold(
+                    parameter_id=sweep.parameter_id,
+                    parameter_label=sweep.parameter_label,
+                    threshold_value=value,
+                    ranking_before=prev_ranking,
+                    ranking_after=current_ranking,
+                    options_affected=affected_options,
+                    score_gap=score_gap
+                ))
 
             prev_ranking = current_ranking
 

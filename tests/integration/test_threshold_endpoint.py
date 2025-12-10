@@ -599,3 +599,263 @@ def test_large_parameter_sweep():
     data = response.json()
     assert "thresholds" in data
     assert "sensitivity_ranking" in data
+
+
+# ============================================================================
+# Baseline Ranking Tests (Correctness Fix)
+# ============================================================================
+
+
+def test_baseline_ranking_honored():
+    """Test that baseline_ranking parameter is properly honored."""
+    sweep = {
+        "parameter_id": "param",
+        "parameter_label": "Parameter",
+        "values": [1.0, 2.0, 3.0],
+        "scores_by_value": {
+            "1.0": {"opt_a": 0.90, "opt_b": 0.60},  # opt_a > opt_b
+            "2.0": {"opt_a": 0.85, "opt_b": 0.65},  # opt_a > opt_b
+            "3.0": {"opt_a": 0.70, "opt_b": 0.80}   # opt_b > opt_a (changed)
+        }
+    }
+
+    # With baseline_ranking provided
+    request_with_baseline = {
+        "parameter_sweeps": [sweep],
+        "baseline_ranking": ["opt_a", "opt_b"],  # Explicit baseline
+        "confidence_threshold": 0.05
+    }
+
+    response = client.post("/api/v1/analysis/thresholds", json=request_with_baseline)
+    assert response.status_code == 200
+
+    data = response.json()
+    thresholds = data["thresholds"]
+
+    # Should find threshold at value 3.0 where ranking diverges from baseline
+    assert len(thresholds) >= 1
+
+    # First threshold should be where ranking diverges from baseline
+    first_threshold = thresholds[0]
+    assert first_threshold["ranking_before"] == ["opt_a", "opt_b"]
+    assert first_threshold["threshold_value"] == 3.0
+
+
+def test_baseline_ranking_vs_no_baseline():
+    """Test difference between providing baseline_ranking and not."""
+    sweep = {
+        "parameter_id": "param",
+        "parameter_label": "Parameter",
+        "values": [1.0, 2.0, 3.0],
+        "scores_by_value": {
+            "1.0": {"opt_a": 0.70, "opt_b": 0.80},  # opt_b > opt_a (at first value)
+            "2.0": {"opt_a": 0.75, "opt_b": 0.85},  # opt_b > opt_a
+            "3.0": {"opt_a": 0.90, "opt_b": 0.60}   # opt_a > opt_b (changed)
+        }
+    }
+
+    # Without baseline (uses ranking at first value)
+    request_no_baseline = {
+        "parameter_sweeps": [sweep],
+        "baseline_ranking": None,
+        "confidence_threshold": 0.05
+    }
+
+    response_no_baseline = client.post(
+        "/api/v1/analysis/thresholds", json=request_no_baseline
+    )
+    thresholds_no_baseline = response_no_baseline.json()["thresholds"]
+
+    # With different baseline
+    request_with_baseline = {
+        "parameter_sweeps": [sweep],
+        "baseline_ranking": ["opt_a", "opt_b"],  # Different from first value
+        "confidence_threshold": 0.05
+    }
+
+    response_with_baseline = client.post(
+        "/api/v1/analysis/thresholds", json=request_with_baseline
+    )
+    thresholds_with_baseline = response_with_baseline.json()["thresholds"]
+
+    # With baseline should find 2 thresholds (diverge at 1.0, change at 3.0)
+    # Without baseline should find 1 threshold (only change at 3.0)
+    assert len(thresholds_with_baseline) > len(thresholds_no_baseline)
+
+
+def test_baseline_ranking_different_from_actual():
+    """Test baseline ranking that differs from all actual rankings."""
+    sweep = {
+        "parameter_id": "param",
+        "parameter_label": "Parameter",
+        "values": [1.0, 2.0],
+        "scores_by_value": {
+            "1.0": {"opt_a": 0.90, "opt_b": 0.80, "opt_c": 0.70},  # a > b > c
+            "2.0": {"opt_a": 0.85, "opt_b": 0.75, "opt_c": 0.65}   # a > b > c
+        }
+    }
+
+    # Provide baseline that's different from all actual rankings
+    request = {
+        "parameter_sweeps": [sweep],
+        "baseline_ranking": ["opt_c", "opt_b", "opt_a"],  # Reverse of actual
+        "confidence_threshold": 0.05
+    }
+
+    response = client.post("/api/v1/analysis/thresholds", json=request)
+    thresholds = response.json()["thresholds"]
+
+    # Should detect threshold at first value (1.0) where actual differs from baseline
+    assert len(thresholds) >= 1
+    assert thresholds[0]["threshold_value"] == 1.0
+    assert thresholds[0]["ranking_before"] == ["opt_c", "opt_b", "opt_a"]
+
+
+# ============================================================================
+# Sweep Order Preservation Tests (Correctness Fix)
+# ============================================================================
+
+
+def test_descending_sweep_order():
+    """Test that descending sweep order is preserved (not sorted)."""
+    sweep = {
+        "parameter_id": "param",
+        "parameter_label": "Parameter",
+        "values": [70.0, 60.0, 50.0, 40.0, 30.0],  # Descending order
+        "scores_by_value": {
+            "70.0": {"opt_a": 0.50, "opt_b": 0.90},  # opt_b wins
+            "60.0": {"opt_a": 0.65, "opt_b": 0.85},  # opt_b wins
+            "50.0": {"opt_a": 0.75, "opt_b": 0.80},  # opt_b wins
+            "40.0": {"opt_a": 0.85, "opt_b": 0.70},  # opt_a wins (changed)
+            "30.0": {"opt_a": 0.90, "opt_b": 0.60}   # opt_a wins
+        }
+    }
+
+    request = {
+        "parameter_sweeps": [sweep],
+        "confidence_threshold": 0.05
+    }
+
+    response = client.post("/api/v1/analysis/thresholds", json=request)
+    thresholds = response.json()["thresholds"]
+
+    # Should find threshold at 40.0 (processing in descending order)
+    assert len(thresholds) >= 1
+    assert thresholds[0]["threshold_value"] == 40.0
+    assert thresholds[0]["ranking_before"] == ["opt_b", "opt_a"]
+    assert thresholds[0]["ranking_after"] == ["opt_a", "opt_b"]
+
+
+def test_non_monotonic_sweep_order():
+    """Test that non-monotonic sweep order is preserved."""
+    sweep = {
+        "parameter_id": "param",
+        "parameter_label": "Parameter",
+        "values": [50.0, 30.0, 70.0, 40.0],  # Non-monotonic order
+        "scores_by_value": {
+            "50.0": {"opt_a": 0.75, "opt_b": 0.80},  # opt_b > opt_a
+            "30.0": {"opt_a": 0.90, "opt_b": 0.60},  # opt_a > opt_b (changed)
+            "70.0": {"opt_a": 0.50, "opt_b": 0.90},  # opt_b > opt_a (changed back)
+            "40.0": {"opt_a": 0.85, "opt_b": 0.70}   # opt_a > opt_b (changed again)
+        }
+    }
+
+    request = {
+        "parameter_sweeps": [sweep],
+        "confidence_threshold": 0.05
+    }
+
+    response = client.post("/api/v1/analysis/thresholds", json=request)
+    thresholds = response.json()["thresholds"]
+
+    # Should find 3 thresholds in the non-monotonic order
+    assert len(thresholds) == 3
+
+    # Verify thresholds occur in sweep order, not sorted order
+    threshold_values = [t["threshold_value"] for t in thresholds]
+    assert threshold_values == [30.0, 70.0, 40.0]  # Order they appear in sweep
+
+
+def test_custom_sweep_order_respected():
+    """Test that custom sweep order is fully respected."""
+    # Deliberately weird order to ensure no internal sorting
+    sweep = {
+        "parameter_id": "param",
+        "parameter_label": "Parameter",
+        "values": [100.0, 20.0, 80.0, 10.0, 60.0],  # Custom order
+        "scores_by_value": {
+            "100.0": {"opt_a": 0.50, "opt_b": 0.60},  # b > a
+            "20.0": {"opt_a": 0.90, "opt_b": 0.40},  # a > b (threshold 1)
+            "80.0": {"opt_a": 0.45, "opt_b": 0.95},  # b > a (threshold 2)
+            "10.0": {"opt_a": 0.95, "opt_b": 0.35},  # a > b (threshold 3)
+            "60.0": {"opt_a": 0.60, "opt_b": 0.85}   # b > a (threshold 4)
+        }
+    }
+
+    request = {
+        "parameter_sweeps": [sweep],
+        "confidence_threshold": 0.05
+    }
+
+    response = client.post("/api/v1/analysis/thresholds", json=request)
+    thresholds = response.json()["thresholds"]
+
+    # Should find 4 thresholds
+    assert len(thresholds) == 4
+
+    # Verify they appear in the custom sweep order
+    threshold_values = [t["threshold_value"] for t in thresholds]
+    assert threshold_values == [20.0, 80.0, 10.0, 60.0]  # Matches sweep order
+
+
+def test_ascending_vs_descending_different_results():
+    """Test that ascending vs descending order can produce different threshold sequences."""
+    ascending_sweep = {
+        "parameter_id": "param_asc",
+        "parameter_label": "Parameter Ascending",
+        "values": [1.0, 2.0, 3.0, 4.0],
+        "scores_by_value": {
+            "1.0": {"opt_a": 0.90, "opt_b": 0.60},
+            "2.0": {"opt_a": 0.70, "opt_b": 0.80},
+            "3.0": {"opt_a": 0.75, "opt_b": 0.85},
+            "4.0": {"opt_a": 0.95, "opt_b": 0.55}
+        }
+    }
+
+    descending_sweep = {
+        "parameter_id": "param_desc",
+        "parameter_label": "Parameter Descending",
+        "values": [4.0, 3.0, 2.0, 1.0],  # Same values, reversed
+        "scores_by_value": {
+            "1.0": {"opt_a": 0.90, "opt_b": 0.60},
+            "2.0": {"opt_a": 0.70, "opt_b": 0.80},
+            "3.0": {"opt_a": 0.75, "opt_b": 0.85},
+            "4.0": {"opt_a": 0.95, "opt_b": 0.55}
+        }
+    }
+
+    # Test ascending
+    request_asc = {
+        "parameter_sweeps": [ascending_sweep],
+        "confidence_threshold": 0.05
+    }
+    response_asc = client.post("/api/v1/analysis/thresholds", json=request_asc)
+    thresholds_asc = response_asc.json()["thresholds"]
+
+    # Test descending
+    request_desc = {
+        "parameter_sweeps": [descending_sweep],
+        "confidence_threshold": 0.05
+    }
+    response_desc = client.post("/api/v1/analysis/thresholds", json=request_desc)
+    thresholds_desc = response_desc.json()["thresholds"]
+
+    # Should have same number of thresholds
+    assert len(thresholds_asc) == len(thresholds_desc)
+
+    # But thresholds occur in different sequences
+    asc_sequence = [t["threshold_value"] for t in thresholds_asc]
+    desc_sequence = [t["threshold_value"] for t in thresholds_desc]
+
+    # Sequences should be reverses of each other
+    assert asc_sequence == list(reversed(desc_sequence))
