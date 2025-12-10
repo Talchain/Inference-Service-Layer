@@ -9,8 +9,9 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 
+from src.api.dependencies import get_multi_criteria_aggregator
 from src.models.isl_metadata import MetadataBuilder
 from src.models.requests import MultiCriteriaRequest
 from src.models.responses import MultiCriteriaResponse
@@ -18,9 +19,6 @@ from src.services.multi_criteria_aggregator import MultiCriteriaAggregator
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# Initialize service
-aggregator = MultiCriteriaAggregator()
 
 
 @router.post(
@@ -64,6 +62,7 @@ aggregator = MultiCriteriaAggregator()
 async def aggregate_multi_criteria(
     request: MultiCriteriaRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+    aggregator: MultiCriteriaAggregator = Depends(get_multi_criteria_aggregator)
 ) -> MultiCriteriaResponse:
     """
     Aggregate option scores across multiple criteria.

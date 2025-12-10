@@ -44,7 +44,7 @@ class CausalDiscoveryEngine:
     - Deterministic results with seed parameter
     """
 
-    def __init__(self, enable_caching: bool = True, enable_advanced: bool = False):
+    def __init__(self, enable_caching: bool = True, enable_advanced: bool = False) -> None:
         """
         Initialize causal discovery engine.
 
@@ -495,7 +495,7 @@ class CausalDiscoveryEngine:
 
         return dags
 
-    def _apply_prior_knowledge(self, dag: nx.DiGraph, prior_knowledge: Dict):
+    def _apply_prior_knowledge(self, dag: nx.DiGraph, prior_knowledge: Dict) -> None:
         """
         Apply prior knowledge constraints to DAG.
 

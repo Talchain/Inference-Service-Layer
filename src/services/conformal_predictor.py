@@ -51,7 +51,7 @@ class ConformalPredictor:
     guaranteed coverage regardless of underlying distribution.
     """
 
-    def __init__(self, counterfactual_engine: CounterfactualEngine):
+    def __init__(self, counterfactual_engine: CounterfactualEngine) -> None:
         """
         Initialize conformal predictor.
 

@@ -9,8 +9,9 @@ import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 
+from src.api.dependencies import get_dominance_analyzer
 from src.models.isl_metadata import MetadataBuilder
 from src.models.requests import DominanceRequest, ParetoRequest
 from src.models.responses import DominanceResponse, ParetoResponse, ParetoFrontierOption
@@ -18,9 +19,6 @@ from src.services.dominance_analyzer import DominanceAnalyzer
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# Initialize service
-dominance_analyzer = DominanceAnalyzer()
 
 
 @router.post(
@@ -57,6 +55,7 @@ dominance_analyzer = DominanceAnalyzer()
 async def detect_dominance(
     request: DominanceRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+    dominance_analyzer: DominanceAnalyzer = Depends(get_dominance_analyzer)
 ) -> DominanceResponse:
     """
     Detect dominance relationships between options.
@@ -178,6 +177,7 @@ async def detect_dominance(
 async def compute_pareto_frontier(
     request: ParetoRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+    dominance_analyzer: DominanceAnalyzer = Depends(get_dominance_analyzer)
 ) -> ParetoResponse:
     """
     Compute Pareto frontier from options.

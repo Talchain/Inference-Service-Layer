@@ -255,7 +255,7 @@ class MultiCriteriaAggregator:
             option_list.append((option_id, option_label, scores_dict))
 
         # Sort lexicographically
-        def lex_key(item):
+        def lex_key(item) -> tuple:
             _, _, scores = item
             return tuple(scores.get(crit, 0) for crit in sorted_criteria)
 

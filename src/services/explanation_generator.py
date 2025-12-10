@@ -166,7 +166,7 @@ class ExplanationGenerator:
     # Documentation base URL
     DOCS_BASE = "https://docs.inference-service-layer.com"
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the explanation generator."""
         self.logger = logger
 

@@ -8,9 +8,9 @@ Provides high-throughput batch processing for:
 Uses parallel processing for 5-10x speedup vs sequential requests.
 """
 
+import asyncio
 import logging
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeoutError
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -39,7 +39,7 @@ counterfactual_engine = CounterfactualEngine()
 # Batch processing limits
 MAX_VALIDATION_BATCH = 50
 MAX_COUNTERFACTUAL_BATCH = 20
-MAX_WORKERS = 10  # Concurrent workers
+MAX_CONCURRENT_TASKS = 10  # Concurrent async tasks (was MAX_WORKERS)
 BATCH_ITEM_TIMEOUT_SECONDS = 30  # Per-item timeout to prevent hanging
 
 
@@ -109,9 +109,9 @@ class BatchCounterfactualResponse(BaseModel):
 # === Helper Functions ===
 
 
-def _process_validation_item(index: int, request: CausalValidationRequest) -> BatchValidationItem:
+def _process_validation_item_sync(index: int, request: CausalValidationRequest) -> BatchValidationItem:
     """
-    Process a single validation request.
+    Process a single validation request (synchronous).
 
     Args:
         index: Index in the batch
@@ -131,11 +131,56 @@ def _process_validation_item(index: int, request: CausalValidationRequest) -> Ba
         return BatchValidationItem(index=index, success=False, result=None, error=str(e))
 
 
-def _process_counterfactual_item(
+async def _process_validation_item(index: int, request: CausalValidationRequest) -> BatchValidationItem:
+    """
+    Process a single validation request asynchronously.
+
+    Runs synchronous validation in thread pool to avoid blocking event loop.
+
+    Args:
+        index: Index in the batch
+        request: Validation request
+
+    Returns:
+        BatchValidationItem with result or error
+    """
+    try:
+        # Run sync function in thread pool with timeout
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_process_validation_item_sync, index, request),
+            timeout=BATCH_ITEM_TIMEOUT_SECONDS
+        )
+        return result
+    except asyncio.TimeoutError:
+        logger.warning(
+            "batch_validation_item_timeout",
+            extra={"index": index, "timeout_seconds": BATCH_ITEM_TIMEOUT_SECONDS},
+        )
+        return BatchValidationItem(
+            index=index,
+            success=False,
+            result=None,
+            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s"
+        )
+    except Exception as e:
+        logger.error(
+            "batch_validation_item_error",
+            extra={"index": index, "error": str(e)},
+            exc_info=True,
+        )
+        return BatchValidationItem(
+            index=index,
+            success=False,
+            result=None,
+            error=f"Processing error: {str(e)}"
+        )
+
+
+def _process_counterfactual_item_sync(
     index: int, request: CounterfactualRequest
 ) -> BatchCounterfactualItem:
     """
-    Process a single counterfactual request.
+    Process a single counterfactual request (synchronous).
 
     Args:
         index: Index in the batch
@@ -155,6 +200,53 @@ def _process_counterfactual_item(
         return BatchCounterfactualItem(index=index, success=False, result=None, error=str(e))
 
 
+async def _process_counterfactual_item(
+    index: int, request: CounterfactualRequest
+) -> BatchCounterfactualItem:
+    """
+    Process a single counterfactual request asynchronously.
+
+    Runs synchronous analysis in thread pool to avoid blocking event loop.
+
+    Args:
+        index: Index in the batch
+        request: Counterfactual request
+
+    Returns:
+        BatchCounterfactualItem with result or error
+    """
+    try:
+        # Run sync function in thread pool with timeout
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_process_counterfactual_item_sync, index, request),
+            timeout=BATCH_ITEM_TIMEOUT_SECONDS
+        )
+        return result
+    except asyncio.TimeoutError:
+        logger.warning(
+            "batch_counterfactual_item_timeout",
+            extra={"index": index, "timeout_seconds": BATCH_ITEM_TIMEOUT_SECONDS},
+        )
+        return BatchCounterfactualItem(
+            index=index,
+            success=False,
+            result=None,
+            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s"
+        )
+    except Exception as e:
+        logger.error(
+            "batch_counterfactual_item_error",
+            extra={"index": index, "error": str(e)},
+            exc_info=True,
+        )
+        return BatchCounterfactualItem(
+            index=index,
+            success=False,
+            result=None,
+            error=f"Processing error: {str(e)}"
+        )
+
+
 # === Endpoints ===
 
 
@@ -167,12 +259,13 @@ def _process_counterfactual_item(
 
     **Limits:**
     - Max requests per batch: 50
-    - Parallel workers: 10
+    - Concurrent tasks: 10
 
     **Behavior:**
-    - Processes requests in parallel
+    - Processes requests concurrently using asyncio
     - Returns partial results if some requests fail
     - Each result includes success status and error details
+    - Individual request timeout: 30 seconds
 
     **Use when:** Validating multiple causal models at once (e.g., scenario comparison).
     """,
@@ -206,56 +299,21 @@ async def batch_validate_causal_models(
     )
 
     try:
-        results: List[BatchValidationItem] = []
+        # Create semaphore to limit concurrency
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-        # Process in parallel with ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # Submit all tasks
-            futures = {
-                executor.submit(_process_validation_item, idx, req): idx
-                for idx, req in enumerate(request.requests)
-            }
+        async def process_with_semaphore(idx: int, req: CausalValidationRequest) -> BatchValidationItem:
+            """Process single item with concurrency limit."""
+            async with semaphore:
+                return await _process_validation_item(idx, req)
 
-            # Collect results as they complete (with timeout)
-            total_timeout = BATCH_ITEM_TIMEOUT_SECONDS * batch_size
-            for future in as_completed(futures, timeout=total_timeout):
-                try:
-                    result = future.result(timeout=BATCH_ITEM_TIMEOUT_SECONDS)
-                    results.append(result)
-                except FutureTimeoutError:
-                    # Handle timeout for individual item
-                    idx = futures[future]
-                    logger.warning(
-                        "batch_validation_item_timeout",
-                        extra={"index": idx, "timeout_seconds": BATCH_ITEM_TIMEOUT_SECONDS},
-                    )
-                    results.append(
-                        BatchValidationItem(
-                            index=idx,
-                            success=False,
-                            result=None,
-                            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s",
-                        )
-                    )
-                except Exception as e:
-                    # Handle unexpected errors from executor
-                    idx = futures[future]
-                    logger.error(
-                        "batch_validation_executor_error",
-                        extra={"index": idx, "error": str(e)},
-                        exc_info=True,
-                    )
-                    results.append(
-                        BatchValidationItem(
-                            index=idx,
-                            success=False,
-                            result=None,
-                            error=f"Executor error: {str(e)}",
-                        )
-                    )
-
-        # Sort results by index to preserve order
-        results.sort(key=lambda x: x.index)
+        # Process all requests concurrently using asyncio.gather()
+        # return_exceptions=False because exceptions are already handled in _process_validation_item
+        tasks = [
+            process_with_semaphore(idx, req)
+            for idx, req in enumerate(request.requests)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
 
         # Calculate summary statistics
         end_time = datetime.utcnow()
@@ -302,12 +360,13 @@ async def batch_validate_causal_models(
 
     **Limits:**
     - Max requests per batch: 20
-    - Parallel workers: 10
+    - Concurrent tasks: 10
 
     **Behavior:**
-    - Processes requests in parallel
+    - Processes requests concurrently using asyncio
     - Returns partial results if some requests fail
     - Each result includes success status and error details
+    - Individual request timeout: 30 seconds
 
     **Use when:** Evaluating multiple "what if" scenarios simultaneously.
     """,
@@ -341,56 +400,21 @@ async def batch_analyze_counterfactuals(
     )
 
     try:
-        results: List[BatchCounterfactualItem] = []
+        # Create semaphore to limit concurrency
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-        # Process in parallel with ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            # Submit all tasks
-            futures = {
-                executor.submit(_process_counterfactual_item, idx, req): idx
-                for idx, req in enumerate(request.requests)
-            }
+        async def process_with_semaphore(idx: int, req: CounterfactualRequest) -> BatchCounterfactualItem:
+            """Process single item with concurrency limit."""
+            async with semaphore:
+                return await _process_counterfactual_item(idx, req)
 
-            # Collect results as they complete (with timeout)
-            total_timeout = BATCH_ITEM_TIMEOUT_SECONDS * batch_size
-            for future in as_completed(futures, timeout=total_timeout):
-                try:
-                    result = future.result(timeout=BATCH_ITEM_TIMEOUT_SECONDS)
-                    results.append(result)
-                except FutureTimeoutError:
-                    # Handle timeout for individual item
-                    idx = futures[future]
-                    logger.warning(
-                        "batch_counterfactual_item_timeout",
-                        extra={"index": idx, "timeout_seconds": BATCH_ITEM_TIMEOUT_SECONDS},
-                    )
-                    results.append(
-                        BatchCounterfactualItem(
-                            index=idx,
-                            success=False,
-                            result=None,
-                            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s",
-                        )
-                    )
-                except Exception as e:
-                    # Handle unexpected errors from executor
-                    idx = futures[future]
-                    logger.error(
-                        "batch_counterfactual_executor_error",
-                        extra={"index": idx, "error": str(e)},
-                        exc_info=True,
-                    )
-                    results.append(
-                        BatchCounterfactualItem(
-                            index=idx,
-                            success=False,
-                            result=None,
-                            error=f"Executor error: {str(e)}",
-                        )
-                    )
-
-        # Sort results by index to preserve order
-        results.sort(key=lambda x: x.index)
+        # Process all requests concurrently using asyncio.gather()
+        # return_exceptions=False because exceptions are already handled in _process_counterfactual_item
+        tasks = [
+            process_with_semaphore(idx, req)
+            for idx, req in enumerate(request.requests)
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
 
         # Calculate summary statistics
         end_time = datetime.utcnow()

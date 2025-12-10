@@ -45,7 +45,7 @@ class AdjustmentStrategy:
         explanation: str,
         theoretical_basis: str,
         expected_identifiability: float,
-    ):
+    ) -> None:
         """
         Initialize adjustment strategy.
 
@@ -74,7 +74,7 @@ class PathAnalysis:
         frontdoor_paths: List[List[str]],
         blocked_paths: List[List[str]],
         critical_nodes: List[str],
-    ):
+    ) -> None:
         """
         Initialize path analysis.
 
@@ -103,7 +103,7 @@ class AdvancedValidationSuggester:
     - Performance optimization for repeated queries
     """
 
-    def __init__(self, enable_caching: bool = True):
+    def __init__(self, enable_caching: bool = True) -> None:
         """
         Initialize advanced validation suggester.
 
@@ -607,7 +607,7 @@ class AdvancedValidationSuggester:
         visited: Set[str],
         backdoor_paths: List[List[str]],
         max_depth: int = 10,
-    ):
+    ) -> None:
         """
         DFS helper to find backdoor paths.
 

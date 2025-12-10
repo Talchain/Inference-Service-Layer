@@ -355,10 +355,9 @@ async def test_contrastive_explanation_explanation_quality(client):
     assert len(explanation["reasoning"]) > 0
 
 
-@pytest.mark.skip(reason="Known Starlette async middleware bug with early validation errors. Endpoint works correctly in production.")
 @pytest.mark.asyncio
 async def test_contrastive_explanation_invalid_request(client):
-    """Test handling of invalid request."""
+    """Test handling of invalid request (Pydantic validation)."""
     response = await client.post(
         "/api/v1/explain/contrastive",
         json={
@@ -376,8 +375,10 @@ async def test_contrastive_explanation_invalid_request(client):
         },
     )
 
-    # Should return validation error
+    # Should return validation error (422 for Pydantic validation)
     assert response.status_code in [400, 422]
+    data = response.json()
+    assert "code" in data or "detail" in data  # Error response
 
 
 @pytest.mark.asyncio

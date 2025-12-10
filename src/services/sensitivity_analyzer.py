@@ -84,7 +84,7 @@ class EnhancedSensitivityAnalyzer:
         ),
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the sensitivity analyzer."""
         self.logger = logger
         self._cache = {}

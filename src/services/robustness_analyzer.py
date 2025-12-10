@@ -41,7 +41,7 @@ class RobustnessAnalyzer:
         self,
         cf_engine: Optional[CounterfactualEngine] = None,
         causal_validator: Optional[CausalValidator] = None,
-    ):
+    ) -> None:
         """
         Initialize robustness analyzer.
 

@@ -8,11 +8,12 @@ where option rankings change.
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 
+from src.api.dependencies import get_threshold_identifier
 from src.models.requests import ThresholdIdentificationRequest
 from src.models.responses import ThresholdIdentificationResponse
-from src.services.threshold_identifier import threshold_identifier
+from src.services.threshold_identifier import ThresholdIdentifier
 from src.models.isl_metadata import MetadataBuilder
 
 router = APIRouter()
@@ -21,7 +22,8 @@ router = APIRouter()
 @router.post("/thresholds", response_model=ThresholdIdentificationResponse)
 async def identify_thresholds(
     request: ThresholdIdentificationRequest,
-    x_request_id: Optional[str] = Header(None)
+    x_request_id: Optional[str] = Header(None),
+    threshold_identifier: ThresholdIdentifier = Depends(get_threshold_identifier)
 ):
     """
     Identify parameter thresholds where option rankings change.

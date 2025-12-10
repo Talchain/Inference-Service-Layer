@@ -6,6 +6,7 @@ Provides X-API-Key header validation for protected endpoints.
 
 import logging
 import os
+import secrets
 from typing import Optional, Set
 
 from fastapi import Request
@@ -149,12 +150,13 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        if api_key not in self._api_keys:
+        # Use constant-time comparison to prevent timing attacks
+        if not any(secrets.compare_digest(api_key, valid_key) for valid_key in self._api_keys):
             # Log authentication failure via security audit logger
             security_audit.log_authentication_attempt(
                 success=False,
                 client_ip=client_ip,
-                api_key_prefix=api_key[:8] if len(api_key) >= 8 else api_key,
+                api_key_prefix=api_key[:4] if len(api_key) >= 4 else api_key,
                 reason="invalid_api_key",
                 path=request.url.path,
             )
@@ -173,7 +175,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         security_audit.log_authentication_attempt(
             success=True,
             client_ip=client_ip,
-            api_key_prefix=api_key[:8] if len(api_key) >= 8 else api_key,
+            api_key_prefix=api_key[:4] if len(api_key) >= 4 else api_key,
             path=request.url.path,
         )
 
