@@ -1661,3 +1661,170 @@ class MultiCriteriaRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Risk Adjustment Endpoint - Request Models
+# ============================================================================
+
+
+class RiskOption(BaseModel):
+    """Option with uncertainty for risk adjustment."""
+
+    option_id: str = Field(
+        ...,
+        description="Option identifier",
+        min_length=1,
+        max_length=200
+    )
+    option_label: str = Field(
+        ...,
+        description="Human-readable option label",
+        min_length=1,
+        max_length=500
+    )
+    # Support both mean/std_dev and percentile representations
+    mean: Optional[float] = Field(
+        default=None,
+        description="Mean score (for mean-variance representation)"
+    )
+    std_dev: Optional[float] = Field(
+        default=None,
+        description="Standard deviation (for mean-variance representation)",
+        ge=0.0
+    )
+    p10: Optional[float] = Field(
+        default=None,
+        description="10th percentile score (for percentile representation)"
+    )
+    p50: Optional[float] = Field(
+        default=None,
+        description="50th percentile score (for percentile representation)"
+    )
+    p90: Optional[float] = Field(
+        default=None,
+        description="90th percentile score (for percentile representation)"
+    )
+
+    @field_validator("mean", "std_dev", "p10", "p50", "p90")
+    @classmethod
+    def validate_scores_finite(cls, v):
+        """Validate scores are finite if provided."""
+        if v is not None:
+            if not isinstance(v, (int, float)):
+                raise ValueError("Score must be numeric")
+            if not (0.0 <= v <= 1.0):
+                raise ValueError(f"Score must be in range [0, 1], got {v}")
+            if not float('-inf') < v < float('inf'):
+                raise ValueError(f"Score must be finite, got {v}")
+        return v
+
+    def model_post_init(self, __context):
+        """Validate that either mean/std_dev or percentiles are provided."""
+        has_mean_std = self.mean is not None and self.std_dev is not None
+        has_percentiles = (
+            self.p10 is not None and self.p50 is not None and self.p90 is not None
+        )
+
+        if not has_mean_std and not has_percentiles:
+            raise ValueError(
+                "Must provide either (mean, std_dev) or (p10, p50, p90)"
+            )
+
+        if has_mean_std and has_percentiles:
+            raise ValueError(
+                "Cannot provide both (mean, std_dev) and (p10, p50, p90) - choose one representation"
+            )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "option_id": "opt_a",
+                    "option_label": "Option A: High Risk",
+                    "mean": 0.75,
+                    "std_dev": 0.15
+                },
+                {
+                    "option_id": "opt_b",
+                    "option_label": "Option B: Low Risk",
+                    "p10": 0.50,
+                    "p50": 0.55,
+                    "p90": 0.60
+                }
+            ]
+        }
+    }
+
+
+class RiskAdjustmentRequest(BaseModel):
+    """Request model for risk adjustment endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing"
+    )
+    options: List[RiskOption] = Field(
+        ...,
+        description="Options with uncertainty to adjust for risk",
+        min_length=2,
+        max_length=100
+    )
+    risk_coefficient: float = Field(
+        ...,
+        description="Risk coefficient from CEE risk profile (>0 for risk aversion)",
+        ge=0.0,
+        le=10.0
+    )
+    risk_type: str = Field(
+        ...,
+        description="Risk attitude type",
+        pattern="^(risk_averse|risk_neutral|risk_seeking)$"
+    )
+
+    @field_validator("risk_type")
+    @classmethod
+    def validate_risk_type_coefficient(cls, v, info):
+        """Validate risk_type matches coefficient."""
+        risk_coefficient = info.data.get("risk_coefficient")
+        if risk_coefficient is not None:
+            if v == "risk_neutral" and risk_coefficient != 0.0:
+                raise ValueError(
+                    "risk_neutral requires risk_coefficient=0.0"
+                )
+            if v in ["risk_averse", "risk_seeking"] and risk_coefficient == 0.0:
+                raise ValueError(
+                    f"{v} requires risk_coefficient > 0.0"
+                )
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_risk_abc123",
+                "options": [
+                    {
+                        "option_id": "opt_aggressive",
+                        "option_label": "Aggressive Growth Strategy",
+                        "mean": 0.80,
+                        "std_dev": 0.20
+                    },
+                    {
+                        "option_id": "opt_conservative",
+                        "option_label": "Conservative Growth Strategy",
+                        "mean": 0.60,
+                        "std_dev": 0.05
+                    },
+                    {
+                        "option_id": "opt_balanced",
+                        "option_label": "Balanced Approach",
+                        "p10": 0.55,
+                        "p50": 0.70,
+                        "p90": 0.85
+                    }
+                ],
+                "risk_coefficient": 2.0,
+                "risk_type": "risk_averse"
+            }
+        }
+    }

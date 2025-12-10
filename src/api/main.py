@@ -39,6 +39,7 @@ from .health import router as health_router
 from .metrics import router as metrics_router
 # ARCHIVED: Preferences deferred to TAE PoC v02
 # from .preferences import router as preferences_router
+from .risk import router as risk_router
 from .robustness import router as robustness_router
 from .teaching import router as teaching_router
 from .team import router as team_router
@@ -459,6 +460,11 @@ app.include_router(
 )
 app.include_router(
     dominance_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
+)
+app.include_router(
+    risk_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Multi-Criteria Analysis"],
 )

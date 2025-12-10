@@ -2666,3 +2666,158 @@ class MultiCriteriaResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Risk Adjustment Endpoint - Response Models
+# ============================================================================
+
+
+class AdjustedScore(BaseModel):
+    """Risk-adjusted score for a single option."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    original_score: float = Field(
+        ...,
+        description="Original score (mean or p50)",
+        ge=0.0,
+        le=1.0
+    )
+    certainty_equivalent: float = Field(
+        ...,
+        description="Risk-adjusted certainty equivalent score",
+        ge=0.0,
+        le=1.0
+    )
+    adjustment: float = Field(
+        ...,
+        description="Adjustment amount (CE - original, can be negative)"
+    )
+    variance: Optional[float] = Field(
+        None,
+        description="Variance of original distribution (if mean/std_dev provided)",
+        ge=0.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_aggressive",
+                "option_label": "Aggressive Growth Strategy",
+                "original_score": 0.80,
+                "certainty_equivalent": 0.60,
+                "adjustment": -0.20,
+                "variance": 0.04
+            }
+        }
+    }
+
+
+class RankingChange(BaseModel):
+    """Details about ranking changes after risk adjustment."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Option label")
+    original_rank: int = Field(..., description="Rank before adjustment (1-based)", ge=1)
+    adjusted_rank: int = Field(..., description="Rank after adjustment (1-based)", ge=1)
+    rank_change: int = Field(
+        ...,
+        description="Change in rank (positive = improved, negative = worsened)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_conservative",
+                "option_label": "Conservative Growth Strategy",
+                "original_rank": 2,
+                "adjusted_rank": 1,
+                "rank_change": 1
+            }
+        }
+    }
+
+
+class RiskAdjustmentResponse(BaseModel):
+    """Response model for risk adjustment endpoint."""
+
+    adjusted_scores: List[AdjustedScore] = Field(
+        ...,
+        description="Options with risk-adjusted scores (sorted by CE, descending)"
+    )
+    rankings_changed: bool = Field(
+        ...,
+        description="True if rankings changed after risk adjustment"
+    )
+    ranking_changes: Optional[List[RankingChange]] = Field(
+        None,
+        description="Detailed ranking changes (only if rankings_changed=True)"
+    )
+    risk_interpretation: str = Field(
+        ...,
+        description="Plain English interpretation of risk adjustment impact",
+        max_length=1000
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "adjusted_scores": [
+                    {
+                        "option_id": "opt_conservative",
+                        "option_label": "Conservative Growth Strategy",
+                        "original_score": 0.60,
+                        "certainty_equivalent": 0.59,
+                        "adjustment": -0.01,
+                        "variance": 0.0025
+                    },
+                    {
+                        "option_id": "opt_aggressive",
+                        "option_label": "Aggressive Growth Strategy",
+                        "original_score": 0.80,
+                        "certainty_equivalent": 0.60,
+                        "adjustment": -0.20,
+                        "variance": 0.04
+                    },
+                    {
+                        "option_id": "opt_balanced",
+                        "option_label": "Balanced Approach",
+                        "original_score": 0.70,
+                        "certainty_equivalent": 0.58,
+                        "adjustment": -0.12,
+                        "variance": 0.0225
+                    }
+                ],
+                "rankings_changed": True,
+                "ranking_changes": [
+                    {
+                        "option_id": "opt_conservative",
+                        "option_label": "Conservative Growth Strategy",
+                        "original_rank": 3,
+                        "adjusted_rank": 1,
+                        "rank_change": 2
+                    },
+                    {
+                        "option_id": "opt_aggressive",
+                        "option_label": "Aggressive Growth Strategy",
+                        "original_rank": 1,
+                        "adjusted_rank": 2,
+                        "rank_change": -1
+                    }
+                ],
+                "risk_interpretation": "Risk aversion (coefficient=2.0) significantly penalizes high-variance options. Conservative strategy moves from rank 3 to rank 1 after adjustment, while aggressive strategy drops from rank 1 to rank 2 due to high variance (0.04).",
+                "metadata": {
+                    "request_id": "req_risk_abc123",
+                    "computation_time_ms": 1.8,
+                    "isl_version": "2.0",
+                    "algorithm": "mean_variance_risk_averse",
+                    "cache_hit": False
+                }
+            }
+        }
+    }
