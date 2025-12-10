@@ -26,20 +26,24 @@ from src.middleware.request_limits import RequestSizeLimitMiddleware, RequestTim
 from src.models.responses import ErrorCode, ErrorResponse
 from src.utils.tracing import TracingMiddleware
 
+from .aggregation import router as aggregation_router
 from .analysis import router as analysis_router
 from .batch import router as batch_router
 from .causal import router as causal_router
 from .cee import router as cee_router
 # ARCHIVED: Deliberation deferred to TAE PoC v02
 # from .deliberation import router as deliberation_router
+from .dominance import router as dominance_router
 from .explain import router as explain_router
 from .health import router as health_router
 from .metrics import router as metrics_router
 # ARCHIVED: Preferences deferred to TAE PoC v02
 # from .preferences import router as preferences_router
+from .risk import router as risk_router
 from .robustness import router as robustness_router
 from .teaching import router as teaching_router
 from .team import router as team_router
+from .threshold import router as threshold_router
 from .validation import router as validation_router
 
 # Setup logging
@@ -454,6 +458,26 @@ app.include_router(
     analysis_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Sensitivity Analysis"],
+)
+app.include_router(
+    dominance_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
+)
+app.include_router(
+    risk_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
+)
+app.include_router(
+    threshold_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
+)
+app.include_router(
+    aggregation_router,
+    prefix=f"{settings.API_V1_PREFIX}/aggregation",
+    tags=["Multi-Criteria Analysis"],
 )
 app.include_router(
     robustness_router,

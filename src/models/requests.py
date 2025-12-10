@@ -1271,3 +1271,706 @@ class ParameterRecommendationRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Dominance Detection Endpoint - Request Models
+# ============================================================================
+
+
+class DominanceOption(BaseModel):
+    """Single option with scores across multiple criteria."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique option identifier",
+        min_length=1,
+        max_length=200
+    )
+    option_label: str = Field(
+        ...,
+        description="Human-readable option label",
+        min_length=1,
+        max_length=500
+    )
+    scores: Dict[str, float] = Field(
+        ...,
+        description="Normalized scores (0-1) by criterion_id"
+    )
+
+    @field_validator("scores")
+    @classmethod
+    def validate_scores(cls, v):
+        """Validate scores are normalized 0-1 and finite."""
+        if not v:
+            raise ValueError("scores cannot be empty")
+
+        for criterion_id, score in v.items():
+            if not isinstance(score, (int, float)):
+                raise ValueError(f"Score for {criterion_id} must be numeric")
+            if not (0.0 <= score <= 1.0):
+                raise ValueError(f"Score for {criterion_id} must be in range [0, 1], got {score}")
+            if not float('-inf') < score < float('inf'):
+                raise ValueError(f"Score for {criterion_id} must be finite, got {score}")
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_launch_q1",
+                "option_label": "Launch in Q1 2025",
+                "scores": {
+                    "revenue": 0.85,
+                    "risk": 0.60,
+                    "timeline": 0.90
+                }
+            }
+        }
+    }
+
+
+class DominanceRequest(BaseModel):
+    """Request model for dominance detection endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing (auto-generated if not provided)"
+    )
+    options: List[DominanceOption] = Field(
+        ...,
+        description="Options to analyze for dominance relationships",
+        min_length=2,
+        max_length=100
+    )
+    criteria: List[str] = Field(
+        ...,
+        description="Criterion IDs to consider (must match keys in option scores)",
+        min_length=1,
+        max_length=10
+    )
+
+    @field_validator("options")
+    @classmethod
+    def validate_option_consistency(cls, v, info):
+        """Validate all options have scores for all criteria."""
+        if len(v) < 2:
+            raise ValueError("At least 2 options required for dominance analysis")
+
+        # Get criteria from context if available
+        criteria = info.data.get("criteria", [])
+        if criteria:
+            for option in v:
+                missing = set(criteria) - set(option.scores.keys())
+                if missing:
+                    raise ValueError(
+                        f"Option {option.option_id} missing scores for criteria: {missing}"
+                    )
+                extra = set(option.scores.keys()) - set(criteria)
+                if extra:
+                    raise ValueError(
+                        f"Option {option.option_id} has scores for unexpected criteria: {extra}"
+                    )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_abc123",
+                "options": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A: Aggressive Growth",
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B: Conservative Growth",
+                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90}
+                    },
+                    {
+                        "option_id": "opt_c",
+                        "option_label": "Option C: Balanced Approach",
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
+                    }
+                ],
+                "criteria": ["revenue", "risk", "timeline"]
+            }
+        }
+    }
+
+
+# ============================================================================
+# Pareto Frontier Endpoint - Request Models
+# ============================================================================
+
+
+class ParetoRequest(BaseModel):
+    """Request model for Pareto frontier endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing (auto-generated if not provided)"
+    )
+    options: List[DominanceOption] = Field(
+        ...,
+        description="Options to analyze for Pareto frontier",
+        min_length=2,
+        max_length=100
+    )
+    criteria: List[str] = Field(
+        ...,
+        description="Criterion IDs to consider (must match keys in option scores)",
+        min_length=1,
+        max_length=10
+    )
+    max_frontier_size: Optional[int] = Field(
+        default=20,
+        description="Maximum number of frontier options to return (for large frontiers)",
+        ge=1,
+        le=100
+    )
+
+    @field_validator("options")
+    @classmethod
+    def validate_option_consistency(cls, v, info):
+        """Validate all options have scores for all criteria."""
+        if len(v) < 2:
+            raise ValueError("At least 2 options required for Pareto analysis")
+
+        # Get criteria from context if available
+        criteria = info.data.get("criteria", [])
+        if criteria:
+            for option in v:
+                missing = set(criteria) - set(option.scores.keys())
+                if missing:
+                    raise ValueError(
+                        f"Option {option.option_id} missing scores for criteria: {missing}"
+                    )
+                extra = set(option.scores.keys()) - set(criteria)
+                if extra:
+                    raise ValueError(
+                        f"Option {option.option_id} has scores for unexpected criteria: {extra}"
+                    )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_abc123",
+                "options": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A: Aggressive Growth",
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B: Conservative Growth",
+                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90}
+                    },
+                    {
+                        "option_id": "opt_c",
+                        "option_label": "Option C: Balanced Approach",
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
+                    }
+                ],
+                "criteria": ["revenue", "risk", "timeline"],
+                "max_frontier_size": 20
+            }
+        }
+    }
+
+
+# ============================================================================
+# Multi-Criteria Aggregation Endpoint - Request Models
+# ============================================================================
+
+
+class OptionScore(BaseModel):
+    """Scores for a single option across percentiles."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    p10: float = Field(..., description="Pessimistic (10th percentile) score")
+    p50: float = Field(..., description="Expected (50th percentile) score")
+    p90: float = Field(..., description="Optimistic (90th percentile) score")
+
+    @field_validator("p10", "p50", "p90")
+    @classmethod
+    def validate_scores(cls, v):
+        """Validate scores are 0-1 and finite."""
+        if not isinstance(v, (int, float)):
+            raise ValueError("Score must be numeric")
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"Score must be in range [0, 1], got {v}")
+        if not float('-inf') < v < float('inf'):
+            raise ValueError(f"Score must be finite, got {v}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_launch_q1",
+                "option_label": "Launch in Q1 2025",
+                "p10": 0.65,
+                "p50": 0.85,
+                "p90": 0.95
+            }
+        }
+    }
+
+
+class CriterionResult(BaseModel):
+    """Results for a single criterion with scores for all options."""
+
+    criterion_id: str = Field(
+        ...,
+        description="Criterion identifier",
+        min_length=1,
+        max_length=100
+    )
+    criterion_name: str = Field(
+        ...,
+        description="Human-readable criterion name",
+        min_length=1,
+        max_length=200
+    )
+    options: List[OptionScore] = Field(
+        ...,
+        description="Scores for each option on this criterion",
+        min_length=2,
+        max_length=100
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "criterion_id": "revenue",
+                "criterion_name": "Expected Revenue",
+                "options": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A",
+                        "p10": 0.65,
+                        "p50": 0.85,
+                        "p90": 0.95
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B",
+                        "p10": 0.45,
+                        "p50": 0.60,
+                        "p90": 0.75
+                    }
+                ]
+            }
+        }
+    }
+
+
+class MultiCriteriaRequest(BaseModel):
+    """Request model for multi-criteria aggregation endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing"
+    )
+    criteria: List[CriterionResult] = Field(
+        ...,
+        description="Results for each criterion with option scores",
+        min_length=1,
+        max_length=10
+    )
+    aggregation_method: str = Field(
+        ...,
+        description="Aggregation method to use",
+        pattern="^(weighted_sum|weighted_product|lexicographic)$"
+    )
+    weights: Dict[str, float] = Field(
+        ...,
+        description="Weights by criterion_id (should sum to 1.0, will auto-normalize if not)"
+    )
+    percentile: Optional[str] = Field(
+        default="p50",
+        description="Which percentile to use for aggregation",
+        pattern="^(p10|p50|p90)$"
+    )
+    trade_off_threshold: Optional[float] = Field(
+        default=0.05,
+        description="Minimum score difference to report as trade-off",
+        ge=0.0,
+        le=1.0
+    )
+    timeout_ms: Optional[int] = Field(
+        default=5000,
+        description="Request timeout in milliseconds",
+        ge=100,
+        le=30000
+    )
+
+    @field_validator("weights")
+    @classmethod
+    def validate_weights_positive(cls, v):
+        """Validate that weights are positive."""
+        if not v:
+            raise ValueError("weights cannot be empty")
+
+        for criterion_id, weight in v.items():
+            if not isinstance(weight, (int, float)):
+                raise ValueError(f"Weight for {criterion_id} must be numeric")
+            if weight < 0:
+                raise ValueError(f"Weight for {criterion_id} must be non-negative, got {weight}")
+            if not float('-inf') < weight < float('inf'):
+                raise ValueError(f"Weight for {criterion_id} must be finite, got {weight}")
+
+        total = sum(v.values())
+        if total == 0:
+            raise ValueError("Cannot normalize: all weights are zero")
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_abc123",
+                "criteria": [
+                    {
+                        "criterion_id": "revenue",
+                        "criterion_name": "Expected Revenue",
+                        "options": [
+                            {"option_id": "opt_a", "option_label": "Option A", "p10": 0.65, "p50": 0.85, "p90": 0.95},
+                            {"option_id": "opt_b", "option_label": "Option B", "p10": 0.45, "p50": 0.60, "p90": 0.75}
+                        ]
+                    },
+                    {
+                        "criterion_id": "risk",
+                        "criterion_name": "Risk Level",
+                        "options": [
+                            {"option_id": "opt_a", "option_label": "Option A", "p10": 0.30, "p50": 0.40, "p90": 0.55},
+                            {"option_id": "opt_b", "option_label": "Option B", "p10": 0.70, "p50": 0.80, "p90": 0.90}
+                        ]
+                    }
+                ],
+                "aggregation_method": "weighted_sum",
+                "weights": {"revenue": 0.6, "risk": 0.4},
+                "percentile": "p50",
+                "trade_off_threshold": 0.05
+            }
+        }
+    }
+
+
+# ============================================================================
+# Risk Adjustment Endpoint - Request Models
+# ============================================================================
+
+
+class RiskOption(BaseModel):
+    """Option with uncertainty for risk adjustment."""
+
+    option_id: str = Field(
+        ...,
+        description="Option identifier",
+        min_length=1,
+        max_length=200
+    )
+    option_label: str = Field(
+        ...,
+        description="Human-readable option label",
+        min_length=1,
+        max_length=500
+    )
+    # Support both mean/std_dev and percentile representations
+    mean: Optional[float] = Field(
+        default=None,
+        description="Mean score (for mean-variance representation)"
+    )
+    std_dev: Optional[float] = Field(
+        default=None,
+        description="Standard deviation (for mean-variance representation)",
+        ge=0.0
+    )
+    p10: Optional[float] = Field(
+        default=None,
+        description="10th percentile score (for percentile representation)"
+    )
+    p50: Optional[float] = Field(
+        default=None,
+        description="50th percentile score (for percentile representation)"
+    )
+    p90: Optional[float] = Field(
+        default=None,
+        description="90th percentile score (for percentile representation)"
+    )
+
+    @field_validator("mean", "std_dev", "p10", "p50", "p90")
+    @classmethod
+    def validate_scores_finite(cls, v):
+        """Validate scores are finite if provided."""
+        if v is not None:
+            if not isinstance(v, (int, float)):
+                raise ValueError("Score must be numeric")
+            if not (0.0 <= v <= 1.0):
+                raise ValueError(f"Score must be in range [0, 1], got {v}")
+            if not float('-inf') < v < float('inf'):
+                raise ValueError(f"Score must be finite, got {v}")
+        return v
+
+    def model_post_init(self, __context):
+        """Validate that either mean/std_dev or percentiles are provided."""
+        has_mean_std = self.mean is not None and self.std_dev is not None
+        has_percentiles = (
+            self.p10 is not None and self.p50 is not None and self.p90 is not None
+        )
+
+        if not has_mean_std and not has_percentiles:
+            raise ValueError(
+                "Must provide either (mean, std_dev) or (p10, p50, p90)"
+            )
+
+        if has_mean_std and has_percentiles:
+            raise ValueError(
+                "Cannot provide both (mean, std_dev) and (p10, p50, p90) - choose one representation"
+            )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "option_id": "opt_a",
+                    "option_label": "Option A: High Risk",
+                    "mean": 0.75,
+                    "std_dev": 0.15
+                },
+                {
+                    "option_id": "opt_b",
+                    "option_label": "Option B: Low Risk",
+                    "p10": 0.50,
+                    "p50": 0.55,
+                    "p90": 0.60
+                }
+            ]
+        }
+    }
+
+
+class RiskAdjustmentRequest(BaseModel):
+    """Request model for risk adjustment endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing"
+    )
+    options: List[RiskOption] = Field(
+        ...,
+        description="Options with uncertainty to adjust for risk",
+        min_length=2,
+        max_length=100
+    )
+    risk_coefficient: float = Field(
+        ...,
+        description="Risk coefficient from CEE risk profile (>0 for risk aversion)",
+        ge=0.0,
+        le=10.0
+    )
+    risk_type: str = Field(
+        ...,
+        description="Risk attitude type",
+        pattern="^(risk_averse|risk_neutral|risk_seeking)$"
+    )
+
+    @field_validator("risk_type")
+    @classmethod
+    def validate_risk_type_coefficient(cls, v, info):
+        """Validate risk_type matches coefficient."""
+        risk_coefficient = info.data.get("risk_coefficient")
+        if risk_coefficient is not None:
+            if v == "risk_neutral" and risk_coefficient != 0.0:
+                raise ValueError(
+                    "risk_neutral requires risk_coefficient=0.0"
+                )
+            if v in ["risk_averse", "risk_seeking"] and risk_coefficient == 0.0:
+                raise ValueError(
+                    f"{v} requires risk_coefficient > 0.0"
+                )
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_risk_abc123",
+                "options": [
+                    {
+                        "option_id": "opt_aggressive",
+                        "option_label": "Aggressive Growth Strategy",
+                        "mean": 0.80,
+                        "std_dev": 0.20
+                    },
+                    {
+                        "option_id": "opt_conservative",
+                        "option_label": "Conservative Growth Strategy",
+                        "mean": 0.60,
+                        "std_dev": 0.05
+                    },
+                    {
+                        "option_id": "opt_balanced",
+                        "option_label": "Balanced Approach",
+                        "p10": 0.55,
+                        "p50": 0.70,
+                        "p90": 0.85
+                    }
+                ],
+                "risk_coefficient": 2.0,
+                "risk_type": "risk_averse"
+            }
+        }
+    }
+
+
+# ============================================================================
+# Threshold Identification Endpoint - Request Models
+# ============================================================================
+
+
+class ParameterSweep(BaseModel):
+    """Parameter sweep with scores at different parameter values."""
+
+    parameter_id: str = Field(
+        ...,
+        description="Parameter identifier",
+        min_length=1,
+        max_length=200
+    )
+    parameter_label: str = Field(
+        ...,
+        description="Human-readable parameter label",
+        min_length=1,
+        max_length=500
+    )
+    values: List[float] = Field(
+        ...,
+        description="Parameter values tested (in sweep order)",
+        min_length=2,
+        max_length=1000
+    )
+    scores_by_value: Dict[str, Dict[str, float]] = Field(
+        ...,
+        description="Scores for each option at each parameter value. "
+                    "Format: {parameter_value: {option_id: score}}"
+    )
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_unique(cls, v):
+        """Validate that parameter values are unique."""
+        if len(v) != len(set(v)):
+            raise ValueError("Parameter values must be unique")
+        return v
+
+    @field_validator("scores_by_value")
+    @classmethod
+    def validate_scores_by_value(cls, v, info):
+        """Validate that scores_by_value has entries for all values."""
+        values = info.data.get("values", [])
+        if values:
+            # Check that all values have score entries
+            values_str = [str(val) for val in values]
+            for val_str in values_str:
+                if val_str not in v:
+                    raise ValueError(
+                        f"scores_by_value missing entry for parameter value {val_str}"
+                    )
+
+            # Check that all score dictionaries have same option_ids
+            if v:
+                first_options = set(next(iter(v.values())).keys())
+                for val_str, scores in v.items():
+                    if set(scores.keys()) != first_options:
+                        raise ValueError(
+                            f"All parameter values must have scores for same options. "
+                            f"Value {val_str} has different options."
+                        )
+
+                # Validate score ranges
+                for val_str, scores in v.items():
+                    for option_id, score in scores.items():
+                        if not isinstance(score, (int, float)):
+                            raise ValueError(
+                                f"Score for {option_id} at {val_str} must be numeric"
+                            )
+                        if not (0.0 <= score <= 1.0):
+                            raise ValueError(
+                                f"Score for {option_id} at {val_str} must be in [0, 1], got {score}"
+                            )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter_id": "price",
+                "parameter_label": "Product Price",
+                "values": [30.0, 40.0, 50.0, 60.0, 70.0],
+                "scores_by_value": {
+                    "30.0": {"opt_a": 0.90, "opt_b": 0.60, "opt_c": 0.75},
+                    "40.0": {"opt_a": 0.85, "opt_b": 0.70, "opt_c": 0.75},
+                    "50.0": {"opt_a": 0.75, "opt_b": 0.80, "opt_c": 0.70},
+                    "60.0": {"opt_a": 0.65, "opt_b": 0.85, "opt_c": 0.65},
+                    "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60}
+                }
+            }
+        }
+    }
+
+
+class ThresholdIdentificationRequest(BaseModel):
+    """Request model for threshold identification endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing"
+    )
+    parameter_sweeps: List[ParameterSweep] = Field(
+        ...,
+        description="Parameter sweeps with scores at different values",
+        min_length=1,
+        max_length=20
+    )
+    baseline_ranking: Optional[List[str]] = Field(
+        default=None,
+        description="Optional baseline ranking (option_ids in rank order). "
+                    "If not provided, uses ranking at first parameter value."
+    )
+    confidence_threshold: Optional[float] = Field(
+        default=0.1,
+        description="Minimum score difference to consider ranking change meaningful",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_threshold_abc123",
+                "parameter_sweeps": [
+                    {
+                        "parameter_id": "price",
+                        "parameter_label": "Product Price",
+                        "values": [30.0, 40.0, 50.0, 60.0, 70.0],
+                        "scores_by_value": {
+                            "30.0": {"opt_a": 0.90, "opt_b": 0.60, "opt_c": 0.75},
+                            "40.0": {"opt_a": 0.85, "opt_b": 0.70, "opt_c": 0.75},
+                            "50.0": {"opt_a": 0.75, "opt_b": 0.80, "opt_c": 0.70},
+                            "60.0": {"opt_a": 0.65, "opt_b": 0.85, "opt_c": 0.65},
+                            "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60}
+                        }
+                    }
+                ],
+                "baseline_ranking": ["opt_a", "opt_c", "opt_b"],
+                "confidence_threshold": 0.1
+            }
+        }
+    }
