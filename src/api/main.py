@@ -26,6 +26,7 @@ from src.middleware.request_limits import RequestSizeLimitMiddleware, RequestTim
 from src.models.responses import ErrorCode, ErrorResponse
 from src.utils.tracing import TracingMiddleware
 
+from .aggregation import router as aggregation_router
 from .analysis import router as analysis_router
 from .batch import router as batch_router
 from .causal import router as causal_router
@@ -459,6 +460,11 @@ app.include_router(
 app.include_router(
     dominance_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Multi-Criteria Analysis"],
+)
+app.include_router(
+    aggregation_router,
+    prefix=f"{settings.API_V1_PREFIX}/aggregation",
     tags=["Multi-Criteria Analysis"],
 )
 app.include_router(

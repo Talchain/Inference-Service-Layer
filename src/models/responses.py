@@ -2492,3 +2492,177 @@ class ParetoResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Multi-Criteria Aggregation Endpoint - Response Models
+# ============================================================================
+
+
+class AggregatedRanking(BaseModel):
+    """Aggregated ranking for a single option."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    rank: int = Field(..., description="Rank (1-based, 1 = best)", ge=1)
+    aggregated_score: float = Field(
+        ...,
+        description="Final aggregated score (0-100 scale)",
+        ge=0.0,
+        le=100.0
+    )
+    scores_by_criterion: Dict[str, float] = Field(
+        ...,
+        description="Normalized scores (0-1) used in aggregation by criterion_id"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_a",
+                "option_label": "Option A: Aggressive Growth",
+                "rank": 1,
+                "aggregated_score": 72.5,
+                "scores_by_criterion": {
+                    "revenue": 0.85,
+                    "risk": 0.40,
+                    "timeline": 0.70
+                }
+            }
+        }
+    }
+
+
+class TradeOff(BaseModel):
+    """Trade-off between two options."""
+
+    option_a_id: str = Field(..., description="First option ID")
+    option_a_label: str = Field(..., description="First option label")
+    option_b_id: str = Field(..., description="Second option ID")
+    option_b_label: str = Field(..., description="Second option label")
+    a_better_on: List[str] = Field(
+        ...,
+        description="Criterion IDs where option A scores higher"
+    )
+    b_better_on: List[str] = Field(
+        ...,
+        description="Criterion IDs where option B scores higher"
+    )
+    max_difference: float = Field(
+        ...,
+        description="Largest score gap across criteria",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_a_id": "opt_a",
+                "option_a_label": "Option A: Aggressive Growth",
+                "option_b_id": "opt_b",
+                "option_b_label": "Option B: Conservative Growth",
+                "a_better_on": ["revenue", "timeline"],
+                "b_better_on": ["risk"],
+                "max_difference": 0.45
+            }
+        }
+    }
+
+
+class ValidationWarning(BaseModel):
+    """Warning about validation actions taken."""
+
+    code: str = Field(
+        ...,
+        description="Warning code",
+        pattern="^(WEIGHTS_NORMALIZED|OPTION_MISMATCH|SCORE_CLAMPED|MISSING_CRITERION)$"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message",
+        max_length=500
+    )
+    affected_items: Optional[List[str]] = Field(
+        None,
+        description="IDs of affected items (options, criteria, etc.)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "WEIGHTS_NORMALIZED",
+                "message": "Weights normalized from sum=0.95 to sum=1.0",
+                "affected_items": ["revenue", "risk"]
+            }
+        }
+    }
+
+
+class MultiCriteriaResponse(BaseModel):
+    """Response model for multi-criteria aggregation endpoint."""
+
+    aggregated_rankings: List[AggregatedRanking] = Field(
+        ...,
+        description="Options ranked by aggregated score (sorted best to worst)"
+    )
+    trade_offs: List[TradeOff] = Field(
+        ...,
+        description="Significant trade-offs between top options"
+    )
+    warnings: Optional[List[ValidationWarning]] = Field(
+        None,
+        description="Warnings about auto-corrections or validation issues"
+    )
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "aggregated_rankings": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A",
+                        "rank": 1,
+                        "aggregated_score": 72.5,
+                        "scores_by_criterion": {"revenue": 0.85, "risk": 0.40}
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B",
+                        "rank": 2,
+                        "aggregated_score": 68.0,
+                        "scores_by_criterion": {"revenue": 0.60, "risk": 0.80}
+                    }
+                ],
+                "trade_offs": [
+                    {
+                        "option_a_id": "opt_a",
+                        "option_a_label": "Option A",
+                        "option_b_id": "opt_b",
+                        "option_b_label": "Option B",
+                        "a_better_on": ["revenue"],
+                        "b_better_on": ["risk"],
+                        "max_difference": 0.40
+                    }
+                ],
+                "warnings": [
+                    {
+                        "code": "WEIGHTS_NORMALIZED",
+                        "message": "Weights normalized from sum=0.95 to sum=1.0",
+                        "affected_items": ["revenue", "risk"]
+                    }
+                ],
+                "metadata": {
+                    "request_id": "req_abc123",
+                    "computation_time_ms": 5.2,
+                    "isl_version": "2.0",
+                    "algorithm": "weighted_sum",
+                    "cache_hit": False
+                }
+            }
+        }
+    }

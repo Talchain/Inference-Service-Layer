@@ -1482,3 +1482,182 @@ class ParetoRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Multi-Criteria Aggregation Endpoint - Request Models
+# ============================================================================
+
+
+class OptionScore(BaseModel):
+    """Scores for a single option across percentiles."""
+
+    option_id: str = Field(..., description="Option identifier")
+    option_label: str = Field(..., description="Human-readable option label")
+    p10: float = Field(..., description="Pessimistic (10th percentile) score")
+    p50: float = Field(..., description="Expected (50th percentile) score")
+    p90: float = Field(..., description="Optimistic (90th percentile) score")
+
+    @field_validator("p10", "p50", "p90")
+    @classmethod
+    def validate_scores(cls, v):
+        """Validate scores are 0-1 and finite."""
+        if not isinstance(v, (int, float)):
+            raise ValueError("Score must be numeric")
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"Score must be in range [0, 1], got {v}")
+        if not float('-inf') < v < float('inf'):
+            raise ValueError(f"Score must be finite, got {v}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "opt_launch_q1",
+                "option_label": "Launch in Q1 2025",
+                "p10": 0.65,
+                "p50": 0.85,
+                "p90": 0.95
+            }
+        }
+    }
+
+
+class CriterionResult(BaseModel):
+    """Results for a single criterion with scores for all options."""
+
+    criterion_id: str = Field(
+        ...,
+        description="Criterion identifier",
+        min_length=1,
+        max_length=100
+    )
+    criterion_name: str = Field(
+        ...,
+        description="Human-readable criterion name",
+        min_length=1,
+        max_length=200
+    )
+    options: List[OptionScore] = Field(
+        ...,
+        description="Scores for each option on this criterion",
+        min_length=2,
+        max_length=100
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "criterion_id": "revenue",
+                "criterion_name": "Expected Revenue",
+                "options": [
+                    {
+                        "option_id": "opt_a",
+                        "option_label": "Option A",
+                        "p10": 0.65,
+                        "p50": 0.85,
+                        "p90": 0.95
+                    },
+                    {
+                        "option_id": "opt_b",
+                        "option_label": "Option B",
+                        "p10": 0.45,
+                        "p50": 0.60,
+                        "p90": 0.75
+                    }
+                ]
+            }
+        }
+    }
+
+
+class MultiCriteriaRequest(BaseModel):
+    """Request model for multi-criteria aggregation endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing"
+    )
+    criteria: List[CriterionResult] = Field(
+        ...,
+        description="Results for each criterion with option scores",
+        min_length=1,
+        max_length=10
+    )
+    aggregation_method: str = Field(
+        ...,
+        description="Aggregation method to use",
+        pattern="^(weighted_sum|weighted_product|lexicographic)$"
+    )
+    weights: Dict[str, float] = Field(
+        ...,
+        description="Weights by criterion_id (should sum to 1.0, will auto-normalize if not)"
+    )
+    percentile: Optional[str] = Field(
+        default="p50",
+        description="Which percentile to use for aggregation",
+        pattern="^(p10|p50|p90)$"
+    )
+    trade_off_threshold: Optional[float] = Field(
+        default=0.05,
+        description="Minimum score difference to report as trade-off",
+        ge=0.0,
+        le=1.0
+    )
+    timeout_ms: Optional[int] = Field(
+        default=5000,
+        description="Request timeout in milliseconds",
+        ge=100,
+        le=30000
+    )
+
+    @field_validator("weights")
+    @classmethod
+    def validate_weights_positive(cls, v):
+        """Validate that weights are positive."""
+        if not v:
+            raise ValueError("weights cannot be empty")
+
+        for criterion_id, weight in v.items():
+            if not isinstance(weight, (int, float)):
+                raise ValueError(f"Weight for {criterion_id} must be numeric")
+            if weight < 0:
+                raise ValueError(f"Weight for {criterion_id} must be non-negative, got {weight}")
+            if not float('-inf') < weight < float('inf'):
+                raise ValueError(f"Weight for {criterion_id} must be finite, got {weight}")
+
+        total = sum(v.values())
+        if total == 0:
+            raise ValueError("Cannot normalize: all weights are zero")
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "req_abc123",
+                "criteria": [
+                    {
+                        "criterion_id": "revenue",
+                        "criterion_name": "Expected Revenue",
+                        "options": [
+                            {"option_id": "opt_a", "option_label": "Option A", "p10": 0.65, "p50": 0.85, "p90": 0.95},
+                            {"option_id": "opt_b", "option_label": "Option B", "p10": 0.45, "p50": 0.60, "p90": 0.75}
+                        ]
+                    },
+                    {
+                        "criterion_id": "risk",
+                        "criterion_name": "Risk Level",
+                        "options": [
+                            {"option_id": "opt_a", "option_label": "Option A", "p10": 0.30, "p50": 0.40, "p90": 0.55},
+                            {"option_id": "opt_b", "option_label": "Option B", "p10": 0.70, "p50": 0.80, "p90": 0.90}
+                        ]
+                    }
+                ],
+                "aggregation_method": "weighted_sum",
+                "weights": {"revenue": 0.6, "risk": 0.4},
+                "percentile": "p50",
+                "trade_off_threshold": 0.05
+            }
+        }
+    }
