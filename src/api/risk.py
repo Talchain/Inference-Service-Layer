@@ -8,11 +8,12 @@ based on user risk profiles.
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Depends, Header
 
+from src.api.dependencies import get_risk_adjuster
 from src.models.requests import RiskAdjustmentRequest
 from src.models.responses import RiskAdjustmentResponse
-from src.services.risk_adjuster import risk_adjuster
+from src.services.risk_adjuster import RiskAdjuster
 from src.models.isl_metadata import MetadataBuilder
 
 router = APIRouter()
@@ -21,7 +22,8 @@ router = APIRouter()
 @router.post("/risk-adjust", response_model=RiskAdjustmentResponse)
 async def adjust_for_risk(
     request: RiskAdjustmentRequest,
-    x_request_id: Optional[str] = Header(None)
+    x_request_id: Optional[str] = Header(None),
+    risk_adjuster: RiskAdjuster = Depends(get_risk_adjuster)
 ):
     """
     Apply risk adjustment to option scores based on risk profile.
