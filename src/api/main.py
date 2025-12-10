@@ -37,6 +37,7 @@ from .dominance import router as dominance_router
 from .explain import router as explain_router
 from .health import router as health_router
 from .metrics import router as metrics_router
+from .phase4 import router as phase4_router
 # ARCHIVED: Preferences deferred to TAE PoC v02
 # from .preferences import router as preferences_router
 from .risk import router as risk_router
@@ -539,6 +540,11 @@ app.include_router(
     cee_router,
     prefix=f"{settings.API_V1_PREFIX}",
     tags=["CEE Enhancement"],
+)
+app.include_router(
+    phase4_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Phase 4: Sequential Decisions"],
 )
 # ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
 # app.include_router(

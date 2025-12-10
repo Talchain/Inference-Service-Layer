@@ -2983,3 +2983,732 @@ class ThresholdIdentificationResponse(BaseModel):
             }
         }
     }
+
+# ============================================================================
+# Phase 4: Sequential Decisions & Conditional Recommendations - Response Models
+# ============================================================================
+
+
+class ConditionExpression(BaseModel):
+    """Machine-readable condition expression."""
+
+    parameter: str = Field(
+        ...,
+        description="Parameter name being conditioned on"
+    )
+    operator: str = Field(
+        ...,
+        description="Comparison operator",
+        pattern="^(<|<=|>|>=|==|in_range)$"
+    )
+    value: Any = Field(
+        ...,
+        description="Threshold value or range tuple for 'in_range'"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "parameter": "marketing_roi",
+                "operator": "<",
+                "value": 0.3
+            }
+        }
+    }
+
+
+class PrimaryRecommendation(BaseModel):
+    """Primary recommendation for an option."""
+
+    option_id: str = Field(..., description="Recommended option ID")
+    label: str = Field(..., description="Human-readable label")
+    confidence: str = Field(
+        ...,
+        description="Confidence level",
+        pattern="^(high|medium|low)$"
+    )
+    expected_value: float = Field(..., description="Expected value of this option")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_a",
+                "label": "Aggressive Expansion",
+                "confidence": "high",
+                "expected_value": 75000.0
+            }
+        }
+    }
+
+
+class ConditionalRecommendation(BaseModel):
+    """A conditional recommendation that depends on parameter values."""
+
+    condition_id: str = Field(..., description="Unique condition identifier")
+    condition_type: str = Field(
+        ...,
+        description="Type of condition",
+        pattern="^(threshold|dominance|risk_profile|scenario)$"
+    )
+    condition_description: str = Field(
+        ...,
+        description="Human-readable description of the condition"
+    )
+    condition_expression: ConditionExpression = Field(
+        ...,
+        description="Machine-readable condition expression"
+    )
+    triggered_recommendation: PrimaryRecommendation = Field(
+        ...,
+        description="Recommendation when condition is true"
+    )
+    probability_of_condition: Optional[float] = Field(
+        default=None,
+        description="Estimated probability that condition is true",
+        ge=0.0,
+        le=1.0
+    )
+    impact_magnitude: str = Field(
+        ...,
+        description="Impact magnitude if condition is true",
+        pattern="^(high|medium|low)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "condition_id": "cond_001",
+                "condition_type": "threshold",
+                "condition_description": "If marketing ROI drops below 0.3",
+                "condition_expression": {
+                    "parameter": "marketing_roi",
+                    "operator": "<",
+                    "value": 0.3
+                },
+                "triggered_recommendation": {
+                    "option_id": "option_b",
+                    "label": "Conservative Growth",
+                    "confidence": "medium",
+                    "expected_value": 50000.0
+                },
+                "probability_of_condition": 0.25,
+                "impact_magnitude": "high"
+            }
+        }
+    }
+
+
+class RobustnessSummary(BaseModel):
+    """Summary of recommendation robustness."""
+
+    recommendation_stability: str = Field(
+        ...,
+        description="Overall stability classification",
+        pattern="^(robust|moderate|fragile)$"
+    )
+    conditions_count: int = Field(
+        ...,
+        description="Number of conditions that could flip the recommendation",
+        ge=0
+    )
+    closest_flip_point: Optional[ConditionExpression] = Field(
+        default=None,
+        description="Nearest condition that would flip the recommendation"
+    )
+    safety_margin: Optional[float] = Field(
+        default=None,
+        description="Distance to nearest flip point (in parameter units)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "recommendation_stability": "moderate",
+                "conditions_count": 3,
+                "closest_flip_point": {
+                    "parameter": "market_size",
+                    "operator": "<",
+                    "value": 0.75
+                },
+                "safety_margin": 0.15
+            }
+        }
+    }
+
+
+class ConditionalRecommendResponse(BaseModel):
+    """Response model for conditional recommendation endpoint."""
+
+    schema_version: str = Field(
+        default="conditional_recommend.v1",
+        description="Schema version for this response"
+    )
+    primary_recommendation: PrimaryRecommendation = Field(
+        ...,
+        description="Primary (unconditional) recommendation"
+    )
+    conditional_recommendations: List[ConditionalRecommendation] = Field(
+        ...,
+        description="List of conditional recommendations"
+    )
+    robustness_summary: RobustnessSummary = Field(
+        ...,
+        description="Summary of recommendation robustness"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "conditional_recommend.v1",
+                "primary_recommendation": {
+                    "option_id": "option_a",
+                    "label": "Aggressive Expansion",
+                    "confidence": "high",
+                    "expected_value": 75000.0
+                },
+                "conditional_recommendations": [
+                    {
+                        "condition_id": "cond_001",
+                        "condition_type": "threshold",
+                        "condition_description": "If marketing ROI drops below 30%",
+                        "condition_expression": {
+                            "parameter": "marketing_roi",
+                            "operator": "<",
+                            "value": 0.3
+                        },
+                        "triggered_recommendation": {
+                            "option_id": "option_b",
+                            "label": "Conservative Growth",
+                            "confidence": "medium",
+                            "expected_value": 50000.0
+                        },
+                        "probability_of_condition": 0.25,
+                        "impact_magnitude": "high"
+                    }
+                ],
+                "robustness_summary": {
+                    "recommendation_stability": "moderate",
+                    "conditions_count": 3,
+                    "closest_flip_point": {
+                        "parameter": "market_size",
+                        "operator": "<",
+                        "value": 0.75
+                    },
+                    "safety_margin": 0.15
+                }
+            }
+        }
+    }
+
+
+# Sequential Decision Support Response Models
+
+
+class ConditionalAction(BaseModel):
+    """A conditional action in a decision rule."""
+
+    condition: str = Field(
+        ...,
+        description="Human-readable condition string"
+    )
+    action: str = Field(
+        ...,
+        description="Action to take if condition is met"
+    )
+    expected_value_if_taken: float = Field(
+        ...,
+        description="Expected value if this action is taken"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "condition": "If demand_signal > 0.7",
+                "action": "expand",
+                "expected_value_if_taken": 85000.0
+            }
+        }
+    }
+
+
+class DecisionRule(BaseModel):
+    """Conditional decision rule based on observed state."""
+
+    default_action: str = Field(
+        ...,
+        description="Default action if no conditions are met"
+    )
+    conditional_actions: List[ConditionalAction] = Field(
+        default_factory=list,
+        description="List of conditional actions"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "default_action": "wait",
+                "conditional_actions": [
+                    {
+                        "condition": "If market_favorable",
+                        "action": "expand",
+                        "expected_value_if_taken": 85000.0
+                    },
+                    {
+                        "condition": "If market_unfavorable",
+                        "action": "exit",
+                        "expected_value_if_taken": 10000.0
+                    }
+                ]
+            }
+        }
+    }
+
+
+class StagePolicy(BaseModel):
+    """Optimal decision policy for a single stage."""
+
+    stage_index: int = Field(..., description="Stage index", ge=0)
+    stage_label: str = Field(..., description="Human-readable stage label")
+    decision_rule: DecisionRule = Field(..., description="Decision rule for this stage")
+    contingent_on: List[str] = Field(
+        default_factory=list,
+        description="What must be observed before this stage"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "stage_index": 1,
+                "stage_label": "Pricing Decision",
+                "decision_rule": {
+                    "default_action": "standard_pricing",
+                    "conditional_actions": [
+                        {
+                            "condition": "If market_favorable",
+                            "action": "premium_pricing",
+                            "expected_value_if_taken": 100000.0
+                        }
+                    ]
+                },
+                "contingent_on": ["market_outcome"]
+            }
+        }
+    }
+
+
+class PolicyDistribution(BaseModel):
+    """Distribution of policy values."""
+
+    type: str = Field(..., description="Distribution type")
+    parameters: Dict[str, float] = Field(..., description="Distribution parameters")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "type": "normal",
+                "parameters": {"mean": 45000, "std": 15000}
+            }
+        }
+    }
+
+
+class Policy(BaseModel):
+    """Optimal policy across all stages."""
+
+    stages: List[StagePolicy] = Field(
+        ...,
+        description="Policy for each stage"
+    )
+    expected_total_value: float = Field(
+        ...,
+        description="Expected total value following this policy"
+    )
+    value_distribution: PolicyDistribution = Field(
+        ...,
+        description="Distribution of total value"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "stages": [
+                    {
+                        "stage_index": 0,
+                        "stage_label": "Investment",
+                        "decision_rule": {
+                            "default_action": "invest",
+                            "conditional_actions": []
+                        },
+                        "contingent_on": []
+                    }
+                ],
+                "expected_total_value": 45000.0,
+                "value_distribution": {
+                    "type": "normal",
+                    "parameters": {"mean": 45000, "std": 15000}
+                }
+            }
+        }
+    }
+
+
+class StageOption(BaseModel):
+    """Analysis of a single option at a stage."""
+
+    option_id: str = Field(..., description="Option identifier")
+    label: str = Field(..., description="Human-readable label")
+    immediate_value: float = Field(
+        ...,
+        description="Immediate payoff of choosing this option"
+    )
+    continuation_value: float = Field(
+        ...,
+        description="Expected value of future stages"
+    )
+    total_value: float = Field(
+        ...,
+        description="Total value (immediate + discounted continuation)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "invest",
+                "label": "Make Investment",
+                "immediate_value": -50000,
+                "continuation_value": 95000,
+                "total_value": 45000
+            }
+        }
+    }
+
+
+class StageAnalysis(BaseModel):
+    """Analysis for a single stage."""
+
+    stage_index: int = Field(..., description="Stage index", ge=0)
+    stage_label: str = Field(..., description="Human-readable stage label")
+    options_at_stage: List[StageOption] = Field(
+        ...,
+        description="Options available at this stage with analysis"
+    )
+    information_value: float = Field(
+        ...,
+        description="Value of information revealed at this stage"
+    )
+    optimal_waiting_value: Optional[float] = Field(
+        default=None,
+        description="Value of delaying decision (if applicable)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "stage_index": 0,
+                "stage_label": "Investment Decision",
+                "options_at_stage": [
+                    {
+                        "option_id": "invest",
+                        "label": "Make Investment",
+                        "immediate_value": -50000,
+                        "continuation_value": 95000,
+                        "total_value": 45000
+                    },
+                    {
+                        "option_id": "wait",
+                        "label": "Wait and See",
+                        "immediate_value": 0,
+                        "continuation_value": 20000,
+                        "total_value": 20000
+                    }
+                ],
+                "information_value": 15000.0,
+                "optimal_waiting_value": 20000.0
+            }
+        }
+    }
+
+
+class SequentialAnalysisResponse(BaseModel):
+    """Response model for sequential decision analysis."""
+
+    schema_version: str = Field(
+        default="sequential.v1",
+        description="Schema version for this response"
+    )
+    optimal_policy: Policy = Field(
+        ...,
+        description="Optimal policy across all stages"
+    )
+    stage_analyses: List[StageAnalysis] = Field(
+        ...,
+        description="Detailed analysis for each stage"
+    )
+    value_of_flexibility: float = Field(
+        ...,
+        description="Value of waiting vs committing now"
+    )
+    sensitivity_to_timing: str = Field(
+        ...,
+        description="How sensitive results are to timing",
+        pattern="^(high|medium|low)$"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "sequential.v1",
+                "optimal_policy": {
+                    "stages": [
+                        {
+                            "stage_index": 0,
+                            "stage_label": "Investment",
+                            "decision_rule": {
+                                "default_action": "invest",
+                                "conditional_actions": []
+                            },
+                            "contingent_on": []
+                        },
+                        {
+                            "stage_index": 1,
+                            "stage_label": "Pricing",
+                            "decision_rule": {
+                                "default_action": "standard",
+                                "conditional_actions": [
+                                    {
+                                        "condition": "If market_favorable",
+                                        "action": "premium",
+                                        "expected_value_if_taken": 100000
+                                    }
+                                ]
+                            },
+                            "contingent_on": ["market_outcome"]
+                        }
+                    ],
+                    "expected_total_value": 45000.0,
+                    "value_distribution": {
+                        "type": "normal",
+                        "parameters": {"mean": 45000, "std": 15000}
+                    }
+                },
+                "stage_analyses": [
+                    {
+                        "stage_index": 0,
+                        "stage_label": "Investment Decision",
+                        "options_at_stage": [
+                            {
+                                "option_id": "invest",
+                                "label": "Make Investment",
+                                "immediate_value": -50000,
+                                "continuation_value": 95000,
+                                "total_value": 45000
+                            }
+                        ],
+                        "information_value": 15000.0,
+                        "optimal_waiting_value": 20000.0
+                    }
+                ],
+                "value_of_flexibility": 25000.0,
+                "sensitivity_to_timing": "medium"
+            }
+        }
+    }
+
+
+class PolicyTreeNode(BaseModel):
+    """Node in a policy tree representation."""
+
+    node_id: str = Field(..., description="Node identifier")
+    stage: int = Field(..., description="Stage this node belongs to")
+    node_type: str = Field(
+        ...,
+        description="Type of node",
+        pattern="^(decision|chance|terminal)$"
+    )
+    label: str = Field(..., description="Human-readable label")
+    optimal_action: Optional[str] = Field(
+        default=None,
+        description="Optimal action at this node (for decision nodes)"
+    )
+    expected_value: float = Field(..., description="Expected value at this node")
+    children: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Child nodes with transition info"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "node_id": "root",
+                "stage": 0,
+                "node_type": "decision",
+                "label": "Investment Decision",
+                "optimal_action": "invest",
+                "expected_value": 45000,
+                "children": [
+                    {
+                        "action": "invest",
+                        "child_id": "market_node",
+                        "probability": 1.0
+                    }
+                ]
+            }
+        }
+    }
+
+
+class PolicyTreeResponse(BaseModel):
+    """Response model for policy tree endpoint."""
+
+    schema_version: str = Field(
+        default="policy_tree.v1",
+        description="Schema version"
+    )
+    root: PolicyTreeNode = Field(
+        ...,
+        description="Root node of the policy tree"
+    )
+    total_stages: int = Field(..., description="Total number of stages")
+    total_nodes: int = Field(..., description="Total number of nodes in tree")
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "policy_tree.v1",
+                "root": {
+                    "node_id": "root",
+                    "stage": 0,
+                    "node_type": "decision",
+                    "label": "Investment Decision",
+                    "optimal_action": "invest",
+                    "expected_value": 45000,
+                    "children": []
+                },
+                "total_stages": 3,
+                "total_nodes": 7
+            }
+        }
+    }
+
+
+class StageSensitivityResult(BaseModel):
+    """Sensitivity analysis result for a single stage."""
+
+    stage_index: int = Field(..., description="Stage index")
+    stage_label: str = Field(..., description="Stage label")
+    parameter_sensitivities: Dict[str, float] = Field(
+        ...,
+        description="Mapping of parameter names to sensitivity scores"
+    )
+    policy_changes_at: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Parameter values where optimal policy changes"
+    )
+    robustness_score: float = Field(
+        ...,
+        description="Stage robustness score (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "stage_index": 0,
+                "stage_label": "Investment Decision",
+                "parameter_sensitivities": {
+                    "market_probability": 0.85,
+                    "investment_cost": 0.45
+                },
+                "policy_changes_at": {
+                    "market_probability": 0.35
+                },
+                "robustness_score": 0.72
+            }
+        }
+    }
+
+
+class StageSensitivityResponse(BaseModel):
+    """Response model for stage sensitivity analysis."""
+
+    schema_version: str = Field(
+        default="stage_sensitivity.v1",
+        description="Schema version"
+    )
+    stage_results: List[StageSensitivityResult] = Field(
+        ...,
+        description="Sensitivity results for each stage"
+    )
+    overall_robustness: float = Field(
+        ...,
+        description="Overall policy robustness score",
+        ge=0.0,
+        le=1.0
+    )
+    most_sensitive_parameters: List[str] = Field(
+        ...,
+        description="Parameters with highest sensitivity"
+    )
+    explanation: ExplanationMetadata = Field(
+        ...,
+        description="Plain English explanation"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional[ResponseMetadata] = Field(
+        default=None,
+        description="Metadata for determinism verification",
+        alias="_metadata"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "stage_sensitivity.v1",
+                "stage_results": [
+                    {
+                        "stage_index": 0,
+                        "stage_label": "Investment Decision",
+                        "parameter_sensitivities": {
+                            "market_probability": 0.85,
+                            "investment_cost": 0.45
+                        },
+                        "policy_changes_at": {
+                            "market_probability": 0.35
+                        },
+                        "robustness_score": 0.72
+                    }
+                ],
+                "overall_robustness": 0.68,
+                "most_sensitive_parameters": ["market_probability", "payoff_high"],
+                "explanation": {
+                    "summary": "Policy is moderately robust to parameter changes",
+                    "reasoning": "Market probability has high sensitivity - small changes could flip optimal decision",
+                    "technical_basis": "One-at-a-time sensitivity analysis with policy tracking",
+                    "assumptions": ["Parameters vary independently"]
+                }
+            }
+        }
+    }
