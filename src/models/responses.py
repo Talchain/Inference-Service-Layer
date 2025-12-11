@@ -4338,3 +4338,341 @@ class CoherenceAnalysisResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Utility Function Validation Response Models
+# ============================================================================
+
+
+class NormalisedGoal(BaseModel):
+    """Normalised goal specification after validation."""
+
+    goal_id: str = Field(
+        ...,
+        description="Goal identifier"
+    )
+    label: str = Field(
+        ...,
+        description="Goal label"
+    )
+    direction: str = Field(
+        ...,
+        description="Optimization direction"
+    )
+    normalised_weight: float = Field(
+        ...,
+        description="Weight after normalization (sums to 1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    original_weight: Optional[float] = Field(
+        None,
+        description="Original weight before normalization"
+    )
+    priority: Optional[int] = Field(
+        None,
+        description="Priority for lexicographic ordering"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "goal_id": "revenue",
+                "label": "Maximize Revenue",
+                "direction": "maximize",
+                "normalised_weight": 0.6,
+                "original_weight": 0.6,
+                "priority": 1
+            }
+        }
+    }
+
+
+class UtilityValidationWarning(BaseModel):
+    """Warning from utility validation."""
+
+    code: str = Field(
+        ...,
+        description="Warning code"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message"
+    )
+    affected_goals: Optional[List[str]] = Field(
+        None,
+        description="List of goal IDs affected"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "WEIGHTS_NORMALIZED",
+                "message": "Weights normalized from sum=1.5 to sum=1.0",
+                "affected_goals": ["revenue", "cost", "quality"]
+            }
+        }
+    }
+
+
+class UtilityValidationResponse(BaseModel):
+    """Response model for utility function validation endpoint."""
+
+    schema_version: str = Field(
+        default="utility.v1",
+        description="Schema version"
+    )
+    valid: bool = Field(
+        ...,
+        description="Whether the utility specification is valid"
+    )
+    normalised_weights: Dict[str, float] = Field(
+        ...,
+        description="Normalized weights by goal ID (sum to 1.0)"
+    )
+    normalised_goals: List[NormalisedGoal] = Field(
+        ...,
+        description="Full normalised goal specifications"
+    )
+    aggregation_method: str = Field(
+        ...,
+        description="Aggregation method to be used"
+    )
+    risk_tolerance: str = Field(
+        ...,
+        description="Risk tolerance setting"
+    )
+    default_behaviour_applied: List[str] = Field(
+        default_factory=list,
+        description="List of default behaviours that were applied"
+    )
+    warnings: List[UtilityValidationWarning] = Field(
+        default_factory=list,
+        description="Validation warnings"
+    )
+    errors: List[str] = Field(
+        default_factory=list,
+        description="Validation errors (if valid=false)"
+    )
+
+    # Metadata for tracing
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "utility.v1",
+                "valid": True,
+                "normalised_weights": {
+                    "revenue": 0.6,
+                    "cost": 0.4
+                },
+                "normalised_goals": [
+                    {
+                        "goal_id": "revenue",
+                        "label": "Revenue",
+                        "direction": "maximize",
+                        "normalised_weight": 0.6
+                    }
+                ],
+                "aggregation_method": "weighted_sum",
+                "risk_tolerance": "risk_neutral",
+                "default_behaviour_applied": [],
+                "warnings": []
+            }
+        }
+    }
+
+
+# ============================================================================
+# Factor Correlation Groups Response Models
+# ============================================================================
+
+
+class ValidatedCorrelationGroup(BaseModel):
+    """Validated correlation group with additional metadata."""
+
+    group_id: str = Field(
+        ...,
+        description="Group identifier"
+    )
+    factors: List[str] = Field(
+        ...,
+        description="Factor IDs in the group"
+    )
+    correlation: float = Field(
+        ...,
+        description="Correlation coefficient"
+    )
+    is_valid: bool = Field(
+        ...,
+        description="Whether this group specification is valid"
+    )
+    issues: List[str] = Field(
+        default_factory=list,
+        description="Issues with this group"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "group_id": "market_conditions",
+                "factors": ["demand", "competition"],
+                "correlation": 0.7,
+                "is_valid": True,
+                "issues": []
+            }
+        }
+    }
+
+
+class CorrelationMatrixAnalysis(BaseModel):
+    """Analysis of the correlation matrix."""
+
+    is_positive_semi_definite: bool = Field(
+        ...,
+        description="Whether matrix is positive semi-definite (valid for sampling)"
+    )
+    min_eigenvalue: Optional[float] = Field(
+        None,
+        description="Minimum eigenvalue (negative indicates not PSD)"
+    )
+    condition_number: Optional[float] = Field(
+        None,
+        description="Condition number (high values indicate near-singularity)"
+    )
+    suggested_regularization: Optional[float] = Field(
+        None,
+        description="Suggested regularization if matrix is not PSD"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "is_positive_semi_definite": True,
+                "min_eigenvalue": 0.15,
+                "condition_number": 3.2,
+                "suggested_regularization": None
+            }
+        }
+    }
+
+
+class ImpliedCorrelationMatrix(BaseModel):
+    """The implied correlation matrix from groups."""
+
+    factors: List[str] = Field(
+        ...,
+        description="Factor IDs in matrix order"
+    )
+    matrix: List[List[float]] = Field(
+        ...,
+        description="Correlation matrix values"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "factors": ["demand", "competition"],
+                "matrix": [[1.0, 0.7], [0.7, 1.0]]
+            }
+        }
+    }
+
+
+class CorrelationValidationWarning(BaseModel):
+    """Warning from correlation validation."""
+
+    code: str = Field(
+        ...,
+        description="Warning code"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message"
+    )
+    affected_groups: Optional[List[str]] = Field(
+        None,
+        description="Group IDs affected by this warning"
+    )
+    affected_factors: Optional[List[str]] = Field(
+        None,
+        description="Factor IDs affected by this warning"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "HIGH_CORRELATION",
+                "message": "Correlation of 0.95 between demand and sales may indicate redundancy",
+                "affected_factors": ["demand", "sales"]
+            }
+        }
+    }
+
+
+class CorrelationValidationResponse(BaseModel):
+    """Response model for correlation validation endpoint."""
+
+    schema_version: str = Field(
+        default="correlation.v1",
+        description="Schema version"
+    )
+    valid: bool = Field(
+        ...,
+        description="Whether the correlation specification is valid for sampling"
+    )
+    validated_groups: List[ValidatedCorrelationGroup] = Field(
+        default_factory=list,
+        description="Validation results for each correlation group"
+    )
+    implied_matrix: Optional[ImpliedCorrelationMatrix] = Field(
+        None,
+        description="The implied correlation matrix from groups"
+    )
+    matrix_analysis: Optional[CorrelationMatrixAnalysis] = Field(
+        None,
+        description="Analysis of the correlation matrix properties"
+    )
+    warnings: List[CorrelationValidationWarning] = Field(
+        default_factory=list,
+        description="Validation warnings"
+    )
+    errors: List[str] = Field(
+        default_factory=list,
+        description="Validation errors (if valid=false)"
+    )
+
+    # Metadata for tracing
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "correlation.v1",
+                "valid": True,
+                "validated_groups": [
+                    {
+                        "group_id": "market_conditions",
+                        "factors": ["demand", "competition"],
+                        "correlation": 0.7,
+                        "is_valid": True,
+                        "issues": []
+                    }
+                ],
+                "matrix_analysis": {
+                    "is_positive_semi_definite": True,
+                    "min_eigenvalue": 0.3,
+                    "condition_number": 2.5
+                },
+                "warnings": []
+            }
+        }
+    }

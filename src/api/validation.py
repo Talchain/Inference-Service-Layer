@@ -5,6 +5,7 @@ Provides comprehensive validation for causal models including:
 - Model structure validation
 - Constraint feasibility checking
 - Coherence analysis for inference results
+- Correlation group validation
 """
 
 import logging
@@ -19,10 +20,19 @@ from src.models.phase1_models import (
     AdvancedValidationRequest,
     AdvancedValidationResponse,
 )
-from src.models.requests import CoherenceAnalysisRequest, FeasibilityRequest
-from src.models.responses import CoherenceAnalysisResponse, FeasibilityResponse
+from src.models.requests import (
+    CoherenceAnalysisRequest,
+    CorrelationValidationRequest,
+    FeasibilityRequest,
+)
+from src.models.responses import (
+    CoherenceAnalysisResponse,
+    CorrelationValidationResponse,
+    FeasibilityResponse,
+)
 from src.services.advanced_validator import AdvancedModelValidator
 from src.services.coherence_analyzer import CoherenceAnalyzer
+from src.services.correlation_validator import CorrelationValidator
 from src.services.feasibility_checker import FeasibilityChecker
 
 router = APIRouter()
@@ -32,6 +42,7 @@ logger = logging.getLogger(__name__)
 advanced_validator = AdvancedModelValidator()
 feasibility_checker = FeasibilityChecker()
 coherence_analyzer = CoherenceAnalyzer()
+correlation_validator = CorrelationValidator()
 
 
 @router.post(
@@ -406,4 +417,137 @@ async def analyze_coherence(
         raise HTTPException(
             status_code=500,
             detail="Failed to analyze coherence. Check logs for details.",
+        )
+
+
+@router.post(
+    "/correlations",
+    response_model=CorrelationValidationResponse,
+    summary="Validate factor correlation specifications",
+    description="""
+    Validates correlation group specifications for factor sampling.
+
+    **Input Methods:**
+    1. **Correlation Groups**: List of groups with pairwise correlations
+    2. **Correlation Matrix**: Full n×n correlation matrix
+
+    **Correlation Group Schema:**
+    ```json
+    {
+      "group_id": "market_conditions",
+      "factors": ["demand", "competition"],
+      "correlation": 0.7,
+      "label": "Market factors tend to move together"
+    }
+    ```
+
+    **Validation Checks:**
+    - Correlation values in range [-1, 1]
+    - Matrix is positive semi-definite (required for sampling)
+    - Factor references exist in graph (if provided)
+    - No conflicting correlations between groups
+    - High correlation warnings (potential redundancy)
+
+    **Matrix Analysis:**
+    - `is_positive_semi_definite`: Can matrix be used for sampling?
+    - `min_eigenvalue`: Smallest eigenvalue (negative = not PSD)
+    - `condition_number`: Numerical stability indicator
+    - `suggested_regularization`: Fix for non-PSD matrices
+
+    **Returns:**
+    - `valid`: Whether specification is valid for sampling
+    - `validated_groups`: Per-group validation results
+    - `implied_matrix`: The full correlation matrix implied by groups
+    - `matrix_analysis`: Eigenvalue and PSD analysis
+    - `warnings`: Non-fatal issues (high correlations, etc.)
+    - `errors`: Fatal issues (not PSD, conflicting correlations)
+
+    **Use when:**
+    - Setting up correlated factor sampling for Monte Carlo
+    - Validating correlation assumptions from domain knowledge
+    - PLoT consuming correlation groups for scenario generation
+    """,
+    responses={
+        200: {"description": "Validation completed (check 'valid' field for result)"},
+        400: {"description": "Invalid request format"},
+        422: {"description": "Must provide correlation_groups or correlation_matrix"},
+        500: {"description": "Internal validation error"},
+    },
+)
+async def validate_correlations(
+    request: CorrelationValidationRequest,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> CorrelationValidationResponse:
+    """
+    Validate factor correlation specifications.
+
+    Args:
+        request: Correlation validation request
+        x_request_id: Optional request ID for tracing
+
+    Returns:
+        CorrelationValidationResponse: Validation results
+    """
+    # Generate request ID if not provided
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        logger.info(
+            "correlation_validation_request",
+            extra={
+                "request_id": request_id,
+                "num_groups": len(request.correlation_groups) if request.correlation_groups else 0,
+                "has_matrix": request.correlation_matrix is not None,
+                "has_graph": request.graph is not None,
+                "check_psd": request.check_positive_definite,
+            },
+        )
+
+        # Perform validation
+        result = correlation_validator.validate(request)
+
+        logger.info(
+            "correlation_validation_completed",
+            extra={
+                "request_id": request_id,
+                "valid": result.valid,
+                "num_groups_validated": len(result.validated_groups),
+                "is_psd": result.matrix_analysis.is_positive_semi_definite if result.matrix_analysis else None,
+                "num_warnings": len(result.warnings),
+                "num_errors": len(result.errors),
+            },
+        )
+
+        # Add metadata
+        result.metadata = create_isl_metadata(
+            request_id=request_id,
+            computation_time_ms=0.0,
+            algorithm="correlation_validation",
+        )
+
+        return result
+
+    except ValueError as e:
+        # Handle validation errors (like missing input)
+        logger.warning(
+            "correlation_validation_error",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=str(e),
+        )
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error(
+            "correlation_validation_error",
+            extra={"request_id": request_id, "error": str(e)},
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to validate correlations. Check logs for details.",
         )
