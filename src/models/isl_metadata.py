@@ -99,3 +99,29 @@ class MetadataBuilder:
             algorithm=algorithm,
             cache_hit=cache_hit
         )
+
+
+def create_isl_metadata(
+    request_id: str,
+    computation_time_ms: float,
+    algorithm: Optional[str] = None,
+    cache_hit: bool = False
+) -> ISLResponseMetadata:
+    """
+    Create an ISL response metadata object.
+
+    Args:
+        request_id: Request identifier for tracing
+        computation_time_ms: Computation time in milliseconds
+        algorithm: Algorithm used for computation
+        cache_hit: Whether result was cached
+
+    Returns:
+        ISLResponseMetadata object
+    """
+    return ISLResponseMetadata(
+        request_id=request_id,
+        computation_time_ms=computation_time_ms,
+        algorithm=algorithm,
+        cache_hit=cache_hit
+    )

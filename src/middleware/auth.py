@@ -71,12 +71,8 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 "API key authentication enabled",
                 extra={"num_keys": len(self._api_keys)},
             )
-        else:
-            # No keys configured and auth not explicitly disabled
-            logger.warning(
-                "API key authentication DISABLED - no ISL_API_KEYS configured. "
-                "Set ISL_API_KEYS or ISL_AUTH_DISABLED=true to suppress this warning."
-            )
+        # Note: The case of "no keys + auth not disabled" is now handled at startup
+        # in main.py with a RuntimeError, so middleware init only sees valid states.
 
     def _load_api_keys(self, api_keys: Optional[str]) -> Set[str]:
         """

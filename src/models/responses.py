@@ -3712,3 +3712,248 @@ class StageSensitivityResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Continuous Optimization Endpoint - Response Models
+# ============================================================================
+
+
+class OptimalPoint(BaseModel):
+    """Optimal point found by optimization."""
+
+    variable_values: Dict[str, float] = Field(
+        ...,
+        description="Optimal values for each decision variable"
+    )
+    objective_value: float = Field(
+        ...,
+        description="Objective function value at optimal point"
+    )
+    confidence_interval: ConfidenceInterval = Field(
+        ...,
+        description="Confidence interval for the objective value"
+    )
+    is_boundary: bool = Field(
+        ...,
+        description="True if optimal point is on variable bounds"
+    )
+    boundary_variables: Optional[List[str]] = Field(
+        default=None,
+        description="Variables at their bounds (if is_boundary=True)"
+    )
+    feasible: bool = Field(
+        default=True,
+        description="True if point satisfies all constraints"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable_values": {"price": 65.0, "quantity": 500.0},
+                "objective_value": 22500.0,
+                "confidence_interval": {
+                    "lower": 21000.0,
+                    "upper": 24000.0,
+                    "confidence_level": 0.95
+                },
+                "is_boundary": True,
+                "boundary_variables": ["quantity"],
+                "feasible": True
+            }
+        }
+    }
+
+
+class OptimisationSensitivity(BaseModel):
+    """Sensitivity analysis at the optimal point."""
+
+    range_within_5pct: Dict[str, List[float]] = Field(
+        ...,
+        description="Variable ranges where objective stays within 5% of optimum [min, max]"
+    )
+    gradient_at_optimum: Dict[str, float] = Field(
+        ...,
+        description="Partial derivatives (sensitivity coefficients) at optimum"
+    )
+    robustness: str = Field(
+        ...,
+        description="Overall robustness assessment",
+        pattern="^(robust|moderate|fragile)$"
+    )
+    robustness_score: float = Field(
+        ...,
+        description="Numerical robustness score (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+    critical_variables: List[str] = Field(
+        default_factory=list,
+        description="Variables with highest sensitivity"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "range_within_5pct": {
+                    "price": [60.0, 70.0],
+                    "quantity": [450.0, 500.0]
+                },
+                "gradient_at_optimum": {
+                    "price": 85.5,
+                    "quantity": -4.2
+                },
+                "robustness": "moderate",
+                "robustness_score": 0.65,
+                "critical_variables": ["quantity"]
+            }
+        }
+    }
+
+
+class OptimisationWarning(BaseModel):
+    """Warning about optimization result."""
+
+    code: str = Field(
+        ...,
+        description="Warning code",
+        pattern="^(NO_FEASIBLE_SOLUTION|FLAT_OBJECTIVE|BOUNDARY_OPTIMUM|NON_CONVEX|MULTIPLE_OPTIMA|CONSTRAINT_ACTIVE)$"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message",
+        max_length=500
+    )
+    affected_variables: Optional[List[str]] = Field(
+        default=None,
+        description="Variables affected by this warning"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "BOUNDARY_OPTIMUM",
+                "message": "Optimal point is at constraint boundary for 'quantity'. Consider relaxing constraints.",
+                "affected_variables": ["quantity"]
+            }
+        }
+    }
+
+
+class GridSearchMetrics(BaseModel):
+    """Metrics from grid search optimization."""
+
+    grid_points_evaluated: int = Field(
+        ...,
+        description="Number of grid points evaluated",
+        ge=0
+    )
+    feasible_points: int = Field(
+        ...,
+        description="Number of points satisfying all constraints",
+        ge=0
+    )
+    computation_time_ms: float = Field(
+        ...,
+        description="Computation time in milliseconds",
+        ge=0
+    )
+    convergence_achieved: bool = Field(
+        ...,
+        description="True if optimization converged"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "grid_points_evaluated": 400,
+                "feasible_points": 350,
+                "computation_time_ms": 125.5,
+                "convergence_achieved": True
+            }
+        }
+    }
+
+
+class OptimisationResponse(BaseModel):
+    """Response model for continuous optimization endpoint."""
+
+    schema_version: str = Field(
+        default="optimise.v1",
+        description="Schema version for this response"
+    )
+    optimal_point: Optional[OptimalPoint] = Field(
+        default=None,
+        description="Optimal point (None if no feasible solution)"
+    )
+    sensitivity: Optional[OptimisationSensitivity] = Field(
+        default=None,
+        description="Sensitivity analysis at optimal point"
+    )
+    grid_metrics: GridSearchMetrics = Field(
+        ...,
+        description="Metrics from grid search"
+    )
+    warnings: List[OptimisationWarning] = Field(
+        default_factory=list,
+        description="Warnings about the optimization result"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "optimise.v1",
+                "optimal_point": {
+                    "variable_values": {"price": 65.0, "quantity": 500.0},
+                    "objective_value": 22500.0,
+                    "confidence_interval": {
+                        "lower": 21000.0,
+                        "upper": 24000.0,
+                        "confidence_level": 0.95
+                    },
+                    "is_boundary": True,
+                    "boundary_variables": ["quantity"],
+                    "feasible": True
+                },
+                "sensitivity": {
+                    "range_within_5pct": {
+                        "price": [60.0, 70.0],
+                        "quantity": [450.0, 500.0]
+                    },
+                    "gradient_at_optimum": {
+                        "price": 85.5,
+                        "quantity": -4.2
+                    },
+                    "robustness": "moderate",
+                    "robustness_score": 0.65,
+                    "critical_variables": ["quantity"]
+                },
+                "grid_metrics": {
+                    "grid_points_evaluated": 400,
+                    "feasible_points": 350,
+                    "computation_time_ms": 125.5,
+                    "convergence_achieved": True
+                },
+                "warnings": [
+                    {
+                        "code": "BOUNDARY_OPTIMUM",
+                        "message": "Optimal point is at constraint boundary for 'quantity'.",
+                        "affected_variables": ["quantity"]
+                    }
+                ],
+                "metadata": {
+                    "request_id": "opt_req_001",
+                    "computation_time_ms": 125.5,
+                    "isl_version": "2.0",
+                    "algorithm": "grid_search",
+                    "cache_hit": False
+                }
+            }
+        }
+    }

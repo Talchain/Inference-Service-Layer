@@ -103,23 +103,25 @@ SENTRY_DSN=https://...@sentry.io # Sentry DSN
 
 ### Authentication
 
-API authentication is **enabled by default** when `ISL_API_KEYS` is configured.
+API authentication is **required by default**. The service will fail to start without valid configuration.
 
-| Environment | Configuration |
-|-------------|---------------|
-| **Production** | Set `ISL_API_KEYS` (required) |
-| **Staging** | Set `ISL_API_KEYS` (recommended) |
-| **Local Dev** | Set `ISL_AUTH_DISABLED=true` to bypass auth |
+| Configuration | Behavior |
+|---------------|----------|
+| `ISL_API_KEYS=key1,key2` | Auth enabled with specified keys |
+| `ISL_AUTH_DISABLED=true` | Auth disabled (local dev only) |
+| Neither set | **Startup fails** with RuntimeError |
 
-**Public endpoints** (no auth required): `/health`, `/metrics`, `/docs`, `/openapi.json`
+**Public endpoints** (no auth required): `/health`, `/metrics`, `/docs`, `/openapi.json`, `/redoc`
 
 ```bash
-# Local development - bypass auth
-ISL_AUTH_DISABLED=true
-
 # Production - keys required
 ISL_API_KEYS=prod_key_1,prod_key_2
+
+# Local development - explicitly disable auth
+ISL_AUTH_DISABLED=true
 ```
+
+> ⚠️ **Security:** Never set `ISL_AUTH_DISABLED=true` in production.
 
 ---
 
@@ -152,6 +154,79 @@ pytest tests/unit/ -v          # Unit tests only
 ```
 
 **Coverage:** 215+ tests, 90%+
+
+---
+
+## Observability
+
+### Request Tracing
+
+Every request is assigned a unique request ID for debugging and correlation.
+
+#### Request ID Format
+```
+req_{uuid16}
+Example: req_a1b2c3d4e5f6g7h8
+```
+
+#### Headers
+
+| Header | Direction | Purpose |
+|--------|-----------|---------|
+| `X-Request-Id` | Request/Response | Primary request identifier |
+| `X-Trace-Id` | Request/Response | Legacy (mapped to X-Request-Id, deprecated) |
+| `X-User-Id` | Request | Optional user context |
+| `X-RateLimit-Limit` | Response | Rate limit ceiling |
+| `X-RateLimit-Remaining` | Response | Remaining requests in window |
+
+#### Providing a Request ID
+
+Clients can optionally provide their own request ID:
+```bash
+curl -X POST https://isl.example.com/api/v1/causal/validate \
+  -H "X-Request-Id: req_mycustomid12345" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"dag": {...}}'
+```
+
+If not provided, ISL generates one automatically.
+
+#### Correlation with Sentry
+
+When Sentry is enabled, the request ID is attached to all error events:
+```
+request_id: req_a1b2c3d4e5f6g7h8
+```
+
+This allows correlating user-reported errors with server-side logs.
+
+### Logging
+
+ISL uses structured JSON logging. Each log entry includes:
+```json
+{
+  "timestamp": "2024-12-11T10:30:00Z",
+  "level": "INFO",
+  "request_id": "req_a1b2c3d4e5f6g7h8",
+  "message": "Request completed",
+  "duration_ms": 45,
+  "status_code": 200
+}
+```
+
+### Metrics
+
+Prometheus metrics are exposed at `/metrics`:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `http_requests_total` | Counter | Total requests by method, endpoint, status |
+| `http_request_duration_seconds` | Histogram | Request duration by method, endpoint |
+| `isl_rate_limit_hits_total` | Counter | Rate limit rejections |
+| `isl_rate_limit_checks_total` | Counter | All rate limit checks |
+
+For detailed observability documentation, see **[docs/observability.md](docs/observability.md)**.
 
 ---
 

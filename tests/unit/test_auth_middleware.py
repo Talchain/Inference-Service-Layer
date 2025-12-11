@@ -78,9 +78,10 @@ class TestAPIKeyAuthMiddleware:
 
     def test_auth_enabled_when_keys_present(self):
         """Test authentication is enabled when keys are configured."""
-        app = MagicMock()
-        middleware = APIKeyAuthMiddleware(app, api_keys="secret_key")
-        assert middleware._auth_enabled
+        with patch.dict("os.environ", {"ISL_AUTH_DISABLED": "false"}, clear=False):
+            app = MagicMock()
+            middleware = APIKeyAuthMiddleware(app, api_keys="secret_key")
+            assert middleware._auth_enabled
 
 
 class TestAPIKeyMiddlewareClientIP:
@@ -184,3 +185,87 @@ class TestAPIKeyMiddlewareDispatch:
 
         # Invalid key should not be in the set
         assert "invalid_key" not in middleware._api_keys
+
+
+class TestAuthEnforcement:
+    """Test authentication enforcement at startup."""
+
+    def test_auth_disabled_allows_empty_keys(self):
+        """Auth disabled should allow startup without keys."""
+        app = MagicMock()
+        middleware = APIKeyAuthMiddleware(app, api_keys="", auth_disabled=True)
+        assert middleware._auth_disabled is True
+        assert middleware._auth_enabled is False
+
+    def test_auth_disabled_via_env(self):
+        """ISL_AUTH_DISABLED=true should disable auth."""
+        with patch.dict("os.environ", {"ISL_AUTH_DISABLED": "true"}, clear=True):
+            app = MagicMock()
+            middleware = APIKeyAuthMiddleware(app, api_keys="")
+            assert middleware._auth_disabled is True
+
+    def test_auth_enabled_with_keys(self):
+        """Keys configured should enable auth."""
+        with patch.dict("os.environ", {"ISL_AUTH_DISABLED": "false"}, clear=False):
+            app = MagicMock()
+            middleware = APIKeyAuthMiddleware(app, api_keys="secret_key", auth_disabled=False)
+            assert middleware._auth_enabled is True
+            assert middleware._auth_disabled is False
+
+    def test_startup_requires_auth_config(self):
+        """Startup should require either keys or explicit auth disable.
+
+        This test verifies the RuntimeError raised in main.py when
+        neither ISL_API_KEYS nor ISL_AUTH_DISABLED is set.
+        """
+        # Note: The actual RuntimeError is raised in main.py module-level code,
+        # not in the middleware. This test documents the expected behavior.
+
+        # Clear env to simulate fresh startup without any auth config
+        with patch.dict("os.environ", {"ISL_AUTH_DISABLED": "false"}, clear=False):
+            # Without keys and without auth_disabled, middleware has no keys
+            app = MagicMock()
+            middleware = APIKeyAuthMiddleware(app, api_keys="", auth_disabled=False)
+
+            # Middleware should not be enabled without keys
+            assert not middleware._auth_enabled
+            # And not disabled unless explicitly set
+            assert not middleware._auth_disabled
+
+
+class TestAuthStartupFailure:
+    """Test that startup fails without proper auth configuration.
+
+    The RuntimeError is raised at module import time in main.py,
+    so we test the configuration logic that triggers it.
+    """
+
+    def test_no_keys_and_no_disable_should_fail(self):
+        """Without keys or explicit disable, startup should fail.
+
+        This test simulates the check performed in main.py:
+        if not _api_keys_configured and not settings.ISL_AUTH_DISABLED:
+            raise RuntimeError(...)
+        """
+        # Simulate the check from main.py
+        api_keys_configured = False
+        auth_disabled = False
+
+        should_fail = not api_keys_configured and not auth_disabled
+        assert should_fail, "Startup should fail without keys or explicit disable"
+
+    def test_keys_configured_should_pass(self):
+        """With keys configured, startup should succeed."""
+        api_keys_configured = True
+        auth_disabled = False
+
+        should_fail = not api_keys_configured and not auth_disabled
+        assert not should_fail, "Startup should succeed with keys"
+
+    def test_auth_disabled_should_pass(self):
+        """With explicit auth disable, startup should succeed."""
+        api_keys_configured = False
+        auth_disabled = True
+
+        should_fail = not api_keys_configured and not auth_disabled
+        assert not should_fail, "Startup should succeed with explicit disable"

@@ -292,6 +292,7 @@ class NodeKind(str, Enum):
     OUTCOME = "outcome"
     RISK = "risk"
     ACTION = "action"
+    FACTOR = "factor"  # External variable/uncertainty (chance node) - not controllable
 
 
 class GraphNodeV1(BaseModel):
