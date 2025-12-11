@@ -233,8 +233,16 @@ app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 app.add_middleware(TracingMiddleware)
 
 # API Key Authentication (validates X-API-Key header)
-# SECURITY: Authentication is enabled by default. Explicit opt-out via ISL_AUTH_DISABLED=true.
+# SECURITY: Authentication is REQUIRED by default. Explicit opt-out via ISL_AUTH_DISABLED=true.
 # Supports both ISL_API_KEYS (preferred) and ISL_API_KEY (legacy) for backward compatibility
+_api_keys_configured = bool(settings.ISL_API_KEYS or settings.ISL_API_KEY)
+
+if not _api_keys_configured and not settings.ISL_AUTH_DISABLED:
+    raise RuntimeError(
+        "ISL_API_KEYS environment variable required. "
+        "Provide comma-separated API keys, or set ISL_AUTH_DISABLED=true for local development only."
+    )
+
 app.add_middleware(
     APIKeyAuthMiddleware,
     api_keys=settings.ISL_API_KEYS or settings.ISL_API_KEY,
@@ -514,6 +522,19 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         },
         exc_info=True,
     )
+
+    # Capture to Sentry with enriched context
+    if settings.SENTRY_ENABLED:
+        try:
+            import sentry_sdk
+            with sentry_sdk.push_scope() as scope:
+                scope.set_tag("request_id", request_id)
+                scope.set_extra("path", request.url.path)
+                scope.set_extra("method", request.method)
+                scope.set_extra("query_params", str(request.query_params))
+                sentry_sdk.capture_exception(exc)
+        except ImportError:
+            pass  # Sentry not installed
 
     # Determine error code based on exception type
     exc_type_name = type(exc).__name__

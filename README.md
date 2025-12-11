@@ -103,23 +103,25 @@ SENTRY_DSN=https://...@sentry.io # Sentry DSN
 
 ### Authentication
 
-API authentication is **enabled by default** when `ISL_API_KEYS` is configured.
+API authentication is **required by default**. The service will fail to start without valid configuration.
 
-| Environment | Configuration |
-|-------------|---------------|
-| **Production** | Set `ISL_API_KEYS` (required) |
-| **Staging** | Set `ISL_API_KEYS` (recommended) |
-| **Local Dev** | Set `ISL_AUTH_DISABLED=true` to bypass auth |
+| Configuration | Behavior |
+|---------------|----------|
+| `ISL_API_KEYS=key1,key2` | Auth enabled with specified keys |
+| `ISL_AUTH_DISABLED=true` | Auth disabled (local dev only) |
+| Neither set | **Startup fails** with RuntimeError |
 
-**Public endpoints** (no auth required): `/health`, `/metrics`, `/docs`, `/openapi.json`
+**Public endpoints** (no auth required): `/health`, `/metrics`, `/docs`, `/openapi.json`, `/redoc`
 
 ```bash
-# Local development - bypass auth
-ISL_AUTH_DISABLED=true
-
 # Production - keys required
 ISL_API_KEYS=prod_key_1,prod_key_2
+
+# Local development - explicitly disable auth
+ISL_AUTH_DISABLED=true
 ```
+
+> ⚠️ **Security:** Never set `ISL_AUTH_DISABLED=true` in production.
 
 ---
 
