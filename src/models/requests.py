@@ -2,7 +2,8 @@
 Request Pydantic models for API endpoints.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -2655,6 +2656,294 @@ class OptimisationRequest(BaseModel):
                 ],
                 "grid_points": 20,
                 "confidence_level": 0.95
+            }
+        }
+    }
+
+
+# ============================================================================
+# Constraint Validation & Feasibility Check - Request Models
+# ============================================================================
+
+
+class ConstraintType(str, Enum):
+    """Types of constraints supported."""
+
+    THRESHOLD = "threshold"  # Value must be above/below threshold
+    BUDGET = "budget"  # Resource allocation constraint
+    CAPACITY = "capacity"  # Maximum capacity constraint
+    DEPENDENCY = "dependency"  # One option depends on another
+    EXCLUSION = "exclusion"  # Mutually exclusive options
+    REQUIREMENT = "requirement"  # Required condition
+
+
+class ConstraintRelation(str, Enum):
+    """Constraint relation operators."""
+
+    LE = "le"  # <=
+    GE = "ge"  # >=
+    EQ = "eq"  # =
+    LT = "lt"  # <
+    GT = "gt"  # >
+
+
+class ConstraintNode(BaseModel):
+    """A constraint node in the decision graph."""
+
+    id: str = Field(
+        ...,
+        description="Unique constraint identifier",
+        min_length=1,
+        max_length=100
+    )
+    constraint_type: ConstraintType = Field(
+        ...,
+        description="Type of constraint"
+    )
+    target_variable: str = Field(
+        ...,
+        description="Variable this constraint applies to",
+        min_length=1,
+        max_length=100
+    )
+    relation: ConstraintRelation = Field(
+        ...,
+        description="Relation operator"
+    )
+    threshold: float = Field(
+        ...,
+        description="Threshold value"
+    )
+    label: Optional[str] = Field(
+        None,
+        description="Human-readable constraint label",
+        max_length=500
+    )
+    priority: Optional[str] = Field(
+        default="medium",
+        description="Constraint priority: hard, soft, medium",
+        pattern="^(hard|soft|medium)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "budget_constraint",
+                "constraint_type": "budget",
+                "target_variable": "total_cost",
+                "relation": "le",
+                "threshold": 100000.0,
+                "label": "Budget must not exceed $100,000",
+                "priority": "hard"
+            }
+        }
+    }
+
+
+class OptionForFeasibility(BaseModel):
+    """An option to check for feasibility."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique option identifier",
+        min_length=1,
+        max_length=100
+    )
+    name: str = Field(
+        ...,
+        description="Human-readable option name",
+        min_length=1,
+        max_length=200
+    )
+    variable_values: Dict[str, float] = Field(
+        ...,
+        description="Variable values for this option"
+    )
+    expected_value: Optional[float] = Field(
+        None,
+        description="Expected value/utility of this option"
+    )
+
+    @field_validator("variable_values")
+    @classmethod
+    def validate_variable_values(cls, v):
+        """Validate variable values dict."""
+        from src.utils.security_validators import validate_dict_size
+        validate_dict_size(v, "variable_values")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_a",
+                "name": "Launch Premium Product",
+                "variable_values": {
+                    "total_cost": 85000,
+                    "expected_revenue": 200000,
+                    "risk_level": 0.3
+                },
+                "expected_value": 50000
+            }
+        }
+    }
+
+
+class FeasibilityRequest(BaseModel):
+    """Request model for feasibility check endpoint."""
+
+    graph: GraphV1 = Field(
+        ...,
+        description="Decision graph with nodes and edges"
+    )
+    constraints: List[ConstraintNode] = Field(
+        ...,
+        description="Constraints to check",
+        min_length=1,
+        max_length=50
+    )
+    options: List[OptionForFeasibility] = Field(
+        ...,
+        description="Options to evaluate for feasibility",
+        min_length=1,
+        max_length=100
+    )
+    include_partial_violations: bool = Field(
+        default=True,
+        description="Include soft constraint violations in report"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "goal", "kind": "goal", "label": "Maximize Profit"},
+                        {"id": "option_a", "kind": "option", "label": "Option A"}
+                    ],
+                    "edges": [{"from": "option_a", "to": "goal", "weight": 2.0}]
+                },
+                "constraints": [
+                    {
+                        "id": "budget_limit",
+                        "constraint_type": "budget",
+                        "target_variable": "total_cost",
+                        "relation": "le",
+                        "threshold": 100000.0,
+                        "priority": "hard"
+                    }
+                ],
+                "options": [
+                    {
+                        "option_id": "option_a",
+                        "name": "Option A",
+                        "variable_values": {"total_cost": 85000},
+                        "expected_value": 50000
+                    }
+                ]
+            }
+        }
+    }
+
+
+# ============================================================================
+# Coherence Analysis - Request Models
+# ============================================================================
+
+
+class RankedOption(BaseModel):
+    """An option with ranking information for coherence analysis."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique option identifier",
+        min_length=1,
+        max_length=100
+    )
+    name: str = Field(
+        ...,
+        description="Human-readable option name",
+        min_length=1,
+        max_length=200
+    )
+    expected_value: float = Field(
+        ...,
+        description="Expected value/utility of this option"
+    )
+    confidence_interval: Optional[Tuple[float, float]] = Field(
+        None,
+        description="Confidence interval (lower, upper)"
+    )
+    rank: Optional[int] = Field(
+        None,
+        description="Current rank (1 = best)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_a",
+                "name": "Launch Premium",
+                "expected_value": 50000,
+                "confidence_interval": [40000, 60000],
+                "rank": 1
+            }
+        }
+    }
+
+
+class CoherenceAnalysisRequest(BaseModel):
+    """Request model for coherence analysis endpoint."""
+
+    graph: GraphV1 = Field(
+        ...,
+        description="Decision graph with nodes and edges"
+    )
+    options: List[RankedOption] = Field(
+        ...,
+        description="Ranked options to analyze for coherence",
+        min_length=2,
+        max_length=100
+    )
+    perturbation_magnitude: float = Field(
+        default=0.1,
+        description="Magnitude of perturbations for stability testing (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+    close_race_threshold: float = Field(
+        default=0.05,
+        description="Threshold for detecting close races (relative difference)",
+        ge=0.0,
+        le=0.5
+    )
+    num_perturbations: int = Field(
+        default=100,
+        description="Number of perturbations for stability analysis",
+        ge=10,
+        le=1000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "goal", "kind": "goal", "label": "Maximize Revenue"},
+                        {"id": "option_a", "kind": "option", "label": "Option A"},
+                        {"id": "option_b", "kind": "option", "label": "Option B"}
+                    ],
+                    "edges": [
+                        {"from": "option_a", "to": "goal", "weight": 2.0},
+                        {"from": "option_b", "to": "goal", "weight": 1.8}
+                    ]
+                },
+                "options": [
+                    {"option_id": "option_a", "name": "Option A", "expected_value": 50000, "rank": 1},
+                    {"option_id": "option_b", "name": "Option B", "expected_value": 48000, "rank": 2}
+                ],
+                "perturbation_magnitude": 0.1,
+                "close_race_threshold": 0.05,
+                "num_perturbations": 100
             }
         }
     }
