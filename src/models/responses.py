@@ -3957,3 +3957,722 @@ class OptimisationResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Feasibility Check Response Models
+# ============================================================================
+
+
+class ConstraintViolation(BaseModel):
+    """Details of a constraint violation."""
+
+    constraint_id: str = Field(
+        ...,
+        description="ID of the violated constraint"
+    )
+    constraint_label: Optional[str] = Field(
+        None,
+        description="Human-readable constraint label"
+    )
+    actual_value: float = Field(
+        ...,
+        description="Actual value that violated the constraint"
+    )
+    threshold: float = Field(
+        ...,
+        description="Threshold value that was violated"
+    )
+    violation_magnitude: float = Field(
+        ...,
+        description="How much the constraint was violated by"
+    )
+    is_hard_violation: bool = Field(
+        ...,
+        description="Whether this is a hard constraint violation"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "constraint_id": "budget_limit",
+                "constraint_label": "Budget must not exceed $100,000",
+                "actual_value": 120000,
+                "threshold": 100000,
+                "violation_magnitude": 20000,
+                "is_hard_violation": True
+            }
+        }
+    }
+
+
+class InfeasibleOption(BaseModel):
+    """An option that violates one or more constraints."""
+
+    option_id: str = Field(
+        ...,
+        description="ID of the infeasible option"
+    )
+    violated_constraints: List[str] = Field(
+        ...,
+        description="List of constraint IDs that were violated"
+    )
+    violation_details: List[ConstraintViolation] = Field(
+        ...,
+        description="Detailed information about each violation"
+    )
+    total_violation_magnitude: float = Field(
+        ...,
+        description="Sum of all violation magnitudes"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_c",
+                "violated_constraints": ["budget_limit", "capacity"],
+                "violation_details": [
+                    {
+                        "constraint_id": "budget_limit",
+                        "actual_value": 120000,
+                        "threshold": 100000,
+                        "violation_magnitude": 20000,
+                        "is_hard_violation": True
+                    }
+                ],
+                "total_violation_magnitude": 20000
+            }
+        }
+    }
+
+
+class ConstraintValidationResult(BaseModel):
+    """Result of validating a single constraint specification."""
+
+    constraint_id: str = Field(
+        ...,
+        description="ID of the constraint"
+    )
+    is_valid: bool = Field(
+        ...,
+        description="Whether the constraint is properly specified"
+    )
+    issues: List[str] = Field(
+        default_factory=list,
+        description="List of issues with the constraint specification"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "constraint_id": "budget_limit",
+                "is_valid": True,
+                "issues": []
+            }
+        }
+    }
+
+
+class FeasibilityResult(BaseModel):
+    """Feasibility analysis results."""
+
+    feasible_options: List[str] = Field(
+        ...,
+        description="List of option IDs that satisfy all constraints"
+    )
+    infeasible_options: List[InfeasibleOption] = Field(
+        ...,
+        description="Options that violate constraints with details"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "feasible_options": ["option_1", "option_2"],
+                "infeasible_options": [
+                    {
+                        "option_id": "option_3",
+                        "violated_constraints": ["budget_constraint"],
+                        "violation_details": [],
+                        "total_violation_magnitude": 5000
+                    }
+                ]
+            }
+        }
+    }
+
+
+class FeasibilityResponse(BaseModel):
+    """Response model for feasibility check endpoint."""
+
+    schema_version: str = Field(
+        default="feasibility.v1",
+        description="Schema version"
+    )
+    constraint_validation: List[ConstraintValidationResult] = Field(
+        ...,
+        description="Validation results for constraint specifications"
+    )
+    feasibility: FeasibilityResult = Field(
+        ...,
+        description="Feasibility analysis results"
+    )
+    summary: str = Field(
+        ...,
+        description="Human-readable summary of results"
+    )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Any warnings generated during analysis"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "feasibility.v1",
+                "constraint_validation": [
+                    {"constraint_id": "budget", "is_valid": True, "issues": []}
+                ],
+                "feasibility": {
+                    "feasible_options": ["option_1", "option_2"],
+                    "infeasible_options": [
+                        {
+                            "option_id": "option_3",
+                            "violated_constraints": ["budget_constraint"],
+                            "violation_details": [],
+                            "total_violation_magnitude": 5000
+                        }
+                    ]
+                },
+                "summary": "2 of 3 options are feasible",
+                "warnings": []
+            }
+        }
+    }
+
+
+# ============================================================================
+# Coherence Analysis Response Models
+# ============================================================================
+
+
+class RankingStability(str, Enum):
+    """Ranking stability classification."""
+
+    STABLE = "stable"
+    SENSITIVE = "sensitive"
+    UNSTABLE = "unstable"
+
+
+class CoherenceAnalysis(BaseModel):
+    """Coherence analysis results."""
+
+    top_option_positive: bool = Field(
+        ...,
+        description="Whether the top option has positive expected value"
+    )
+    margin_to_second: float = Field(
+        ...,
+        description="Margin between top option and second-best"
+    )
+    margin_to_second_pct: float = Field(
+        ...,
+        description="Margin as percentage of top option's value"
+    )
+    ranking_stability: RankingStability = Field(
+        ...,
+        description="Stability classification of rankings"
+    )
+    stability_score: float = Field(
+        ...,
+        description="Numerical stability score (0-1, higher is more stable)",
+        ge=0.0,
+        le=1.0
+    )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Coherence warnings and edge case flags"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "top_option_positive": True,
+                "margin_to_second": 2000,
+                "margin_to_second_pct": 4.0,
+                "ranking_stability": "sensitive",
+                "stability_score": 0.65,
+                "warnings": ["Close race detected between top options"]
+            }
+        }
+    }
+
+
+class PerturbationResult(BaseModel):
+    """Result of a single perturbation scenario."""
+
+    perturbation_id: int = Field(
+        ...,
+        description="Perturbation scenario ID"
+    )
+    top_option_id: str = Field(
+        ...,
+        description="ID of top option in this scenario"
+    )
+    ranking_changed: bool = Field(
+        ...,
+        description="Whether ranking changed from baseline"
+    )
+    value_change_pct: float = Field(
+        ...,
+        description="Percentage change in top option's value"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "perturbation_id": 1,
+                "top_option_id": "option_b",
+                "ranking_changed": True,
+                "value_change_pct": -3.5
+            }
+        }
+    }
+
+
+class StabilityAnalysis(BaseModel):
+    """Detailed stability analysis from perturbations."""
+
+    num_perturbations: int = Field(
+        ...,
+        description="Number of perturbations performed"
+    )
+    ranking_changes: int = Field(
+        ...,
+        description="Number of times ranking changed"
+    )
+    ranking_change_rate: float = Field(
+        ...,
+        description="Rate of ranking changes (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+    most_frequent_alternative: Optional[str] = Field(
+        None,
+        description="Option that most often took top rank when changed"
+    )
+    sample_perturbations: List[PerturbationResult] = Field(
+        default_factory=list,
+        description="Sample of perturbation results",
+        max_length=10
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "num_perturbations": 100,
+                "ranking_changes": 35,
+                "ranking_change_rate": 0.35,
+                "most_frequent_alternative": "option_b",
+                "sample_perturbations": []
+            }
+        }
+    }
+
+
+class CoherenceAnalysisResponse(BaseModel):
+    """Response model for coherence analysis endpoint."""
+
+    schema_version: str = Field(
+        default="coherence.v1",
+        description="Schema version"
+    )
+    coherence_analysis: CoherenceAnalysis = Field(
+        ...,
+        description="Core coherence metrics"
+    )
+    stability_analysis: StabilityAnalysis = Field(
+        ...,
+        description="Detailed stability analysis"
+    )
+    recommendations: List[str] = Field(
+        default_factory=list,
+        description="Actionable recommendations based on analysis"
+    )
+
+    # Metadata for determinism and reproducibility
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "coherence.v1",
+                "coherence_analysis": {
+                    "top_option_positive": True,
+                    "margin_to_second": 2000,
+                    "margin_to_second_pct": 4.0,
+                    "ranking_stability": "sensitive",
+                    "stability_score": 0.65,
+                    "warnings": ["Close race detected between top options"]
+                },
+                "stability_analysis": {
+                    "num_perturbations": 100,
+                    "ranking_changes": 35,
+                    "ranking_change_rate": 0.35,
+                    "most_frequent_alternative": "option_b",
+                    "sample_perturbations": []
+                },
+                "recommendations": [
+                    "Consider gathering more data to reduce uncertainty",
+                    "Top options are close - decision may depend on risk tolerance"
+                ]
+            }
+        }
+    }
+
+
+# ============================================================================
+# Utility Function Validation Response Models
+# ============================================================================
+
+
+class NormalisedGoal(BaseModel):
+    """Normalised goal specification after validation."""
+
+    goal_id: str = Field(
+        ...,
+        description="Goal identifier"
+    )
+    label: str = Field(
+        ...,
+        description="Goal label"
+    )
+    direction: str = Field(
+        ...,
+        description="Optimization direction"
+    )
+    normalised_weight: float = Field(
+        ...,
+        description="Weight after normalization (sums to 1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    original_weight: Optional[float] = Field(
+        None,
+        description="Original weight before normalization"
+    )
+    priority: Optional[int] = Field(
+        None,
+        description="Priority for lexicographic ordering"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "goal_id": "revenue",
+                "label": "Maximize Revenue",
+                "direction": "maximize",
+                "normalised_weight": 0.6,
+                "original_weight": 0.6,
+                "priority": 1
+            }
+        }
+    }
+
+
+class UtilityValidationWarning(BaseModel):
+    """Warning from utility validation."""
+
+    code: str = Field(
+        ...,
+        description="Warning code"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message"
+    )
+    affected_goals: Optional[List[str]] = Field(
+        None,
+        description="List of goal IDs affected"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "WEIGHTS_NORMALIZED",
+                "message": "Weights normalized from sum=1.5 to sum=1.0",
+                "affected_goals": ["revenue", "cost", "quality"]
+            }
+        }
+    }
+
+
+class UtilityValidationResponse(BaseModel):
+    """Response model for utility function validation endpoint."""
+
+    schema_version: str = Field(
+        default="utility.v1",
+        description="Schema version"
+    )
+    valid: bool = Field(
+        ...,
+        description="Whether the utility specification is valid"
+    )
+    normalised_weights: Dict[str, float] = Field(
+        ...,
+        description="Normalized weights by goal ID (sum to 1.0)"
+    )
+    normalised_goals: List[NormalisedGoal] = Field(
+        ...,
+        description="Full normalised goal specifications"
+    )
+    aggregation_method: str = Field(
+        ...,
+        description="Aggregation method to be used"
+    )
+    risk_tolerance: str = Field(
+        ...,
+        description="Risk tolerance setting"
+    )
+    default_behaviour_applied: List[str] = Field(
+        default_factory=list,
+        description="List of default behaviours that were applied"
+    )
+    warnings: List[UtilityValidationWarning] = Field(
+        default_factory=list,
+        description="Validation warnings"
+    )
+    errors: List[str] = Field(
+        default_factory=list,
+        description="Validation errors (if valid=false)"
+    )
+
+    # Metadata for tracing
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "utility.v1",
+                "valid": True,
+                "normalised_weights": {
+                    "revenue": 0.6,
+                    "cost": 0.4
+                },
+                "normalised_goals": [
+                    {
+                        "goal_id": "revenue",
+                        "label": "Revenue",
+                        "direction": "maximize",
+                        "normalised_weight": 0.6
+                    }
+                ],
+                "aggregation_method": "weighted_sum",
+                "risk_tolerance": "risk_neutral",
+                "default_behaviour_applied": [],
+                "warnings": []
+            }
+        }
+    }
+
+
+# ============================================================================
+# Factor Correlation Groups Response Models
+# ============================================================================
+
+
+class ValidatedCorrelationGroup(BaseModel):
+    """Validated correlation group with additional metadata."""
+
+    group_id: str = Field(
+        ...,
+        description="Group identifier"
+    )
+    factors: List[str] = Field(
+        ...,
+        description="Factor IDs in the group"
+    )
+    correlation: float = Field(
+        ...,
+        description="Correlation coefficient"
+    )
+    is_valid: bool = Field(
+        ...,
+        description="Whether this group specification is valid"
+    )
+    issues: List[str] = Field(
+        default_factory=list,
+        description="Issues with this group"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "group_id": "market_conditions",
+                "factors": ["demand", "competition"],
+                "correlation": 0.7,
+                "is_valid": True,
+                "issues": []
+            }
+        }
+    }
+
+
+class CorrelationMatrixAnalysis(BaseModel):
+    """Analysis of the correlation matrix."""
+
+    is_positive_semi_definite: bool = Field(
+        ...,
+        description="Whether matrix is positive semi-definite (valid for sampling)"
+    )
+    min_eigenvalue: Optional[float] = Field(
+        None,
+        description="Minimum eigenvalue (negative indicates not PSD)"
+    )
+    condition_number: Optional[float] = Field(
+        None,
+        description="Condition number (high values indicate near-singularity)"
+    )
+    suggested_regularization: Optional[float] = Field(
+        None,
+        description="Suggested regularization if matrix is not PSD"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "is_positive_semi_definite": True,
+                "min_eigenvalue": 0.15,
+                "condition_number": 3.2,
+                "suggested_regularization": None
+            }
+        }
+    }
+
+
+class ImpliedCorrelationMatrix(BaseModel):
+    """The implied correlation matrix from groups."""
+
+    factors: List[str] = Field(
+        ...,
+        description="Factor IDs in matrix order"
+    )
+    matrix: List[List[float]] = Field(
+        ...,
+        description="Correlation matrix values"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "factors": ["demand", "competition"],
+                "matrix": [[1.0, 0.7], [0.7, 1.0]]
+            }
+        }
+    }
+
+
+class CorrelationValidationWarning(BaseModel):
+    """Warning from correlation validation."""
+
+    code: str = Field(
+        ...,
+        description="Warning code"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable warning message"
+    )
+    affected_groups: Optional[List[str]] = Field(
+        None,
+        description="Group IDs affected by this warning"
+    )
+    affected_factors: Optional[List[str]] = Field(
+        None,
+        description="Factor IDs affected by this warning"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "code": "HIGH_CORRELATION",
+                "message": "Correlation of 0.95 between demand and sales may indicate redundancy",
+                "affected_factors": ["demand", "sales"]
+            }
+        }
+    }
+
+
+class CorrelationValidationResponse(BaseModel):
+    """Response model for correlation validation endpoint."""
+
+    schema_version: str = Field(
+        default="correlation.v1",
+        description="Schema version"
+    )
+    valid: bool = Field(
+        ...,
+        description="Whether the correlation specification is valid for sampling"
+    )
+    validated_groups: List[ValidatedCorrelationGroup] = Field(
+        default_factory=list,
+        description="Validation results for each correlation group"
+    )
+    implied_matrix: Optional[ImpliedCorrelationMatrix] = Field(
+        None,
+        description="The implied correlation matrix from groups"
+    )
+    matrix_analysis: Optional[CorrelationMatrixAnalysis] = Field(
+        None,
+        description="Analysis of the correlation matrix properties"
+    )
+    warnings: List[CorrelationValidationWarning] = Field(
+        default_factory=list,
+        description="Validation warnings"
+    )
+    errors: List[str] = Field(
+        default_factory=list,
+        description="Validation errors (if valid=false)"
+    )
+
+    # Metadata for tracing
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "schema_version": "correlation.v1",
+                "valid": True,
+                "validated_groups": [
+                    {
+                        "group_id": "market_conditions",
+                        "factors": ["demand", "competition"],
+                        "correlation": 0.7,
+                        "is_valid": True,
+                        "issues": []
+                    }
+                ],
+                "matrix_analysis": {
+                    "is_positive_semi_definite": True,
+                    "min_eigenvalue": 0.3,
+                    "condition_number": 2.5
+                },
+                "warnings": []
+            }
+        }
+    }

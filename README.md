@@ -29,8 +29,13 @@ curl -X POST http://localhost:8000/api/v1/validation/assumptions \
 | Capability | Endpoint | Description |
 |------------|----------|-------------|
 | **Multi-Criteria Analysis** | `/api/v1/analysis/*` | Dominance, Pareto, risk adjustment, thresholds |
+| **Continuous Optimization** | `/api/v1/analysis/optimise` | Grid search with constraints, confidence intervals, sensitivity |
 | **Aggregation** | `/api/v1/aggregation/*` | Multi-criteria scoring (sum/product/lexicographic) |
-| **Validation** | `/api/v1/validation/*` | Validate causal DAGs |
+| **Validation** | `/api/v1/validation/*` | Validate causal DAGs, constraints, coherence |
+| **Feasibility Checking** | `/api/v1/validation/feasibility` | Check options against business constraints |
+| **Coherence Analysis** | `/api/v1/validation/coherence` | Analyze ranking stability and close races |
+| **Correlation Validation** | `/api/v1/validation/correlations` | Validate factor correlations (PSD check) |
+| **Utility Functions** | `/api/v1/utility/validate` | Validate multi-goal utility specifications |
 | **Counterfactuals** | `/api/v1/counterfactual/*` | "What-if" analysis |
 | **Sensitivity** | `/api/v1/sensitivity/*` | Test assumption robustness |
 | **Explanations** | `/api/v1/explanations/*` | Multi-level explanations |
@@ -60,6 +65,11 @@ Import the complete API collection for interactive testing and development:
 - ✅ Risk Adjustment - Certainty equivalents with risk profiles
 - ✅ Threshold Identification - Parameter sensitivity analysis
 - ✅ Multi-Criteria Aggregation - Weighted sum/product/lexicographic
+- ✅ Continuous Optimization - Grid search with constraints and sensitivity
+- ✅ Feasibility Checking - Validate options against constraints
+- ✅ Coherence Analysis - Ranking stability and close race detection
+- ✅ Utility Validation - Multi-goal utility function specs
+- ✅ Correlation Validation - Factor correlation groups with PSD check
 
 **Features:**
 - Pre-configured example requests for all endpoints

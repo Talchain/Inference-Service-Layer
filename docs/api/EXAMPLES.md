@@ -447,3 +447,447 @@ async function validateModel() {
 2. **Handle timeouts** - Requests timeout after 60s, use simpler inputs if hitting limits
 3. **Cache results** - ISL caches for 5 minutes, same request = cached response
 4. **Check rate limits** - Monitor `X-RateLimit-Remaining` header
+
+---
+
+## 9. Constraint Feasibility Checking
+
+### Check Option Feasibility
+
+Validate which decision options satisfy business constraints.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/validation/feasibility" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "constraints": [
+      {
+        "constraint_id": "budget",
+        "label": "Budget Limit",
+        "constraint_type": "budget",
+        "attribute": "cost",
+        "relation": "le",
+        "threshold": 100000,
+        "priority": "hard"
+      },
+      {
+        "constraint_id": "min_quality",
+        "label": "Minimum Quality",
+        "constraint_type": "requirement",
+        "attribute": "quality_score",
+        "relation": "ge",
+        "threshold": 7.0,
+        "priority": "medium"
+      }
+    ],
+    "options": [
+      {"option_id": "premium", "attributes": {"cost": 80000, "quality_score": 9.5}},
+      {"option_id": "standard", "attributes": {"cost": 50000, "quality_score": 7.2}},
+      {"option_id": "budget", "attributes": {"cost": 30000, "quality_score": 5.0}},
+      {"option_id": "deluxe", "attributes": {"cost": 150000, "quality_score": 9.8}}
+    ],
+    "include_partial_violations": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "feasibility.v1",
+  "constraint_validation": {
+    "all_valid": true,
+    "results": [
+      {"constraint_id": "budget", "valid": true},
+      {"constraint_id": "min_quality", "valid": true}
+    ]
+  },
+  "feasibility": {
+    "feasible_options": ["premium", "standard"],
+    "infeasible_options": ["budget", "deluxe"],
+    "option_results": [
+      {"option_id": "premium", "feasible": true, "hard_violations": [], "soft_violations": []},
+      {"option_id": "standard", "feasible": true, "hard_violations": [], "soft_violations": []},
+      {"option_id": "budget", "feasible": false, "hard_violations": [], "soft_violations": ["min_quality"]},
+      {"option_id": "deluxe", "feasible": false, "hard_violations": ["budget"], "soft_violations": []}
+    ]
+  },
+  "warnings": []
+}
+```
+
+---
+
+## 10. Coherence Analysis
+
+### Analyze Inference Result Coherence
+
+Check if ranked options are stable and sensible.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/validation/coherence" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "options": [
+      {
+        "option_id": "expand_market",
+        "label": "Expand to New Market",
+        "expected_value": 150000,
+        "confidence_interval": {"lower": 120000, "upper": 180000}
+      },
+      {
+        "option_id": "optimize_current",
+        "label": "Optimize Current Operations",
+        "expected_value": 140000,
+        "confidence_interval": {"lower": 130000, "upper": 150000}
+      },
+      {
+        "option_id": "reduce_costs",
+        "label": "Cost Reduction Initiative",
+        "expected_value": 80000,
+        "confidence_interval": {"lower": 70000, "upper": 90000}
+      }
+    ],
+    "perturbation_magnitude": 0.1,
+    "num_perturbations": 100,
+    "close_race_threshold": 0.15
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "coherence.v1",
+  "coherence_analysis": {
+    "top_option_id": "expand_market",
+    "top_option_positive": true,
+    "margin_to_second": {
+      "absolute": 10000,
+      "percentage": 0.071
+    },
+    "is_close_race": true,
+    "ranking_stability": "sensitive",
+    "stability_score": 0.78,
+    "warnings": [
+      {
+        "code": "CLOSE_RACE",
+        "message": "Top two options are within 15% of each other",
+        "severity": "medium"
+      }
+    ]
+  },
+  "stability_analysis": {
+    "perturbations_run": 100,
+    "ranking_changes": 22,
+    "most_frequent_alternative": "optimize_current",
+    "alternative_frequency": 0.22
+  },
+  "recommendations": [
+    "Consider additional analysis to distinguish between top options",
+    "The close race suggests collecting more data may change rankings"
+  ]
+}
+```
+
+---
+
+## 11. Utility Function Validation
+
+### Validate Multi-Goal Utility Specification
+
+Validate utility function configuration for multi-criteria aggregation.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/utility/validate" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "utility_spec": {
+      "goals": [
+        {"goal_id": "revenue", "label": "Maximize Revenue", "direction": "maximize", "weight": 0.5},
+        {"goal_id": "cost", "label": "Minimize Cost", "direction": "minimize", "weight": 0.3},
+        {"goal_id": "satisfaction", "label": "Customer Satisfaction", "direction": "maximize", "weight": 0.2}
+      ],
+      "aggregation_method": "weighted_sum",
+      "risk_tolerance": "risk_neutral"
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "utility.v1",
+  "valid": true,
+  "normalised_weights": {
+    "revenue": 0.5,
+    "cost": 0.3,
+    "satisfaction": 0.2
+  },
+  "normalised_goals": [
+    {"goal_id": "revenue", "label": "Maximize Revenue", "direction": "maximize", "normalised_weight": 0.5, "original_weight": 0.5},
+    {"goal_id": "cost", "label": "Minimize Cost", "direction": "minimize", "normalised_weight": 0.3, "original_weight": 0.3},
+    {"goal_id": "satisfaction", "label": "Customer Satisfaction", "direction": "maximize", "normalised_weight": 0.2, "original_weight": 0.2}
+  ],
+  "aggregation_method": "weighted_sum",
+  "risk_tolerance": "risk_neutral",
+  "default_behaviour_applied": [],
+  "warnings": [],
+  "errors": []
+}
+```
+
+### Validate with Default Weights
+
+```bash
+curl -X POST "$ISL_URL/api/v1/utility/validate" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "utility_spec": {
+      "goals": [
+        {"goal_id": "profit", "label": "Profit"},
+        {"goal_id": "growth", "label": "Growth"},
+        {"goal_id": "risk", "label": "Risk", "direction": "minimize"}
+      ],
+      "aggregation_method": "weighted_sum"
+    }
+  }'
+```
+
+**Response (with default equal weighting):**
+```json
+{
+  "valid": true,
+  "normalised_weights": {
+    "profit": 0.333,
+    "growth": 0.333,
+    "risk": 0.333
+  },
+  "default_behaviour_applied": ["Equal weighting applied (no weights specified)"],
+  "warnings": [
+    {"code": "DEFAULT_WEIGHTS", "message": "No weights specified - applying equal weights (0.333 each)"}
+  ]
+}
+```
+
+---
+
+## 12. Correlation Group Validation
+
+### Validate Factor Correlations
+
+Validate correlation specifications for Monte Carlo sampling.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/validation/correlations" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "correlation_groups": [
+      {
+        "group_id": "market_conditions",
+        "factors": ["demand", "competition"],
+        "correlation": 0.7,
+        "label": "Market factors tend to move together"
+      },
+      {
+        "group_id": "cost_factors",
+        "factors": ["labor_cost", "material_cost", "energy_cost"],
+        "correlation": 0.5,
+        "label": "Cost components are moderately correlated"
+      }
+    ],
+    "check_positive_definite": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "correlation.v1",
+  "valid": true,
+  "validated_groups": [
+    {"group_id": "market_conditions", "is_valid": true, "correlation": 0.7, "issues": []},
+    {"group_id": "cost_factors", "is_valid": true, "correlation": 0.5, "issues": []}
+  ],
+  "implied_matrix": {
+    "factors": ["demand", "competition", "labor_cost", "material_cost", "energy_cost"],
+    "matrix": [
+      [1.0, 0.7, 0.0, 0.0, 0.0],
+      [0.7, 1.0, 0.0, 0.0, 0.0],
+      [0.0, 0.0, 1.0, 0.5, 0.5],
+      [0.0, 0.0, 0.5, 1.0, 0.5],
+      [0.0, 0.0, 0.5, 0.5, 1.0]
+    ]
+  },
+  "matrix_analysis": {
+    "is_positive_semi_definite": true,
+    "min_eigenvalue": 0.27,
+    "condition_number": 3.7,
+    "suggested_regularization": null
+  },
+  "warnings": [],
+  "errors": []
+}
+```
+
+### Validate with Direct Matrix Input
+
+```bash
+curl -X POST "$ISL_URL/api/v1/validation/correlations" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "correlation_matrix": {
+      "factors": ["demand", "price", "competition"],
+      "matrix": [
+        [1.0, -0.6, 0.7],
+        [-0.6, 1.0, -0.3],
+        [0.7, -0.3, 1.0]
+      ]
+    },
+    "check_positive_definite": true
+  }'
+```
+
+---
+
+## 13. Continuous Optimization
+
+### Optimize Decision Variables
+
+Find optimal values for continuous decision variables.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/optimise" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "objective": {
+      "variable_id": "profit",
+      "direction": "maximize",
+      "coefficients": {"price": 1000, "quantity": -5},
+      "constant": -50000
+    },
+    "decision_variables": [
+      {"variable_id": "price", "lower_bound": 10, "upper_bound": 100},
+      {"variable_id": "quantity", "lower_bound": 0, "upper_bound": 500}
+    ],
+    "constraints": [
+      {
+        "constraint_id": "capacity",
+        "coefficients": {"quantity": 1},
+        "relation": "le",
+        "rhs": 400
+      },
+      {
+        "constraint_id": "min_price",
+        "coefficients": {"price": 1},
+        "relation": "ge",
+        "rhs": 20
+      }
+    ],
+    "grid_points": 20,
+    "confidence_level": 0.95
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "optimise.v1",
+  "optimal_point": {
+    "variable_values": {
+      "price": 100.0,
+      "quantity": 0.0
+    },
+    "objective_value": 50000.0,
+    "confidence_interval": {
+      "lower": 45100.0,
+      "upper": 54900.0,
+      "confidence_level": 0.95
+    },
+    "is_boundary": true,
+    "boundary_variables": ["price", "quantity"],
+    "feasible": true
+  },
+  "sensitivity": {
+    "range_within_5pct": {
+      "price": [95.0, 100.0],
+      "quantity": [0.0, 25.0]
+    },
+    "gradient_at_optimum": {
+      "price": 1000.0,
+      "quantity": -5.0
+    },
+    "robustness": "fragile",
+    "robustness_score": 0.15,
+    "critical_variables": ["price"]
+  },
+  "grid_metrics": {
+    "grid_points_evaluated": 400,
+    "feasible_points": 380,
+    "computation_time_ms": 125.5,
+    "convergence_achieved": true
+  },
+  "warnings": [
+    {
+      "code": "BOUNDARY_OPTIMUM",
+      "message": "Optimal point is at variable bounds: ['price', 'quantity']. Consider expanding bounds.",
+      "affected_variables": ["price", "quantity"]
+    }
+  ]
+}
+```
+
+### Optimization with Budget Constraint
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/optimise" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "objective": {
+      "variable_id": "revenue",
+      "direction": "maximize",
+      "coefficients": {"marketing": 2.5, "sales_staff": 1.8}
+    },
+    "decision_variables": [
+      {"variable_id": "marketing", "lower_bound": 0, "upper_bound": 100000},
+      {"variable_id": "sales_staff", "lower_bound": 0, "upper_bound": 50000}
+    ],
+    "constraints": [
+      {
+        "constraint_id": "total_budget",
+        "coefficients": {"marketing": 1.0, "sales_staff": 1.0},
+        "relation": "le",
+        "rhs": 80000
+      }
+    ],
+    "grid_points": 15
+  }'
+```
+
+**Response:**
+```json
+{
+  "optimal_point": {
+    "variable_values": {
+      "marketing": 80000.0,
+      "sales_staff": 0.0
+    },
+    "objective_value": 200000.0,
+    "is_boundary": true
+  },
+  "sensitivity": {
+    "gradient_at_optimum": {"marketing": 2.5, "sales_staff": 1.8},
+    "robustness": "moderate",
+    "critical_variables": ["marketing"]
+  },
+  "warnings": [
+    {"code": "CONSTRAINT_ACTIVE", "message": "Constraints active at optimum: ['total_budget']"}
+  ]
+}
+```

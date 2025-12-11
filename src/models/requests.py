@@ -2,7 +2,8 @@
 Request Pydantic models for API endpoints.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -2655,6 +2656,636 @@ class OptimisationRequest(BaseModel):
                 ],
                 "grid_points": 20,
                 "confidence_level": 0.95
+            }
+        }
+    }
+
+
+# ============================================================================
+# Constraint Validation & Feasibility Check - Request Models
+# ============================================================================
+
+
+class ConstraintType(str, Enum):
+    """Types of constraints supported."""
+
+    THRESHOLD = "threshold"  # Value must be above/below threshold
+    BUDGET = "budget"  # Resource allocation constraint
+    CAPACITY = "capacity"  # Maximum capacity constraint
+    DEPENDENCY = "dependency"  # One option depends on another
+    EXCLUSION = "exclusion"  # Mutually exclusive options
+    REQUIREMENT = "requirement"  # Required condition
+
+
+class ConstraintRelation(str, Enum):
+    """Constraint relation operators."""
+
+    LE = "le"  # <=
+    GE = "ge"  # >=
+    EQ = "eq"  # =
+    LT = "lt"  # <
+    GT = "gt"  # >
+
+
+class ConstraintNode(BaseModel):
+    """A constraint node in the decision graph."""
+
+    id: str = Field(
+        ...,
+        description="Unique constraint identifier",
+        min_length=1,
+        max_length=100
+    )
+    constraint_type: ConstraintType = Field(
+        ...,
+        description="Type of constraint"
+    )
+    target_variable: str = Field(
+        ...,
+        description="Variable this constraint applies to",
+        min_length=1,
+        max_length=100
+    )
+    relation: ConstraintRelation = Field(
+        ...,
+        description="Relation operator"
+    )
+    threshold: float = Field(
+        ...,
+        description="Threshold value"
+    )
+    label: Optional[str] = Field(
+        None,
+        description="Human-readable constraint label",
+        max_length=500
+    )
+    priority: Optional[str] = Field(
+        default="medium",
+        description="Constraint priority: hard, soft, medium",
+        pattern="^(hard|soft|medium)$"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "id": "budget_constraint",
+                "constraint_type": "budget",
+                "target_variable": "total_cost",
+                "relation": "le",
+                "threshold": 100000.0,
+                "label": "Budget must not exceed $100,000",
+                "priority": "hard"
+            }
+        }
+    }
+
+
+class OptionForFeasibility(BaseModel):
+    """An option to check for feasibility."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique option identifier",
+        min_length=1,
+        max_length=100
+    )
+    name: str = Field(
+        ...,
+        description="Human-readable option name",
+        min_length=1,
+        max_length=200
+    )
+    variable_values: Dict[str, float] = Field(
+        ...,
+        description="Variable values for this option"
+    )
+    expected_value: Optional[float] = Field(
+        None,
+        description="Expected value/utility of this option"
+    )
+
+    @field_validator("variable_values")
+    @classmethod
+    def validate_variable_values(cls, v):
+        """Validate variable values dict."""
+        from src.utils.security_validators import validate_dict_size
+        validate_dict_size(v, "variable_values")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_a",
+                "name": "Launch Premium Product",
+                "variable_values": {
+                    "total_cost": 85000,
+                    "expected_revenue": 200000,
+                    "risk_level": 0.3
+                },
+                "expected_value": 50000
+            }
+        }
+    }
+
+
+class FeasibilityRequest(BaseModel):
+    """Request model for feasibility check endpoint."""
+
+    graph: GraphV1 = Field(
+        ...,
+        description="Decision graph with nodes and edges"
+    )
+    constraints: List[ConstraintNode] = Field(
+        ...,
+        description="Constraints to check",
+        min_length=1,
+        max_length=50
+    )
+    options: List[OptionForFeasibility] = Field(
+        ...,
+        description="Options to evaluate for feasibility",
+        min_length=1,
+        max_length=100
+    )
+    include_partial_violations: bool = Field(
+        default=True,
+        description="Include soft constraint violations in report"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "goal", "kind": "goal", "label": "Maximize Profit"},
+                        {"id": "option_a", "kind": "option", "label": "Option A"}
+                    ],
+                    "edges": [{"from": "option_a", "to": "goal", "weight": 2.0}]
+                },
+                "constraints": [
+                    {
+                        "id": "budget_limit",
+                        "constraint_type": "budget",
+                        "target_variable": "total_cost",
+                        "relation": "le",
+                        "threshold": 100000.0,
+                        "priority": "hard"
+                    }
+                ],
+                "options": [
+                    {
+                        "option_id": "option_a",
+                        "name": "Option A",
+                        "variable_values": {"total_cost": 85000},
+                        "expected_value": 50000
+                    }
+                ]
+            }
+        }
+    }
+
+
+# ============================================================================
+# Coherence Analysis - Request Models
+# ============================================================================
+
+
+class RankedOption(BaseModel):
+    """An option with ranking information for coherence analysis."""
+
+    option_id: str = Field(
+        ...,
+        description="Unique option identifier",
+        min_length=1,
+        max_length=100
+    )
+    name: str = Field(
+        ...,
+        description="Human-readable option name",
+        min_length=1,
+        max_length=200
+    )
+    expected_value: float = Field(
+        ...,
+        description="Expected value/utility of this option"
+    )
+    confidence_interval: Optional[Tuple[float, float]] = Field(
+        None,
+        description="Confidence interval (lower, upper)"
+    )
+    rank: Optional[int] = Field(
+        None,
+        description="Current rank (1 = best)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "option_id": "option_a",
+                "name": "Launch Premium",
+                "expected_value": 50000,
+                "confidence_interval": [40000, 60000],
+                "rank": 1
+            }
+        }
+    }
+
+
+class CoherenceAnalysisRequest(BaseModel):
+    """Request model for coherence analysis endpoint."""
+
+    graph: GraphV1 = Field(
+        ...,
+        description="Decision graph with nodes and edges"
+    )
+    options: List[RankedOption] = Field(
+        ...,
+        description="Ranked options to analyze for coherence",
+        min_length=2,
+        max_length=100
+    )
+    perturbation_magnitude: float = Field(
+        default=0.1,
+        description="Magnitude of perturbations for stability testing (0-1)",
+        ge=0.0,
+        le=1.0
+    )
+    close_race_threshold: float = Field(
+        default=0.05,
+        description="Threshold for detecting close races (relative difference)",
+        ge=0.0,
+        le=0.5
+    )
+    num_perturbations: int = Field(
+        default=100,
+        description="Number of perturbations for stability analysis",
+        ge=10,
+        le=1000
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "goal", "kind": "goal", "label": "Maximize Revenue"},
+                        {"id": "option_a", "kind": "option", "label": "Option A"},
+                        {"id": "option_b", "kind": "option", "label": "Option B"}
+                    ],
+                    "edges": [
+                        {"from": "option_a", "to": "goal", "weight": 2.0},
+                        {"from": "option_b", "to": "goal", "weight": 1.8}
+                    ]
+                },
+                "options": [
+                    {"option_id": "option_a", "name": "Option A", "expected_value": 50000, "rank": 1},
+                    {"option_id": "option_b", "name": "Option B", "expected_value": 48000, "rank": 2}
+                ],
+                "perturbation_magnitude": 0.1,
+                "close_race_threshold": 0.05,
+                "num_perturbations": 100
+            }
+        }
+    }
+
+
+# ============================================================================
+# Utility Function Contract v1 - Request Models
+# ============================================================================
+
+
+class AggregationMethod(str, Enum):
+    """Aggregation methods for multi-goal utility functions."""
+
+    WEIGHTED_SUM = "weighted_sum"  # Linear: U = Σ(w_i × v_i) - Compensatory
+    WEIGHTED_PRODUCT = "weighted_product"  # Geometric: U = ∏(v_i ^ w_i) - Balanced
+    LEXICOGRAPHIC = "lexicographic"  # Priority-based: Sort by priority order
+    MIN_MAX = "min_max"  # Pessimistic: U = min(v_i) across goals
+
+
+class RiskTolerance(str, Enum):
+    """Risk tolerance levels for utility computation."""
+
+    RISK_AVERSE = "risk_averse"  # Prefer certain outcomes, penalize variance
+    RISK_NEUTRAL = "risk_neutral"  # Expected value only
+    RISK_SEEKING = "risk_seeking"  # Prefer variance, accept gambles
+
+
+class GoalSpecification(BaseModel):
+    """Specification for a single goal in utility function."""
+
+    goal_id: str = Field(
+        ...,
+        description="Unique identifier for the goal",
+        min_length=1,
+        max_length=100
+    )
+    label: str = Field(
+        ...,
+        description="Human-readable goal label",
+        min_length=1,
+        max_length=200
+    )
+    direction: str = Field(
+        default="maximize",
+        description="Optimization direction: 'maximize' or 'minimize'",
+        pattern="^(maximize|minimize)$"
+    )
+    weight: Optional[float] = Field(
+        None,
+        description="Goal weight (0-1). If not specified, defaults to equal weighting.",
+        ge=0.0,
+        le=1.0
+    )
+    priority: Optional[int] = Field(
+        None,
+        description="Priority for lexicographic ordering (1 = highest)",
+        ge=1,
+        le=100
+    )
+    scale_min: Optional[float] = Field(
+        None,
+        description="Minimum value for normalization"
+    )
+    scale_max: Optional[float] = Field(
+        None,
+        description="Maximum value for normalization"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "goal_id": "revenue",
+                "label": "Maximize Revenue",
+                "direction": "maximize",
+                "weight": 0.6,
+                "priority": 1,
+                "scale_min": 0,
+                "scale_max": 1000000
+            }
+        }
+    }
+
+
+class UtilityFunctionSpec(BaseModel):
+    """Complete utility function specification."""
+
+    goals: List[GoalSpecification] = Field(
+        ...,
+        description="List of goals to aggregate",
+        min_length=1,
+        max_length=20
+    )
+    aggregation_method: AggregationMethod = Field(
+        default=AggregationMethod.WEIGHTED_SUM,
+        description="Method for aggregating goal values"
+    )
+    risk_tolerance: RiskTolerance = Field(
+        default=RiskTolerance.RISK_NEUTRAL,
+        description="Risk tolerance for utility computation"
+    )
+    risk_coefficient: Optional[float] = Field(
+        None,
+        description="Risk aversion coefficient (for risk_averse: higher = more averse)",
+        ge=0.0,
+        le=10.0
+    )
+
+    @field_validator("goals")
+    @classmethod
+    def validate_unique_goal_ids(cls, v):
+        """Validate goal IDs are unique."""
+        ids = [g.goal_id for g in v]
+        if len(ids) != len(set(ids)):
+            duplicates = [id for id in ids if ids.count(id) > 1]
+            raise ValueError(f"Duplicate goal IDs: {set(duplicates)}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "goals": [
+                    {"goal_id": "revenue", "label": "Revenue", "weight": 0.6},
+                    {"goal_id": "cost", "label": "Cost", "direction": "minimize", "weight": 0.4}
+                ],
+                "aggregation_method": "weighted_sum",
+                "risk_tolerance": "risk_neutral"
+            }
+        }
+    }
+
+
+class UtilityValidationRequest(BaseModel):
+    """Request model for utility function validation endpoint."""
+
+    utility_spec: UtilityFunctionSpec = Field(
+        ...,
+        description="Utility function specification to validate"
+    )
+    graph: Optional[GraphV1] = Field(
+        None,
+        description="Optional graph to validate goal references against"
+    )
+    strict_mode: bool = Field(
+        default=False,
+        description="If true, require all weights to be specified"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "utility_spec": {
+                    "goals": [
+                        {"goal_id": "revenue", "label": "Revenue", "weight": 0.6},
+                        {"goal_id": "cost", "label": "Cost", "direction": "minimize", "weight": 0.4}
+                    ],
+                    "aggregation_method": "weighted_sum",
+                    "risk_tolerance": "risk_neutral"
+                },
+                "strict_mode": False
+            }
+        }
+    }
+
+
+# ============================================================================
+# Factor Correlation Groups - Request Models
+# ============================================================================
+
+
+class CorrelationGroup(BaseModel):
+    """Specification for a group of correlated factors."""
+
+    group_id: str = Field(
+        ...,
+        description="Unique identifier for the correlation group",
+        min_length=1,
+        max_length=100
+    )
+    factors: List[str] = Field(
+        ...,
+        description="List of factor IDs that are correlated",
+        min_length=2,
+        max_length=20
+    )
+    correlation: float = Field(
+        ...,
+        description="Correlation coefficient (-1 to 1). Positive = move together, negative = inverse",
+        ge=-1.0,
+        le=1.0
+    )
+    label: Optional[str] = Field(
+        None,
+        description="Human-readable description of the correlation",
+        max_length=500
+    )
+    correlation_type: Optional[str] = Field(
+        default="pearson",
+        description="Type of correlation: 'pearson', 'spearman', or 'kendall'",
+        pattern="^(pearson|spearman|kendall)$"
+    )
+
+    @field_validator("factors")
+    @classmethod
+    def validate_unique_factors(cls, v):
+        """Validate factor IDs are unique within group."""
+        if len(v) != len(set(v)):
+            duplicates = [f for f in v if v.count(f) > 1]
+            raise ValueError(f"Duplicate factors in group: {set(duplicates)}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "group_id": "market_conditions",
+                "factors": ["demand", "competition"],
+                "correlation": 0.7,
+                "label": "Demand and competition tend to move together",
+                "correlation_type": "pearson"
+            }
+        }
+    }
+
+
+class CorrelationMatrix(BaseModel):
+    """Full correlation matrix specification for multiple factors."""
+
+    factors: List[str] = Field(
+        ...,
+        description="List of factor IDs in matrix order",
+        min_length=2,
+        max_length=50
+    )
+    matrix: List[List[float]] = Field(
+        ...,
+        description="Correlation matrix (symmetric, diagonal = 1)"
+    )
+
+    @field_validator("matrix")
+    @classmethod
+    def validate_correlation_matrix(cls, v, info):
+        """Validate correlation matrix properties."""
+        if "factors" not in info.data:
+            return v
+
+        n = len(info.data["factors"])
+
+        # Check dimensions
+        if len(v) != n:
+            raise ValueError(f"Matrix must have {n} rows, got {len(v)}")
+
+        for i, row in enumerate(v):
+            if len(row) != n:
+                raise ValueError(f"Row {i} must have {n} columns, got {len(row)}")
+
+        # Check diagonal is 1
+        for i in range(n):
+            if abs(v[i][i] - 1.0) > 0.001:
+                raise ValueError(f"Diagonal element [{i}][{i}] must be 1.0")
+
+        # Check symmetry
+        for i in range(n):
+            for j in range(i + 1, n):
+                if abs(v[i][j] - v[j][i]) > 0.001:
+                    raise ValueError(
+                        f"Matrix must be symmetric: [{i}][{j}]={v[i][j]} != [{j}][{i}]={v[j][i]}"
+                    )
+
+        # Check values in range [-1, 1]
+        for i in range(n):
+            for j in range(n):
+                if not -1.0 <= v[i][j] <= 1.0:
+                    raise ValueError(
+                        f"Correlation [{i}][{j}]={v[i][j]} must be in [-1, 1]"
+                    )
+
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "factors": ["demand", "competition", "price_sensitivity"],
+                "matrix": [
+                    [1.0, 0.7, -0.3],
+                    [0.7, 1.0, 0.2],
+                    [-0.3, 0.2, 1.0]
+                ]
+            }
+        }
+    }
+
+
+class CorrelationValidationRequest(BaseModel):
+    """Request model for correlation group validation endpoint."""
+
+    correlation_groups: Optional[List[CorrelationGroup]] = Field(
+        None,
+        description="List of correlation groups to validate",
+        max_length=50
+    )
+    correlation_matrix: Optional[CorrelationMatrix] = Field(
+        None,
+        description="Full correlation matrix (alternative to groups)"
+    )
+    graph: Optional[GraphV1] = Field(
+        None,
+        description="Graph to validate factor references against"
+    )
+    check_positive_definite: bool = Field(
+        default=True,
+        description="Check if implied correlation matrix is positive semi-definite"
+    )
+
+    @field_validator("correlation_groups")
+    @classmethod
+    def validate_at_least_one_input(cls, v, info):
+        """Validate at least one of groups or matrix is provided."""
+        # This validator runs first, we'll check in the model validator
+        return v
+
+    def model_post_init(self, __context):
+        """Validate that at least one input method is provided."""
+        if self.correlation_groups is None and self.correlation_matrix is None:
+            raise ValueError(
+                "Must provide either correlation_groups or correlation_matrix"
+            )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "correlation_groups": [
+                    {
+                        "group_id": "market_conditions",
+                        "factors": ["demand", "competition"],
+                        "correlation": 0.7
+                    },
+                    {
+                        "group_id": "cost_factors",
+                        "factors": ["labor_cost", "material_cost"],
+                        "correlation": 0.5
+                    }
+                ],
+                "check_positive_definite": True
             }
         }
     }

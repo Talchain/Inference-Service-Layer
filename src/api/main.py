@@ -45,6 +45,7 @@ from .robustness import router as robustness_router
 from .teaching import router as teaching_router
 from .team import router as team_router
 from .threshold import router as threshold_router
+from .utility import router as utility_router
 from .validation import router as validation_router
 
 # Setup logging
@@ -602,6 +603,11 @@ app.include_router(
     validation_router,
     prefix=f"{settings.API_V1_PREFIX}/validation",
     tags=["Advanced Validation"],
+)
+app.include_router(
+    utility_router,
+    prefix=f"{settings.API_V1_PREFIX}/utility",
+    tags=["Utility Functions"],
 )
 app.include_router(
     team_router,
