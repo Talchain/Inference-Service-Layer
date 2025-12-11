@@ -2429,3 +2429,232 @@ class StageSensitivityRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Continuous Optimization Endpoint - Request Models
+# ============================================================================
+
+
+class ObjectiveFunction(BaseModel):
+    """Objective function specification for optimization."""
+
+    variable_id: str = Field(
+        ...,
+        description="Variable ID for the objective (outcome to optimize)",
+        min_length=1,
+        max_length=100
+    )
+    direction: str = Field(
+        ...,
+        description="Optimization direction: 'maximize' or 'minimize'",
+        pattern="^(maximize|minimize)$"
+    )
+    coefficients: Dict[str, float] = Field(
+        ...,
+        description="Linear coefficients mapping decision variable IDs to weights"
+    )
+    constant: float = Field(
+        default=0.0,
+        description="Constant term in objective function"
+    )
+
+    @field_validator("coefficients")
+    @classmethod
+    def validate_coefficients(cls, v):
+        """Validate coefficients are finite."""
+        if not v:
+            raise ValueError("coefficients cannot be empty")
+        for var_id, coeff in v.items():
+            if not isinstance(coeff, (int, float)):
+                raise ValueError(f"Coefficient for {var_id} must be numeric")
+            if not float('-inf') < coeff < float('inf'):
+                raise ValueError(f"Coefficient for {var_id} must be finite")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable_id": "profit",
+                "direction": "maximize",
+                "coefficients": {"price": 100, "quantity": -5, "marketing": 0.5},
+                "constant": -10000
+            }
+        }
+    }
+
+
+class DecisionVariable(BaseModel):
+    """Decision variable with bounds for optimization."""
+
+    variable_id: str = Field(
+        ...,
+        description="Unique identifier for the decision variable",
+        min_length=1,
+        max_length=100
+    )
+    lower_bound: float = Field(
+        ...,
+        description="Lower bound for this variable"
+    )
+    upper_bound: float = Field(
+        ...,
+        description="Upper bound for this variable"
+    )
+    initial_value: Optional[float] = Field(
+        default=None,
+        description="Optional initial value (defaults to midpoint)"
+    )
+    step_size: Optional[float] = Field(
+        default=None,
+        description="Optional custom step size for grid search"
+    )
+
+    @field_validator("upper_bound")
+    @classmethod
+    def validate_bounds(cls, v, info):
+        """Validate upper_bound >= lower_bound."""
+        lower = info.data.get("lower_bound")
+        if lower is not None and v < lower:
+            raise ValueError(
+                f"upper_bound ({v}) must be >= lower_bound ({lower})"
+            )
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "variable_id": "price",
+                "lower_bound": 10.0,
+                "upper_bound": 100.0,
+                "initial_value": 50.0,
+                "step_size": 5.0
+            }
+        }
+    }
+
+
+class OptimisationConstraint(BaseModel):
+    """Linear constraint for optimization."""
+
+    constraint_id: str = Field(
+        ...,
+        description="Unique identifier for the constraint",
+        min_length=1,
+        max_length=100
+    )
+    coefficients: Dict[str, float] = Field(
+        ...,
+        description="Coefficients mapping variable IDs to weights"
+    )
+    relation: str = Field(
+        ...,
+        description="Constraint relation: 'le' (<=), 'ge' (>=), or 'eq' (=)",
+        pattern="^(le|ge|eq)$"
+    )
+    rhs: float = Field(
+        ...,
+        description="Right-hand side value"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "constraint_id": "budget_limit",
+                "coefficients": {"price": 1.0, "marketing": 2.0},
+                "relation": "le",
+                "rhs": 1000.0
+            }
+        }
+    }
+
+
+class OptimisationRequest(BaseModel):
+    """Request model for continuous optimization endpoint."""
+
+    request_id: Optional[str] = Field(
+        default=None,
+        description="Optional request ID for tracing (auto-generated if not provided)"
+    )
+    objective: ObjectiveFunction = Field(
+        ...,
+        description="Objective function to optimize"
+    )
+    decision_variables: List[DecisionVariable] = Field(
+        ...,
+        description="Decision variables with bounds",
+        min_length=1,
+        max_length=10
+    )
+    constraints: Optional[List[OptimisationConstraint]] = Field(
+        default=None,
+        description="Optional linear constraints",
+        max_length=20
+    )
+    grid_points: int = Field(
+        default=20,
+        description="Number of grid points per dimension",
+        ge=5,
+        le=100
+    )
+    confidence_level: float = Field(
+        default=0.95,
+        description="Confidence level for intervals (0.5-0.999)",
+        ge=0.5,
+        le=0.999
+    )
+    noise_std: Optional[float] = Field(
+        default=None,
+        description="Optional standard deviation of noise for uncertainty estimation",
+        ge=0.0
+    )
+    seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility"
+    )
+
+    @field_validator("decision_variables")
+    @classmethod
+    def validate_unique_variable_ids(cls, v):
+        """Validate variable IDs are unique."""
+        ids = [var.variable_id for var in v]
+        if len(ids) != len(set(ids)):
+            duplicates = [id for id in ids if ids.count(id) > 1]
+            raise ValueError(f"Duplicate variable IDs: {duplicates}")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "opt_req_001",
+                "objective": {
+                    "variable_id": "profit",
+                    "direction": "maximize",
+                    "coefficients": {"price": 100, "quantity": -5},
+                    "constant": -10000
+                },
+                "decision_variables": [
+                    {
+                        "variable_id": "price",
+                        "lower_bound": 10.0,
+                        "upper_bound": 100.0
+                    },
+                    {
+                        "variable_id": "quantity",
+                        "lower_bound": 0.0,
+                        "upper_bound": 1000.0
+                    }
+                ],
+                "constraints": [
+                    {
+                        "constraint_id": "capacity",
+                        "coefficients": {"quantity": 1.0},
+                        "relation": "le",
+                        "rhs": 500.0
+                    }
+                ],
+                "grid_points": 20,
+                "confidence_level": 0.95
+            }
+        }
+    }
