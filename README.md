@@ -137,6 +137,24 @@ ISL_AUTH_DISABLED=true
 
 > ⚠️ **Security:** Never set `ISL_AUTH_DISABLED=true` in production.
 
+### Production Configuration Validation
+
+ISL enforces fail-closed security in production. The `validate_production_config()` method (in `src/config/__init__.py:199-235`) checks:
+
+| Check | Requirement | Failure Mode |
+|-------|-------------|--------------|
+| API Keys | `ISL_API_KEYS` or `ISL_API_KEY` must be set | Startup fails |
+| Auth Disabled | `ISL_AUTH_DISABLED` must be false | Startup fails |
+| CORS Origins | No wildcards (`*`) allowed | Startup fails |
+| CORS Localhost | No localhost origins in production | Startup fails |
+| Redis Host | Must be configured (not localhost) | Startup fails |
+
+**CI Safeguards:** The `.github/workflows/config-validation.yml` workflow validates deployment configurations:
+- Blocks `ISL_AUTH_DISABLED=true` in non-dev configs
+- Warns about missing `SENTRY_ENABLED=true`
+- Detects hardcoded secrets in manifests
+- Validates required environment variables are documented
+
 ---
 
 ## Project Structure
@@ -157,6 +175,21 @@ docs/
 ├── operations/DEPLOYMENT.md
 └── security/GUIDE.md
 ```
+
+### Key Source Files
+
+| Feature | Implementation | Contract/Schema |
+|---------|---------------|-----------------|
+| **Error Responses** | `src/middleware/error_handler.py` | `src/models/responses.py` |
+| **Request ID Middleware** | `src/api/main.py:45-80` | - |
+| **Authentication** | `src/middleware/auth.py` | `src/config/__init__.py` |
+| **Rate Limiting** | `src/middleware/rate_limiter.py` | - |
+| **Sentry Integration** | `src/utils/tracing.py` | `src/config/__init__.py:57-76` |
+| **Configuration** | `src/config/__init__.py` | `Settings` class |
+| **Production Validation** | `src/config/__init__.py:199-235` | `validate_production_config()` |
+| **Decision Robustness** | `src/services/decision_robustness_analyzer.py` | `src/models/decision_robustness.py` |
+| **Identifiability** | `src/services/identifiability_analyzer.py` | `src/models/responses.py` |
+| **Outcome Logging** | `src/services/outcome_logger.py` | `src/models/decision_robustness.py` |
 
 ---
 

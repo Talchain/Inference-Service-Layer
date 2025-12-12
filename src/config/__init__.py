@@ -215,6 +215,10 @@ class Settings(BaseSettings):
         if not self.ISL_API_KEYS and not self.ISL_API_KEY:
             errors.append("ISL_API_KEYS (or ISL_API_KEY) is required in production")
 
+        # CRITICAL: ISL_AUTH_DISABLED must never be true in production
+        if self.ISL_AUTH_DISABLED:
+            errors.append("ISL_AUTH_DISABLED=true is not allowed in production - authentication must be enabled")
+
         if "*" in self.CORS_ORIGINS:
             errors.append("Wildcard CORS origins not allowed in production")
 
