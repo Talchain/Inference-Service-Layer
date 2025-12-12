@@ -22,6 +22,36 @@ curl -X POST http://localhost:8000/api/v1/validation/assumptions \
   -d '{"dag": {"nodes": ["A", "B"], "edges": [["A", "B"]]}, "treatment": "A", "outcome": "B"}'
 ```
 
+### Local vs. Production Configuration
+
+| Setting | Local Development | Production |
+|---------|-------------------|------------|
+| `ISL_AUTH_DISABLED` | `true` | **Never set** (or `false`) |
+| `ISL_API_KEYS` | Not required | **Required** - comma-separated keys |
+| `CORS_ORIGINS` | `http://localhost:3000` | Your app domain(s), no wildcards |
+| `REDIS_HOST` | `localhost` (optional) | **Required** - production Redis |
+| `SENTRY_ENABLED` | `false` | `true` (recommended) |
+| `ENVIRONMENT` | `development` | `production` |
+
+**Minimum local setup:**
+```bash
+# .env file for local development
+ISL_AUTH_DISABLED=true
+```
+
+**Minimum production setup:**
+```bash
+# Environment variables for production
+ISL_API_KEYS=key1,key2,key3
+CORS_ORIGINS=https://app.example.com
+REDIS_HOST=redis.example.com
+ENVIRONMENT=production
+SENTRY_ENABLED=true
+SENTRY_DSN=https://...@sentry.io
+```
+
+> ⚠️ **Startup will fail** if neither `ISL_API_KEYS` nor `ISL_AUTH_DISABLED=true` is set.
+
 ---
 
 ## What ISL Does
@@ -195,12 +225,90 @@ docs/
 
 ## Testing
 
+### Running Tests
+
 ```bash
-pytest -o addopts=""           # All tests
-pytest tests/unit/ -v          # Unit tests only
+# All tests
+pytest -o addopts=""
+
+# Unit tests only (fast, no external deps)
+pytest tests/unit/ -v
+
+# Integration tests (requires app context)
+pytest tests/integration/ -v
+
+# Specific test file
+pytest tests/unit/test_decision_robustness_analyzer.py -v
+
+# With coverage report
+pytest --cov=src --cov-report=html
 ```
 
-**Coverage:** 215+ tests, 90%+
+### Test Categories
+
+| Category | Path | Count | Description |
+|----------|------|-------|-------------|
+| Unit | `tests/unit/` | 120+ | Service logic, models, validators |
+| Integration | `tests/integration/` | 95+ | API endpoints, error handling |
+| Smoke | `tests/smoke/` | 10+ | Health checks, production readiness |
+
+### Smoke Testing Endpoints
+
+Quick verification that critical endpoints respond:
+```bash
+# Health check (no auth required)
+curl http://localhost:8000/health
+
+# Authenticated endpoint
+curl -X POST http://localhost:8000/api/v1/analysis/dominance \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"options": [{"option_id": "A", "option_label": "A", "scores": {"x": 0.5}}], "criteria": ["x"]}'
+```
+
+**Total Coverage:** 215+ tests
+
+---
+
+## Security
+
+### Key Controls
+
+| Control | Implementation | Configuration |
+|---------|----------------|---------------|
+| **Authentication** | API key validation via `X-API-Key` header | `ISL_API_KEYS` env var |
+| **Rate Limiting** | Token bucket per IP (100 req/min default) | `RATE_LIMIT_*` env vars |
+| **Request Size** | 10MB max payload | `MAX_REQUEST_SIZE_MB` |
+| **Timeouts** | 60s default, endpoint-specific overrides | `REQUEST_TIMEOUT_SECONDS` |
+| **CORS** | Explicit origin allowlist | `CORS_ORIGINS` |
+| **Audit Logging** | Structured JSON logs with request IDs | Automatic |
+
+### API Key Management
+
+```bash
+# Multiple keys for rotation
+ISL_API_KEYS=active_key,old_key_for_rotation
+
+# Key rotation process:
+# 1. Add new key: ISL_API_KEYS=new_key,old_key
+# 2. Update clients to use new_key
+# 3. Remove old key: ISL_API_KEYS=new_key
+```
+
+### Rate Limiting
+
+Default limits (configurable via environment):
+- **100 requests/minute** per IP
+- **1000 requests/hour** per IP
+- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`
+
+```bash
+# Custom rate limits
+RATE_LIMIT_REQUESTS_PER_MINUTE=200
+RATE_LIMIT_REQUESTS_PER_HOUR=2000
+```
+
+For detailed security documentation, see **[docs/security/GUIDE.md](docs/security/GUIDE.md)**.
 
 ---
 
