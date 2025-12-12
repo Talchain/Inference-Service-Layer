@@ -51,6 +51,36 @@ class RecommendationStatus(str, Enum):
     EXPLORATORY = "exploratory"  # Effect is NOT identifiable, recommendations are uncertain
 
 
+class ConcernType(str, Enum):
+    """Types of identifiability concerns in the causal graph."""
+
+    UNMEASURED_CONFOUNDER = "unmeasured_confounder"
+    COLLIDER = "collider"
+    SELECTION_BIAS = "selection_bias"
+    MEDIATOR = "mediator"
+    M_BIAS = "m_bias"
+    INSUFFICIENT_DATA = "insufficient_data"
+
+
+class ConcernSeverity(str, Enum):
+    """Severity level of identifiability concerns."""
+
+    CRITICAL = "critical"
+    WARNING = "warning"
+    INFO = "info"
+
+
+@dataclass
+class IdentifiabilityConcern:
+    """A structural concern affecting identifiability."""
+
+    type: ConcernType
+    severity: ConcernSeverity
+    description: str
+    affected_nodes: Optional[List[str]] = None
+    affected_paths: Optional[List[str]] = None
+
+
 @dataclass
 class IdentifiabilitySuggestion:
     """Suggestion for making an effect identifiable."""
@@ -75,6 +105,7 @@ class IdentifiabilityResult:
     recommendation_caveat: Optional[str]
     suggestions: Optional[List[IdentifiabilitySuggestion]]
     backdoor_paths: Optional[List[str]]
+    concerns: Optional[List[IdentifiabilityConcern]] = None
 
 
 class IdentifiabilityAnalyzer:
@@ -83,6 +114,55 @@ class IdentifiabilityAnalyzer:
 
     Implements the hard rule: if the primary decision→goal effect
     is non-identifiable, recommendations must be marked as "exploratory".
+
+    ## Current Capabilities (Graph-Structural, No Data Required)
+
+    - **Backdoor Criterion**: Identifies adjustment sets that block confounding paths
+    - **Frontdoor Criterion**: Detects when mediating variables enable identification
+    - **Instrumental Variables**: Suggests when IV methods may be applicable
+    - **Concern Detection**: Identifies colliders, confounders, mediators, M-bias
+    - **Suggestion Generation**: Provides actionable guidance for non-identifiable effects
+    - **Narrative Generation**: Clear, decision-maker-friendly explanations
+
+    ## Future Capabilities (Will Require Data)
+
+    The following features are planned but require actual observational data:
+
+    ### 1. Sensitivity Analysis for Unmeasured Confounding
+    - E-value computation for causal estimates
+    - Bias bounding when confounders are unmeasured
+    - Robustness to hidden bias assessment
+
+    ### 2. Empirical Validation of Causal Assumptions
+    - Covariate balance checking after adjustment
+    - Positivity violation detection
+    - Overlap assessment for treatment groups
+
+    ### 3. Instrumental Variable Strength Assessment
+    - Weak instrument detection
+    - First-stage F-statistic computation
+    - IV validity testing
+
+    ### 4. Mediation Analysis
+    - Natural direct/indirect effect estimation
+    - Sensitivity analysis for mediator-outcome confounding
+    - Sequential ignorability assessment
+
+    ### 5. Confidence Intervals for Effects
+    - Bootstrap confidence intervals
+    - Bayesian credible intervals
+    - Sensitivity-adjusted intervals
+
+    ### 6. Model Misspecification Detection
+    - Functional form testing
+    - Heterogeneous treatment effect detection
+    - Regression discontinuity validity checks
+
+    ## Integration Points
+
+    - **Robustness Suite**: Identifiability status feeds into recommendation_status
+    - **Outcome Logging**: Non-identifiable effects flagged in calibration data
+    - **API Responses**: Concerns and suggestions included in all identifiability responses
     """
 
     def __init__(self) -> None:
@@ -505,6 +585,258 @@ class IdentifiabilityAnalyzer:
 
         return suggestions
 
+    def _detect_concerns(
+        self,
+        graph: nx.DiGraph,
+        treatment: str,
+        outcome: str,
+        identifiable: bool,
+    ) -> List[IdentifiabilityConcern]:
+        """
+        Detect structural concerns in the causal graph.
+
+        Identifies:
+        - Unmeasured confounders blocking identification
+        - Colliders that shouldn't be conditioned on
+        - Mediators on causal paths
+        - M-bias structures
+        """
+        concerns = []
+
+        # Find unmeasured confounders (parents of both treatment and outcome)
+        treatment_parents = set(graph.predecessors(treatment))
+        outcome_parents = set(graph.predecessors(outcome))
+        common_causes = treatment_parents & outcome_parents
+
+        for confounder in common_causes:
+            if not identifiable:
+                concerns.append(
+                    IdentifiabilityConcern(
+                        type=ConcernType.UNMEASURED_CONFOUNDER,
+                        severity=ConcernSeverity.CRITICAL,
+                        description=(
+                            f"Variable '{confounder}' is a common cause of both "
+                            f"'{treatment}' and '{outcome}', creating a backdoor path. "
+                            f"If this variable cannot be observed, the effect is not identifiable."
+                        ),
+                        affected_nodes=[confounder, treatment, outcome],
+                        affected_paths=[f"{treatment} ← {confounder} → {outcome}"],
+                    )
+                )
+            else:
+                concerns.append(
+                    IdentifiabilityConcern(
+                        type=ConcernType.UNMEASURED_CONFOUNDER,
+                        severity=ConcernSeverity.INFO,
+                        description=(
+                            f"Variable '{confounder}' is a confounder. "
+                            f"The backdoor path is blocked by adjusting for it."
+                        ),
+                        affected_nodes=[confounder, treatment, outcome],
+                    )
+                )
+
+        # Detect colliders (nodes with multiple parents from treatment/outcome paths)
+        colliders = self._find_colliders(graph, treatment, outcome)
+        for collider_node, parents in colliders:
+            concerns.append(
+                IdentifiabilityConcern(
+                    type=ConcernType.COLLIDER,
+                    severity=ConcernSeverity.WARNING,
+                    description=(
+                        f"Variable '{collider_node}' is a collider with parents "
+                        f"{list(parents)}. Conditioning on this variable would "
+                        f"open a spurious path and bias the effect estimate."
+                    ),
+                    affected_nodes=[collider_node] + list(parents),
+                )
+            )
+
+        # Detect mediators
+        mediators = self._find_mediators(graph, treatment, outcome)
+        for mediator in mediators:
+            concerns.append(
+                IdentifiabilityConcern(
+                    type=ConcernType.MEDIATOR,
+                    severity=ConcernSeverity.INFO,
+                    description=(
+                        f"Variable '{mediator}' mediates the effect of '{treatment}' "
+                        f"on '{outcome}'. The total effect includes paths through this mediator. "
+                        f"To estimate direct effects, additional assumptions are needed."
+                    ),
+                    affected_nodes=[treatment, mediator, outcome],
+                )
+            )
+
+        # Detect M-bias structures (two independent variables both causing treatment/outcome)
+        m_bias = self._detect_m_bias(graph, treatment, outcome)
+        if m_bias:
+            for structure in m_bias:
+                concerns.append(
+                    IdentifiabilityConcern(
+                        type=ConcernType.M_BIAS,
+                        severity=ConcernSeverity.WARNING,
+                        description=(
+                            f"M-bias structure detected involving {structure}. "
+                            f"Conditioning on certain variables may open this path."
+                        ),
+                        affected_nodes=structure,
+                    )
+                )
+
+        return concerns
+
+    def _find_colliders(
+        self, graph: nx.DiGraph, treatment: str, outcome: str
+    ) -> List[Tuple[str, set]]:
+        """Find collider nodes in the graph."""
+        colliders = []
+
+        for node in graph.nodes():
+            if node in [treatment, outcome]:
+                continue
+
+            parents = set(graph.predecessors(node))
+            if len(parents) >= 2:
+                # Check if any parents are connected to treatment/outcome
+                treatment_connected = treatment in parents or any(
+                    nx.has_path(graph, treatment, p) for p in parents
+                )
+                outcome_connected = outcome in parents or any(
+                    nx.has_path(graph, p, outcome) for p in parents
+                )
+
+                if treatment_connected and outcome_connected:
+                    colliders.append((node, parents))
+
+        return colliders
+
+    def _find_mediators(
+        self, graph: nx.DiGraph, treatment: str, outcome: str
+    ) -> List[str]:
+        """Find variables that mediate the treatment → outcome effect."""
+        mediators = []
+
+        try:
+            for path in nx.all_simple_paths(graph, treatment, outcome):
+                # Nodes between treatment and outcome are mediators
+                for node in path[1:-1]:
+                    if node not in mediators:
+                        mediators.append(node)
+        except nx.NetworkXError:
+            pass
+
+        return mediators
+
+    def _detect_m_bias(
+        self, graph: nx.DiGraph, treatment: str, outcome: str
+    ) -> List[List[str]]:
+        """
+        Detect M-bias structures.
+
+        M-bias: Two independent variables U1, U2 both affect a common descendant M,
+        and U1 → X and U2 → Y. Conditioning on M opens the path X ← U1 → M ← U2 → Y.
+        """
+        m_structures = []
+
+        # Look for nodes with multiple parents where those parents are
+        # ancestors of treatment and outcome respectively
+        for node in graph.nodes():
+            if node in [treatment, outcome]:
+                continue
+
+            parents = list(graph.predecessors(node))
+            if len(parents) < 2:
+                continue
+
+            # Check for M-structure pattern
+            for i, p1 in enumerate(parents):
+                for p2 in parents[i + 1:]:
+                    # Check if p1 is ancestor of treatment and p2 of outcome (or vice versa)
+                    p1_to_treatment = nx.has_path(graph, p1, treatment) or p1 == treatment
+                    p2_to_outcome = nx.has_path(graph, p2, outcome) or p2 == outcome
+
+                    p2_to_treatment = nx.has_path(graph, p2, treatment) or p2 == treatment
+                    p1_to_outcome = nx.has_path(graph, p1, outcome) or p1 == outcome
+
+                    if (p1_to_treatment and p2_to_outcome) or (p2_to_treatment and p1_to_outcome):
+                        m_structures.append([p1, node, p2])
+
+        return m_structures
+
+    def _generate_narrative(
+        self,
+        decision: str,
+        goal: str,
+        identifiable: bool,
+        method: Optional[IdentificationMethod],
+        adjustment_set: Optional[List[str]],
+        concerns: List[IdentifiabilityConcern],
+    ) -> str:
+        """Generate a clear, actionable narrative explanation."""
+        if identifiable:
+            if method == IdentificationMethod.BACKDOOR:
+                if adjustment_set:
+                    adjustment_str = ", ".join(f"'{v}'" for v in adjustment_set)
+                    narrative = (
+                        f"Good news: The causal effect of '{decision}' on '{goal}' "
+                        f"can be reliably estimated from your data.\n\n"
+                        f"To get an unbiased estimate, you'll need to account for "
+                        f"{adjustment_str} in your analysis. These variables are "
+                        f"confounders that affect both the decision and the outcome.\n\n"
+                        f"Practical advice: Include {adjustment_str} as control "
+                        f"variables in your regression or matching analysis."
+                    )
+                else:
+                    narrative = (
+                        f"Excellent news: The causal effect of '{decision}' on '{goal}' "
+                        f"can be directly estimated without any adjustment.\n\n"
+                        f"There are no confounding variables that affect both the "
+                        f"decision and the outcome, so a simple comparison is valid.\n\n"
+                        f"Practical advice: A direct comparison of outcomes across "
+                        f"different decision values gives you the causal effect."
+                    )
+            elif method == IdentificationMethod.FRONTDOOR:
+                mediator_str = ", ".join(f"'{v}'" for v in (adjustment_set or []))
+                narrative = (
+                    f"The causal effect of '{decision}' on '{goal}' can be estimated "
+                    f"using the frontdoor criterion.\n\n"
+                    f"This works because the effect operates through {mediator_str}, "
+                    f"which fully mediates the relationship.\n\n"
+                    f"Practical advice: This requires a two-stage analysis through "
+                    f"the mediating variable(s)."
+                )
+            else:
+                narrative = (
+                    f"The causal effect of '{decision}' on '{goal}' is identifiable "
+                    f"through advanced do-calculus reasoning.\n\n"
+                    f"Practical advice: Consult a causal inference specialist "
+                    f"for the specific estimation procedure."
+                )
+        else:
+            critical_concerns = [c for c in concerns if c.severity == ConcernSeverity.CRITICAL]
+            if critical_concerns:
+                concern_desc = critical_concerns[0].description
+                narrative = (
+                    f"Caution: The causal effect of '{decision}' on '{goal}' "
+                    f"cannot be reliably estimated from observational data alone.\n\n"
+                    f"The main issue: {concern_desc}\n\n"
+                    f"What this means: Any analysis claiming to show causation "
+                    f"between these variables should be treated as exploratory. "
+                    f"The observed association may be spurious.\n\n"
+                    f"Recommendations: Consider running a randomized experiment, "
+                    f"finding instrumental variables, or measuring additional confounders."
+                )
+            else:
+                narrative = (
+                    f"The causal effect of '{decision}' on '{goal}' cannot be "
+                    f"identified with the current model structure.\n\n"
+                    f"Treat any recommendations as hypotheses to test, not "
+                    f"actionable conclusions."
+                )
+
+        return narrative
+
     def _create_identifiable_result(
         self,
         decision: str,
@@ -553,17 +885,26 @@ class IdentifiabilityAnalyzer:
             [" → ".join(path) for path in backdoor_paths] if backdoor_paths else None
         )
 
+        # Detect concerns
+        concerns = self._detect_concerns(nx_graph, decision, goal, identifiable=True)
+
+        # Generate narrative
+        narrative = self._generate_narrative(
+            decision, goal, True, method, adjustment_set, concerns
+        )
+
         return IdentifiabilityResult(
             effect=f"{decision} → {goal}",
             identifiable=True,
             method=method,
             adjustment_set=adjustment_set,
             confidence=ConfidenceLevel.HIGH,
-            explanation=explanation,
+            explanation=narrative,  # Use narrative instead of simple explanation
             recommendation_status=RecommendationStatus.ACTIONABLE,
             recommendation_caveat=None,
             suggestions=None,
             backdoor_paths=formatted_paths,
+            concerns=concerns if concerns else None,
         )
 
     def _create_non_identifiable_result(
@@ -577,10 +918,12 @@ class IdentifiabilityAnalyzer:
 
         suggestions = self._generate_suggestions(nx_graph, decision, goal)
 
-        explanation = (
-            f"The effect of '{decision}' on '{goal}' is NOT identifiable from "
-            f"the current model structure. There are confounding paths that cannot "
-            f"be blocked with the available observed variables."
+        # Detect concerns (critical since not identifiable)
+        concerns = self._detect_concerns(nx_graph, decision, goal, identifiable=False)
+
+        # Generate narrative explanation
+        narrative = self._generate_narrative(
+            decision, goal, False, IdentificationMethod.NON_IDENTIFIABLE, None, concerns
         )
 
         # HARD RULE: Non-identifiable effects get exploratory status
@@ -597,11 +940,12 @@ class IdentifiabilityAnalyzer:
             method=IdentificationMethod.NON_IDENTIFIABLE,
             adjustment_set=None,
             confidence=ConfidenceLevel.LOW,
-            explanation=explanation,
+            explanation=narrative,  # Use narrative
             recommendation_status=RecommendationStatus.EXPLORATORY,
             recommendation_caveat=caveat,
             suggestions=suggestions,
             backdoor_paths=formatted_paths,
+            concerns=concerns if concerns else None,
         )
 
     def _create_no_path_result(

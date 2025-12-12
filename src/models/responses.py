@@ -4722,6 +4722,76 @@ class IdentificationMethodEnum(str, Enum):
     NON_IDENTIFIABLE = "non_identifiable"
 
 
+class ConcernTypeEnum(str, Enum):
+    """Types of identifiability concerns in the causal graph."""
+
+    UNMEASURED_CONFOUNDER = "unmeasured_confounder"  # Hidden common cause
+    COLLIDER = "collider"  # Conditioning on collider opens path
+    SELECTION_BIAS = "selection_bias"  # Selection on collider/descendant
+    MEDIATOR = "mediator"  # Potential mediation affecting identification
+    M_BIAS = "m_bias"  # M-structure creating spurious association
+    INSUFFICIENT_DATA = "insufficient_data"  # Graph-based, but data needed
+
+
+class ConcernSeverityEnum(str, Enum):
+    """Severity level of identifiability concerns."""
+
+    CRITICAL = "critical"  # Blocks identification entirely
+    WARNING = "warning"  # May affect identification under certain conditions
+    INFO = "info"  # Informational, doesn't block identification
+
+
+class IdentifiabilityConcern(BaseModel):
+    """
+    A specific concern affecting causal effect identifiability.
+
+    Concerns represent structural issues in the causal graph that
+    may prevent or complicate effect identification.
+    """
+
+    type: ConcernTypeEnum = Field(
+        ...,
+        description="Type of identifiability concern"
+    )
+    severity: ConcernSeverityEnum = Field(
+        ...,
+        description="Severity level: critical blocks identification, warning may affect it"
+    )
+    description: str = Field(
+        ...,
+        description="Human-readable description of the concern"
+    )
+    affected_nodes: Optional[List[str]] = Field(
+        None,
+        description="Nodes involved in this concern"
+    )
+    affected_paths: Optional[List[str]] = Field(
+        None,
+        description="Paths affected by this concern"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "type": "unmeasured_confounder",
+                    "severity": "critical",
+                    "description": "Unmeasured variable 'economic_conditions' affects both 'marketing' and 'sales', creating unblockable backdoor path",
+                    "affected_nodes": ["economic_conditions", "marketing", "sales"],
+                    "affected_paths": ["marketing ← economic_conditions → sales"]
+                },
+                {
+                    "type": "collider",
+                    "severity": "warning",
+                    "description": "Conditioning on 'customer_satisfaction' (a collider) would open a spurious path between 'price' and 'quality'",
+                    "affected_nodes": ["price", "customer_satisfaction", "quality"],
+                    "affected_paths": ["price → customer_satisfaction ← quality"]
+                }
+            ]
+        }
+    }
+
+
 class RecommendationStatusEnum(str, Enum):
     """Status of recommendations based on identifiability (hard rule)."""
 
@@ -4767,6 +4837,27 @@ class IdentifiabilityInfo(BaseModel):
 
     This implements the Y₀ identifiability analysis as specified,
     including the hard rule for non-identifiable effects.
+
+    **Scope and Limitations:**
+    This analysis is purely graph-structural. It determines whether
+    causal effects CAN be identified from observational data given
+    the graph structure, NOT whether the effects are actually present
+    or estimated correctly. For that, you need actual data.
+
+    **What this CAN do (without data):**
+    - Determine if effect is identifiable from graph structure
+    - Find adjustment sets for backdoor criterion
+    - Detect frontdoor criterion applicability
+    - Identify colliders that shouldn't be conditioned on
+    - Flag unmeasured confounders blocking identification
+    - Suggest graph modifications to enable identification
+
+    **What this CANNOT do (requires data):**
+    - Estimate actual causal effect sizes
+    - Validate causal assumptions empirically
+    - Perform sensitivity analysis on estimates
+    - Detect model misspecification
+    - Compute confidence intervals for effects
     """
 
     effect: str = Field(
@@ -4793,6 +4884,10 @@ class IdentifiabilityInfo(BaseModel):
         ...,
         description="Human-readable explanation of identifiability status"
     )
+    concerns: Optional[List[IdentifiabilityConcern]] = Field(
+        None,
+        description="Structural concerns affecting identifiability (colliders, confounders, etc.)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -4802,7 +4897,15 @@ class IdentifiabilityInfo(BaseModel):
                 "method": "backdoor",
                 "adjustment_set": ["market_segment"],
                 "confidence": "high",
-                "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+                "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment.",
+                "concerns": [
+                    {
+                        "type": "mediator",
+                        "severity": "info",
+                        "description": "Variable 'customer_demand' mediates part of the price→revenue effect. The total effect is identified; direct effect would require additional assumptions.",
+                        "affected_nodes": ["price", "customer_demand", "revenue"]
+                    }
+                ]
             }
         }
     }
@@ -4839,6 +4942,16 @@ class IdentifiabilityResponse(BaseModel):
     backdoor_paths: Optional[List[str]] = Field(
         None,
         description="Backdoor paths identified in the graph"
+    )
+    concerns: Optional[List[IdentifiabilityConcern]] = Field(
+        None,
+        description="Structural concerns affecting identifiability"
+    )
+
+    # Scope documentation
+    scope: Optional[str] = Field(
+        default="graph_structural",
+        description="Analysis scope: 'graph_structural' (can identify without data)"
     )
 
     # Metadata for tracing

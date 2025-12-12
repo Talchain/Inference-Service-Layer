@@ -41,7 +41,11 @@ from src.models.decision_robustness import (
     UtilitySpecification,
     ValueOfInformation,
 )
-from src.models.shared import GraphV1
+from src.models.shared import GraphV1, NodeKind
+from src.services.identifiability_analyzer import (
+    IdentifiabilityAnalyzer,
+    RecommendationStatus as IdentifiabilityStatus,
+)
 from src.utils.cache import get_cache
 from src.utils.determinism import make_deterministic
 
@@ -76,6 +80,7 @@ class DecisionRobustnessAnalyzer:
         """
         self.settings = settings or get_settings()
         self._executor = ThreadPoolExecutor(max_workers=4)
+        self._identifiability_analyzer = IdentifiabilityAnalyzer()
 
     def _validate_request(
         self,
@@ -241,6 +246,75 @@ class DecisionRobustnessAnalyzer:
                     queue.append(parent)
         return connected
 
+    def _check_identifiability(
+        self,
+        graph: GraphV1,
+        goal_node_id: str,
+        request_id: str,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Check if the primary decision→goal effect is identifiable.
+
+        This integrates the Y₀ identifiability analysis into the robustness suite.
+        If the effect is not identifiable, recommendations should be marked as
+        exploratory per the hard rule.
+
+        Args:
+            graph: The causal graph
+            goal_node_id: The goal/outcome node
+            request_id: Request ID for logging
+
+        Returns:
+            Tuple of (is_identifiable, caveat_message)
+        """
+        if not self.settings.ENABLE_IDENTIFIABILITY_ANALYSIS:
+            return True, None
+
+        try:
+            # Find decision node in graph
+            decision_node = None
+            for node in graph.nodes:
+                if node.kind == NodeKind.DECISION:
+                    decision_node = node.id
+                    break
+
+            if not decision_node:
+                logger.debug(
+                    "identifiability_skip_no_decision_node",
+                    extra={"request_id": request_id},
+                )
+                return True, None
+
+            # Run identifiability analysis
+            result = self._identifiability_analyzer.analyze(
+                graph=graph,
+                decision_node_id=decision_node,
+                goal_node_id=goal_node_id,
+            )
+
+            logger.info(
+                "identifiability_check_completed",
+                extra={
+                    "request_id": request_id,
+                    "identifiable": result.identifiable,
+                    "method": result.method.value if result.method else None,
+                    "recommendation_status": result.recommendation_status.value,
+                },
+            )
+
+            if not result.identifiable:
+                return False, result.recommendation_caveat
+
+            return True, None
+
+        except Exception as e:
+            logger.warning(
+                "identifiability_check_failed",
+                extra={"request_id": request_id, "error": str(e)},
+            )
+            # Don't fail the entire analysis if identifiability check fails
+            return True, None
+
     def analyze(
         self,
         request: RobustnessRequest,
@@ -273,6 +347,17 @@ class DecisionRobustnessAnalyzer:
         # Track completed and skipped analyses
         completed_analyses: List[str] = []
         skipped_analyses: List[str] = []
+
+        # Check identifiability (Brief 24: Y₀ Integration)
+        is_identifiable, identifiability_caveat = self._check_identifiability(
+            request.graph,
+            request.utility.goal_node_id,
+            request_id,
+        )
+        if is_identifiable:
+            completed_analyses.append("identifiability")
+        else:
+            completed_analyses.append("identifiability_exploratory")
 
         logger.info(
             "decision_robustness_analysis_started",
@@ -428,14 +513,21 @@ class DecisionRobustnessAnalyzer:
                 recommendation,
             )
 
-            # Update recommendation status based on robustness
-            if robustness_label == RobustnessLabelEnum.FRAGILE:
+            # Update recommendation status based on robustness and identifiability
+            # Hard rule: non-identifiable effect → EXPLORATORY (Brief 24)
+            if not is_identifiable or robustness_label == RobustnessLabelEnum.FRAGILE:
                 recommendation = Recommendation(
                     option_id=recommendation.option_id,
                     option_label=recommendation.option_label,
                     confidence=ConfidenceLevelEnum.LOW,
                     recommendation_status=RecommendationStatusEnum.EXPLORATORY,
                 )
+                # Append identifiability caveat to narrative if relevant
+                if not is_identifiable and identifiability_caveat:
+                    narrative = (
+                        f"{narrative}\n\n"
+                        f"**Identifiability Warning:** {identifiability_caveat}"
+                    )
 
             elapsed_ms = (time.time() - start_time) * 1000
 

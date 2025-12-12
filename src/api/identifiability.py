@@ -20,6 +20,9 @@ from fastapi import APIRouter, Header, HTTPException
 from src.models.isl_metadata import MetadataBuilder
 from src.models.requests import IdentifiabilityFromDAGRequest, IdentifiabilityRequest
 from src.models.responses import (
+    ConcernSeverityEnum,
+    ConcernTypeEnum,
+    IdentifiabilityConcern as IdentifiabilityConcernResponse,
     IdentifiabilityInfo,
     IdentifiabilityResponse,
     IdentifiabilitySuggestionResponse,
@@ -28,7 +31,10 @@ from src.models.responses import (
 )
 from src.models.shared import ConfidenceLevel
 from src.services.identifiability_analyzer import (
+    ConcernSeverity,
+    ConcernType,
     IdentifiabilityAnalyzer,
+    IdentifiabilityConcern,
     IdentificationMethod,
     RecommendationStatus,
 )
@@ -55,6 +61,34 @@ def _convert_status(status: RecommendationStatus) -> RecommendationStatusEnum:
 def _convert_confidence(confidence: ConfidenceLevel) -> ConfidenceLevel:
     """Pass through confidence level."""
     return confidence
+
+
+def _convert_concern_type(concern_type: ConcernType) -> ConcernTypeEnum:
+    """Convert service concern type to response enum."""
+    return ConcernTypeEnum(concern_type.value)
+
+
+def _convert_concern_severity(severity: ConcernSeverity) -> ConcernSeverityEnum:
+    """Convert service concern severity to response enum."""
+    return ConcernSeverityEnum(severity.value)
+
+
+def _convert_concerns(
+    concerns: Optional[list]
+) -> Optional[list]:
+    """Convert service concerns to response concerns."""
+    if not concerns:
+        return None
+    return [
+        IdentifiabilityConcernResponse(
+            type=_convert_concern_type(c.type),
+            severity=_convert_concern_severity(c.severity),
+            description=c.description,
+            affected_nodes=c.affected_nodes,
+            affected_paths=c.affected_paths,
+        )
+        for c in concerns
+    ]
 
 
 @router.post(
@@ -148,6 +182,9 @@ async def analyze_identifiability(
                 for s in result.suggestions
             ]
 
+        # Convert concerns
+        concerns = _convert_concerns(result.concerns)
+
         # Build response
         response = IdentifiabilityResponse(
             identifiability=IdentifiabilityInfo(
@@ -157,11 +194,14 @@ async def analyze_identifiability(
                 adjustment_set=result.adjustment_set,
                 confidence=result.confidence,
                 explanation=result.explanation,
+                concerns=concerns,
             ),
             recommendation_status=_convert_status(result.recommendation_status),
             recommendation_caveat=result.recommendation_caveat,
             suggestions=suggestions,
             backdoor_paths=result.backdoor_paths,
+            concerns=concerns,
+            scope="graph_structural",
         )
 
         # Add metadata
@@ -263,6 +303,9 @@ async def analyze_identifiability_from_dag(
                 for s in result.suggestions
             ]
 
+        # Convert concerns
+        concerns = _convert_concerns(result.concerns)
+
         # Build response
         response = IdentifiabilityResponse(
             identifiability=IdentifiabilityInfo(
@@ -272,11 +315,14 @@ async def analyze_identifiability_from_dag(
                 adjustment_set=result.adjustment_set,
                 confidence=result.confidence,
                 explanation=result.explanation,
+                concerns=concerns,
             ),
             recommendation_status=_convert_status(result.recommendation_status),
             recommendation_caveat=result.recommendation_caveat,
             suggestions=suggestions,
             backdoor_paths=result.backdoor_paths,
+            concerns=concerns,
+            scope="graph_structural",
         )
 
         # Add metadata
