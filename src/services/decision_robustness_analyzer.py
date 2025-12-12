@@ -77,6 +77,170 @@ class DecisionRobustnessAnalyzer:
         self.settings = settings or get_settings()
         self._executor = ThreadPoolExecutor(max_workers=4)
 
+    def _validate_request(
+        self,
+        request: RobustnessRequest,
+        request_id: str,
+    ) -> None:
+        """
+        Validate request inputs (Brief 20 Task 3).
+
+        Checks for:
+        - Empty options list
+        - Single option (needs 2+ for comparison)
+        - Missing goal node
+        - Circular graph
+        - Disconnected nodes (warning only)
+
+        Args:
+            request: The robustness request
+            request_id: Request ID for logging
+
+        Raises:
+            ValueError: If validation fails
+        """
+        # Check options count
+        if not request.options or len(request.options) == 0:
+            logger.warning(
+                "validation_failed",
+                extra={"request_id": request_id, "reason": "empty_options"},
+            )
+            raise ValueError(
+                "Options list is empty. At least 2 options are required for "
+                "robustness analysis to compare alternatives."
+            )
+
+        if len(request.options) == 1:
+            logger.warning(
+                "validation_failed",
+                extra={"request_id": request_id, "reason": "single_option"},
+            )
+            raise ValueError(
+                "Only 1 option provided. Robustness analysis requires at least "
+                "2 options to compare. Consider adding a baseline/status quo option."
+            )
+
+        # Check goal node exists in graph
+        node_ids = {node.id for node in request.graph.nodes}
+        goal_id = request.utility.goal_node_id
+        if goal_id not in node_ids:
+            logger.warning(
+                "validation_failed",
+                extra={
+                    "request_id": request_id,
+                    "reason": "missing_goal_node",
+                    "goal_id": goal_id,
+                },
+            )
+            raise ValueError(
+                f"Goal node '{goal_id}' not found in graph. "
+                f"Available nodes: {sorted(node_ids)}"
+            )
+
+        # Check additional goals exist
+        if request.utility.additional_goals:
+            missing_goals = [g for g in request.utility.additional_goals if g not in node_ids]
+            if missing_goals:
+                logger.warning(
+                    "validation_failed",
+                    extra={
+                        "request_id": request_id,
+                        "reason": "missing_additional_goals",
+                        "missing": missing_goals,
+                    },
+                )
+                raise ValueError(
+                    f"Additional goal nodes not found: {missing_goals}. "
+                    f"Available nodes: {sorted(node_ids)}"
+                )
+
+        # Check for cycles (simple detection)
+        if self._has_cycle(request.graph):
+            logger.warning(
+                "validation_failed",
+                extra={"request_id": request_id, "reason": "cyclic_graph"},
+            )
+            raise ValueError(
+                "Graph contains a cycle. Robustness analysis requires a "
+                "directed acyclic graph (DAG) for causal inference."
+            )
+
+        # Check intervention nodes exist (warning only, don't fail)
+        for option in request.options:
+            missing_interventions = [
+                k for k in option.interventions.keys() if k not in node_ids
+            ]
+            if missing_interventions:
+                logger.warning(
+                    "validation_warning",
+                    extra={
+                        "request_id": request_id,
+                        "reason": "missing_intervention_nodes",
+                        "option": option.id,
+                        "missing": missing_interventions,
+                    },
+                )
+
+        # Check for disconnected nodes (warning only)
+        connected = self._get_connected_nodes(request.graph, goal_id)
+        disconnected = node_ids - connected
+        if disconnected:
+            logger.info(
+                "validation_info",
+                extra={
+                    "request_id": request_id,
+                    "reason": "disconnected_nodes",
+                    "disconnected": list(disconnected),
+                },
+            )
+
+    def _has_cycle(self, graph: GraphV1) -> bool:
+        """Check if graph has a cycle using DFS."""
+        adjacency = {}
+        for node in graph.nodes:
+            adjacency[node.id] = []
+        for edge in graph.edges:
+            adjacency[edge.from_].append(edge.to)
+
+        visited = set()
+        rec_stack = set()
+
+        def dfs(node: str) -> bool:
+            visited.add(node)
+            rec_stack.add(node)
+            for neighbor in adjacency.get(node, []):
+                if neighbor not in visited:
+                    if dfs(neighbor):
+                        return True
+                elif neighbor in rec_stack:
+                    return True
+            rec_stack.discard(node)
+            return False
+
+        for node in adjacency:
+            if node not in visited:
+                if dfs(node):
+                    return True
+        return False
+
+    def _get_connected_nodes(self, graph: GraphV1, goal_id: str) -> set:
+        """Get all nodes connected to the goal node (ancestors)."""
+        reverse_adj = {}
+        for node in graph.nodes:
+            reverse_adj[node.id] = []
+        for edge in graph.edges:
+            reverse_adj[edge.to].append(edge.from_)
+
+        connected = {goal_id}
+        queue = [goal_id]
+        while queue:
+            current = queue.pop(0)
+            for parent in reverse_adj.get(current, []):
+                if parent not in connected:
+                    connected.add(parent)
+                    queue.append(parent)
+        return connected
+
     def analyze(
         self,
         request: RobustnessRequest,
@@ -91,21 +255,35 @@ class DecisionRobustnessAnalyzer:
 
         Returns:
             Complete RobustnessResult with all metrics
+
+        Raises:
+            ValueError: If validation fails
         """
         start_time = time.time()
+
+        # Input validation (Brief 20 Task 3)
+        self._validate_request(request, request_id)
+
         seed = make_deterministic(request.model_dump())
         np.random.seed(seed)
 
         options = request.analysis_options or AnalysisOptions()
         timeout_sec = (options.timeout_ms or 5000) / 1000
 
+        # Track completed and skipped analyses
+        completed_analyses: List[str] = []
+        skipped_analyses: List[str] = []
+
         logger.info(
             "decision_robustness_analysis_started",
             extra={
                 "request_id": request_id,
                 "num_options": len(request.options),
+                "num_nodes": len(request.graph.nodes),
+                "num_edges": len(request.graph.edges),
                 "goal_node": request.utility.goal_node_id,
                 "timeout_ms": options.timeout_ms,
+                "monte_carlo_samples": options.monte_carlo_samples,
             },
         )
 
@@ -114,12 +292,18 @@ class DecisionRobustnessAnalyzer:
             graph_model = self._build_graph_model(request.graph)
 
             # Step 2: Compute utility for all options
+            step_start = time.time()
             option_utilities = self._compute_all_utilities(
                 request.options,
                 graph_model,
                 request.utility,
                 options.monte_carlo_samples,
                 seed,
+            )
+            completed_analyses.append("rankings")
+            logger.debug(
+                "analysis_step_completed",
+                extra={"step": "rankings", "elapsed_ms": (time.time() - step_start) * 1000},
             )
 
             # Step 3: Rank options and create recommendation
@@ -131,6 +315,7 @@ class DecisionRobustnessAnalyzer:
             )
 
             # Step 4: Sensitivity analysis
+            step_start = time.time()
             sensitivity_params = self._compute_sensitivity(
                 option_rankings[0],  # Top option
                 graph_model,
@@ -139,8 +324,14 @@ class DecisionRobustnessAnalyzer:
                 options.perturbation_range,
                 seed,
             )
+            completed_analyses.append("sensitivity")
+            logger.debug(
+                "analysis_step_completed",
+                extra={"step": "sensitivity", "elapsed_ms": (time.time() - step_start) * 1000},
+            )
 
             # Step 5: Robustness bounds
+            step_start = time.time()
             robustness_bounds = self._compute_robustness_bounds(
                 option_rankings,
                 graph_model,
@@ -149,6 +340,11 @@ class DecisionRobustnessAnalyzer:
                 options.perturbation_range,
                 seed,
             )
+            completed_analyses.append("robustness_bounds")
+            logger.debug(
+                "analysis_step_completed",
+                extra={"step": "robustness_bounds", "elapsed_ms": (time.time() - step_start) * 1000},
+            )
 
             # Step 6: Determine robustness label
             robustness_label, robustness_summary = self._classify_robustness(
@@ -156,34 +352,74 @@ class DecisionRobustnessAnalyzer:
                 sensitivity_params,
             )
 
-            # Step 7: Value of Information (if enabled)
+            # Check timeout before expensive operations
+            elapsed_so_far = (time.time() - start_time) * 1000
+            time_remaining_ms = (timeout_sec * 1000) - elapsed_so_far
+
+            # Step 7: Value of Information (if enabled and time permits)
             voi_results: List[ValueOfInformation] = []
             if options.include_voi and request.parameter_uncertainties:
-                voi_results = self._compute_value_of_information(
-                    option_rankings,
-                    graph_model,
-                    request.utility,
-                    request.parameter_uncertainties,
-                    options.sample_sizes_for_evsi,
-                    seed,
-                )
+                if time_remaining_ms > 1000:  # Need at least 1s for VoI
+                    step_start = time.time()
+                    voi_results = self._compute_value_of_information(
+                        option_rankings,
+                        graph_model,
+                        request.utility,
+                        request.parameter_uncertainties,
+                        options.sample_sizes_for_evsi,
+                        seed,
+                    )
+                    completed_analyses.append("voi")
+                    logger.debug(
+                        "analysis_step_completed",
+                        extra={"step": "voi", "elapsed_ms": (time.time() - step_start) * 1000},
+                    )
+                else:
+                    skipped_analyses.append("voi")
+                    logger.info(
+                        "analysis_step_skipped",
+                        extra={"step": "voi", "reason": "timeout_approaching"},
+                    )
+            elif not options.include_voi:
+                skipped_analyses.append("voi")
+            elif not request.parameter_uncertainties:
+                skipped_analyses.append("voi")
 
-            # Step 8: Pareto frontier (if multi-goal and enabled)
+            # Step 8: Pareto frontier (if multi-goal, enabled, and time permits)
             pareto_result: Optional[ParetoResult] = None
             if (
                 options.include_pareto
                 and request.utility.additional_goals
                 and len(request.utility.additional_goals) > 0
             ):
-                pareto_result = self._compute_pareto_frontier(
-                    request.options,
-                    graph_model,
-                    request.utility,
-                    option_rankings[0].option_id,
-                    seed,
-                )
+                elapsed_so_far = (time.time() - start_time) * 1000
+                time_remaining_ms = (timeout_sec * 1000) - elapsed_so_far
+                if time_remaining_ms > 500:  # Need at least 500ms for Pareto
+                    step_start = time.time()
+                    pareto_result = self._compute_pareto_frontier(
+                        request.options,
+                        graph_model,
+                        request.utility,
+                        option_rankings[0].option_id,
+                        seed,
+                    )
+                    completed_analyses.append("pareto")
+                    logger.debug(
+                        "analysis_step_completed",
+                        extra={"step": "pareto", "elapsed_ms": (time.time() - step_start) * 1000},
+                    )
+                else:
+                    skipped_analyses.append("pareto")
+                    logger.info(
+                        "analysis_step_skipped",
+                        extra={"step": "pareto", "reason": "timeout_approaching"},
+                    )
+            elif not options.include_pareto:
+                skipped_analyses.append("pareto")
+            else:
+                skipped_analyses.append("pareto")
 
-            # Step 9: Generate narrative
+            # Step 9: Generate narrative (improved quality - Brief 20 Task 4)
             narrative = self._generate_narrative(
                 robustness_label,
                 sensitivity_params,
@@ -208,6 +444,8 @@ class DecisionRobustnessAnalyzer:
                 extra={
                     "request_id": request_id,
                     "elapsed_ms": elapsed_ms,
+                    "completed_analyses": completed_analyses,
+                    "skipped_analyses": skipped_analyses,
                     "robustness_label": robustness_label.value,
                     "top_option": option_rankings[0].option_id,
                 },
@@ -223,6 +461,10 @@ class DecisionRobustnessAnalyzer:
                 value_of_information=voi_results,
                 pareto=pareto_result,
                 narrative=narrative,
+                partial=len(skipped_analyses) > 0 and "voi" not in skipped_analyses,
+                completed_analyses=completed_analyses,
+                skipped_analyses=skipped_analyses,
+                elapsed_ms=elapsed_ms,
             )
 
         except FuturesTimeoutError:
@@ -1118,9 +1360,13 @@ class DecisionRobustnessAnalyzer:
         recommendation: Recommendation,
     ) -> str:
         """
-        Generate plain-language narrative combining all analyses.
+        Generate plain-language narrative combining all analyses (Brief 20 Task 4).
 
-        Template: "Your decision is [label]. [Top sensitivity]. [Top VoI if worthwhile]."
+        Improved narrative quality:
+        - Natural language flow
+        - Appropriate confidence hedging
+        - Actionable guidance
+        - No jargon
 
         Args:
             robustness_label: Robustness classification
@@ -1133,45 +1379,74 @@ class DecisionRobustnessAnalyzer:
             Narrative string
         """
         parts = []
+        opt_label = recommendation.option_label
 
-        # Robustness statement
+        # Opening statement based on robustness
         if robustness_label == RobustnessLabelEnum.ROBUST:
             parts.append(
-                f"Your decision to choose {recommendation.option_label} is robust."
+                f"Based on the analysis, {opt_label} is the recommended choice, "
+                "and this recommendation holds up well under uncertainty."
             )
         elif robustness_label == RobustnessLabelEnum.MODERATE:
             parts.append(
-                f"Your decision to choose {recommendation.option_label} is moderately robust."
+                f"Based on the analysis, {opt_label} appears to be the best choice, "
+                "though the recommendation depends on some assumptions that may need verification."
             )
         else:
             parts.append(
-                f"Your decision to choose {recommendation.option_label} is fragile."
+                f"The analysis suggests {opt_label} as a starting point, "
+                "but the recommendation is sensitive to assumptions and should be treated "
+                "as exploratory rather than definitive."
             )
 
-        # Top sensitivity insight
+        # Sensitivity insight with actionable framing
         if sensitivity_params:
             top_param = sensitivity_params[0]
-            parts.append(
-                f"The most influential factor is {top_param.parameter_label} "
-                f"(sensitivity: {top_param.sensitivity_score:.0%})."
-            )
+            direction_word = "improves" if top_param.impact_direction == ImpactDirectionEnum.POSITIVE else "decreases"
 
-        # Flip threshold if relevant
+            if top_param.sensitivity_score > 0.7:
+                parts.append(
+                    f"Your assumption about {top_param.parameter_label} has a major influence "
+                    f"on the outcome—if it {direction_word}, the expected results change significantly."
+                )
+            elif top_param.sensitivity_score > 0.4:
+                parts.append(
+                    f"The outcome is moderately sensitive to {top_param.parameter_label}."
+                )
+
+        # Flip threshold with concrete guidance
         if robustness_bounds and robustness_label != RobustnessLabelEnum.ROBUST:
             top_bound = min(robustness_bounds, key=lambda b: b.flip_threshold_pct)
-            parts.append(
-                f"Changing {top_bound.parameter_label} by ~{top_bound.flip_threshold_pct:.0f}% "
-                f"would flip the recommendation to {top_bound.flip_to_option}."
-            )
-
-        # VoI recommendation if worthwhile
-        if voi_results:
-            top_voi = voi_results[0]
-            if top_voi.evpi > 5000:
+            if top_bound.flip_threshold_pct < 20:
                 parts.append(
-                    f"Reducing uncertainty on {top_voi.parameter_label} "
-                    f"is worth up to {top_voi.evpi:,.0f}."
+                    f"Be aware: if {top_bound.parameter_label} turns out to be just "
+                    f"{top_bound.flip_threshold_pct:.0f}% different from your estimate, "
+                    f"{top_bound.flip_to_option} would become the better choice."
                 )
+            elif top_bound.flip_threshold_pct < 50:
+                parts.append(
+                    f"The recommendation would change to {top_bound.flip_to_option} "
+                    f"if {top_bound.parameter_label} shifts by about {top_bound.flip_threshold_pct:.0f}%."
+                )
+
+        # VoI with actionable suggestion
+        if voi_results:
+            high_value_voi = [v for v in voi_results if v.evpi > 5000]
+            if high_value_voi:
+                top_voi = high_value_voi[0]
+                parts.append(
+                    f"Consider gathering more data on {top_voi.parameter_label}—reducing "
+                    f"uncertainty here could be worth up to ${top_voi.evpi:,.0f} in better decisions."
+                )
+                if top_voi.data_collection_suggestion:
+                    parts.append(f"One approach: {top_voi.data_collection_suggestion}")
+
+        # Closing guidance based on status
+        if recommendation.recommendation_status == RecommendationStatusEnum.EXPLORATORY:
+            parts.append(
+                "Given the uncertainty, consider running a small pilot or gathering "
+                "more information before committing fully."
+            )
 
         return " ".join(parts)
 
@@ -1225,7 +1500,15 @@ class DecisionRobustnessAnalyzer:
             robustness_bounds=[],
             value_of_information=[],
             pareto=None,
-            narrative="Analysis timed out before completion. Treat results as exploratory.",
+            narrative=(
+                "The analysis timed out before completing all calculations. "
+                "The option rankings shown are preliminary. For more reliable results, "
+                "try simplifying the graph or increasing the timeout."
+            ),
+            partial=True,
+            completed_analyses=["rankings"],
+            skipped_analyses=["sensitivity", "robustness_bounds", "voi", "pareto"],
+            elapsed_ms=None,
         )
 
 
