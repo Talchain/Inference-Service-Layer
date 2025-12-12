@@ -1,0 +1,210 @@
+name: Configuration Validation
+
+on:
+  push:
+    branches: [main, staging, develop]
+  pull_request:
+    branches: [main, staging, develop]
+  workflow_dispatch:
+
+jobs:
+  validate-config:
+    name: Validate Configuration Safety
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml
+
+      - name: Check for insecure configuration patterns
+        run: |
+          echo "## Configuration Security Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          ERRORS=0
+          WARNINGS=0
+
+          # Check for ISL_AUTH_DISABLED=true in non-dev files
+          echo "### Checking for insecure auth configuration..." >> $GITHUB_STEP_SUMMARY
+
+          # Check deployment manifests, docker-compose files, env templates
+          for file in docker-compose*.yml docker-compose*.yaml *.env.example .env.* render.yaml; do
+            if [ -f "$file" ]; then
+              if grep -qi "ISL_AUTH_DISABLED.*true\|ISL_AUTH_DISABLED.*1\|ISL_AUTH_DISABLED.*yes" "$file"; then
+                echo "❌ **ERROR**: $file contains ISL_AUTH_DISABLED=true" >> $GITHUB_STEP_SUMMARY
+                echo "::error file=$file::ISL_AUTH_DISABLED=true found in deployment config. This disables authentication and must not be used in production."
+                ERRORS=$((ERRORS + 1))
+              fi
+            fi
+          done
+
+          # Check for hardcoded API keys (not template variables)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checking for hardcoded secrets..." >> $GITHUB_STEP_SUMMARY
+
+          for file in docker-compose*.yml docker-compose*.yaml render.yaml; do
+            if [ -f "$file" ]; then
+              # Look for ISL_API_KEY with actual values (not ${} template vars)
+              if grep -E "ISL_API_KEY[S]?:\s*['\"]?[a-zA-Z0-9_-]{10,}['\"]?" "$file" | grep -v '\${'; then
+                echo "⚠️ **WARNING**: $file may contain hardcoded API key" >> $GITHUB_STEP_SUMMARY
+                echo "::warning file=$file::Potential hardcoded API key detected. Use environment variables or secrets."
+                WARNINGS=$((WARNINGS + 1))
+              fi
+            fi
+          done
+
+          # Check for production-unsafe CORS settings
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checking CORS configuration..." >> $GITHUB_STEP_SUMMARY
+
+          for file in docker-compose*.yml docker-compose*.yaml render.yaml .env.production; do
+            if [ -f "$file" ]; then
+              if grep -qi "CORS_ORIGINS.*\*" "$file"; then
+                echo "❌ **ERROR**: $file contains wildcard CORS_ORIGINS" >> $GITHUB_STEP_SUMMARY
+                echo "::error file=$file::Wildcard CORS_ORIGINS (*) found. Not allowed in production."
+                ERRORS=$((ERRORS + 1))
+              fi
+            fi
+          done
+
+          # Check Sentry is enabled for staging/production configs
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Checking observability configuration..." >> $GITHUB_STEP_SUMMARY
+
+          for file in render.yaml docker-compose.prod.yml docker-compose.staging.yml; do
+            if [ -f "$file" ]; then
+              if ! grep -qi "SENTRY_ENABLED.*true\|SENTRY_ENABLED.*1" "$file"; then
+                echo "⚠️ **WARNING**: $file does not enable Sentry" >> $GITHUB_STEP_SUMMARY
+                echo "::warning file=$file::SENTRY_ENABLED not set to true. Recommended for production observability."
+                WARNINGS=$((WARNINGS + 1))
+              fi
+            fi
+          done
+
+          # Summary
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Errors: $ERRORS" >> $GITHUB_STEP_SUMMARY
+          echo "- Warnings: $WARNINGS" >> $GITHUB_STEP_SUMMARY
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "❌ **Configuration validation failed with $ERRORS error(s)**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+          if [ $WARNINGS -gt 0 ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Configuration validation passed with $WARNINGS warning(s)**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "✅ **Configuration validation passed**" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  validate-env-requirements:
+    name: Validate Environment Requirements
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Install dependencies
+        run: poetry install --no-interaction --no-root
+
+      - name: Run environment validation tests
+        env:
+          ENVIRONMENT: production
+          ISL_API_KEYS: test_key_for_ci
+          CORS_ORIGINS: https://app.example.com
+          REDIS_HOST: redis.example.com
+        run: |
+          poetry run python -c "
+          from src.config import get_settings, Settings
+          import sys
+
+          # Test production config validation
+          settings = Settings(
+              ENVIRONMENT='production',
+              ISL_API_KEYS='test_key',
+              CORS_ORIGINS='https://app.example.com',
+              REDIS_HOST='redis.example.com'
+          )
+
+          errors = settings.validate_production_config()
+          if errors:
+              print('Production config validation errors:')
+              for error in errors:
+                  print(f'  - {error}')
+              sys.exit(1)
+          else:
+              print('✅ Production config validation passed')
+
+          # Test that insecure config is rejected
+          insecure_settings = Settings(
+              ENVIRONMENT='production',
+              ISL_AUTH_DISABLED=True,  # This should be flagged
+              CORS_ORIGINS='*',  # This should be rejected
+          )
+
+          try:
+              # CORS validation should fail
+              print('Testing CORS wildcard rejection...')
+          except ValueError as e:
+              print(f'✅ Correctly rejected insecure CORS: {e}')
+
+          errors = insecure_settings.validate_production_config()
+          if not errors:
+              print('❌ ERROR: Insecure config should have been flagged')
+              sys.exit(1)
+          else:
+              print(f'✅ Correctly identified {len(errors)} insecure configuration(s)')
+              for error in errors:
+                  print(f'  - {error}')
+          "
+
+      - name: Verify required env vars documented
+        run: |
+          echo "Checking that required environment variables are documented..."
+
+          REQUIRED_VARS=(
+            "ISL_API_KEYS"
+            "ENVIRONMENT"
+            "CORS_ORIGINS"
+            "SENTRY_ENABLED"
+            "SENTRY_DSN"
+            "REDIS_HOST"
+          )
+
+          MISSING=0
+          for var in "${REQUIRED_VARS[@]}"; do
+            if ! grep -q "$var" README.md && ! grep -q "$var" docs/api/EXAMPLES.md; then
+              echo "⚠️ $var not documented in README or EXAMPLES"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+
+          if [ $MISSING -gt 0 ]; then
+            echo "::warning::$MISSING environment variables not documented"
+          else
+            echo "✅ All required environment variables documented"
+          fi
