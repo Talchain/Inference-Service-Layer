@@ -3289,3 +3289,121 @@ class CorrelationValidationRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Y₀ Identifiability Analysis Request Models
+# ============================================================================
+
+
+class IdentifiabilityRequest(BaseModel):
+    """
+    Request model for Y₀ identifiability analysis endpoint.
+
+    Analyzes whether the causal effect from decision to goal is identifiable
+    from observational data given the graph structure.
+    """
+
+    graph: GraphV1 = Field(
+        ...,
+        description="Decision graph with typed nodes (must include decision and goal nodes)"
+    )
+    decision_node_id: Optional[str] = Field(
+        None,
+        description="Override: specific decision node ID (auto-detected from kind='decision' if not provided)"
+    )
+    goal_node_id: Optional[str] = Field(
+        None,
+        description="Override: specific goal node ID (auto-detected from kind='goal' if not provided)"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "graph": {
+                    "nodes": [
+                        {"id": "price", "kind": "decision", "label": "Pricing Strategy"},
+                        {"id": "market_segment", "kind": "factor", "label": "Market Segment"},
+                        {"id": "revenue", "kind": "goal", "label": "Revenue Target"}
+                    ],
+                    "edges": [
+                        {"from": "price", "to": "revenue", "weight": 2.0},
+                        {"from": "market_segment", "to": "price", "weight": 1.5},
+                        {"from": "market_segment", "to": "revenue", "weight": 1.0}
+                    ]
+                }
+            }
+        }
+    }
+
+
+class IdentifiabilityFromDAGRequest(BaseModel):
+    """
+    Request model for identifiability analysis from simple DAG structure.
+
+    Alternative to GraphV1 format for simpler use cases.
+    """
+
+    nodes: List[str] = Field(
+        ...,
+        description="List of node names in the DAG",
+        min_length=2,
+        max_length=50
+    )
+    edges: List[Tuple[str, str]] = Field(
+        ...,
+        description="List of directed edges as (from, to) tuples",
+        max_length=200
+    )
+    treatment: str = Field(
+        ...,
+        description="Treatment/decision node name"
+    )
+    outcome: str = Field(
+        ...,
+        description="Outcome/goal node name"
+    )
+
+    @field_validator("edges")
+    @classmethod
+    def validate_edges_reference_nodes(cls, v, info):
+        """Validate edges reference existing nodes."""
+        if 'nodes' in info.data:
+            nodes = set(info.data['nodes'])
+            for from_node, to_node in v:
+                if from_node not in nodes:
+                    raise ValueError(f"Edge references non-existent node: {from_node}")
+                if to_node not in nodes:
+                    raise ValueError(f"Edge references non-existent node: {to_node}")
+        return v
+
+    @field_validator("treatment")
+    @classmethod
+    def validate_treatment_in_nodes(cls, v, info):
+        """Validate treatment is in nodes."""
+        if 'nodes' in info.data and v not in info.data['nodes']:
+            raise ValueError(f"Treatment '{v}' not found in nodes")
+        return v
+
+    @field_validator("outcome")
+    @classmethod
+    def validate_outcome_in_nodes(cls, v, info):
+        """Validate outcome is in nodes."""
+        if 'nodes' in info.data and v not in info.data['nodes']:
+            raise ValueError(f"Outcome '{v}' not found in nodes")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "nodes": ["price", "market_segment", "revenue"],
+                "edges": [
+                    ["price", "revenue"],
+                    ["market_segment", "price"],
+                    ["market_segment", "revenue"]
+                ],
+                "treatment": "price",
+                "outcome": "revenue"
+            }
+        }
+    }

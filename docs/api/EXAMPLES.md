@@ -891,3 +891,157 @@ curl -X POST "$ISL_URL/api/v1/analysis/optimise" \
   ]
 }
 ```
+
+---
+
+## 14. Y₀ Identifiability Analysis
+
+### Check Effect Identifiability (GraphV1 Format)
+
+Determine if a causal effect is identifiable from observational data using the Y₀ algorithm.
+
+**HARD RULE:** If the decision→goal effect is non-identifiable, recommendations are marked as "exploratory" (not "actionable").
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/identifiability" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "graph": {
+      "nodes": [
+        {"id": "price", "kind": "decision", "label": "Pricing Strategy"},
+        {"id": "market_segment", "kind": "factor", "label": "Market Segment"},
+        {"id": "revenue", "kind": "goal", "label": "Revenue Target"}
+      ],
+      "edges": [
+        {"from": "price", "to": "revenue", "weight": 2.0},
+        {"from": "market_segment", "to": "price", "weight": 1.5},
+        {"from": "market_segment", "to": "revenue", "weight": 1.0}
+      ]
+    }
+  }'
+```
+
+**Response (Identifiable - Actionable):**
+```json
+{
+  "schema_version": "identifiability.v1",
+  "identifiability": {
+    "effect": "price → revenue",
+    "identifiable": true,
+    "method": "backdoor",
+    "adjustment_set": ["market_segment"],
+    "confidence": "high",
+    "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+  },
+  "recommendation_status": "actionable",
+  "recommendation_caveat": null,
+  "suggestions": null,
+  "backdoor_paths": ["price → market_segment → revenue"]
+}
+```
+
+### Check Non-Identifiable Effect
+
+When an effect is non-identifiable, the hard rule enforces exploratory status:
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/identifiability" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "graph": {
+      "nodes": [
+        {"id": "decision", "kind": "decision", "label": "Decision"},
+        {"id": "other", "kind": "outcome", "label": "Other Outcome"},
+        {"id": "goal", "kind": "goal", "label": "Goal"}
+      ],
+      "edges": [
+        {"from": "decision", "to": "other", "weight": 1.0}
+      ]
+    }
+  }'
+```
+
+**Response (Non-Identifiable - Exploratory):**
+```json
+{
+  "schema_version": "identifiability.v1",
+  "identifiability": {
+    "effect": "decision → goal",
+    "identifiable": false,
+    "method": "non_identifiable",
+    "adjustment_set": null,
+    "confidence": "high",
+    "explanation": "No causal path exists from 'decision' to 'goal'. The decision cannot affect the goal in this model."
+  },
+  "recommendation_status": "exploratory",
+  "recommendation_caveat": "No causal connection exists between decision and goal. Any recommendations would be meaningless.",
+  "suggestions": [
+    {
+      "description": "Add direct or mediated causal path from 'decision' to 'goal'",
+      "edges_to_add": [["decision", "goal"]],
+      "priority": "critical"
+    },
+    {
+      "description": "Verify that 'decision' actually causally affects 'goal' in the real-world domain",
+      "priority": "critical"
+    }
+  ],
+  "backdoor_paths": null
+}
+```
+
+### Simple DAG Format
+
+Alternative endpoint for simple DAG structures:
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/identifiability/dag" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "nodes": ["X", "Y", "Z"],
+    "edges": [["X", "Y"], ["Z", "X"], ["Z", "Y"]],
+    "treatment": "X",
+    "outcome": "Y"
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "identifiability.v1",
+  "identifiability": {
+    "effect": "X → Y",
+    "identifiable": true,
+    "method": "backdoor",
+    "adjustment_set": ["Z"],
+    "confidence": "high",
+    "explanation": "The effect of 'X' on 'Y' is identifiable using the backdoor criterion. Adjust for: Z."
+  },
+  "recommendation_status": "actionable",
+  "recommendation_caveat": null,
+  "suggestions": null,
+  "backdoor_paths": ["X → Z → Y"]
+}
+```
+
+### Identification Methods
+
+The Y₀ algorithm supports multiple identification methods:
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `backdoor` | Block all backdoor paths by conditioning | Adjust for confounders |
+| `frontdoor` | Use mediating variables when backdoor blocked | Mechanism-based identification |
+| `instrumental` | Use variables affecting X but not Y directly | Natural experiments |
+| `do_calculus` | General graphical rules | Complex identification |
+| `non_identifiable` | No identification method found | Exploratory recommendations |
+
+### Hard Rule Summary
+
+| Identifiability | recommendation_status | recommendation_caveat |
+|-----------------|----------------------|----------------------|
+| `true` | `actionable` | `null` |
+| `false` | `exploratory` | Warning message (required) |
