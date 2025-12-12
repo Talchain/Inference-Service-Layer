@@ -378,6 +378,24 @@ class RobustnessResult(BaseModel):
         description="Plain language summary combining all analyses"
     )
 
+    # Partial results tracking (Brief 20 Task 2)
+    partial: bool = Field(
+        default=False,
+        description="Whether this is a partial result due to timeout"
+    )
+    completed_analyses: List[str] = Field(
+        default_factory=lambda: ["rankings", "sensitivity", "robustness_bounds"],
+        description="Analyses that completed successfully"
+    )
+    skipped_analyses: List[str] = Field(
+        default_factory=list,
+        description="Analyses skipped due to timeout or disabled"
+    )
+    elapsed_ms: Optional[float] = Field(
+        default=None,
+        description="Total analysis time in milliseconds"
+    )
+
     # Metadata
     metadata: Optional[ISLResponseMetadata] = Field(
         default=None,

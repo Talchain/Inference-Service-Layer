@@ -143,6 +143,12 @@ class Settings(BaseSettings):
         description="Enable outcome logging for calibration"
     )
 
+    # Y₀ Identifiability Analysis (Brief 6)
+    ENABLE_IDENTIFIABILITY_ANALYSIS: bool = Field(
+        default=True,
+        description="Enable Y₀ identifiability analysis with hard rule enforcement"
+    )
+
     model_config = ConfigDict(
         env_file=".env",
         case_sensitive=True
