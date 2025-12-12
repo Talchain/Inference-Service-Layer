@@ -47,6 +47,9 @@ from .team import router as team_router
 from .threshold import router as threshold_router
 from .utility import router as utility_router
 from .validation import router as validation_router
+from .identifiability import router as identifiability_router
+from .decision_robustness import router as decision_robustness_router
+from .outcomes import router as outcomes_router
 
 # Setup logging
 logger = setup_logging()
@@ -658,6 +661,21 @@ app.include_router(
     phase4_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Phase 4: Sequential Decisions"],
+)
+app.include_router(
+    identifiability_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Y₀ Identifiability"],
+)
+app.include_router(
+    decision_robustness_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Decision Robustness Suite"],
+)
+app.include_router(
+    outcomes_router,
+    prefix=f"{settings.API_V1_PREFIX}/outcomes",
+    tags=["Outcome Logging"],
 )
 # ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
 # app.include_router(

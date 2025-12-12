@@ -2614,6 +2614,21 @@ class MultiCriteriaResponse(BaseModel):
         None,
         description="Warnings about auto-corrections or validation issues"
     )
+
+    # Y₀ Identifiability fields (Task: Y₀ Hard Rule)
+    identifiability: Optional["IdentifiabilityInfo"] = Field(
+        default=None,
+        description="Identifiability analysis for the primary decision→goal effect (if graph provided)"
+    )
+    recommendation_status: Optional["RecommendationStatusEnum"] = Field(
+        default=None,
+        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+    )
+    recommendation_caveat: Optional[str] = Field(
+        default=None,
+        description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
+    )
+
     metadata: Optional["ISLResponseMetadata"] = Field(
         None,
         description="Request metadata for tracing and monitoring"
@@ -3899,6 +3914,20 @@ class OptimisationResponse(BaseModel):
         description="Warnings about the optimization result"
     )
 
+    # Y₀ Identifiability fields (Task: Y₀ Hard Rule)
+    identifiability: Optional["IdentifiabilityInfo"] = Field(
+        default=None,
+        description="Identifiability analysis for the primary decision→goal effect (if graph provided)"
+    )
+    recommendation_status: Optional["RecommendationStatusEnum"] = Field(
+        default=None,
+        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+    )
+    recommendation_caveat: Optional[str] = Field(
+        default=None,
+        description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
+    )
+
     # Metadata for determinism and reproducibility
     metadata: Optional["ISLResponseMetadata"] = Field(
         default=None,
@@ -4676,3 +4705,221 @@ class CorrelationValidationResponse(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# Y₀ Identifiability Analysis Response Models
+# ============================================================================
+
+
+class IdentificationMethodEnum(str, Enum):
+    """Method used for causal identification."""
+
+    BACKDOOR = "backdoor"
+    FRONTDOOR = "frontdoor"
+    INSTRUMENTAL = "instrumental"
+    DO_CALCULUS = "do_calculus"
+    NON_IDENTIFIABLE = "non_identifiable"
+
+
+class RecommendationStatusEnum(str, Enum):
+    """Status of recommendations based on identifiability (hard rule)."""
+
+    ACTIONABLE = "actionable"  # Effect is identifiable, recommendations reliable
+    EXPLORATORY = "exploratory"  # Effect NOT identifiable, treat as hypotheses
+
+
+class IdentifiabilitySuggestionResponse(BaseModel):
+    """Suggestion for making an effect identifiable."""
+
+    description: str = Field(
+        ...,
+        description="Human-readable suggestion for making effect identifiable"
+    )
+    variable_to_add: Optional[str] = Field(
+        None,
+        description="Variable that could be added to enable identification"
+    )
+    edges_to_add: Optional[List[Tuple[str, str]]] = Field(
+        None,
+        description="Edges that could be added to enable identification"
+    )
+    priority: str = Field(
+        default="recommended",
+        description="Priority: 'critical', 'recommended', 'optional'"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "description": "Adding 'market_conditions' as an observed factor would enable backdoor adjustment",
+                "variable_to_add": "market_conditions_observed",
+                "edges_to_add": [["market_conditions_observed", "price"], ["market_conditions_observed", "revenue"]],
+                "priority": "recommended"
+            }
+        }
+    }
+
+
+class IdentifiabilityInfo(BaseModel):
+    """
+    Structured identifiability information for causal effects.
+
+    This implements the Y₀ identifiability analysis as specified,
+    including the hard rule for non-identifiable effects.
+    """
+
+    effect: str = Field(
+        ...,
+        description="The causal effect being analyzed (e.g., 'decision → goal')"
+    )
+    identifiable: bool = Field(
+        ...,
+        description="Whether the causal effect is identifiable from observational data"
+    )
+    method: Optional[IdentificationMethodEnum] = Field(
+        None,
+        description="Method used for identification: backdoor, frontdoor, instrumental, do_calculus, or non_identifiable"
+    )
+    adjustment_set: Optional[List[str]] = Field(
+        None,
+        description="Variables to condition on for identification (if identifiable)"
+    )
+    confidence: ConfidenceLevel = Field(
+        ...,
+        description="Confidence in the identifiability assessment"
+    )
+    explanation: str = Field(
+        ...,
+        description="Human-readable explanation of identifiability status"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "effect": "price → revenue",
+                "identifiable": True,
+                "method": "backdoor",
+                "adjustment_set": ["market_segment"],
+                "confidence": "high",
+                "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+            }
+        }
+    }
+
+
+class IdentifiabilityResponse(BaseModel):
+    """
+    Response model for Y₀ identifiability analysis endpoint.
+
+    Implements the hard rule: if primary decision→goal effect is non-identifiable,
+    recommendations are marked as 'exploratory' rather than 'actionable'.
+    """
+
+    schema_version: str = Field(
+        default="identifiability.v1",
+        description="Schema version for this response"
+    )
+    identifiability: IdentifiabilityInfo = Field(
+        ...,
+        description="Core identifiability analysis results"
+    )
+    recommendation_status: RecommendationStatusEnum = Field(
+        ...,
+        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+    )
+    recommendation_caveat: Optional[str] = Field(
+        None,
+        description="Caveat for recommendations if effect is non-identifiable"
+    )
+    suggestions: Optional[List[IdentifiabilitySuggestionResponse]] = Field(
+        None,
+        description="Suggestions for making effect identifiable (if non-identifiable)"
+    )
+    backdoor_paths: Optional[List[str]] = Field(
+        None,
+        description="Backdoor paths identified in the graph"
+    )
+
+    # Metadata for tracing
+    metadata: Optional["ISLResponseMetadata"] = Field(
+        default=None,
+        description="Request metadata for tracing and monitoring"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "title": "Identifiable Effect",
+                    "value": {
+                        "schema_version": "identifiability.v1",
+                        "identifiability": {
+                            "effect": "price → revenue",
+                            "identifiable": True,
+                            "method": "backdoor",
+                            "adjustment_set": ["market_segment"],
+                            "confidence": "high",
+                            "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+                        },
+                        "recommendation_status": "actionable",
+                        "recommendation_caveat": None,
+                        "suggestions": None,
+                        "backdoor_paths": ["price → market_segment → revenue"]
+                    }
+                },
+                {
+                    "title": "Non-Identifiable Effect (Hard Rule Applied)",
+                    "value": {
+                        "schema_version": "identifiability.v1",
+                        "identifiability": {
+                            "effect": "marketing_spend → sales",
+                            "identifiable": False,
+                            "method": "non_identifiable",
+                            "adjustment_set": None,
+                            "confidence": "high",
+                            "explanation": "The effect of 'marketing_spend' on 'sales' is NOT identifiable. There is unmeasured confounding that cannot be blocked."
+                        },
+                        "recommendation_status": "exploratory",
+                        "recommendation_caveat": "Causal effect cannot be confirmed from current model structure. Recommendations should be treated as exploratory hypotheses, not actionable conclusions.",
+                        "suggestions": [
+                            {
+                                "description": "If 'market_conditions' were observed as a confounder, conditioning on it might block the backdoor path",
+                                "variable_to_add": "market_conditions_observed",
+                                "priority": "recommended"
+                            },
+                            {
+                                "description": "Adding an instrumental variable that affects 'marketing_spend' but not 'sales' directly could enable identification",
+                                "variable_to_add": "marketing_spend_instrument",
+                                "edges_to_add": [["marketing_spend_instrument", "marketing_spend"]],
+                                "priority": "recommended"
+                            }
+                        ],
+                        "backdoor_paths": ["marketing_spend → unmeasured_confounder → sales"]
+                    }
+                }
+            ]
+        }
+    }
+
+
+class IdentifiabilityEnhancedResponse(BaseModel):
+    """
+    Mixin for responses that include identifiability information.
+
+    Used to add identifiability to existing response models like
+    OptimisationResponse and MultiCriteriaResponse.
+    """
+
+    identifiability: Optional[IdentifiabilityInfo] = Field(
+        None,
+        description="Identifiability analysis for the primary decision→goal effect"
+    )
+    recommendation_status: Optional[RecommendationStatusEnum] = Field(
+        None,
+        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+    )
+    recommendation_caveat: Optional[str] = Field(
+        None,
+        description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
+    )

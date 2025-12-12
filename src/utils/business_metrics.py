@@ -358,3 +358,47 @@ def track_llm_budget_exceeded(session_type: str) -> None:
 def track_llm_fallback(reason: str) -> None:
     """Track LLM fallback to rule-based system."""
     llm_fallback_to_rules_total.labels(reason=reason).inc()
+
+
+# Decision Robustness Suite metrics (Brief 7)
+decision_robustness_analyses_total = Counter(
+    'isl_decision_robustness_analyses_total',
+    'Total Decision Robustness Suite analyses',
+    ['robustness_label', 'recommendation_status']
+)
+
+decision_robustness_duration = Histogram(
+    'isl_decision_robustness_duration_ms',
+    'Decision Robustness Suite analysis duration in ms',
+    buckets=[100, 500, 1000, 2000, 5000, 10000]
+)
+
+decision_robustness_options = Histogram(
+    'isl_decision_robustness_options_count',
+    'Number of options in robustness analysis',
+    buckets=[2, 3, 5, 7, 10, 15, 20]
+)
+
+
+def track_business_metric(metric_name: str, labels: dict) -> None:
+    """
+    Generic business metric tracking helper.
+
+    Routes to appropriate metric based on metric_name.
+
+    Args:
+        metric_name: Name of the metric to track
+        labels: Dictionary of label values
+    """
+    if metric_name == "robustness_analysis":
+        robustness_label = labels.get("robustness_label", "unknown")
+        recommendation_status = labels.get("recommendation_status", "unknown")
+        elapsed_ms = labels.get("elapsed_ms", 0)
+        num_options = labels.get("num_options", 0)
+
+        decision_robustness_analyses_total.labels(
+            robustness_label=robustness_label,
+            recommendation_status=recommendation_status,
+        ).inc()
+        decision_robustness_duration.observe(elapsed_ms)
+        decision_robustness_options.observe(num_options)

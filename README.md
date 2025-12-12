@@ -30,6 +30,9 @@ curl -X POST http://localhost:8000/api/v1/validation/assumptions \
 |------------|----------|-------------|
 | **Multi-Criteria Analysis** | `/api/v1/analysis/*` | Dominance, Pareto, risk adjustment, thresholds |
 | **Continuous Optimization** | `/api/v1/analysis/optimise` | Grid search with constraints, confidence intervals, sensitivity |
+| **Y₀ Identifiability** | `/api/v1/analysis/identifiability` | Causal effect identifiability analysis with hard rule |
+| **Decision Robustness** | `/api/v1/analysis/robustness` | Unified sensitivity, robustness bounds, VoI, Pareto |
+| **Outcome Logging** | `/api/v1/outcomes/*` | Log decisions and outcomes for calibration |
 | **Aggregation** | `/api/v1/aggregation/*` | Multi-criteria scoring (sum/product/lexicographic) |
 | **Validation** | `/api/v1/validation/*` | Validate causal DAGs, constraints, coherence |
 | **Feasibility Checking** | `/api/v1/validation/feasibility` | Check options against business constraints |
@@ -66,6 +69,7 @@ Import the complete API collection for interactive testing and development:
 - ✅ Threshold Identification - Parameter sensitivity analysis
 - ✅ Multi-Criteria Aggregation - Weighted sum/product/lexicographic
 - ✅ Continuous Optimization - Grid search with constraints and sensitivity
+- ✅ Y₀ Identifiability - Causal effect identifiability with hard rule enforcement
 - ✅ Feasibility Checking - Validate options against constraints
 - ✅ Coherence Analysis - Ranking stability and close race detection
 - ✅ Utility Validation - Multi-goal utility function specs

@@ -129,6 +129,20 @@ class Settings(BaseSettings):
     # Determinism
     ENABLE_DETERMINISTIC_MODE: bool = True
 
+    # Decision Robustness Suite (Brief 7)
+    ENABLE_ROBUSTNESS_SUITE: bool = Field(
+        default=True,
+        description="Enable Decision Robustness Suite unified analysis"
+    )
+    ENABLE_PARETO_FRONTIER: bool = Field(
+        default=True,
+        description="Enable Pareto frontier analysis for multi-goal decisions"
+    )
+    ENABLE_OUTCOME_LOGGING: bool = Field(
+        default=True,
+        description="Enable outcome logging for calibration"
+    )
+
     model_config = ConfigDict(
         env_file=".env",
         case_sensitive=True

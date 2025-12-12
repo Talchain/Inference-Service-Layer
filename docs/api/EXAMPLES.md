@@ -891,3 +891,389 @@ curl -X POST "$ISL_URL/api/v1/analysis/optimise" \
   ]
 }
 ```
+
+---
+
+## 14. Y₀ Identifiability Analysis
+
+### Check Effect Identifiability (GraphV1 Format)
+
+Determine if a causal effect is identifiable from observational data using the Y₀ algorithm.
+
+**HARD RULE:** If the decision→goal effect is non-identifiable, recommendations are marked as "exploratory" (not "actionable").
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/identifiability" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "graph": {
+      "nodes": [
+        {"id": "price", "kind": "decision", "label": "Pricing Strategy"},
+        {"id": "market_segment", "kind": "factor", "label": "Market Segment"},
+        {"id": "revenue", "kind": "goal", "label": "Revenue Target"}
+      ],
+      "edges": [
+        {"from": "price", "to": "revenue", "weight": 2.0},
+        {"from": "market_segment", "to": "price", "weight": 1.5},
+        {"from": "market_segment", "to": "revenue", "weight": 1.0}
+      ]
+    }
+  }'
+```
+
+**Response (Identifiable - Actionable):**
+```json
+{
+  "schema_version": "identifiability.v1",
+  "identifiability": {
+    "effect": "price → revenue",
+    "identifiable": true,
+    "method": "backdoor",
+    "adjustment_set": ["market_segment"],
+    "confidence": "high",
+    "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+  },
+  "recommendation_status": "actionable",
+  "recommendation_caveat": null,
+  "suggestions": null,
+  "backdoor_paths": ["price → market_segment → revenue"]
+}
+```
+
+### Check Non-Identifiable Effect
+
+When an effect is non-identifiable, the hard rule enforces exploratory status:
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/identifiability" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "graph": {
+      "nodes": [
+        {"id": "decision", "kind": "decision", "label": "Decision"},
+        {"id": "other", "kind": "outcome", "label": "Other Outcome"},
+        {"id": "goal", "kind": "goal", "label": "Goal"}
+      ],
+      "edges": [
+        {"from": "decision", "to": "other", "weight": 1.0}
+      ]
+    }
+  }'
+```
+
+**Response (Non-Identifiable - Exploratory):**
+```json
+{
+  "schema_version": "identifiability.v1",
+  "identifiability": {
+    "effect": "decision → goal",
+    "identifiable": false,
+    "method": "non_identifiable",
+    "adjustment_set": null,
+    "confidence": "high",
+    "explanation": "No causal path exists from 'decision' to 'goal'. The decision cannot affect the goal in this model."
+  },
+  "recommendation_status": "exploratory",
+  "recommendation_caveat": "No causal connection exists between decision and goal. Any recommendations would be meaningless.",
+  "suggestions": [
+    {
+      "description": "Add direct or mediated causal path from 'decision' to 'goal'",
+      "edges_to_add": [["decision", "goal"]],
+      "priority": "critical"
+    },
+    {
+      "description": "Verify that 'decision' actually causally affects 'goal' in the real-world domain",
+      "priority": "critical"
+    }
+  ],
+  "backdoor_paths": null
+}
+```
+
+### Simple DAG Format
+
+Alternative endpoint for simple DAG structures:
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/identifiability/dag" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "nodes": ["X", "Y", "Z"],
+    "edges": [["X", "Y"], ["Z", "X"], ["Z", "Y"]],
+    "treatment": "X",
+    "outcome": "Y"
+  }'
+```
+
+**Response:**
+```json
+{
+  "schema_version": "identifiability.v1",
+  "identifiability": {
+    "effect": "X → Y",
+    "identifiable": true,
+    "method": "backdoor",
+    "adjustment_set": ["Z"],
+    "confidence": "high",
+    "explanation": "The effect of 'X' on 'Y' is identifiable using the backdoor criterion. Adjust for: Z."
+  },
+  "recommendation_status": "actionable",
+  "recommendation_caveat": null,
+  "suggestions": null,
+  "backdoor_paths": ["X → Z → Y"]
+}
+```
+
+### Identification Methods
+
+The Y₀ algorithm supports multiple identification methods:
+
+| Method | Description | Example |
+|--------|-------------|---------|
+| `backdoor` | Block all backdoor paths by conditioning | Adjust for confounders |
+| `frontdoor` | Use mediating variables when backdoor blocked | Mechanism-based identification |
+| `instrumental` | Use variables affecting X but not Y directly | Natural experiments |
+| `do_calculus` | General graphical rules | Complex identification |
+| `non_identifiable` | No identification method found | Exploratory recommendations |
+
+### Hard Rule Summary
+
+| Identifiability | recommendation_status | recommendation_caveat |
+|-----------------|----------------------|----------------------|
+| `true` | `actionable` | `null` |
+| `false` | `exploratory` | Warning message (required) |
+
+---
+
+## 15. Decision Robustness Suite
+
+Unified robustness analysis combining sensitivity, robustness bounds, value of information, and Pareto frontier analysis.
+
+### Unified Robustness Analysis
+
+Perform comprehensive decision robustness analysis in a single call.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/robustness" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "graph": {
+      "nodes": [
+        {"id": "marketing_spend", "kind": "decision", "label": "Marketing Spend"},
+        {"id": "price", "kind": "decision", "label": "Product Price"},
+        {"id": "demand", "kind": "factor", "label": "Customer Demand"},
+        {"id": "revenue", "kind": "goal", "label": "Revenue"}
+      ],
+      "edges": [
+        {"from": "marketing_spend", "to": "demand", "weight": 2.0},
+        {"from": "price", "to": "demand", "weight": -1.5},
+        {"from": "demand", "to": "revenue", "weight": 2.5}
+      ]
+    },
+    "options": [
+      {
+        "id": "option_a",
+        "label": "Aggressive Marketing",
+        "interventions": {"marketing_spend": 100000, "price": 49.99},
+        "is_baseline": false
+      },
+      {
+        "id": "option_b",
+        "label": "Premium Pricing",
+        "interventions": {"marketing_spend": 50000, "price": 79.99},
+        "is_baseline": true
+      }
+    ],
+    "utility": {
+      "goal_node_id": "revenue",
+      "maximize": true
+    },
+    "analysis_options": {
+      "sensitivity_top_n": 5,
+      "perturbation_range": 0.5,
+      "monte_carlo_samples": 1000,
+      "include_pareto": false,
+      "include_voi": false
+    }
+  }'
+```
+
+**Response:**
+```json
+{
+  "result": {
+    "option_rankings": [
+      {
+        "option_id": "option_a",
+        "option_label": "Aggressive Marketing",
+        "expected_utility": 150000.0,
+        "utility_distribution": {
+          "p5": 120000.0,
+          "p25": 135000.0,
+          "p50": 150000.0,
+          "p75": 165000.0,
+          "p95": 180000.0
+        },
+        "rank": 1,
+        "vs_baseline": 25000.0,
+        "vs_baseline_pct": 20.0
+      }
+    ],
+    "recommendation": {
+      "option_id": "option_a",
+      "option_label": "Aggressive Marketing",
+      "confidence": "high",
+      "recommendation_status": "actionable"
+    },
+    "sensitivity": [
+      {
+        "parameter_id": "edge_marketing_spend_demand",
+        "parameter_label": "marketing_spend → demand weight",
+        "sensitivity_score": 0.85,
+        "current_value": 2.0,
+        "impact_direction": "positive",
+        "description": "Increasing marketing_spend→demand connection improves outcome"
+      }
+    ],
+    "robustness_label": "robust",
+    "robustness_summary": "Your decision is robust. Even 50% changes to key parameters wouldn't change the recommendation.",
+    "robustness_bounds": [
+      {
+        "parameter_id": "edge_price_demand",
+        "parameter_label": "price → demand weight",
+        "flip_threshold": 0.75,
+        "flip_threshold_pct": 50.0,
+        "flip_to_option": "option_b"
+      }
+    ],
+    "value_of_information": [],
+    "pareto": null,
+    "narrative": "Your decision to choose Aggressive Marketing is robust. The most influential factor is marketing_spend → demand weight (sensitivity: 85%)."
+  }
+}
+```
+
+### With Value of Information
+
+Add parameter uncertainties to get VoI analysis.
+
+```bash
+curl -X POST "$ISL_URL/api/v1/analysis/robustness" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "graph": { ... },
+    "options": [ ... ],
+    "utility": {"goal_node_id": "revenue"},
+    "analysis_options": {
+      "include_voi": true,
+      "sample_sizes_for_evsi": [10, 50, 100]
+    },
+    "parameter_uncertainties": {
+      "customer_churn": {"mean": 0.15, "std": 0.05},
+      "price_elasticity": {"mean": -1.2, "std": 0.3}
+    }
+  }'
+```
+
+**VoI Response Fields:**
+```json
+{
+  "value_of_information": [
+    {
+      "parameter_id": "customer_churn",
+      "parameter_label": "Customer Churn",
+      "evpi": 15000.0,
+      "evsi": 8500.0,
+      "current_uncertainty": 0.05,
+      "recommendation": "High value - consider gathering data",
+      "data_collection_suggestion": "Gather data on customer_churn. Sample size of 50 recommended."
+    }
+  ]
+}
+```
+
+### Robustness Classification
+
+| Label | Threshold | Meaning |
+|-------|-----------|---------|
+| `robust` | Flip requires ≥50% change | Safe to act on recommendation |
+| `moderate` | Flip requires 20-50% change | Act with monitoring |
+| `fragile` | Flip requires <20% change | Treat as exploratory |
+
+When `robustness_label` is `fragile`, `recommendation_status` automatically becomes `exploratory`.
+
+---
+
+## 16. Outcome Logging
+
+Log decisions and outcomes for future calibration analysis.
+
+### Log a Decision
+
+```bash
+curl -X POST "$ISL_URL/api/v1/outcomes/log" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "decision_id": "decision_001",
+    "graph_hash": "abc123def456",
+    "response_hash": "xyz789",
+    "chosen_option": "option_a",
+    "recommendation_option": "option_a",
+    "user_id": "user_123",
+    "tenant_id": "tenant_xyz"
+  }'
+```
+
+**Response:**
+```json
+{
+  "id": "log_fc33c1d3d38a",
+  "decision_id": "decision_001",
+  "graph_hash": "abc123def456",
+  "response_hash": "xyz789",
+  "chosen_option": "option_a",
+  "recommendation_option": "option_a",
+  "recommendation_followed": true,
+  "timestamp": "2024-01-15T10:30:00Z",
+  "outcome_values": null,
+  "user_id": "user_123",
+  "tenant_id": "tenant_xyz"
+}
+```
+
+### Update with Actual Outcome
+
+```bash
+curl -X PATCH "$ISL_URL/api/v1/outcomes/log_fc33c1d3d38a" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $ISL_API_KEY" \
+  -d '{
+    "outcome_values": {"revenue": 155000.0},
+    "notes": "Q1 results exceeded expectations"
+  }'
+```
+
+### Get Summary Statistics
+
+```bash
+curl -X GET "$ISL_URL/api/v1/outcomes/summary" \
+  -H "X-API-Key: $ISL_API_KEY"
+```
+
+**Response:**
+```json
+{
+  "total_logged": 150,
+  "with_outcomes": 45,
+  "recommendations_followed": 120,
+  "recommendations_followed_pct": 80.0,
+  "avg_outcome_when_followed": 142000.0,
+  "avg_outcome_when_not_followed": 125000.0
+}
+```
