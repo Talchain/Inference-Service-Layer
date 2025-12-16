@@ -643,22 +643,30 @@ class RobustnessAnalyzerV2:
         shift: float,
         rng: SeededRNG,
     ) -> Dict[Tuple[str, str], float]:
-        """Sample edge configuration with one edge's mean shifted."""
+        """
+        Sample edge configuration with one edge's mean shifted.
+
+        CRITICAL: The target edge is FORCED to exist so we isolate
+        magnitude effect from existence effect. Otherwise, magnitude
+        sensitivity would be conflated with structural uncertainty.
+        """
         config = {}
 
         for edge in edges:
             edge_key = (edge.from_, edge.to)
 
-            if rng.bernoulli(edge.exists_probability):
-                if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
-                    # Shift this edge's mean
-                    config[edge_key] = rng.normal(
-                        edge.strength.mean + shift, edge.strength.std
-                    )
-                else:
-                    config[edge_key] = rng.normal(edge.strength.mean, edge.strength.std)
+            if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
+                # TARGET EDGE: Force to exist and apply shifted mean
+                # This isolates magnitude sensitivity from existence sensitivity
+                config[edge_key] = rng.normal(
+                    edge.strength.mean + shift, edge.strength.std
+                )
             else:
-                config[edge_key] = 0.0
+                # OTHER EDGES: Sample normally (both existence and strength)
+                if rng.bernoulli(edge.exists_probability):
+                    config[edge_key] = rng.normal(edge.strength.mean, edge.strength.std)
+                else:
+                    config[edge_key] = 0.0
 
         return config
 

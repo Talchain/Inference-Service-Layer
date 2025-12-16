@@ -940,3 +940,136 @@ class TestRobustnessV2Integration:
         mean_high = response_high.results[0].outcome_distribution.mean
 
         assert mean_high > mean_low
+
+
+# =============================================================================
+# Magnitude Sensitivity Isolation Tests
+# =============================================================================
+
+
+class TestMagnitudeSensitivityIsolation:
+    """Test that magnitude sensitivity is isolated from existence sensitivity."""
+
+    def test_sample_with_shifted_mean_forces_target_existence(self):
+        """
+        Directly test that _sample_with_shifted_mean forces target edge to exist.
+        """
+        from src.utils.rng import SeededRNG
+
+        # Create edge with very low existence probability
+        edge_never_exists = EdgeV2(
+            **{"from": "a", "to": "b"},
+            exists_probability=0.0,  # Never exists in normal sampling
+            strength=StrengthDistribution(mean=1.0, std=0.1),
+        )
+
+        edges = [edge_never_exists]
+        rng = SeededRNG(42)
+        analyzer = RobustnessAnalyzerV2()
+
+        # Sample 100 times with shifted mean
+        for _ in range(100):
+            config = analyzer._sample_with_shifted_mean(
+                edges, edge_never_exists, shift=0.5, rng=rng
+            )
+            # Target edge should ALWAYS exist (non-zero strength)
+            assert config[("a", "b")] != 0.0, (
+                "Target edge should be forced to exist in _sample_with_shifted_mean"
+            )
+
+    def test_magnitude_sensitivity_with_low_existence_still_computed(self):
+        """
+        Edge with low exists_probability should still report magnitude sensitivity.
+
+        The target edge is forced to exist during magnitude sensitivity
+        calculation, so even low-probability edges can show magnitude effects.
+        """
+        # Two edges: one certain (to ensure non-zero baseline) and one uncertain
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="a", kind="factor", label="A"),
+                NodeV2(id="b", kind="outcome", label="B"),
+                NodeV2(id="c", kind="outcome", label="C"),
+            ],
+            edges=[
+                # Certain edge to provide baseline
+                EdgeV2(
+                    **{"from": "a", "to": "b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                # Low probability edge - should still show magnitude effect
+                EdgeV2(
+                    **{"from": "b", "to": "c"},
+                    exists_probability=0.1,  # Rarely exists
+                    strength=StrengthDistribution(mean=2.0, std=0.5),  # Large std
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt1", interventions={"a": 1.0})
+            ],
+            goal_node_id="c",
+            n_samples=500,
+            seed=42,
+            analysis_types=["sensitivity"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Find magnitude sensitivity for the low-probability edge
+        mag_sens = next(
+            s for s in response.sensitivity
+            if s.sensitivity_type == "magnitude" and s.edge_from == "b"
+        )
+
+        # Even though edge rarely exists in normal sampling,
+        # magnitude sensitivity should be computed (edge forced to exist)
+        # The exact value doesn't matter, just that it's non-zero
+        assert mag_sens.elasticity != 0.0, (
+            "Magnitude sensitivity should be computed even for low-probability edges"
+        )
+
+    def test_other_edges_still_sampled_normally_in_magnitude_sensitivity(self):
+        """
+        When computing magnitude sensitivity for one edge,
+        other edges should still sample existence normally.
+        """
+        from src.utils.rng import SeededRNG
+
+        # Two edges: target (always exists) and other (never exists)
+        target_edge = EdgeV2(
+            **{"from": "a", "to": "b"},
+            exists_probability=1.0,
+            strength=StrengthDistribution(mean=1.0, std=0.1),
+        )
+        other_edge = EdgeV2(
+            **{"from": "b", "to": "c"},
+            exists_probability=0.0,  # Never exists
+            strength=StrengthDistribution(mean=2.0, std=0.1),
+        )
+
+        edges = [target_edge, other_edge]
+        rng = SeededRNG(42)
+        analyzer = RobustnessAnalyzerV2()
+
+        # Sample with shifted mean on TARGET edge
+        configs = []
+        for _ in range(100):
+            config = analyzer._sample_with_shifted_mean(
+                edges, target_edge, shift=0.5, rng=rng
+            )
+            configs.append(config)
+
+        # Target edge should ALWAYS exist
+        target_exists = sum(1 for c in configs if c[("a", "b")] != 0)
+        assert target_exists == 100, "Target edge should always exist"
+
+        # Other edge should NEVER exist (its exists_probability=0)
+        other_exists = sum(1 for c in configs if c[("b", "c")] != 0)
+        assert other_exists == 0, "Other edge should follow its exists_probability=0"
