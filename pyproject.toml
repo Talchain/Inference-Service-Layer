@@ -27,7 +27,7 @@ redis = "5.0.3"
 prometheus-client = "0.20.0"
 psutil = "^5.9.0"
 # Phase 4A LLM dependencies - pinned for security
-openai = "1.12.0"
+openai = "2.13.0"
 anthropic = "0.21.3"
 # Error tracking
 sentry-sdk = {extras = ["fastapi"], version = "^1.40.0"}
