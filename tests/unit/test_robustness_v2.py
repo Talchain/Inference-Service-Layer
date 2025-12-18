@@ -20,6 +20,7 @@ from src.models.robustness_v2 import (
     GraphV2,
     InterventionOption,
     NodeV2,
+    ObservedState,
     OptionResult,
     OutcomeDistribution,
     ResponseMetadataV2,
@@ -150,6 +151,170 @@ class TestStrengthDistribution:
         """Test rejection of negative std."""
         with pytest.raises(ValueError):
             StrengthDistribution(mean=0.5, std=-0.1)
+
+
+class TestObservedState:
+    """Test ObservedState model."""
+
+    def test_valid_observed_state_full(self):
+        """Test valid observed state with all fields."""
+        state = ObservedState(
+            value=59.0,
+            baseline=49.0,
+            unit="£k",
+            source="brief_extraction"
+        )
+        assert state.value == 59.0
+        assert state.baseline == 49.0
+        assert state.unit == "£k"
+        assert state.source == "brief_extraction"
+
+    def test_valid_observed_state_value_only(self):
+        """Test observed state with only required value field."""
+        state = ObservedState(value=42.5)
+        assert state.value == 42.5
+        assert state.baseline is None
+        assert state.unit is None
+        assert state.source is None
+
+    def test_missing_optional_fields_default_none(self):
+        """Test optional fields default to None."""
+        state = ObservedState(value=100.0)
+        assert state.baseline is None
+        assert state.unit is None
+        assert state.source is None
+
+    def test_negative_value_allowed(self):
+        """Test negative values are allowed."""
+        state = ObservedState(value=-25.0, baseline=0.0)
+        assert state.value == -25.0
+        assert state.baseline == 0.0
+
+    def test_zero_value_allowed(self):
+        """Test zero value is allowed."""
+        state = ObservedState(value=0.0)
+        assert state.value == 0.0
+
+    def test_value_nan_rejected(self):
+        """Test NaN value is rejected."""
+        with pytest.raises(ValueError, match="finite"):
+            ObservedState(value=float("nan"))
+
+    def test_value_inf_rejected(self):
+        """Test infinity value is rejected."""
+        with pytest.raises(ValueError, match="finite"):
+            ObservedState(value=float("inf"))
+
+    def test_value_neg_inf_rejected(self):
+        """Test negative infinity value is rejected."""
+        with pytest.raises(ValueError, match="finite"):
+            ObservedState(value=float("-inf"))
+
+    def test_baseline_nan_rejected(self):
+        """Test NaN baseline is rejected."""
+        with pytest.raises(ValueError, match="finite"):
+            ObservedState(value=10.0, baseline=float("nan"))
+
+    def test_baseline_inf_rejected(self):
+        """Test infinity baseline is rejected."""
+        with pytest.raises(ValueError, match="finite"):
+            ObservedState(value=10.0, baseline=float("inf"))
+
+    def test_from_dict(self):
+        """Test creating observed state from dictionary."""
+        data = {
+            "value": 59.0,
+            "baseline": 49.0,
+            "unit": "£k",
+            "source": "user_input"
+        }
+        state = ObservedState(**data)
+        assert state.value == 59.0
+        assert state.source == "user_input"
+
+    def test_to_dict(self):
+        """Test serializing observed state to dictionary."""
+        state = ObservedState(value=59.0, unit="£k")
+        data = state.model_dump()
+        assert data["value"] == 59.0
+        assert data["unit"] == "£k"
+        assert data["baseline"] is None
+
+
+class TestNodeV2WithObservedState:
+    """Test NodeV2 model with observed_state field."""
+
+    def test_node_without_observed_state_backward_compatible(self):
+        """Test nodes without observed_state continue to work (backward compatibility)."""
+        node = NodeV2(id="revenue", kind="outcome", label="Revenue")
+        assert node.id == "revenue"
+        assert node.observed_state is None
+
+    def test_node_with_observed_state(self):
+        """Test node with observed_state is parsed correctly."""
+        node = NodeV2(
+            id="marketing-spend",
+            kind="factor",
+            label="Marketing Spend",
+            observed_state=ObservedState(
+                value=100000.0,
+                baseline=75000.0,
+                unit="$",
+                source="brief_extraction"
+            )
+        )
+        assert node.id == "marketing-spend"
+        assert node.observed_state is not None
+        assert node.observed_state.value == 100000.0
+        assert node.observed_state.baseline == 75000.0
+        assert node.observed_state.unit == "$"
+        assert node.observed_state.source == "brief_extraction"
+
+    def test_node_observed_state_from_dict(self):
+        """Test node with observed_state created from dictionary."""
+        data = {
+            "id": "revenue",
+            "kind": "outcome",
+            "label": "Total Revenue",
+            "observed_state": {
+                "value": 59.0,
+                "baseline": 49.0,
+                "unit": "£k"
+            }
+        }
+        node = NodeV2(**data)
+        assert node.observed_state is not None
+        assert node.observed_state.value == 59.0
+
+    def test_node_observed_state_accessible(self):
+        """Test observed_state fields are accessible after parsing."""
+        node = NodeV2(
+            id="sales",
+            kind="factor",
+            label="Sales Volume",
+            observed_state=ObservedState(value=1500.0, unit="units")
+        )
+        assert node.observed_state.value == 1500.0
+        assert node.observed_state.unit == "units"
+        assert node.observed_state.baseline is None
+
+    def test_node_serialization_includes_observed_state(self):
+        """Test node serialization includes observed_state."""
+        node = NodeV2(
+            id="price",
+            kind="decision",
+            label="Price Point",
+            observed_state=ObservedState(value=49.99)
+        )
+        data = node.model_dump()
+        assert "observed_state" in data
+        assert data["observed_state"]["value"] == 49.99
+
+    def test_node_without_observed_state_serialization(self):
+        """Test node without observed_state serializes with None."""
+        node = NodeV2(id="x", kind="factor", label="X")
+        data = node.model_dump()
+        assert data["observed_state"] is None
 
 
 class TestEdgeV2:
@@ -1073,3 +1238,1024 @@ class TestMagnitudeSensitivityIsolation:
         # Other edge should NEVER exist (its exists_probability=0)
         other_exists = sum(1 for c in configs if c[("b", "c")] != 0)
         assert other_exists == 0, "Other edge should follow its exists_probability=0"
+
+
+# =============================================================================
+# Observed State Integration Tests
+# =============================================================================
+
+
+class TestObservedStateIntegration:
+    """Integration tests for observed_state in robustness analysis."""
+
+    def test_request_with_observed_state_accepted(self):
+        """Test robustness request with nodes containing observed_state is accepted."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing Spend",
+                    observed_state=ObservedState(
+                        value=100000.0,
+                        baseline=75000.0,
+                        unit="$",
+                        source="brief_extraction"
+                    )
+                ),
+                NodeV2(
+                    id="revenue",
+                    kind="outcome",
+                    label="Revenue",
+                    observed_state=ObservedState(value=500000.0)
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=2.0, std=0.3),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="observed-state-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="increase",
+                    label="Increase Marketing",
+                    interventions={"marketing": 1.5}
+                ),
+                InterventionOption(
+                    id="maintain",
+                    label="Maintain Marketing",
+                    interventions={"marketing": 1.0}
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        # Request should be valid
+        assert request.graph.nodes[0].observed_state is not None
+        assert request.graph.nodes[0].observed_state.value == 100000.0
+
+    def test_analysis_with_observed_state_returns_response(self):
+        """Test full robustness analysis with observed_state returns valid response."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="price",
+                    kind="decision",
+                    label="Price",
+                    observed_state=ObservedState(value=49.0, baseline=39.0, unit="£")
+                ),
+                NodeV2(
+                    id="revenue",
+                    kind="outcome",
+                    label="Revenue",
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-observed-state",
+            graph=graph,
+            options=[
+                InterventionOption(id="low", label="Low price", interventions={"price": 0.3}),
+                InterventionOption(id="high", label="High price", interventions={"price": 0.7}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should return valid response
+        assert isinstance(response, RobustnessResponseV2)
+        assert response.request_id == "test-observed-state"
+        assert len(response.results) == 2
+
+    def test_observed_state_preserved_in_graph(self):
+        """Test observed_state is preserved in graph during analysis."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="a",
+                    kind="factor",
+                    label="A",
+                    observed_state=ObservedState(value=42.0, source="test")
+                ),
+                NodeV2(id="b", kind="outcome", label="B"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "a", "to": "b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                )
+            ],
+        )
+
+        # Create evaluator
+        evaluator = SCMEvaluatorV2(graph)
+
+        # observed_state should be accessible via _nodes_by_id
+        node_a = evaluator._nodes_by_id["a"]
+        assert node_a.observed_state is not None
+        assert node_a.observed_state.value == 42.0
+        assert node_a.observed_state.source == "test"
+
+    def test_mixed_nodes_with_and_without_observed_state(self):
+        """Test graph with some nodes having observed_state and others not."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0)  # Has observed_state
+                ),
+                NodeV2(
+                    id="price",
+                    kind="decision",
+                    label="Price",
+                    # No observed_state
+                ),
+                NodeV2(
+                    id="revenue",
+                    kind="outcome",
+                    label="Revenue",
+                    observed_state=ObservedState(value=500.0, unit="$")  # Has observed_state
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=0.8,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.3, std=0.05),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="mixed-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1", label="Option 1", interventions={"price": 0.5}
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete successfully
+        assert response.request_id == "mixed-test"
+        assert len(response.results) == 1
+
+        # Verify nodes are accessible with correct observed_state
+        evaluator = SCMEvaluatorV2(graph)
+        assert evaluator._nodes_by_id["marketing"].observed_state is not None
+        assert evaluator._nodes_by_id["price"].observed_state is None
+        assert evaluator._nodes_by_id["revenue"].observed_state is not None
+
+
+# =============================================================================
+# Phase 2A Part 2: ParameterUncertainty Tests
+# =============================================================================
+
+
+class TestParameterUncertainty:
+    """Test ParameterUncertainty model validation."""
+
+    def test_normal_distribution_requires_std(self):
+        """Test normal distribution requires positive std."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        # Missing std
+        with pytest.raises(ValueError, match="std.*must be provided"):
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="normal",
+            )
+
+        # std=0 is invalid
+        with pytest.raises(ValueError, match="std.*must be provided and > 0"):
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="normal",
+                std=0.0,
+            )
+
+    def test_normal_distribution_valid(self):
+        """Test valid normal distribution parameters."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        uncertainty = ParameterUncertainty(
+            node_id="marketing",
+            distribution="normal",
+            std=5.0,
+        )
+        assert uncertainty.distribution == "normal"
+        assert uncertainty.std == 5.0
+
+    def test_uniform_distribution_requires_range(self):
+        """Test uniform distribution requires both range_min and range_max."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        # Missing both
+        with pytest.raises(ValueError, match="range_min.*range_max.*must be provided"):
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="uniform",
+            )
+
+        # Missing range_max
+        with pytest.raises(ValueError, match="range_min.*range_max.*must be provided"):
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="uniform",
+                range_min=0.0,
+            )
+
+    def test_uniform_distribution_range_order(self):
+        """Test uniform distribution requires range_min < range_max."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        with pytest.raises(ValueError, match="range_min.*must be less than range_max"):
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="uniform",
+                range_min=100.0,
+                range_max=50.0,
+            )
+
+    def test_uniform_distribution_valid(self):
+        """Test valid uniform distribution parameters."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        uncertainty = ParameterUncertainty(
+            node_id="marketing",
+            distribution="uniform",
+            range_min=50.0,
+            range_max=150.0,
+        )
+        assert uncertainty.distribution == "uniform"
+        assert uncertainty.range_min == 50.0
+        assert uncertainty.range_max == 150.0
+
+    def test_point_mass_no_extra_params(self):
+        """Test point_mass distribution requires no extra parameters."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        uncertainty = ParameterUncertainty(
+            node_id="marketing",
+            distribution="point_mass",
+        )
+        assert uncertainty.distribution == "point_mass"
+
+    def test_unknown_distribution_rejected(self):
+        """Test unknown distribution type is rejected."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        with pytest.raises(ValueError, match="Unknown distribution"):
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="gamma",  # Not supported
+            )
+
+    def test_node_id_pattern_validation(self):
+        """Test node_id pattern validation."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        # Valid patterns
+        ParameterUncertainty(node_id="marketing_spend", distribution="point_mass")
+        ParameterUncertainty(node_id="node-1", distribution="point_mass")
+        ParameterUncertainty(node_id="node:v2", distribution="point_mass")
+
+        # Invalid pattern
+        with pytest.raises(ValueError):
+            ParameterUncertainty(node_id="Marketing Spend", distribution="point_mass")
+
+
+class TestParameterUncertaintiesInRequest:
+    """Test parameter_uncertainties field in RobustnessRequestV2."""
+
+    def test_request_without_parameter_uncertainties(self, simple_graph, simple_options):
+        """Test request works without parameter_uncertainties (backward compatible)."""
+        request = RobustnessRequestV2(
+            request_id="test",
+            graph=simple_graph,
+            options=simple_options,
+            goal_node_id="revenue",
+            n_samples=100,
+        )
+        assert request.parameter_uncertainties is None
+
+    def test_request_with_parameter_uncertainties(self):
+        """Test request accepts valid parameter_uncertainties."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"marketing": 1.0})
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)
+            ],
+        )
+
+        assert request.parameter_uncertainties is not None
+        assert len(request.parameter_uncertainties) == 1
+        assert request.parameter_uncertainties[0].node_id == "marketing"
+
+    def test_parameter_uncertainty_nonexistent_node_rejected(self):
+        """Test parameter_uncertainty referencing non-existent node is rejected."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="marketing", kind="factor", label="Marketing"),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="non-existent node"):
+            RobustnessRequestV2(
+                request_id="test",
+                graph=graph,
+                options=[
+                    InterventionOption(id="opt1", label="Option 1", interventions={"marketing": 1.0})
+                ],
+                goal_node_id="revenue",
+                n_samples=100,
+                parameter_uncertainties=[
+                    ParameterUncertainty(node_id="nonexistent", distribution="normal", std=10.0)
+                ],
+            )
+
+
+# =============================================================================
+# Phase 2A Part 2: FactorSampler Tests
+# =============================================================================
+
+
+class TestFactorSampler:
+    """Test FactorSampler class."""
+
+    def test_sample_normal_distribution(self):
+        """Test FactorSampler samples from normal distribution."""
+        from src.models.robustness_v2 import ParameterUncertainty
+        from src.services.robustness_analyzer_v2 import FactorSampler
+
+        nodes = [
+            NodeV2(
+                id="marketing",
+                kind="factor",
+                label="Marketing",
+                observed_state=ObservedState(value=100.0),
+            )
+        ]
+        uncertainties = [
+            ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)
+        ]
+
+        rng = SeededRNG(42)
+        sampler = FactorSampler(nodes, uncertainties, rng)
+
+        # Sample many times
+        samples = []
+        for _ in range(1000):
+            values = sampler.sample_factor_values()
+            samples.append(values["marketing"])
+
+        # Mean should be approximately 100.0
+        assert 95.0 < np.mean(samples) < 105.0
+
+        # Std should be approximately 10.0
+        assert 8.0 < np.std(samples) < 12.0
+
+    def test_sample_uniform_distribution(self):
+        """Test FactorSampler samples from uniform distribution."""
+        from src.models.robustness_v2 import ParameterUncertainty
+        from src.services.robustness_analyzer_v2 import FactorSampler
+
+        nodes = [
+            NodeV2(
+                id="marketing",
+                kind="factor",
+                label="Marketing",
+                observed_state=ObservedState(value=100.0),  # Ignored for uniform
+            )
+        ]
+        uncertainties = [
+            ParameterUncertainty(
+                node_id="marketing",
+                distribution="uniform",
+                range_min=50.0,
+                range_max=150.0,
+            )
+        ]
+
+        rng = SeededRNG(42)
+        sampler = FactorSampler(nodes, uncertainties, rng)
+
+        # Sample many times
+        samples = []
+        for _ in range(1000):
+            values = sampler.sample_factor_values()
+            samples.append(values["marketing"])
+
+        # All samples should be in range
+        assert all(50.0 <= s <= 150.0 for s in samples)
+
+        # Mean should be approximately 100.0 (midpoint)
+        assert 95.0 < np.mean(samples) < 105.0
+
+    def test_sample_point_mass_distribution(self):
+        """Test FactorSampler returns fixed value for point_mass distribution."""
+        from src.models.robustness_v2 import ParameterUncertainty
+        from src.services.robustness_analyzer_v2 import FactorSampler
+
+        nodes = [
+            NodeV2(
+                id="marketing",
+                kind="factor",
+                label="Marketing",
+                observed_state=ObservedState(value=100.0),
+            )
+        ]
+        uncertainties = [
+            ParameterUncertainty(node_id="marketing", distribution="point_mass")
+        ]
+
+        rng = SeededRNG(42)
+        sampler = FactorSampler(nodes, uncertainties, rng)
+
+        # All samples should be exactly 100.0
+        for _ in range(100):
+            values = sampler.sample_factor_values()
+            assert values["marketing"] == 100.0
+
+    def test_sample_without_observed_state_uses_zero(self):
+        """Test FactorSampler uses 0.0 as mean if no observed_state."""
+        from src.models.robustness_v2 import ParameterUncertainty
+        from src.services.robustness_analyzer_v2 import FactorSampler
+
+        nodes = [
+            NodeV2(
+                id="marketing",
+                kind="factor",
+                label="Marketing",
+                # No observed_state
+            )
+        ]
+        uncertainties = [
+            ParameterUncertainty(node_id="marketing", distribution="normal", std=1.0)
+        ]
+
+        rng = SeededRNG(42)
+        sampler = FactorSampler(nodes, uncertainties, rng)
+
+        # Sample many times
+        samples = []
+        for _ in range(1000):
+            values = sampler.sample_factor_values()
+            samples.append(values["marketing"])
+
+        # Mean should be approximately 0.0
+        assert -0.5 < np.mean(samples) < 0.5
+
+    def test_has_uncertainties(self):
+        """Test has_uncertainties method."""
+        from src.models.robustness_v2 import ParameterUncertainty
+        from src.services.robustness_analyzer_v2 import FactorSampler
+
+        nodes = [NodeV2(id="a", kind="factor", label="A")]
+        rng = SeededRNG(42)
+
+        # No uncertainties
+        sampler_empty = FactorSampler(nodes, None, rng)
+        assert not sampler_empty.has_uncertainties()
+
+        sampler_empty2 = FactorSampler(nodes, [], rng)
+        assert not sampler_empty2.has_uncertainties()
+
+        # With uncertainties
+        uncertainties = [
+            ParameterUncertainty(node_id="a", distribution="point_mass")
+        ]
+        sampler_with = FactorSampler(nodes, uncertainties, rng)
+        assert sampler_with.has_uncertainties()
+
+    def test_deterministic_sampling(self):
+        """Test FactorSampler produces deterministic results with same seed."""
+        from src.models.robustness_v2 import ParameterUncertainty
+        from src.services.robustness_analyzer_v2 import FactorSampler
+
+        nodes = [
+            NodeV2(
+                id="marketing",
+                kind="factor",
+                label="Marketing",
+                observed_state=ObservedState(value=100.0),
+            )
+        ]
+        uncertainties = [
+            ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)
+        ]
+
+        rng1 = SeededRNG(42)
+        rng2 = SeededRNG(42)
+        sampler1 = FactorSampler(nodes, uncertainties, rng1)
+        sampler2 = FactorSampler(nodes, uncertainties, rng2)
+
+        # Should produce identical sequences
+        for _ in range(10):
+            values1 = sampler1.sample_factor_values()
+            values2 = sampler2.sample_factor_values()
+            assert values1["marketing"] == values2["marketing"]
+
+
+# =============================================================================
+# Phase 2A Part 2: SCMEvaluatorV2 Factor Value Tests
+# =============================================================================
+
+
+class TestSCMEvaluatorFactorValues:
+    """Test SCMEvaluatorV2 factor value handling."""
+
+    def test_uses_observed_state_for_root_nodes(self):
+        """Test SCMEvaluatorV2 uses observed_state.value for root nodes."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # No interventions on marketing, should use observed_state.value
+        outcome = evaluator.evaluate(
+            edge_strengths={("marketing", "revenue"): 2.0},
+            interventions={},  # No intervention
+            goal_node="revenue",
+        )
+
+        # revenue = marketing.observed_state.value * edge_strength
+        # = 100.0 * 2.0 = 200.0
+        assert outcome == pytest.approx(200.0, rel=1e-6)
+
+    def test_factor_values_override_observed_state(self):
+        """Test factor_values takes priority over observed_state."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # factor_values should override observed_state
+        outcome = evaluator.evaluate(
+            edge_strengths={("marketing", "revenue"): 2.0},
+            interventions={},
+            goal_node="revenue",
+            factor_values={"marketing": 50.0},  # Overrides observed_state.value=100
+        )
+
+        # revenue = factor_values["marketing"] * edge_strength = 50.0 * 2.0 = 100.0
+        assert outcome == pytest.approx(100.0, rel=1e-6)
+
+    def test_intervention_overrides_factor_values(self):
+        """Test interventions take priority over factor_values."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # intervention should override both factor_values and observed_state
+        outcome = evaluator.evaluate(
+            edge_strengths={("marketing", "revenue"): 2.0},
+            interventions={"marketing": 25.0},  # Highest priority
+            goal_node="revenue",
+            factor_values={"marketing": 50.0},
+        )
+
+        # revenue = intervention["marketing"] * edge_strength = 25.0 * 2.0 = 50.0
+        assert outcome == pytest.approx(50.0, rel=1e-6)
+
+    def test_non_root_node_ignores_observed_state(self):
+        """Test non-root nodes ignore observed_state (computed from parents)."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="a", kind="factor", label="A"),
+                NodeV2(
+                    id="b",
+                    kind="chance",
+                    label="B",
+                    # This observed_state should be ignored because b has a parent
+                    observed_state=ObservedState(value=999.0),
+                ),
+                NodeV2(id="c", kind="outcome", label="C"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "a", "to": "b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "b", "to": "c"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=3.0, std=0.1),
+                ),
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        outcome = evaluator.evaluate(
+            edge_strengths={("a", "b"): 2.0, ("b", "c"): 3.0},
+            interventions={"a": 10.0},
+            goal_node="c",
+        )
+
+        # a = 10.0 (intervention)
+        # b = a * 2.0 = 20.0 (NOT 999.0 from observed_state)
+        # c = b * 3.0 = 60.0
+        assert outcome == pytest.approx(60.0, rel=1e-6)
+
+
+# =============================================================================
+# Phase 2A Part 2: Full Analysis Integration Tests
+# =============================================================================
+
+
+class TestFactorSamplingIntegration:
+    """Integration tests for factor sampling in robustness analysis."""
+
+    def test_analysis_with_factor_uncertainties(self):
+        """Test full analysis with parameter_uncertainties returns factor_sensitivity."""
+        from src.models.robustness_v2 import ParameterUncertainty, FactorSensitivityResult
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing Spend",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.05),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="factor-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=200,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should have factor_sensitivity results
+        assert response.factor_sensitivity is not None
+        assert len(response.factor_sensitivity) == 1
+        assert response.factor_sensitivity[0].node_id == "marketing"
+        assert isinstance(response.factor_sensitivity[0], FactorSensitivityResult)
+
+    def test_analysis_without_factor_uncertainties_empty_factor_sensitivity(self):
+        """Test analysis without parameter_uncertainties has empty factor_sensitivity."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="no-factor-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            # No parameter_uncertainties
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # factor_sensitivity should be empty
+        assert response.factor_sensitivity == []
+
+    def test_factor_sampling_affects_outcome_distribution(self):
+        """Test factor sampling creates variance in outcome distribution."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,  # Certain edge
+                    strength=StrengthDistribution(mean=1.0, std=0.01),  # Very low edge variance
+                )
+            ],
+        )
+
+        # Request WITH factor uncertainty
+        request_with = RobustnessRequestV2(
+            request_id="with-factor",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="marketing", distribution="normal", std=20.0)
+            ],
+        )
+
+        # Request WITHOUT factor uncertainty
+        request_without = RobustnessRequestV2(
+            request_id="without-factor",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            # No parameter_uncertainties
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response_with = analyzer.analyze(request_with)
+        response_without = analyzer.analyze(request_without)
+
+        # With factor uncertainty should have higher outcome variance
+        std_with = response_with.results[0].outcome_distribution.std
+        std_without = response_without.results[0].outcome_distribution.std
+
+        assert std_with > std_without * 2  # Significantly higher variance
+
+    def test_multiple_factor_uncertainties(self):
+        """Test analysis with multiple factor uncertainties."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(
+                    id="price",
+                    kind="factor",
+                    label="Price",
+                    observed_state=ObservedState(value=50.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.3, std=0.05),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="multi-factor",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=200,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0),
+                ParameterUncertainty(node_id="price", distribution="uniform", range_min=40.0, range_max=60.0),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should have 2 factor sensitivities
+        assert len(response.factor_sensitivity) == 2
+
+        node_ids = {fs.node_id for fs in response.factor_sensitivity}
+        assert "marketing" in node_ids
+        assert "price" in node_ids
+
+    def test_factor_sensitivity_ranking(self):
+        """Test factor sensitivity results are ranked by importance."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="high_impact",
+                    kind="factor",
+                    label="High Impact",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(
+                    id="low_impact",
+                    kind="factor",
+                    label="Low Impact",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "high_impact", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.1),  # Strong effect
+                ),
+                EdgeV2(
+                    **{"from": "low_impact", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.1, std=0.01),  # Weak effect
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="ranking-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=200,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="high_impact", distribution="normal", std=10.0),
+                ParameterUncertainty(node_id="low_impact", distribution="normal", std=10.0),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should be sorted by absolute elasticity
+        ranks = [fs.importance_rank for fs in response.factor_sensitivity]
+        assert ranks == sorted(ranks)
+
+        # High impact should have higher absolute elasticity
+        high_impact = next(fs for fs in response.factor_sensitivity if fs.node_id == "high_impact")
+        low_impact = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
+
+        assert abs(high_impact.elasticity) > abs(low_impact.elasticity)

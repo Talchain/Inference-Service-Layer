@@ -10,7 +10,6 @@ Supports per-endpoint timeout configuration for computation-heavy operations.
 
 import asyncio
 import logging
-import re
 from typing import Dict, Optional, Set
 
 from fastapi import Request
@@ -18,28 +17,37 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import get_settings
+from src.models.responses import ErrorResponse, RecoveryHints
+from src.utils.tracing import get_trace_id
 
 logger = logging.getLogger(__name__)
 
 
 # Per-endpoint timeout configuration (in seconds)
 # Computation-heavy endpoints get longer timeouts
+# Aligned with actual routes in src/api/main.py
 ENDPOINT_TIMEOUTS: Dict[str, int] = {
-    # Validation endpoints - fast
+    # Fast endpoints (30s) - simple validation and quick lookups
     "/api/v1/validation/": 30,
+    "/api/v1/utility/": 30,
+    "/api/v1/outcomes/": 30,
 
-    # Counterfactual endpoints - can be slow due to Monte Carlo
-    "/api/v1/counterfactual/": 120,
-    "/api/v1/counterfactual/batch": 180,
+    # Moderate endpoints (60s) - moderate computation
+    "/api/v1/explain/": 60,
+    "/api/v1/teaching/": 60,
+    "/api/v1/team/": 60,
+    "/api/v1/aggregation/": 60,
 
-    # Sensitivity analysis - computation heavy
-    "/api/v1/sensitivity/": 120,
+    # Heavy endpoints (90s) - significant computation
+    "/api/v1/causal/": 90,
+    "/api/v1/robustness/": 90,
 
-    # Discovery endpoints - may involve LLM calls
-    "/api/v1/discovery/": 90,
+    # Very heavy endpoints (120s) - Monte Carlo, sensitivity analysis
+    # Includes: sensitivity, dominance, risk, threshold, phase4, identifiability, decision-robustness
+    "/api/v1/analysis/": 120,
 
-    # Explanations - moderate
-    "/api/v1/explanations/": 60,
+    # Batch endpoints (180s) - multiple sequential computations
+    "/api/v1/batch/": 180,
 }
 
 
@@ -101,15 +109,26 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                             "max_size": self.max_size_bytes,
                         }
                     )
+                    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+                    max_mb = int(self.max_size_bytes / (1024 * 1024))
+                    error_response = ErrorResponse(
+                        code="REQUEST_TOO_LARGE",
+                        message=f"Request body too large. Maximum size is {max_mb}MB.",
+                        reason="payload_exceeds_limit",
+                        recovery=RecoveryHints(
+                            hints=[
+                                f"Reduce request body size to under {max_mb}MB",
+                                "Consider splitting large requests into smaller batches",
+                            ],
+                            suggestion="Reduce payload size",
+                        ),
+                        retryable=False,
+                        source="isl",
+                        request_id=request_id,
+                    )
                     return JSONResponse(
                         status_code=413,
-                        content={
-                            "schema": "error.v1",
-                            "code": "REQUEST_TOO_LARGE",
-                            "message": f"Request body too large. Maximum size is {self.max_size_bytes / (1024 * 1024):.0f}MB.",
-                            "retryable": False,
-                            "suggested_action": "reduce_payload_size",
-                        }
+                        content=error_response.model_dump(exclude_none=True),
                     )
             except ValueError:
                 pass  # Invalid Content-Length, let it through for validation
@@ -211,13 +230,24 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
                     "is_endpoint_specific": timeout != self.default_timeout,
                 }
             )
+            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+            error_response = ErrorResponse(
+                code="REQUEST_TIMEOUT",
+                message=f"Request processing timed out after {timeout} seconds.",
+                reason="processing_timeout",
+                recovery=RecoveryHints(
+                    hints=[
+                        "Try with a smaller or simpler input",
+                        "Reduce the number of Monte Carlo iterations if applicable",
+                        "Consider breaking complex analyses into smaller parts",
+                    ],
+                    suggestion="Retry with simpler input",
+                ),
+                retryable=True,
+                source="isl",
+                request_id=request_id,
+            )
             return JSONResponse(
                 status_code=504,
-                content={
-                    "schema": "error.v1",
-                    "code": "REQUEST_TIMEOUT",
-                    "message": f"Request processing timed out after {timeout} seconds.",
-                    "retryable": True,
-                    "suggested_action": "retry_with_simpler_input",
-                }
+                content=error_response.model_dump(exclude_none=True),
             )

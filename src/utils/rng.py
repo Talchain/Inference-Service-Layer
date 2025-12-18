@@ -138,17 +138,82 @@ class SeededRNG:
         """
         return int(self._rng.integers(low, high))
 
-    def spawn(self) -> "SeededRNG":
+    def beta(self, a: float, b: float, size: Optional[int] = None):
         """
-        Create a new independent RNG from this one.
+        Generate beta distribution sample(s).
+
+        Args:
+            a: Alpha parameter (shape)
+            b: Beta parameter (shape)
+            size: Number of samples (None = single value)
+
+        Returns:
+            Single float or array of floats from Beta(a, b)
+        """
+        result = self._rng.beta(a, b, size)
+        if size is None:
+            return float(result)
+        return result
+
+    def normal_array(self, mean: float, std: float, size: int) -> np.ndarray:
+        """
+        Generate array of normal distribution samples.
+
+        Args:
+            mean: Mean of distribution
+            std: Standard deviation of distribution
+            size: Number of samples
+
+        Returns:
+            NumPy array of samples from Normal(mean, std)
+        """
+        return self._rng.normal(mean, std, size)
+
+    def uniform_array(self, low: float, high: float, size: int) -> np.ndarray:
+        """
+        Generate array of uniform distribution samples.
+
+        Args:
+            low: Lower bound (inclusive)
+            high: Upper bound (exclusive)
+            size: Number of samples
+
+        Returns:
+            NumPy array of samples from Uniform(low, high)
+        """
+        return self._rng.uniform(low, high, size)
+
+    def beta_array(self, a: float, b: float, size: int) -> np.ndarray:
+        """
+        Generate array of beta distribution samples.
+
+        Args:
+            a: Alpha parameter (shape)
+            b: Beta parameter (shape)
+            size: Number of samples
+
+        Returns:
+            NumPy array of samples from Beta(a, b)
+        """
+        return self._rng.beta(a, b, size)
+
+    def spawn(self, n: int = 1) -> "SeededRNG":
+        """
+        Create new independent RNG(s) from this one.
 
         Useful for parallel operations that need separate RNG streams.
 
+        Args:
+            n: Number of child RNGs to create (default 1)
+
         Returns:
-            New SeededRNG instance with independent state
+            Single SeededRNG if n=1, else list of SeededRNG instances
         """
-        new_seed = self.integers(0, 2**31)
-        return SeededRNG(new_seed)
+        if n == 1:
+            new_seed = self.integers(0, 2**31)
+            return SeededRNG(new_seed)
+        seeds = self._rng.integers(0, 2**31, n)
+        return [SeededRNG(int(s)) for s in seeds]
 
 
 def compute_seed_from_graph(graph: "GraphV2") -> int:

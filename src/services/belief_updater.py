@@ -65,7 +65,7 @@ class BeliefUpdater:
             Updated belief model
         """
         # Make computation deterministic
-        seed = make_deterministic(
+        rng = make_deterministic(
             {
                 "query_id": query.id,
                 "response": response.value,
@@ -79,7 +79,7 @@ class BeliefUpdater:
                 "query_id": query.id,
                 "response": response.value,
                 "confidence": confidence,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 

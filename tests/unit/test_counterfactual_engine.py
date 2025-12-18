@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 from src.models.requests import CounterfactualRequest
 from src.models.shared import Distribution, DistributionType, StructuralModel
 from src.services.counterfactual_engine import CounterfactualEngine
+from src.utils.rng import SeededRNG
 
 
 class TestCounterfactualEngineBasic:
@@ -199,11 +200,13 @@ class TestDistributionSampling:
     def test_sample_normal_distribution(self):
         """Test sampling from normal distribution."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         samples = engine._sample_distribution(
             "normal",
             {"mean": 10.0, "std": 2.0},
-            1000
+            1000,
+            rng
         )
 
         assert len(samples) == 1000
@@ -213,11 +216,13 @@ class TestDistributionSampling:
     def test_sample_uniform_distribution(self):
         """Test sampling from uniform distribution."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         samples = engine._sample_distribution(
             "uniform",
             {"min": 0.0, "max": 10.0},
-            1000
+            1000,
+            rng
         )
 
         assert len(samples) == 1000
@@ -228,11 +233,13 @@ class TestDistributionSampling:
     def test_sample_beta_distribution(self):
         """Test sampling from beta distribution."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         samples = engine._sample_distribution(
             "beta",
             {"alpha": 2.0, "beta": 5.0},
-            1000
+            1000,
+            rng
         )
 
         assert len(samples) == 1000
@@ -242,11 +249,13 @@ class TestDistributionSampling:
     def test_sample_exponential_distribution(self):
         """Test sampling from exponential distribution."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         samples = engine._sample_distribution(
             "exponential",
             {"scale": 2.0},
-            1000
+            1000,
+            rng
         )
 
         assert len(samples) == 1000
@@ -256,12 +265,14 @@ class TestDistributionSampling:
     def test_unknown_distribution_raises_error(self):
         """Test that unknown distribution type raises error."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         with pytest.raises(ValueError, match="Unknown distribution type"):
             engine._sample_distribution(
                 "unknown_distribution",
                 {"param": 1.0},
-                100
+                100,
+                rng
             )
 
 
@@ -391,6 +402,7 @@ class TestUncertaintyAnalysis:
     def test_analyze_uncertainty_single_source(self):
         """Test uncertainty analysis with single exogenous variable."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         model = StructuralModel(
             variables=["X", "Y"],
@@ -411,8 +423,7 @@ class TestUncertaintyAnalysis:
         )
 
         # Generate samples
-        np.random.seed(42)
-        samples = engine._run_monte_carlo(request)
+        samples = engine._run_monte_carlo(request, rng)
 
         uncertainty = engine._analyze_uncertainty(request, samples)
 
@@ -423,6 +434,7 @@ class TestUncertaintyAnalysis:
     def test_uncertainty_level_classification(self):
         """Test classification of uncertainty levels."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         model = StructuralModel(
             variables=["X", "Y"],
@@ -442,8 +454,7 @@ class TestUncertaintyAnalysis:
             context={}
         )
 
-        np.random.seed(42)
-        samples = engine._run_monte_carlo(request)
+        samples = engine._run_monte_carlo(request, rng)
         uncertainty = engine._analyze_uncertainty(request, samples)
 
         # Low coefficient of variation should give LOW uncertainty
@@ -614,6 +625,7 @@ class TestMonteCarloIntegration:
     def test_monte_carlo_respects_intervention(self):
         """Test that Monte Carlo respects intervention values."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         model = StructuralModel(
             variables=["X", "Y"],
@@ -633,7 +645,7 @@ class TestMonteCarloIntegration:
             context={}
         )
 
-        samples = engine._run_monte_carlo(request)
+        samples = engine._run_monte_carlo(request, rng)
 
         # All X samples should be exactly 42
         assert np.all(samples["X"] == 42.0)
@@ -643,6 +655,7 @@ class TestMonteCarloIntegration:
     def test_monte_carlo_respects_context(self):
         """Test that Monte Carlo respects context values."""
         engine = CounterfactualEngine()
+        rng = SeededRNG(42)
 
         model = StructuralModel(
             variables=["X", "Y", "Z"],
@@ -666,7 +679,7 @@ class TestMonteCarloIntegration:
             context={"Y": 10.0}  # Observed value
         )
 
-        samples = engine._run_monte_carlo(request)
+        samples = engine._run_monte_carlo(request, rng)
 
         # X should be 5, Y should be 10
         assert np.all(samples["X"] == 5.0)

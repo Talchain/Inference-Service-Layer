@@ -47,7 +47,7 @@ class TeamAligner:
             TeamAlignmentResponse: Alignment analysis
         """
         # Make computation deterministic
-        seed = make_deterministic(request.model_dump())
+        rng = make_deterministic(request.model_dump())
 
         logger.info(
             "team_alignment_started",
@@ -55,7 +55,7 @@ class TeamAligner:
                 "request_hash": canonical_hash(request.model_dump()),
                 "num_perspectives": len(request.perspectives),
                 "num_options": len(request.options),
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 

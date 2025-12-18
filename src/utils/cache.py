@@ -3,6 +3,15 @@ Caching utilities for causal inference operations.
 
 Provides thread-safe, TTL-based caching for expensive operations
 like DAG path analysis and strategy generation.
+
+NOTE: For new code, prefer using `get_named_cache` from
+`src/infrastructure/memory_cache` which provides the same functionality
+with the production-grade MemoryCache implementation:
+
+    from src.infrastructure.memory_cache import get_named_cache
+    cache = get_named_cache("my_domain", max_size=500, ttl=3600)
+
+This module's `get_cache` function remains available for backward compatibility.
 """
 
 import hashlib

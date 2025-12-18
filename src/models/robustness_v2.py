@@ -5,6 +5,7 @@ Supports both structural uncertainty (edge existence) and parametric
 uncertainty (effect magnitude) for proper robustness analysis.
 """
 
+import math
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -62,6 +63,140 @@ class StrengthDistribution(BaseModel):
             "example": {
                 "mean": 0.5,
                 "std": 0.1
+            }
+        }
+    }
+
+
+class ObservedState(BaseModel):
+    """
+    Observed state for quantitative factor nodes.
+
+    Captures the current observed value of a factor, along with optional
+    baseline for comparison, display unit, and data provenance.
+
+    This supports the v2.2 schema where factor nodes can carry actual
+    observed values from CEE extraction or user input.
+    """
+
+    value: float = Field(
+        ...,
+        description="Current observed value in user units (e.g., 59 for £59k revenue)"
+    )
+    baseline: Optional[float] = Field(
+        None,
+        description="Reference/baseline value for comparison (e.g., 49 for £49k baseline)"
+    )
+    unit: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Display unit (e.g., '£', '%', 'users', 'k')"
+    )
+    source: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Data provenance (e.g., 'brief_extraction', 'user_input', 'computed')"
+    )
+
+    @field_validator("value")
+    @classmethod
+    def value_must_be_finite(cls, v: float) -> float:
+        """Validate that value is a finite number (not NaN or infinity)."""
+        if not math.isfinite(v):
+            raise ValueError("value must be finite (not NaN or infinity)")
+        return v
+
+    @field_validator("baseline")
+    @classmethod
+    def baseline_must_be_finite(cls, v: Optional[float]) -> Optional[float]:
+        """Validate that baseline, if provided, is finite."""
+        if v is not None and not math.isfinite(v):
+            raise ValueError("baseline must be finite (not NaN or infinity)")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "value": 59.0,
+                "baseline": 49.0,
+                "unit": "£k",
+                "source": "brief_extraction"
+            }
+        }
+    }
+
+
+class ParameterUncertainty(BaseModel):
+    """
+    Uncertainty specification for a factor node's value.
+
+    Defines how to sample a factor's value during Monte Carlo analysis.
+    The mean is typically taken from the node's `observed_state.value`.
+
+    Supported distributions:
+    - "normal": Sample from Normal(observed_value, std)
+    - "uniform": Sample uniformly from [range_min, range_max]
+    - "point_mass": Use observed_value exactly (no sampling)
+    """
+
+    node_id: str = Field(
+        ...,
+        pattern=r"^[a-z0-9_:-]+$",
+        description="ID of the factor node this uncertainty applies to"
+    )
+    distribution: str = Field(
+        default="normal",
+        description="Distribution family: 'normal', 'uniform', 'point_mass'"
+    )
+    std: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Standard deviation for Normal sampling around observed_state.value"
+    )
+    # For uniform distribution
+    range_min: Optional[float] = Field(
+        None,
+        description="Minimum value for uniform distribution"
+    )
+    range_max: Optional[float] = Field(
+        None,
+        description="Maximum value for uniform distribution"
+    )
+
+    @model_validator(mode="after")
+    def validate_distribution_params(self) -> "ParameterUncertainty":
+        """Validate distribution-specific parameters."""
+        if self.distribution == "normal":
+            if self.std is None or self.std <= 0:
+                raise ValueError(
+                    f"For normal distribution, 'std' must be provided and > 0 "
+                    f"(got std={self.std})"
+                )
+        elif self.distribution == "uniform":
+            if self.range_min is None or self.range_max is None:
+                raise ValueError(
+                    "For uniform distribution, both 'range_min' and 'range_max' must be provided"
+                )
+            if self.range_min >= self.range_max:
+                raise ValueError(
+                    f"For uniform distribution, range_min ({self.range_min}) "
+                    f"must be less than range_max ({self.range_max})"
+                )
+        elif self.distribution == "point_mass":
+            pass  # No additional params needed
+        else:
+            raise ValueError(
+                f"Unknown distribution '{self.distribution}'. "
+                f"Supported: 'normal', 'uniform', 'point_mass'"
+            )
+        return self
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "node_id": "marketing_spend",
+                "distribution": "normal",
+                "std": 2.5
             }
         }
     }
@@ -138,13 +273,22 @@ class NodeV2(BaseModel):
         description="Detailed description",
         max_length=5000
     )
+    observed_state: Optional[ObservedState] = Field(
+        None,
+        description="Observed state for quantitative factor nodes (value, baseline, unit, source)"
+    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "id": "revenue",
                 "kind": "outcome",
-                "label": "Total Revenue"
+                "label": "Total Revenue",
+                "observed_state": {
+                    "value": 59.0,
+                    "baseline": 49.0,
+                    "unit": "£k"
+                }
             }
         }
     }
@@ -269,9 +413,9 @@ class RobustnessRequestV2(BaseModel):
     options, and configuration for Monte Carlo sampling and analysis.
     """
 
-    request_id: str = Field(
-        ...,
-        description="Unique request identifier for tracing"
+    request_id: Optional[str] = Field(
+        None,
+        description="Optional request ID for tracing. Generated if not provided."
     )
     graph: GraphV2 = Field(
         ...,
@@ -311,6 +455,13 @@ class RobustnessRequestV2(BaseModel):
         description="Confidence level for intervals"
     )
 
+    # Factor uncertainty configuration (Phase 2A Part 2)
+    parameter_uncertainties: Optional[List[ParameterUncertainty]] = Field(
+        None,
+        description="Uncertainty specifications for factor node values. "
+        "If not provided, factor nodes use observed_state.value as fixed values."
+    )
+
     @field_validator("goal_node_id")
     @classmethod
     def validate_goal_node_exists(cls, v: str, info) -> str:
@@ -330,6 +481,18 @@ class RobustnessRequestV2(BaseModel):
                 if node_id not in node_ids:
                     raise ValueError(
                         f"Option '{option.id}' references non-existent node: {node_id}"
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def validate_parameter_uncertainties_reference_nodes(self) -> "RobustnessRequestV2":
+        """Validate all parameter uncertainty node_ids exist in graph."""
+        if self.parameter_uncertainties:
+            node_ids = {node.id for node in self.graph.nodes}
+            for uncertainty in self.parameter_uncertainties:
+                if uncertainty.node_id not in node_ids:
+                    raise ValueError(
+                        f"ParameterUncertainty references non-existent node: {uncertainty.node_id}"
                     )
         return self
 
@@ -456,6 +619,43 @@ class SensitivityResult(BaseModel):
                 "elasticity": 0.45,
                 "importance_rank": 1,
                 "interpretation": "Decision is moderately sensitive to marketing->demand existence"
+            }
+        }
+    }
+
+
+class FactorSensitivityResult(BaseModel):
+    """Sensitivity to a factor node's value (Phase 2A Part 2)."""
+
+    node_id: str = Field(..., description="Factor node ID")
+    node_label: Optional[str] = Field(None, description="Human-readable node label")
+    elasticity: float = Field(
+        ...,
+        description="% change in outcome per % change in factor value"
+    )
+    importance_rank: int = Field(
+        ...,
+        ge=1,
+        description="Rank by importance (1 = most important)"
+    )
+    observed_value: Optional[float] = Field(
+        None,
+        description="Observed value from node's observed_state"
+    )
+    interpretation: str = Field(
+        ...,
+        description="Human-readable explanation"
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "node_id": "marketing_spend",
+                "node_label": "Marketing Spend",
+                "elasticity": 0.32,
+                "importance_rank": 2,
+                "observed_value": 50000.0,
+                "interpretation": "Decision is moderately sensitive to marketing_spend value"
             }
         }
     }
@@ -595,6 +795,12 @@ class RobustnessResponseV2(BaseModel):
     sensitivity: List[SensitivityResult] = Field(
         default_factory=list,
         description="Sensitivity results per edge"
+    )
+
+    # Factor sensitivity analysis (Phase 2A Part 2)
+    factor_sensitivity: List[FactorSensitivityResult] = Field(
+        default_factory=list,
+        description="Sensitivity results per factor node value"
     )
 
     # Robustness analysis

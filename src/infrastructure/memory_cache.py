@@ -351,3 +351,51 @@ def shutdown_cache() -> None:
     if _cache_instance is not None:
         _cache_instance.shutdown()
         _cache_instance = None
+
+
+# Named cache registry for domain-specific caches
+_named_caches: Dict[str, MemoryCache] = {}
+_named_cache_lock = threading.Lock()
+
+
+def get_named_cache(
+    name: str, max_size: int = 1000, ttl: int = 3600
+) -> MemoryCache:
+    """
+    Get or create a named cache instance.
+
+    This provides named caches for different domains (e.g., "robustness", "validation")
+    similar to utils/cache.get_cache but using MemoryCache.
+
+    RECOMMENDED: Use this function for new code. Prefer this over src/utils/cache.get_cache.
+
+    Args:
+        name: Cache name (e.g., "decision_robustness", "validation")
+        max_size: Maximum cache size
+        ttl: Time-to-live in seconds
+
+    Returns:
+        MemoryCache instance
+
+    Example:
+        cache = get_named_cache("decision_robustness", max_size=500, ttl=3600)
+        cache.set("key", value)
+        result = cache.get("key")
+    """
+    with _named_cache_lock:
+        if name not in _named_caches:
+            _named_caches[name] = MemoryCache(max_size=max_size, default_ttl=ttl)
+        return _named_caches[name]
+
+
+def clear_all_named_caches() -> None:
+    """Clear all named caches."""
+    with _named_cache_lock:
+        for cache in _named_caches.values():
+            cache.clear()
+
+
+def get_all_named_cache_stats() -> Dict[str, Dict[str, Any]]:
+    """Get statistics for all named caches."""
+    with _named_cache_lock:
+        return {name: cache.get_stats() for name, cache in _named_caches.items()}

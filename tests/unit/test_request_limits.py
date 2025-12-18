@@ -76,11 +76,17 @@ class TestRequestTimeoutMiddleware:
             app = MagicMock()
             middleware = RequestTimeoutMiddleware(app)
 
-            # Validation should have shorter timeout
+            # Validation should have shorter timeout (30s)
             assert middleware._get_timeout_for_path("/api/v1/validation/assumptions") == 30
 
-            # Counterfactual should have longer timeout
-            assert middleware._get_timeout_for_path("/api/v1/counterfactual/generate") == 120
+            # Analysis endpoints should have longer timeout (120s)
+            assert middleware._get_timeout_for_path("/api/v1/analysis/sensitivity") == 120
+
+            # Causal endpoints should have 90s timeout
+            assert middleware._get_timeout_for_path("/api/v1/causal/validate") == 90
+
+            # Batch endpoints should have longest timeout (180s)
+            assert middleware._get_timeout_for_path("/api/v1/batch/process") == 180
 
             # Unknown path should use default
             assert middleware._get_timeout_for_path("/unknown/path") == 60

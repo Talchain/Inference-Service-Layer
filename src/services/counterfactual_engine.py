@@ -31,6 +31,7 @@ from src.models.responses import (
 from src.models.shared import ConfidenceLevel, RobustnessLevel, UncertaintyLevel
 from src.services.explanation_generator import ExplanationGenerator
 from src.utils.determinism import canonical_hash, make_deterministic
+from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -68,8 +69,8 @@ class CounterfactualEngine:
         Returns:
             CounterfactualResponse: Prediction results with uncertainty
         """
-        # Make computation deterministic
-        seed = make_deterministic(request.model_dump())
+        # Create per-request RNG for thread-safe determinism
+        rng = make_deterministic(request.model_dump())
 
         logger.info(
             "counterfactual_analysis_started",
@@ -77,13 +78,13 @@ class CounterfactualEngine:
                 "request_hash": canonical_hash(request.model_dump()),
                 "outcome": request.outcome,
                 "intervention": request.intervention,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 
         try:
             # Run Monte Carlo simulation
-            samples = self._run_monte_carlo(request)
+            samples = self._run_monte_carlo(request, rng)
 
             # Compute prediction results
             prediction = self._compute_prediction(samples, request.outcome)
@@ -182,7 +183,7 @@ class CounterfactualEngine:
         return result
 
     def _run_monte_carlo(
-        self, request: CounterfactualRequest
+        self, request: CounterfactualRequest, rng: SeededRNG
     ) -> Dict[str, np.ndarray]:
         """
         Run Monte Carlo simulation of the structural model.
@@ -192,17 +193,18 @@ class CounterfactualEngine:
 
         Args:
             request: Counterfactual request
+            rng: Per-request random number generator
 
         Returns:
             Dict mapping variable names to arrays of sampled values
         """
         if self.enable_adaptive_sampling:
-            return self._run_adaptive_monte_carlo(request)
+            return self._run_adaptive_monte_carlo(request, rng)
         else:
-            return self._run_fixed_monte_carlo(request, self.num_iterations)
+            return self._run_fixed_monte_carlo(request, self.num_iterations, rng)
 
     def _run_adaptive_monte_carlo(
-        self, request: CounterfactualRequest
+        self, request: CounterfactualRequest, rng: SeededRNG
     ) -> Dict[str, np.ndarray]:
         """
         Adaptive Monte Carlo: start small, grow if variance is high.
@@ -213,6 +215,10 @@ class CounterfactualEngine:
         - If CV < 0.1 (converged), stop early
         - Otherwise, double samples and continue
         - Max: self.num_iterations
+
+        Args:
+            request: Counterfactual request
+            rng: Per-request random number generator
         """
         batch_size = 100
         all_samples: Dict[str, List[float]] = {request.outcome: []}
@@ -220,7 +226,7 @@ class CounterfactualEngine:
         while len(all_samples[request.outcome]) < self.num_iterations:
             # Run batch
             current_size = min(batch_size, self.num_iterations - len(all_samples[request.outcome]))
-            batch_samples = self._run_fixed_monte_carlo(request, current_size)
+            batch_samples = self._run_fixed_monte_carlo(request, current_size, rng)
 
             # Accumulate samples for outcome variable
             if not all_samples[request.outcome]:
@@ -254,10 +260,10 @@ class CounterfactualEngine:
         # Run one final simulation with the determined sample count
         # (we only tracked outcome for convergence, need all variables)
         final_count = len(all_samples[request.outcome])
-        return self._run_fixed_monte_carlo(request, final_count)
+        return self._run_fixed_monte_carlo(request, final_count, rng)
 
     def _run_fixed_monte_carlo(
-        self, request: CounterfactualRequest, num_samples: int
+        self, request: CounterfactualRequest, num_samples: int, rng: SeededRNG
     ) -> Dict[str, np.ndarray]:
         """
         Run fixed-size Monte Carlo simulation.
@@ -265,6 +271,7 @@ class CounterfactualEngine:
         Args:
             request: Counterfactual request
             num_samples: Number of samples to generate
+            rng: Per-request random number generator
 
         Returns:
             Dict mapping variable names to arrays of sampled values
@@ -274,7 +281,7 @@ class CounterfactualEngine:
         # Sample exogenous variables from their distributions
         for var_name, dist in request.model.distributions.items():
             samples[var_name] = self._sample_distribution(
-                dist.type.value, dist.parameters, num_samples
+                dist.type.value, dist.parameters, num_samples, rng
             )
 
         # Apply intervention (set intervened variables to fixed values)
@@ -296,27 +303,31 @@ class CounterfactualEngine:
         return samples
 
     def _sample_distribution(
-        self, dist_type: str, params: Dict[str, float], size: int
+        self, dist_type: str, params: Dict[str, float], size: int, rng: SeededRNG
     ) -> np.ndarray:
         """
-        Sample from a probability distribution.
+        Sample from a probability distribution using per-request RNG.
 
         Args:
             dist_type: Distribution type (normal, uniform, beta, exponential)
             params: Distribution parameters
             size: Number of samples
+            rng: Per-request random number generator
 
         Returns:
             Array of samples
         """
         if dist_type == "normal":
-            return np.random.normal(params["mean"], params["std"], size)
+            return rng.normal_array(params["mean"], params["std"], size)
         elif dist_type == "uniform":
-            return np.random.uniform(params["min"], params["max"], size)
+            return rng.uniform_array(params["min"], params["max"], size)
         elif dist_type == "beta":
-            return np.random.beta(params["alpha"], params["beta"], size)
+            return rng.beta_array(params["alpha"], params["beta"], size)
         elif dist_type == "exponential":
-            return np.random.exponential(params["scale"], size)
+            # Use inverse transform sampling for exponential
+            # X = -scale * ln(U) where U ~ Uniform(0, 1)
+            u = rng.uniform_array(0.0, 1.0, size)
+            return -params["scale"] * np.log(u)
         else:
             raise ValueError(f"Unknown distribution type: {dist_type}")
 

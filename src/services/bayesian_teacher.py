@@ -88,7 +88,7 @@ class BayesianTeacher:
             Tuple of (examples, explanation, learning_objectives, estimated_time)
         """
         # Make computation deterministic
-        seed = make_deterministic(
+        rng = make_deterministic(
             {
                 "concept": target_concept,
                 "beliefs": current_beliefs.model_dump(),
@@ -102,7 +102,7 @@ class BayesianTeacher:
                 "concept": target_concept,
                 "num_variables": len(context.variables),
                 "max_examples": max_examples,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 

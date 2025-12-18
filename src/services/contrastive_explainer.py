@@ -29,6 +29,7 @@ from src.services.counterfactual_engine import CounterfactualEngine
 from src.services.explanation_generator import ExplanationGenerator
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.utils.determinism import canonical_hash, make_deterministic
+from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +83,11 @@ class ContrastiveExplainer:
         Returns:
             ContrastiveExplanationResponse with ranked interventions
         """
-        # Make computation deterministic
-        seed = make_deterministic(request.model_dump())
+        # Make computation deterministic using per-request RNG
         if request.seed is not None:
-            seed = request.seed
-
-        np.random.seed(seed)
+            rng = SeededRNG(request.seed)
+        else:
+            rng = make_deterministic(request.model_dump())
 
         logger.info(
             "contrastive_analysis_started",
@@ -95,7 +95,7 @@ class ContrastiveExplainer:
                 "request_hash": canonical_hash(request.model_dump()),
                 "feasible_vars": request.constraints.feasible,
                 "target_outcome": request.target_outcome,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 
@@ -110,7 +110,7 @@ class ContrastiveExplainer:
                     model=request.model,
                     target_outcome=request.target_outcome,
                     constraints=request.constraints,
-                    seed=seed,
+                    seed=rng.seed,
                 )
                 if intervention is not None:
                     candidates.append(intervention)
@@ -122,7 +122,7 @@ class ContrastiveExplainer:
                     model=request.model,
                     target_outcome=request.target_outcome,
                     constraints=request.constraints,
-                    seed=seed,
+                    seed=rng.seed,
                 )
                 candidates.extend(multi_interventions)
 
@@ -136,7 +136,7 @@ class ContrastiveExplainer:
                     target_outcome=request.target_outcome,
                     constraints=request.constraints,
                     request_id=request_id,
-                    seed=seed,
+                    seed=rng.seed,
                 )
                 if eval_result is not None:
                     evaluated.append(eval_result)
@@ -244,7 +244,7 @@ class ContrastiveExplainer:
                     current_state=current_state,
                     model=model,
                     outcome_var=outcome_var,
-                    seed=seed,
+                    seed=rng.seed,
                 )
 
                 if outcome is not None and target_min <= outcome <= target_max:
@@ -314,7 +314,7 @@ class ContrastiveExplainer:
                         target_min=target_min,
                         target_max=target_max,
                         constraints=constraints,
-                        seed=seed,
+                        seed=rng.seed,
                     )
 
                     if best_combo is not None:
@@ -382,7 +382,7 @@ class ContrastiveExplainer:
                     current_state=current_state,
                     model=model,
                     outcome_var=outcome_var,
-                    seed=seed,
+                    seed=rng.seed,
                 )
 
                 if outcome is not None and target_min <= outcome <= target_max:
@@ -468,7 +468,7 @@ class ContrastiveExplainer:
                 current_state=current_state,
                 model=model,
                 outcome_var=outcome_var,
-                seed=seed,
+                seed=rng.seed,
             )
 
             if expected_outcome is None:
@@ -480,7 +480,7 @@ class ContrastiveExplainer:
                 model=model,
                 target_outcome=target_outcome,
                 request_id=request_id,
-                seed=seed,
+                seed=rng.seed,
             )
 
             # Compute feasibility score

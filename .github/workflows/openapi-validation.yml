@@ -1,0 +1,124 @@
+name: OpenAPI Specification Validation
+
+on:
+  push:
+    branches: [main, staging, develop]
+    paths:
+      - 'src/api/**'
+      - 'src/models/**'
+      - 'openapi.json'
+      - 'scripts/generate_openapi.py'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/openapi-validation.yml'
+  pull_request:
+    branches: [main, staging, develop]
+    paths:
+      - 'src/api/**'
+      - 'src/models/**'
+      - 'openapi.json'
+      - 'scripts/generate_openapi.py'
+      - 'pyproject.toml'
+      - 'poetry.lock'
+      - '.github/workflows/openapi-validation.yml'
+  workflow_dispatch:
+
+jobs:
+  validate-openapi-spec:
+    name: Validate OpenAPI Specification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Check OpenAPI spec is current
+        env:
+          ISL_AUTH_DISABLED: "true"  # Disable auth for CI
+        run: |
+          echo "## OpenAPI Specification Validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if poetry run python scripts/generate_openapi.py --check; then
+            echo "✅ **openapi.json is up to date**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **openapi.json is out of date**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Run \`poetry run python scripts/generate_openapi.py\` to regenerate." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Validate OpenAPI spec structure
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Spec Statistics" >> $GITHUB_STEP_SUMMARY
+
+          poetry run python -c "
+          import json
+
+          with open('openapi.json') as f:
+              spec = json.load(f)
+
+          paths = spec.get('paths', {})
+          schemas = spec.get('components', {}).get('schemas', {})
+          tags = set()
+          for path_info in paths.values():
+              for method_info in path_info.values():
+                  if isinstance(method_info, dict):
+                      tags.update(method_info.get('tags', []))
+
+          print(f'- Paths: {len(paths)}')
+          print(f'- Schemas: {len(schemas)}')
+          print(f'- Tags: {len(tags)}')
+
+          # Validate minimum expected paths
+          if len(paths) < 40:
+              print(f'::warning::Only {len(paths)} paths documented. Expected ~50+')
+
+          print()
+          print('Paths by prefix:')
+          prefixes = {}
+          for path in paths:
+              prefix = '/'.join(path.split('/')[:4])
+              prefixes[prefix] = prefixes.get(prefix, 0) + 1
+          for prefix, count in sorted(prefixes.items()):
+              print(f'  {prefix}: {count}')
+          " >> $GITHUB_STEP_SUMMARY
+
+      - name: Install OpenAPI validator
+        run: |
+          pip install openapi-spec-validator
+
+      - name: Validate OpenAPI 3.x compliance
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### OpenAPI 3.x Compliance" >> $GITHUB_STEP_SUMMARY
+
+          if python -c "from openapi_spec_validator import validate_spec; import json; validate_spec(json.load(open('openapi.json')))"; then
+            echo "✅ **Spec is valid OpenAPI 3.x**" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Spec validation failed**" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

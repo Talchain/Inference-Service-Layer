@@ -23,6 +23,7 @@ from src.models.shared import ExplanationMetadata, RobustnessLevel, StructuralMo
 from src.services.counterfactual_engine import CounterfactualEngine
 from src.services.explanation_generator import ExplanationGenerator
 from src.utils.determinism import canonical_hash, make_deterministic
+from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,11 @@ class BatchCounterfactualEngine:
         Returns:
             BatchCounterfactualResponse with scenarios, interactions, and comparison
         """
-        # Make computation deterministic
-        seed = make_deterministic(request.model_dump())
+        # Make computation deterministic using per-request RNG
         if request.seed is not None:
-            seed = request.seed
-
-        np.random.seed(seed)
+            rng = SeededRNG(request.seed)
+        else:
+            rng = make_deterministic(request.model_dump())
 
         logger.info(
             "batch_counterfactual_started",
@@ -81,7 +81,7 @@ class BatchCounterfactualEngine:
                 "num_scenarios": len(request.scenarios),
                 "outcome": request.outcome,
                 "analyze_interactions": request.analyze_interactions,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 
@@ -93,7 +93,7 @@ class BatchCounterfactualEngine:
                     model=request.model,
                     scenario=scenario,
                     outcome=request.outcome,
-                    seed=seed,
+                    seed=rng.seed,
                 )
                 results.append(result)
 
@@ -104,7 +104,7 @@ class BatchCounterfactualEngine:
                     model=request.model,
                     scenarios=request.scenarios,
                     results=results,
-                    seed=seed,
+                    seed=rng.seed,
                 )
 
             # Comparison

@@ -12,6 +12,7 @@ This enables answering:
 
 import logging
 import time
+import uuid
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
@@ -20,10 +21,13 @@ import numpy as np
 from src.models.robustness_v2 import (
     ClampMetrics,
     EdgeV2,
+    FactorSensitivityResult,
     GraphV2,
     InterventionOption,
+    NodeV2,
     OptionResult,
     OutcomeDistribution,
+    ParameterUncertainty,
     ResponseMetadataV2,
     RobustnessRequestV2,
     RobustnessResponseV2,
@@ -125,6 +129,134 @@ class DualUncertaintySampler:
 
 
 # =============================================================================
+# Factor Sampler (Phase 2A Part 2)
+# =============================================================================
+
+class FactorSampler:
+    """
+    Samples factor node values with parameter uncertainty.
+
+    For each factor with specified uncertainty:
+    1. Get mean from node's observed_state.value
+    2. Sample from distribution (normal, uniform, or point_mass)
+
+    This enables Monte Carlo integration over factor value uncertainty,
+    complementing edge uncertainty (structural + magnitude).
+    """
+
+    def __init__(
+        self,
+        nodes: List[NodeV2],
+        uncertainties: Optional[List[ParameterUncertainty]],
+        rng: SeededRNG,
+    ):
+        """
+        Initialize factor sampler.
+
+        Args:
+            nodes: List of graph nodes (may include observed_state)
+            uncertainties: List of factor uncertainty specifications
+            rng: Seeded random number generator
+        """
+        self.rng = rng
+        self._node_map: Dict[str, NodeV2] = {n.id: n for n in nodes}
+        self._uncertainty_map: Dict[str, ParameterUncertainty] = {
+            u.node_id: u for u in (uncertainties or [])
+        }
+        self._sample_count = 0
+        self._value_sums: Dict[str, float] = defaultdict(float)
+
+    def sample_factor_values(self) -> Dict[str, float]:
+        """
+        Sample factor values for one Monte Carlo iteration.
+
+        Returns:
+            Dict mapping node_id -> sampled value for all factor nodes
+            with specified uncertainty.
+        """
+        self._sample_count += 1
+        factor_values: Dict[str, float] = {}
+
+        for node_id, uncertainty in self._uncertainty_map.items():
+            node = self._node_map.get(node_id)
+            if not node:
+                # Node doesn't exist - skip (should have been caught by validation)
+                continue
+
+            # Get mean from observed_state.value, default to 0
+            mean = 0.0
+            if node.observed_state and node.observed_state.value is not None:
+                mean = node.observed_state.value
+
+            # Sample from specified distribution
+            sampled_value = self._sample_from_distribution(uncertainty, mean)
+            factor_values[node_id] = sampled_value
+            self._value_sums[node_id] += sampled_value
+
+        return factor_values
+
+    def _sample_from_distribution(
+        self, uncertainty: ParameterUncertainty, mean: float
+    ) -> float:
+        """
+        Sample a value from the specified distribution.
+
+        Args:
+            uncertainty: Distribution specification
+            mean: Mean value (from observed_state.value)
+
+        Returns:
+            Sampled value
+        """
+        dist = uncertainty.distribution
+
+        if dist == "point_mass":
+            # No sampling - use observed value directly
+            return mean
+
+        elif dist == "normal":
+            # Sample from Normal(mean, std)
+            std = uncertainty.std or 0.0
+            return self.rng.normal(mean, std)
+
+        elif dist == "uniform":
+            # Sample uniformly from [range_min, range_max]
+            range_min = uncertainty.range_min
+            range_max = uncertainty.range_max
+            if range_min is None or range_max is None:
+                raise ValueError(
+                    f"Uniform distribution for node {node_id} requires range_min and range_max"
+                )
+            return self.rng.uniform(range_min, range_max)
+
+        else:
+            # Unknown distribution - fail fast instead of silent fallback
+            raise ValueError(
+                f"Unknown distribution '{dist}' for node {node_id}. "
+                f"Supported: point_mass, normal, uniform"
+            )
+
+    def has_uncertainties(self) -> bool:
+        """Check if any factor uncertainties are specified."""
+        return len(self._uncertainty_map) > 0
+
+    def get_mean_sampled_values(self) -> Dict[str, float]:
+        """
+        Get mean values from sampling for diagnostics.
+
+        Returns:
+            Dict mapping node_id -> mean sampled value
+        """
+        if self._sample_count == 0:
+            return {}
+
+        return {
+            node_id: total / self._sample_count
+            for node_id, total in self._value_sums.items()
+        }
+
+
+# =============================================================================
 # SCM Evaluator
 # =============================================================================
 
@@ -138,6 +270,12 @@ class SCMEvaluatorV2:
     - Evaluation follows topological order
 
     For more complex models, this could integrate with a full SCM engine.
+
+    Note: Nodes may contain `observed_state` with actual factor values from
+    CEE extraction. Phase 2A Part 2 will use these for:
+    - Anchoring factor distributions to observed values
+    - Computing realistic outcome distributions
+    - Providing value-aware robustness analysis
     """
 
     def __init__(self, graph: GraphV2):
@@ -145,12 +283,15 @@ class SCMEvaluatorV2:
         Initialize evaluator.
 
         Args:
-            graph: Causal graph structure
+            graph: Causal graph structure (nodes may include observed_state)
         """
         self.graph = graph
         self._node_order = self._compute_topological_order()
         self._children: Dict[str, List[str]] = defaultdict(list)
         self._parents: Dict[str, List[str]] = defaultdict(list)
+        # Build node lookup for quick access to observed_state
+        # Phase 2A Part 2: Will use this for factor value sampling
+        self._nodes_by_id: Dict[str, NodeV2] = {node.id: node for node in graph.nodes}
 
         for edge in graph.edges:
             self._children[edge.from_].append(edge.to)
@@ -192,6 +333,7 @@ class SCMEvaluatorV2:
         interventions: Dict[str, float],
         goal_node: str,
         base_values: Optional[Dict[str, float]] = None,
+        factor_values: Optional[Dict[str, float]] = None,
     ) -> float:
         """
         Evaluate outcome under given edge configuration and interventions.
@@ -204,12 +346,19 @@ class SCMEvaluatorV2:
             interventions: Node interventions (do(X=x))
             goal_node: Target outcome node
             base_values: Optional base values for nodes (default: 0)
+            factor_values: Optional sampled factor values (overrides observed_state.value)
 
         Returns:
             Value at goal_node
+
+        Phase 2A Part 2 (ACTIVE):
+            Root factor nodes use observed_state.value as their base value.
+            If factor_values is provided, those take precedence (for sampling).
         """
         if base_values is None:
             base_values = {}
+        if factor_values is None:
+            factor_values = {}
 
         node_values: Dict[str, float] = {}
 
@@ -218,10 +367,25 @@ class SCMEvaluatorV2:
                 # Interventional value overrides structural equations
                 node_values[node_id] = interventions[node_id]
             else:
-                # Compute from parents
-                base = base_values.get(node_id, 0.0)
-                parents_contribution = 0.0
+                # Determine base value for this node
+                # Priority: factor_values > observed_state.value > base_values > 0
+                if node_id in factor_values:
+                    # Sampled factor value takes highest priority
+                    base = factor_values[node_id]
+                elif node_id in base_values:
+                    # Explicitly provided base value
+                    base = base_values[node_id]
+                else:
+                    # Check for observed_state.value on root nodes
+                    node = self._nodes_by_id.get(node_id)
+                    is_root = len(self._parents.get(node_id, [])) == 0
+                    if is_root and node and node.observed_state and node.observed_state.value is not None:
+                        base = node.observed_state.value
+                    else:
+                        base = 0.0
 
+                # Compute contribution from parents
+                parents_contribution = 0.0
                 for parent in self._parents[node_id]:
                     edge_key = (parent, node_id)
                     strength = edge_strengths.get(edge_key, 0.0)
@@ -274,26 +438,35 @@ class RobustnessAnalyzerV2:
         """
         start_time = time.time()
 
-        # Setup
+        # Generate request_id if not provided
+        request_id = request.request_id or f"robustness-{uuid.uuid4().hex[:12]}"
+
+        # Setup - use separate RNG streams for edge and factor sampling
+        # to prevent fragile determinism coupling
         seed = request.seed or compute_seed_from_graph(request.graph)
-        rng = SeededRNG(seed)
-        sampler = DualUncertaintySampler(request.graph.edges, rng)
+        rng_edge = SeededRNG(seed)
+        rng_factor = SeededRNG(seed + 1)
+        sampler = DualUncertaintySampler(request.graph.edges, rng_edge)
+        factor_sampler = FactorSampler(
+            request.graph.nodes, request.parameter_uncertainties, rng_factor
+        )
         evaluator = SCMEvaluatorV2(request.graph)
 
         self.logger.info(
             "robustness_v2_analysis_started",
             extra={
-                "request_id": request.request_id,
+                "request_id": request_id,
                 "n_samples": request.n_samples,
                 "n_options": len(request.options),
                 "n_edges": len(request.graph.edges),
+                "n_factor_uncertainties": len(request.parameter_uncertainties or []),
                 "seed": seed,
             },
         )
 
         # Run Monte Carlo simulation
         option_outcomes, option_wins, winner_per_sample = self._run_monte_carlo(
-            request, sampler, evaluator
+            request, sampler, factor_sampler, evaluator
         )
 
         # Compute results
@@ -305,7 +478,14 @@ class RobustnessAnalyzerV2:
         sensitivity = []
         if "sensitivity" in request.analysis_types:
             sensitivity = self._compute_sensitivity(
-                request, option_outcomes, sampler, rng, evaluator
+                request, option_outcomes, sampler, rng_edge, evaluator
+            )
+
+        # Compute factor sensitivity if factor uncertainties are specified
+        factor_sensitivity = []
+        if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
+            factor_sensitivity = self._compute_factor_sensitivity(
+                request, option_outcomes, rng_factor, evaluator
             )
 
         # Compute robustness assessment
@@ -320,11 +500,12 @@ class RobustnessAnalyzerV2:
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
         response = RobustnessResponseV2(
-            request_id=request.request_id,
+            request_id=request_id,
             results=results,
             recommended_option_id=recommended_option_id,
             recommendation_confidence=recommendation_confidence,
             sensitivity=sensitivity,
+            factor_sensitivity=factor_sensitivity,
             robustness=robustness,
             metadata=ResponseMetadataV2(
                 isl_version=__version__,
@@ -339,7 +520,7 @@ class RobustnessAnalyzerV2:
         self.logger.info(
             "robustness_v2_analysis_complete",
             extra={
-                "request_id": request.request_id,
+                "request_id": request_id,
                 "recommended_option": recommended_option_id,
                 "recommendation_confidence": recommendation_confidence,
                 "is_robust": robustness.is_robust,
@@ -353,10 +534,11 @@ class RobustnessAnalyzerV2:
         self,
         request: RobustnessRequestV2,
         sampler: DualUncertaintySampler,
+        factor_sampler: FactorSampler,
         evaluator: SCMEvaluatorV2,
     ) -> Tuple[Dict[str, List[float]], Dict[str, int], List[str]]:
         """
-        Run Monte Carlo simulation.
+        Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
 
         Returns:
             (option_outcomes, option_wins, winner_per_sample)
@@ -368,8 +550,11 @@ class RobustnessAnalyzerV2:
         winner_per_sample: List[str] = []
 
         for _ in range(request.n_samples):
-            # Sample edge configuration
+            # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
+
+            # Sample factor values (parameter uncertainty)
+            factor_values = factor_sampler.sample_factor_values()
 
             # Evaluate each option
             sample_outcomes = {}
@@ -378,6 +563,7 @@ class RobustnessAnalyzerV2:
                     edge_strengths=edge_config,
                     interventions=option.interventions,
                     goal_node=request.goal_node_id,
+                    factor_values=factor_values,
                 )
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
@@ -696,6 +882,139 @@ class RobustnessAnalyzerV2:
             return (
                 f"Decision is highly sensitive to {edge_name} effect size - "
                 "consider narrowing uncertainty"
+            )
+
+    def _compute_factor_sensitivity(
+        self,
+        request: RobustnessRequestV2,
+        baseline_outcomes: Dict[str, List[float]],
+        rng: SeededRNG,
+        evaluator: SCMEvaluatorV2,
+    ) -> List[FactorSensitivityResult]:
+        """
+        Compute sensitivity to factor node values.
+
+        For each factor with uncertainty specified, measures how much
+        the outcome changes when the factor value is varied by ±1 std
+        (or ±10% of range for uniform distributions).
+        """
+        if not request.parameter_uncertainties:
+            return []
+
+        sensitivities = []
+        ref_option = request.options[0]
+        baseline_mean = np.mean(baseline_outcomes[ref_option.id])
+
+        # Build node map for labels
+        node_map = {n.id: n for n in request.graph.nodes}
+
+        # Sample mean edge configuration for sensitivity analysis
+        # (isolate factor sensitivity from edge uncertainty)
+        mean_edge_config = {
+            (e.from_, e.to): e.strength.mean * e.exists_probability
+            for e in request.graph.edges
+        }
+
+        for uncertainty in request.parameter_uncertainties:
+            node = node_map.get(uncertainty.node_id)
+            if not node:
+                continue
+
+            # Get observed value
+            observed_value = None
+            if node.observed_state and node.observed_state.value is not None:
+                observed_value = node.observed_state.value
+
+            mean_value = observed_value if observed_value is not None else 0.0
+
+            # Determine perturbation amount based on distribution
+            if uncertainty.distribution == "normal":
+                delta = uncertainty.std or 0.0
+            elif uncertainty.distribution == "uniform":
+                range_min = uncertainty.range_min or 0.0
+                range_max = uncertainty.range_max or 0.0
+                delta = (range_max - range_min) * 0.1  # 10% of range
+            else:
+                # point_mass - no sensitivity
+                delta = 0.0
+
+            if delta == 0.0:
+                # No uncertainty to measure
+                sensitivities.append({
+                    "node_id": uncertainty.node_id,
+                    "node_label": node.label,
+                    "elasticity": 0.0,
+                    "observed_value": observed_value,
+                    "interpretation": f"Factor {node.label} has no uncertainty (point mass)",
+                })
+                continue
+
+            # Evaluate with high and low values (single evaluation - deterministic given fixed inputs)
+            factor_values_high = {uncertainty.node_id: mean_value + delta}
+            outcome_high = evaluator.evaluate(
+                edge_strengths=mean_edge_config,
+                interventions=ref_option.interventions,
+                goal_node=request.goal_node_id,
+                factor_values=factor_values_high,
+            )
+
+            factor_values_low = {uncertainty.node_id: mean_value - delta}
+            outcome_low = evaluator.evaluate(
+                edge_strengths=mean_edge_config,
+                interventions=ref_option.interventions,
+                goal_node=request.goal_node_id,
+                factor_values=factor_values_low,
+            )
+
+            outcome_diff = outcome_high - outcome_low
+
+            # Compute true elasticity: (%Δ outcome) / (%Δ factor)
+            if abs(baseline_mean) < 1e-10:
+                elasticity = 0.0
+            else:
+                pct_outcome_change = outcome_diff / baseline_mean
+                pct_factor_change = (2 * delta) / mean_value if abs(mean_value) > 1e-10 else 1.0
+                elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+
+            sensitivities.append({
+                "node_id": uncertainty.node_id,
+                "node_label": node.label,
+                "elasticity": elasticity,
+                "observed_value": observed_value,
+                "interpretation": self._interpret_factor_sensitivity(
+                    node.label, elasticity
+                ),
+            })
+
+        # Sort by absolute elasticity
+        sensitivities.sort(key=lambda x: abs(x["elasticity"]), reverse=True)
+
+        # Convert to results with ranks
+        results = []
+        for i, s in enumerate(sensitivities):
+            results.append(
+                FactorSensitivityResult(
+                    node_id=s["node_id"],
+                    node_label=s["node_label"],
+                    elasticity=s["elasticity"],
+                    importance_rank=i + 1,
+                    observed_value=s["observed_value"],
+                    interpretation=s["interpretation"],
+                )
+            )
+
+        return results
+
+    def _interpret_factor_sensitivity(self, node_label: str, elasticity: float) -> str:
+        """Generate human-readable interpretation for factor sensitivity."""
+        if abs(elasticity) < 0.05:
+            return f"Decision is robust to {node_label} value variation"
+        elif abs(elasticity) < self.HIGH_SENSITIVITY_THRESHOLD:
+            return f"Decision is moderately sensitive to {node_label} value"
+        else:
+            return (
+                f"Decision is highly sensitive to {node_label} value - "
+                "consider narrowing uncertainty or gathering more data"
             )
 
     def _compute_robustness(

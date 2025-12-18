@@ -46,27 +46,26 @@ def test_seed_from_input_deterministic():
 
 
 def test_make_deterministic():
-    """Test that make_deterministic sets global seeds."""
-    import random
-
-    import numpy as np
+    """Test that make_deterministic returns a per-request RNG."""
+    from src.utils.rng import SeededRNG
 
     data = {"test": "data"}
 
-    seed = make_deterministic(data)
+    rng1 = make_deterministic(data)
+    assert isinstance(rng1, SeededRNG), "make_deterministic should return SeededRNG"
 
-    # Generate some random numbers
-    rand1 = random.random()
-    np_rand1 = np.random.random()
+    # Generate some random numbers using the RNG
+    rand1 = rng1.random()
+    np_rand1 = rng1.normal(0, 1)
 
-    # Reset with same data
-    seed2 = make_deterministic(data)
+    # Create new RNG with same data
+    rng2 = make_deterministic(data)
 
-    # Should get same random numbers
-    rand2 = random.random()
-    np_rand2 = np.random.random()
+    # Should get same random numbers from new RNG with same seed
+    rand2 = rng2.random()
+    np_rand2 = rng2.normal(0, 1)
 
-    assert seed == seed2, "Same input should produce same seed"
+    assert rng1.seed == rng2.seed, "Same input should produce same seed"
     assert rand1 == rand2, "Random numbers should be reproducible"
     assert np_rand1 == np_rand2, "NumPy random numbers should be reproducible"
 
@@ -75,10 +74,8 @@ def test_verify_determinism():
     """Test determinism verification."""
 
     def deterministic_func(data):
-        make_deterministic(data)
-        import numpy as np
-
-        return np.random.random()
+        rng = make_deterministic(data)
+        return rng.random()
 
     assert verify_determinism(deterministic_func, {"test": 1}), \
         "Deterministic function should pass verification"

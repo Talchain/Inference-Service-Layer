@@ -34,6 +34,7 @@ from src.utils.error_recovery import (
     FallbackStrategy,
     health_monitor
 )
+from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +76,8 @@ class ConformalPredictor:
         Raises:
             HTTPException: If calibration data is insufficient or invalid
         """
-        # Make computation deterministic
-        request_hash = make_deterministic(request.model_dump())
+        # Create per-request RNG for thread-safe determinism
+        rng = make_deterministic(request.model_dump())
 
         logger.info(
             "conformal_prediction_started",
@@ -84,6 +85,7 @@ class ConformalPredictor:
                 "request_hash": canonical_hash(request.model_dump()),
                 "method": request.method,
                 "confidence_level": request.confidence_level,
+                "seed": rng.seed,
             },
         )
 
@@ -120,13 +122,13 @@ class ConformalPredictor:
                 # Normal operation
                 # Use split conformal method
                 if request.method == "split":
-                    result = self._split_conformal(request)
+                    result = self._split_conformal(request, rng)
                 else:
                     # Fallback to split for now (cv+ and jackknife+ would be implemented here)
                     logger.warning(
                         f"Method {request.method} not yet implemented, using split conformal"
                     )
-                    result = self._split_conformal(request)
+                    result = self._split_conformal(request, rng)
                 health_monitor.record_success("conformal_prediction")
 
             logger.info(
@@ -181,7 +183,7 @@ class ConformalPredictor:
                 )
 
     def _split_conformal(
-        self, request: ConformalCounterfactualRequest
+        self, request: ConformalCounterfactualRequest, rng: SeededRNG
     ) -> ConformalCounterfactualResponse:
         """
         Split conformal prediction.
@@ -194,20 +196,18 @@ class ConformalPredictor:
 
         Args:
             request: Conformal counterfactual request
+            rng: Per-request random number generator
 
         Returns:
             Conformal prediction response
         """
-        if request.seed is not None:
-            np.random.seed(request.seed)
-
         # Split calibration data
         calib_data = request.calibration_data
         n = len(calib_data)
         split_idx = int(n * 0.5)
 
-        # Randomly shuffle
-        indices = np.random.permutation(n)
+        # Randomly shuffle using per-request RNG
+        indices = rng.shuffle(list(range(n)))
         train_idx = indices[:split_idx]
         calib_idx = indices[split_idx:]
 
@@ -714,9 +714,7 @@ class ConformalPredictor:
         # Don't actually split if we have too few points - use all for calibration
         n_calib = len(request.calibration_data)
 
-        if request.seed is not None:
-            np.random.seed(request.seed)
-
+        # Note: No random operations in degraded mode - using all calibration data
         from src.services.structural_model_parser import StructuralModelParser
         parser = StructuralModelParser()
         scm = parser.parse(request.model)

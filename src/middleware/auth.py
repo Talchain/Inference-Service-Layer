@@ -13,7 +13,10 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from src.models.responses import ErrorResponse, RecoveryHints
+from src.utils.ip_extraction import get_client_ip
 from src.utils.secure_logging import get_security_audit_logger
+from src.utils.tracing import get_trace_id
 
 logger = logging.getLogger(__name__)
 security_audit = get_security_audit_logger()
@@ -139,7 +142,10 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         # Get API key from header
         api_key = request.headers.get("X-API-Key")
 
-        client_ip = self._get_client_ip(request)
+        client_ip = get_client_ip(request)
+
+        # Get request ID for correlation
+        request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
 
         # Validate API key
         if not api_key:
@@ -150,15 +156,24 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 reason="missing_api_key",
                 path=request.url.path,
             )
+            error_response = ErrorResponse(
+                code="UNAUTHORIZED",
+                message="Missing API key. Provide X-API-Key header.",
+                reason="missing_api_key",
+                recovery=RecoveryHints(
+                    hints=[
+                        "Include X-API-Key header in your request",
+                        "Ensure API key is properly configured"
+                    ],
+                    suggestion="Provide X-API-Key header",
+                ),
+                retryable=False,
+                source="isl",
+                request_id=request_id,
+            )
             return JSONResponse(
                 status_code=401,
-                content={
-                    "schema": "error.v1",
-                    "code": "UNAUTHORIZED",
-                    "message": "Missing API key. Provide X-API-Key header.",
-                    "retryable": False,
-                    "suggested_action": "provide_api_key",
-                },
+                content=error_response.model_dump(exclude_none=True),
             )
 
         # Use constant-time comparison to prevent timing attacks
@@ -171,15 +186,24 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 reason="invalid_api_key",
                 path=request.url.path,
             )
+            error_response = ErrorResponse(
+                code="UNAUTHORIZED",
+                message="Invalid API key.",
+                reason="invalid_api_key",
+                recovery=RecoveryHints(
+                    hints=[
+                        "Verify your API key is correct",
+                        "Check if your API key has expired"
+                    ],
+                    suggestion="Check your API key",
+                ),
+                retryable=False,
+                source="isl",
+                request_id=request_id,
+            )
             return JSONResponse(
                 status_code=401,
-                content={
-                    "schema": "error.v1",
-                    "code": "UNAUTHORIZED",
-                    "message": "Invalid API key.",
-                    "retryable": False,
-                    "suggested_action": "check_api_key",
-                },
+                content=error_response.model_dump(exclude_none=True),
             )
 
         # API key is valid - log successful authentication
@@ -192,34 +216,6 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
         # Continue processing
         return await call_next(request)
-
-    def _get_client_ip(self, request: Request) -> str:
-        """
-        Get client IP address, respecting proxy headers.
-
-        Args:
-            request: The incoming request
-
-        Returns:
-            Client IP address
-        """
-        # Check X-Forwarded-For header first (set by proxies/load balancers)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # X-Forwarded-For can contain multiple IPs: client, proxy1, proxy2
-            # The first IP is the original client
-            return forwarded_for.split(",")[0].strip()
-
-        # Check X-Real-IP header (set by nginx)
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
-
-        # Fall back to direct client IP
-        if request.client:
-            return request.client.host
-
-        return "unknown"
 
 
 def get_api_keys() -> Set[str]:

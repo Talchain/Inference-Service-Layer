@@ -72,7 +72,7 @@ class AdvancedModelValidator:
                      suggestions, best_practices)
         """
         # Make computation deterministic
-        seed = make_deterministic(
+        rng = make_deterministic(
             {
                 "dag": dag,
                 "level": validation_level.value,
@@ -85,7 +85,7 @@ class AdvancedModelValidator:
                 "num_nodes": len(dag.get("nodes", [])),
                 "num_edges": len(dag.get("edges", [])),
                 "level": validation_level.value,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 

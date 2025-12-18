@@ -68,7 +68,7 @@ class RobustnessAnalyzer:
             FACETRobustnessAnalysis with regions and guarantees
         """
         # Make computation deterministic
-        seed = make_deterministic(request.model_dump())
+        rng = make_deterministic(request.model_dump())
 
         logger.info(
             "robustness_analysis_started",
@@ -77,7 +77,7 @@ class RobustnessAnalyzer:
                 "intervention_vars": list(request.intervention_proposal.keys()),
                 "target_outcomes": list(request.target_outcome.keys()),
                 "perturbation_radius": request.perturbation_radius,
-                "seed": seed,
+                "seed": rng.seed,
             },
         )
 

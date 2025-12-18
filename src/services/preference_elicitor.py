@@ -67,7 +67,7 @@ class PreferenceElicitor:
             Tuple of (queries, strategy_info)
         """
         # Make computation deterministic
-        seed = make_deterministic(
+        rng = make_deterministic(
             {"context": context.model_dump(), "num_queries": num_queries}
         )
 
@@ -77,7 +77,7 @@ class PreferenceElicitor:
                 "domain": context.domain,
                 "num_variables": len(context.variables),
                 "num_queries": num_queries,
-                "seed": seed,
+                "seed": rng.seed,
                 "has_beliefs": current_beliefs is not None,
             },
         )

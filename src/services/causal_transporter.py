@@ -49,7 +49,7 @@ class CausalTransporter:
             TransportabilityResponse: Transportability analysis results
         """
         # Make computation deterministic
-        request_hash = make_deterministic(request.model_dump())
+        rng = make_deterministic(request.model_dump())
 
         logger.info(
             "transportability_analysis_started",

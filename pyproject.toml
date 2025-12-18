@@ -69,11 +69,19 @@ select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
     "F",  # pyflakes
-    "I",  # isort
+    "I",  # isort (import sorting via ruff)
     "B",  # flake8-bugbear
     "C4", # flake8-comprehensions
 ]
 ignore = ["E501"]  # line too long (handled by black)
+
+[tool.ruff.isort]
+# Import sorting configuration (replaces standalone isort)
+known-first-party = ["src"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+combine-as-imports = true
+force-single-line = false
+lines-between-types = 1
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

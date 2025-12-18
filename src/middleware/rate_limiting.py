@@ -7,8 +7,9 @@ Supports proxy-aware IP detection and per-API-key rate limiting.
 
 import logging
 import time
+import uuid
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -16,6 +17,7 @@ from prometheus_client import Counter
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import get_settings
+from src.utils.ip_extraction import get_client_ip
 from src.utils.secure_logging import get_security_audit_logger
 
 logger = logging.getLogger(__name__)
@@ -161,8 +163,10 @@ class RedisRateLimiter:
             # Remove old entries
             pipe.zremrangebyscore(key, 0, window_start)
 
-            # Add current request
-            pipe.zadd(key, {str(now): now})
+            # Add current request with unique member to avoid collision
+            # Member format: timestamp:uuid (ensures uniqueness for concurrent requests)
+            unique_member = f"{now}:{uuid.uuid4().hex[:8]}"
+            pipe.zadd(key, {unique_member: now})
 
             # Count requests in window
             pipe.zcard(key)
@@ -323,7 +327,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             identifier = f"key:{api_key[:16]}"  # Truncate for safety
             identifier_type = "api_key"
         else:
-            identifier = f"ip:{self._get_client_ip(request)}"
+            identifier = f"ip:{get_client_ip(request)}"
             identifier_type = "ip"
 
         # Check rate limit
@@ -339,7 +343,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             rate_limit_checks.labels(result="blocked").inc()
 
             # Get client IP for audit logging
-            client_ip = self._get_client_ip(request)
+            client_ip = get_client_ip(request)
 
             # Log rate limit violation via security audit logger
             settings = get_settings()
@@ -390,81 +394,3 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Remaining"] = str(stats["remaining"])
 
         return response
-
-    def _get_client_ip(self, request: Request) -> str:
-        """
-        Get client IP address, respecting proxy headers.
-
-        Supports X-Forwarded-For and X-Real-IP headers from trusted proxies.
-
-        Args:
-            request: The incoming request
-
-        Returns:
-            Client IP address
-        """
-        settings = get_settings()
-        trusted_proxies = settings.get_trusted_proxies_list()
-
-        # Check X-Forwarded-For header (set by proxies/load balancers)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # X-Forwarded-For can contain multiple IPs: client, proxy1, proxy2
-            # Parse the chain and find the first non-trusted IP
-            ips = [ip.strip() for ip in forwarded_for.split(",")]
-
-            # If we have trusted proxies configured, walk back through the chain
-            if trusted_proxies:
-                for ip in reversed(ips):
-                    if not self._is_trusted_proxy(ip, trusted_proxies):
-                        return ip
-                # All IPs are trusted, return the first one (original client)
-                return ips[0]
-            else:
-                # No trusted proxies configured, return the first IP
-                return ips[0]
-
-        # Check X-Real-IP header (set by nginx)
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
-
-        # Fall back to direct client IP
-        if request.client:
-            return request.client.host
-
-        return "unknown"
-
-    def _is_trusted_proxy(self, ip: str, trusted_proxies: List[str]) -> bool:
-        """
-        Check if an IP is in the trusted proxy list.
-
-        Args:
-            ip: IP address to check
-            trusted_proxies: List of trusted proxy IPs or CIDRs
-
-        Returns:
-            True if IP is trusted, False otherwise
-        """
-        import ipaddress
-
-        try:
-            check_ip = ipaddress.ip_address(ip)
-
-            for proxy in trusted_proxies:
-                try:
-                    # Check if it's a CIDR range
-                    if "/" in proxy:
-                        network = ipaddress.ip_network(proxy, strict=False)
-                        if check_ip in network:
-                            return True
-                    else:
-                        # Single IP
-                        if check_ip == ipaddress.ip_address(proxy):
-                            return True
-                except ValueError:
-                    continue
-
-            return False
-        except ValueError:
-            return False

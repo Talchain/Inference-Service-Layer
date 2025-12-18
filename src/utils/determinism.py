@@ -3,14 +3,23 @@ Determinism utilities for reproducible computations.
 
 Ensures identical inputs always produce identical outputs by providing
 deterministic hashing and seeding mechanisms.
+
+IMPORTANT: For concurrent request safety, always use make_deterministic()
+which returns a per-request SeededRNG. Do NOT use set_global_seed() in
+production code as it affects global state.
 """
 
 import hashlib
 import json
+import logging
 import random
 from typing import Any, Dict, Union
 
 import numpy as np
+
+from src.utils.rng import SeededRNG
+
+logger = logging.getLogger(__name__)
 
 
 def canonical_hash(data: Union[Dict[str, Any], list, str, int, float]) -> str:
@@ -67,41 +76,40 @@ def set_global_seed(seed: int) -> None:
     """
     Set global random seeds for all libraries.
 
-    Ensures reproducibility across:
-    - Python's random module
-    - NumPy
-    - Any other libraries using these RNGs
+    DEPRECATED: This function sets global state and is NOT safe for concurrent
+    requests. Use make_deterministic() which returns a per-request SeededRNG.
 
     Args:
         seed: Integer seed value
-
-    Example:
-        >>> set_global_seed(42)
-        >>> # All subsequent random operations are now deterministic
     """
+    logger.warning(
+        "set_global_seed() is deprecated for production use - "
+        "use make_deterministic() which returns per-request SeededRNG"
+    )
     random.seed(seed)
     np.random.seed(seed)
 
 
-def make_deterministic(request_data: Union[Dict[str, Any], list, str]) -> int:
+def make_deterministic(request_data: Union[Dict[str, Any], list, str]) -> SeededRNG:
     """
-    Convenience function to make all random operations deterministic.
+    Create per-request RNG for deterministic, thread-safe random operations.
 
-    Combines seed generation and global seed setting in one call.
+    Returns a SeededRNG instance that is isolated to this request, preventing
+    cross-request interference in concurrent environments.
 
     Args:
         request_data: Input request data to use for seeding
 
     Returns:
-        int: The seed value that was set
+        SeededRNG: Per-request random number generator
 
     Example:
-        >>> seed = make_deterministic({"dag": {...}, "treatment": "X"})
-        >>> # Now all random operations are reproducible
+        >>> rng = make_deterministic({"dag": {...}, "treatment": "X"})
+        >>> value = rng.normal(0, 1)  # Thread-safe, deterministic
+        >>> samples = rng.normal_array(0, 1, 100)  # Array of samples
     """
     seed = seed_from_input(request_data)
-    set_global_seed(seed)
-    return seed
+    return SeededRNG(seed)
 
 
 def verify_determinism(

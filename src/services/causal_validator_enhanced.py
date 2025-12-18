@@ -56,7 +56,7 @@ class EnhancedCausalValidator:
             CausalValidationResponse: Enhanced validation results
         """
         # Make computation deterministic
-        request_hash = make_deterministic(request.model_dump())
+        rng = make_deterministic(request.model_dump())
 
         logger.info(
             "enhanced_causal_validation_started",

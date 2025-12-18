@@ -270,6 +270,43 @@ curl -X POST http://localhost:8000/api/v1/analysis/dominance \
 
 ---
 
+## OpenAPI Specification
+
+The `openapi.json` file is auto-generated from FastAPI route definitions and must be kept in sync with the codebase.
+
+### Regenerating the Spec
+
+When you add or modify API endpoints, regenerate the OpenAPI spec:
+
+```bash
+# Regenerate openapi.json
+poetry run python scripts/generate_openapi.py
+
+# Verify spec is current (CI check mode)
+poetry run python scripts/generate_openapi.py --check
+```
+
+### CI Validation
+
+The `.github/workflows/openapi-validation.yml` workflow automatically:
+1. Checks if `openapi.json` matches the current API
+2. Validates the spec against OpenAPI 3.x standard
+3. Reports spec statistics (paths, schemas, tags)
+
+**If the CI fails**, run the generation script and commit the updated spec.
+
+### Spec Statistics
+
+| Metric | Expected |
+|--------|----------|
+| Paths | ~51 |
+| Tags | ~15 |
+| Schemas | ~100+ |
+
+For gap analysis details, see `docs/openapi-gap-analysis.md`.
+
+---
+
 ## Security
 
 ### Key Controls

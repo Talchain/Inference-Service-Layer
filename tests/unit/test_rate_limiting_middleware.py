@@ -13,6 +13,7 @@ from src.middleware.rate_limiting import (
     RedisRateLimiter,
     RateLimitMiddleware,
 )
+from src.utils.ip_extraction import get_client_ip, _is_trusted_proxy
 
 
 class TestRateLimiter:
@@ -181,41 +182,32 @@ class TestRateLimitMiddleware:
 
     def test_get_client_ip_from_direct_connection(self):
         """Test extracting IP from direct connection."""
-        app = MagicMock()
-        middleware = RateLimitMiddleware(app)
-
         request = MagicMock()
         request.headers.get.return_value = None
         request.client.host = "192.168.1.100"
 
-        with patch("src.middleware.rate_limiting.get_settings") as mock_settings:
+        with patch("src.utils.ip_extraction.get_settings") as mock_settings:
             mock_settings.return_value.get_trusted_proxies_list.return_value = []
-            ip = middleware._get_client_ip(request)
+            ip = get_client_ip(request)
 
         assert ip == "192.168.1.100"
 
     def test_get_client_ip_from_x_forwarded_for(self):
         """Test extracting IP from X-Forwarded-For header."""
-        app = MagicMock()
-        middleware = RateLimitMiddleware(app)
-
         request = MagicMock()
         request.headers.get.side_effect = lambda h: {
             "X-Forwarded-For": "203.0.113.1, 10.0.0.1",
             "X-Real-IP": None,
         }.get(h)
 
-        with patch("src.middleware.rate_limiting.get_settings") as mock_settings:
+        with patch("src.utils.ip_extraction.get_settings") as mock_settings:
             mock_settings.return_value.get_trusted_proxies_list.return_value = []
-            ip = middleware._get_client_ip(request)
+            ip = get_client_ip(request)
 
         assert ip == "203.0.113.1"
 
     def test_trusted_proxy_handling(self):
         """Test that trusted proxies are skipped in X-Forwarded-For chain."""
-        app = MagicMock()
-        middleware = RateLimitMiddleware(app)
-
         request = MagicMock()
         # Client -> Trusted Proxy 1 -> Trusted Proxy 2 -> Server
         request.headers.get.side_effect = lambda h: {
@@ -223,38 +215,29 @@ class TestRateLimitMiddleware:
             "X-Real-IP": None,
         }.get(h)
 
-        with patch("src.middleware.rate_limiting.get_settings") as mock_settings:
+        with patch("src.utils.ip_extraction.get_settings") as mock_settings:
             mock_settings.return_value.get_trusted_proxies_list.return_value = [
                 "10.0.0.0/8"  # Trust all 10.x.x.x addresses
             ]
-            ip = middleware._get_client_ip(request)
+            ip = get_client_ip(request)
 
         # Should return the first non-trusted IP (working backwards)
         assert ip == "203.0.113.1"
 
     def test_is_trusted_proxy_single_ip(self):
         """Test checking if single IP is trusted."""
-        app = MagicMock()
-        middleware = RateLimitMiddleware(app)
-
-        assert middleware._is_trusted_proxy("10.0.0.1", ["10.0.0.1"])
-        assert not middleware._is_trusted_proxy("10.0.0.2", ["10.0.0.1"])
+        assert _is_trusted_proxy("10.0.0.1", ["10.0.0.1"])
+        assert not _is_trusted_proxy("10.0.0.2", ["10.0.0.1"])
 
     def test_is_trusted_proxy_cidr(self):
         """Test checking if IP is in trusted CIDR range."""
-        app = MagicMock()
-        middleware = RateLimitMiddleware(app)
-
         # 10.0.0.0/8 should match any 10.x.x.x
-        assert middleware._is_trusted_proxy("10.0.0.1", ["10.0.0.0/8"])
-        assert middleware._is_trusted_proxy("10.255.255.255", ["10.0.0.0/8"])
-        assert not middleware._is_trusted_proxy("192.168.1.1", ["10.0.0.0/8"])
+        assert _is_trusted_proxy("10.0.0.1", ["10.0.0.0/8"])
+        assert _is_trusted_proxy("10.255.255.255", ["10.0.0.0/8"])
+        assert not _is_trusted_proxy("192.168.1.1", ["10.0.0.0/8"])
 
     def test_is_trusted_proxy_invalid_ip(self):
         """Test handling of invalid IP address."""
-        app = MagicMock()
-        middleware = RateLimitMiddleware(app)
-
         # Invalid IP should return False
-        assert not middleware._is_trusted_proxy("invalid", ["10.0.0.0/8"])
-        assert not middleware._is_trusted_proxy("", ["10.0.0.0/8"])
+        assert not _is_trusted_proxy("invalid", ["10.0.0.0/8"])
+        assert not _is_trusted_proxy("", ["10.0.0.0/8"])

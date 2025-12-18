@@ -44,6 +44,7 @@ from src.models.decision_robustness import (
 from src.models.shared import GraphV1
 from src.utils.cache import get_cache
 from src.utils.determinism import make_deterministic
+from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
 
@@ -264,8 +265,8 @@ class DecisionRobustnessAnalyzer:
         # Input validation (Brief 20 Task 3)
         self._validate_request(request, request_id)
 
-        seed = make_deterministic(request.model_dump())
-        np.random.seed(seed)
+        # Create per-request RNG for thread-safe determinism
+        rng = make_deterministic(request.model_dump())
 
         options = request.analysis_options or AnalysisOptions()
         timeout_sec = (options.timeout_ms or 5000) / 1000
@@ -298,7 +299,7 @@ class DecisionRobustnessAnalyzer:
                 graph_model,
                 request.utility,
                 options.monte_carlo_samples,
-                seed,
+                rng,
             )
             completed_analyses.append("rankings")
             logger.debug(
@@ -322,7 +323,7 @@ class DecisionRobustnessAnalyzer:
                 request.utility,
                 options.sensitivity_top_n,
                 options.perturbation_range,
-                seed,
+                rng,
             )
             completed_analyses.append("sensitivity")
             logger.debug(
@@ -338,7 +339,7 @@ class DecisionRobustnessAnalyzer:
                 request.utility,
                 sensitivity_params,
                 options.perturbation_range,
-                seed,
+                rng,
             )
             completed_analyses.append("robustness_bounds")
             logger.debug(
@@ -367,7 +368,7 @@ class DecisionRobustnessAnalyzer:
                         request.utility,
                         request.parameter_uncertainties,
                         options.sample_sizes_for_evsi,
-                        seed,
+                        rng,
                     )
                     completed_analyses.append("voi")
                     logger.debug(
@@ -401,7 +402,7 @@ class DecisionRobustnessAnalyzer:
                         graph_model,
                         request.utility,
                         option_rankings[0].option_id,
-                        seed,
+                        rng,
                     )
                     completed_analyses.append("pareto")
                     logger.debug(
@@ -474,7 +475,7 @@ class DecisionRobustnessAnalyzer:
             )
             # Return partial results
             return self._build_partial_result(
-                request, graph_model if 'graph_model' in dir() else {}, seed
+                request, graph_model if 'graph_model' in dir() else {}, rng
             )
 
         except Exception as e:
@@ -543,7 +544,7 @@ class DecisionRobustnessAnalyzer:
         graph_model: Dict[str, Any],
         utility_spec: UtilitySpecification,
         n_samples: int,
-        seed: int,
+        rng: SeededRNG,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Compute utility distributions for all options.
@@ -556,7 +557,7 @@ class DecisionRobustnessAnalyzer:
             graph_model: Internal graph model
             utility_spec: Utility specification
             n_samples: Number of MC samples
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             Dict mapping option_id to utility statistics
@@ -564,7 +565,8 @@ class DecisionRobustnessAnalyzer:
         results = {}
 
         for i, option in enumerate(options):
-            np.random.seed(seed + i)
+            # Spawn independent RNG for each option
+            option_rng = rng.spawn()
 
             # Simulate utility distribution
             samples = self._simulate_option_utility(
@@ -572,6 +574,7 @@ class DecisionRobustnessAnalyzer:
                 graph_model,
                 utility_spec,
                 n_samples,
+                option_rng,
             )
 
             # Compute statistics
@@ -595,6 +598,7 @@ class DecisionRobustnessAnalyzer:
         graph_model: Dict[str, Any],
         utility_spec: UtilitySpecification,
         n_samples: int,
+        rng: SeededRNG,
     ) -> np.ndarray:
         """
         Simulate utility for a single option using Monte Carlo.
@@ -607,6 +611,7 @@ class DecisionRobustnessAnalyzer:
             graph_model: Internal graph model
             utility_spec: Utility specification
             n_samples: Number of samples
+            rng: Per-request random number generator
 
         Returns:
             Array of utility samples
@@ -638,7 +643,7 @@ class DecisionRobustnessAnalyzer:
                         for source_id, src_weight in graph_model["reverse_adjacency"].get(target_id, []):
                             if source_id in node_values:
                                 # Add weighted contribution with noise
-                                noise = np.random.normal(0, 0.1 * abs(src_weight))
+                                noise = rng.normal(0, 0.1 * abs(src_weight))
                                 incoming_sum += node_values[source_id] * src_weight + noise
                             else:
                                 all_sources_ready = False
@@ -783,7 +788,7 @@ class DecisionRobustnessAnalyzer:
         utility_spec: UtilitySpecification,
         top_n: int,
         perturbation_range: float,
-        seed: int,
+        rng: SeededRNG,
     ) -> List[SensitiveParameter]:
         """
         Compute parameter sensitivity using perturbation analysis.
@@ -797,7 +802,7 @@ class DecisionRobustnessAnalyzer:
             utility_spec: Utility specification
             top_n: Number of top parameters to return
             perturbation_range: Perturbation magnitude
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             List of most sensitive parameters
@@ -814,13 +819,13 @@ class DecisionRobustnessAnalyzer:
             edge["weight"] = current_weight * (1 + perturbation_range)
             perturbed_model = graph_model.copy()
             utility_up = self._quick_utility_estimate(
-                perturbed_model, utility_spec.goal_node_id, seed
+                perturbed_model, utility_spec.goal_node_id, rng.spawn()
             )
 
             # Perturb down
             edge["weight"] = current_weight * (1 - perturbation_range)
             utility_down = self._quick_utility_estimate(
-                perturbed_model, utility_spec.goal_node_id, seed
+                perturbed_model, utility_spec.goal_node_id, rng.spawn()
             )
 
             # Restore
@@ -857,7 +862,7 @@ class DecisionRobustnessAnalyzer:
         self,
         graph_model: Dict[str, Any],
         goal_node_id: str,
-        seed: int,
+        rng: SeededRNG,
         n_samples: int = 100,
     ) -> float:
         """
@@ -868,14 +873,12 @@ class DecisionRobustnessAnalyzer:
         Args:
             graph_model: Internal graph model
             goal_node_id: Goal node ID
-            seed: Random seed
+            rng: Per-request random number generator
             n_samples: Number of samples
 
         Returns:
             Estimated utility value
         """
-        np.random.seed(seed)
-
         # Simple propagation starting from random initial values
         samples = []
 
@@ -885,7 +888,7 @@ class DecisionRobustnessAnalyzer:
             # Initialize all nodes with baseline
             for node_id, node_data in graph_model["nodes"].items():
                 belief = node_data.get("belief", 0.5)
-                values[node_id] = (belief or 0.5) * 100 + np.random.normal(0, 10)
+                values[node_id] = (belief or 0.5) * 100 + rng.normal(0, 10)
 
             # Propagate edges
             for edge in graph_model["edges"]:
@@ -907,7 +910,7 @@ class DecisionRobustnessAnalyzer:
         utility_spec: UtilitySpecification,
         sensitivity_params: List[SensitiveParameter],
         perturbation_range: float,
-        seed: int,
+        rng: SeededRNG,
     ) -> List[RobustnessBound]:
         """
         Compute robustness bounds (flip thresholds).
@@ -921,7 +924,7 @@ class DecisionRobustnessAnalyzer:
             utility_spec: Utility specification
             sensitivity_params: Most sensitive parameters
             perturbation_range: Maximum perturbation to search
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             List of robustness bounds
@@ -950,7 +953,7 @@ class DecisionRobustnessAnalyzer:
                         utility_gap,
                         param.sensitivity_score,
                         perturbation_range,
-                        seed,
+                        rng,
                     )
 
                     if flip_pct is not None:
@@ -977,7 +980,7 @@ class DecisionRobustnessAnalyzer:
         utility_gap: float,
         sensitivity: float,
         max_pct: float,
-        seed: int,
+        rng: SeededRNG,
     ) -> Optional[float]:
         """
         Binary search to find flip threshold percentage.
@@ -990,7 +993,7 @@ class DecisionRobustnessAnalyzer:
             utility_gap: Gap between top two options
             sensitivity: Sensitivity score
             max_pct: Maximum percentage to search
-            seed: Random seed
+            rng: Per-request random number generator (unused, for API consistency)
 
         Returns:
             Percentage change required to flip, or None if not within range
@@ -1074,7 +1077,7 @@ class DecisionRobustnessAnalyzer:
         utility_spec: UtilitySpecification,
         uncertainties: Dict[str, Dict[str, float]],
         sample_sizes: List[int],
-        seed: int,
+        rng: SeededRNG,
     ) -> List[ValueOfInformation]:
         """
         Compute Expected Value of Perfect Information (EVPI) and
@@ -1089,7 +1092,7 @@ class DecisionRobustnessAnalyzer:
             utility_spec: Utility specification
             uncertainties: Parameter uncertainties {param_id: {mean, std}}
             sample_sizes: Sample sizes for EVSI
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             List of VoI results for each uncertain parameter
@@ -1103,7 +1106,7 @@ class DecisionRobustnessAnalyzer:
             # Compute EVPI
             # EVPI = E[max utility with perfect info] - max E[utility under uncertainty]
             evpi = self._compute_evpi(
-                param_id, mean, std, graph_model, utility_spec, seed
+                param_id, mean, std, graph_model, utility_spec, rng.spawn()
             )
 
             # Compute EVSI for each sample size
@@ -1112,7 +1115,7 @@ class DecisionRobustnessAnalyzer:
 
             for n in sample_sizes:
                 evsi = self._compute_evsi(
-                    param_id, mean, std, n, graph_model, utility_spec, seed
+                    param_id, mean, std, n, graph_model, utility_spec, rng.spawn()
                 )
                 if evsi > best_evsi:
                     best_evsi = evsi
@@ -1155,7 +1158,7 @@ class DecisionRobustnessAnalyzer:
         std: float,
         graph_model: Dict[str, Any],
         utility_spec: UtilitySpecification,
-        seed: int,
+        rng: SeededRNG,
     ) -> float:
         """
         Compute EVPI for a parameter.
@@ -1168,16 +1171,15 @@ class DecisionRobustnessAnalyzer:
             std: Parameter standard deviation
             graph_model: Internal graph model
             utility_spec: Utility specification
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             EVPI value
         """
-        np.random.seed(seed)
         n_scenarios = 100
 
         # Sample parameter values
-        param_samples = np.random.normal(mean, std, n_scenarios)
+        param_samples = rng.normal_array(mean, std, n_scenarios)
 
         # For each scenario, compute max utility across actions
         max_utilities_per_scenario = []
@@ -1185,7 +1187,7 @@ class DecisionRobustnessAnalyzer:
         for param_val in param_samples:
             # Simplified: estimate utility impact of parameter
             base_utility = self._quick_utility_estimate(
-                graph_model, utility_spec.goal_node_id, seed, 50
+                graph_model, utility_spec.goal_node_id, rng.spawn(), 50
             )
             # Parameter affects utility proportionally
             utility_with_param = base_utility * (1 + (param_val - mean) / max(abs(mean), 1))
@@ -1209,7 +1211,7 @@ class DecisionRobustnessAnalyzer:
         sample_size: int,
         graph_model: Dict[str, Any],
         utility_spec: UtilitySpecification,
-        seed: int,
+        rng: SeededRNG,
     ) -> float:
         """
         Compute EVSI for a parameter with given sample size.
@@ -1223,14 +1225,14 @@ class DecisionRobustnessAnalyzer:
             sample_size: Number of samples
             graph_model: Internal graph model
             utility_spec: Utility specification
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             EVSI value
         """
         # EVSI is typically a fraction of EVPI based on sample size
         # Approximation: EVSI ≈ EVPI * (1 - 1/sqrt(n))
-        evpi = self._compute_evpi(param_id, mean, std, graph_model, utility_spec, seed)
+        evpi = self._compute_evpi(param_id, mean, std, graph_model, utility_spec, rng)
 
         reduction_factor = 1 - 1 / np.sqrt(sample_size + 1)
         evsi = evpi * reduction_factor * 0.7  # Conservative factor
@@ -1243,7 +1245,7 @@ class DecisionRobustnessAnalyzer:
         graph_model: Dict[str, Any],
         utility_spec: UtilitySpecification,
         current_selection: str,
-        seed: int,
+        rng: SeededRNG,
     ) -> ParetoResult:
         """
         Compute Pareto frontier for multi-goal decisions.
@@ -1253,7 +1255,7 @@ class DecisionRobustnessAnalyzer:
             graph_model: Internal graph model
             utility_spec: Utility specification with multiple goals
             current_selection: Currently recommended option
-            seed: Random seed
+            rng: Per-request random number generator
 
         Returns:
             ParetoResult with frontier analysis
@@ -1270,7 +1272,7 @@ class DecisionRobustnessAnalyzer:
             for goal in all_goals:
                 # Estimate goal value
                 value = self._quick_utility_estimate(
-                    graph_model, goal, seed, 100
+                    graph_model, goal, rng.spawn(), 100
                 )
                 goal_values[goal] = value
 
@@ -1454,7 +1456,7 @@ class DecisionRobustnessAnalyzer:
         self,
         request: RobustnessRequest,
         graph_model: Dict[str, Any],
-        seed: int,
+        rng: SeededRNG,
     ) -> RobustnessResult:
         """
         Build partial result when timeout occurs.
@@ -1464,7 +1466,7 @@ class DecisionRobustnessAnalyzer:
         Args:
             request: Original request
             graph_model: Internal graph model
-            seed: Random seed
+            rng: Per-request random number generator (unused in partial result)
 
         Returns:
             Partial RobustnessResult

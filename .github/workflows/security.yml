@@ -46,13 +46,14 @@ jobs:
 
       - name: Run safety check
         run: |
-          poetry run safety check --full-report || true
-        continue-on-error: true
+          # Safety check for known vulnerabilities in dependencies
+          poetry run safety check --full-report 2>&1 || echo "::warning::Safety check found potential issues"
 
       - name: Run pip-audit
         run: |
+          # Audit dependencies for security vulnerabilities
+          # BLOCKING: This must pass for security compliance
           poetry run pip-audit --strict --progress-spinner off
-        continue-on-error: true
 
   code-security-scan:
     name: Code Security Scan (Bandit)
@@ -71,8 +72,10 @@ jobs:
 
       - name: Run bandit security scan
         run: |
+          # Generate JSON report for artifact
           bandit -r src/ -f json -o bandit-report.json || true
-          bandit -r src/ -f txt --severity-level medium
+          # BLOCKING: Fail on medium+ severity issues
+          bandit -r src/ -f txt --severity-level medium --exit-zero-if-skipped
 
       - name: Upload bandit report
         uses: actions/upload-artifact@v4
@@ -91,10 +94,10 @@ jobs:
           fetch-depth: 0
 
       - name: Run Gitleaks
+        # BLOCKING: Secrets detection must pass - leaked secrets are critical
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
 
   sast-scan:
     name: SAST Analysis (Semgrep)
@@ -107,10 +110,12 @@ jobs:
 
       - name: Run Semgrep
         run: |
+          # Generate JSON report for artifact
           semgrep scan --config auto --config p/python --config p/security-audit \
             --json --output semgrep-results.json src/ || true
-          semgrep scan --config auto --config p/python --config p/security-audit src/
-        continue-on-error: true
+          # BLOCKING: SAST analysis must pass
+          semgrep scan --config auto --config p/python --config p/security-audit \
+            --error src/
 
       - name: Upload Semgrep results
         uses: actions/upload-artifact@v4
@@ -135,3 +140,13 @@ jobs:
           echo "| Code Security (Bandit) | ${{ needs.code-security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Secrets Detection | ${{ needs.secrets-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SAST (Semgrep) | ${{ needs.sast-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any security scan failed
+        if: |
+          needs.dependency-scan.result == 'failure' ||
+          needs.code-security-scan.result == 'failure' ||
+          needs.secrets-scan.result == 'failure' ||
+          needs.sast-scan.result == 'failure'
+        run: |
+          echo "::error::One or more security scans failed. See summary above."
+          exit 1
