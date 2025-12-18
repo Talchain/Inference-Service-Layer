@@ -11,19 +11,12 @@ repos:
         language_version: python3.11
         args: ['--line-length=100']
 
-  # Import sorting with isort
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: ['--profile', 'black', '--line-length=100']
-
-  # Linting with ruff
+  # Linting and import sorting with ruff (replaces isort)
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.1.15
     hooks:
       - id: ruff
-        args: ['--fix', '--exit-non-zero-on-fix']
+        args: ['--fix', '--exit-non-zero-on-fix', '--select', 'I']
 
   # Type checking with mypy
   - repo: https://github.com/pre-commit/mirrors-mypy

@@ -42,7 +42,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY src/ ./src/
-COPY .env.example .env
+# NOTE: Do not copy .env files into the image. Configuration should be
+# provided at runtime via environment variables or mounted secrets.
 
 # Set ownership
 RUN chown -R appuser:appuser /app

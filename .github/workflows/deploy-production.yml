@@ -59,33 +59,8 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
 
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Run security scan
-        run: |
-          pip install safety bandit
-          echo "Running safety check..."
-          safety check || echo "⚠️  Safety check found vulnerabilities"
-
-          echo "Running bandit..."
-          bandit -r src/ -ll -f json -o bandit-report.json || true
-
-          echo "Security scan complete"
-
-      - name: Upload security report
-        uses: actions/upload-artifact@v3
-        if: always()
-        with:
-          name: security-reports
-          path: bandit-report.json
+  # NOTE: Security checks are handled by .github/workflows/security.yml
+  # which runs blocking checks (pip-audit, semgrep, gitleaks, bandit)
 
   lint:
     runs-on: ubuntu-latest
@@ -112,7 +87,7 @@ jobs:
           poetry run mypy src/
 
   deploy-staging:
-    needs: [test, security, lint]
+    needs: [test, lint]
     if: github.ref == 'refs/heads/main' || inputs.environment == 'staging'
     runs-on: ubuntu-latest
     environment: staging
@@ -170,7 +145,7 @@ jobs:
           fields: repo,commit,author,action,eventName,ref,workflow
 
   deploy-production:
-    needs: [test, security, lint, deploy-staging]
+    needs: [test, lint, deploy-staging]
     if: startsWith(github.ref, 'refs/tags/v') || inputs.environment == 'production'
     runs-on: ubuntu-latest
     environment: production

@@ -5,6 +5,7 @@ Implements distributed rate limiting using Redis with in-memory fallback.
 Supports proxy-aware IP detection and per-API-key rate limiting.
 """
 
+import hashlib
 import logging
 import time
 import uuid
@@ -324,7 +325,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Determine identifier (prefer API key over IP)
         api_key = request.headers.get("X-API-Key")
         if api_key:
-            identifier = f"key:{api_key[:16]}"  # Truncate for safety
+            # Hash API key to avoid storing/logging sensitive material
+            key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+            identifier = f"key:{key_hash}"
             identifier_type = "api_key"
         else:
             identifier = f"ip:{get_client_ip(request)}"
