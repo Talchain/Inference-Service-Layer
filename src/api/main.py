@@ -25,7 +25,8 @@ from src.middleware.observability import ObservabilityMiddleware
 from src.middleware.rate_limiting import RateLimitMiddleware
 from src.middleware.request_limits import RequestSizeLimitMiddleware, RequestTimeoutMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
-from src.utils.tracing import TracingMiddleware
+from src.utils.ip_extraction import get_client_ip
+from src.utils.tracing import TracingMiddleware, get_trace_id
 
 from .aggregation import router as aggregation_router
 from .analysis import router as analysis_router
@@ -326,13 +327,16 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
     )
 
     start_time = time.time()
-    request_id = f"{int(time.time() * 1000)}"
+    # Use canonical trace ID from TracingMiddleware for consistent correlation
+    request_id = get_trace_id()
 
     # Track active requests
     active_requests.inc()
 
     # Extract endpoint pattern (strip query params)
     endpoint = request.url.path
+    # Use unified IP extraction for consistency with auth/rate limiting
+    client_ip = get_client_ip(request)
 
     logger.info(
         "request_started",
@@ -340,7 +344,7 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
             "request_id": request_id,
             "method": request.method,
             "path": endpoint,
-            "client": request.client.host if request.client else "unknown",
+            "client": client_ip,
         },
     )
 

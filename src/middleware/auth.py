@@ -4,6 +4,7 @@ API Key Authentication Middleware.
 Provides X-API-Key header validation for protected endpoints.
 """
 
+import hashlib
 import logging
 import os
 import secrets
@@ -13,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.models.responses import ErrorResponse, RecoveryHints
+from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
 from src.utils.ip_extraction import get_client_ip
 from src.utils.secure_logging import get_security_audit_logger
 from src.utils.tracing import get_trace_id
@@ -157,7 +158,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 path=request.url.path,
             )
             error_response = ErrorResponse(
-                code="UNAUTHORIZED",
+                code=ErrorCode.UNAUTHORIZED.value,
                 message="Missing API key. Provide X-API-Key header.",
                 reason="missing_api_key",
                 recovery=RecoveryHints(
@@ -179,15 +180,17 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         # Use constant-time comparison to prevent timing attacks
         if not any(secrets.compare_digest(api_key, valid_key) for valid_key in self._api_keys):
             # Log authentication failure via security audit logger
+            # Use hash prefix instead of raw key prefix for privacy
+            key_hash_prefix = hashlib.sha256(api_key.encode()).hexdigest()[:8]
             security_audit.log_authentication_attempt(
                 success=False,
                 client_ip=client_ip,
-                api_key_prefix=api_key[:4] if len(api_key) >= 4 else api_key,
+                api_key_prefix=key_hash_prefix,
                 reason="invalid_api_key",
                 path=request.url.path,
             )
             error_response = ErrorResponse(
-                code="UNAUTHORIZED",
+                code=ErrorCode.UNAUTHORIZED.value,
                 message="Invalid API key.",
                 reason="invalid_api_key",
                 recovery=RecoveryHints(
@@ -207,10 +210,12 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             )
 
         # API key is valid - log successful authentication
+        # Use hash prefix instead of raw key prefix for privacy
+        key_hash_prefix = hashlib.sha256(api_key.encode()).hexdigest()[:8]
         security_audit.log_authentication_attempt(
             success=True,
             client_ip=client_ip,
-            api_key_prefix=api_key[:4] if len(api_key) >= 4 else api_key,
+            api_key_prefix=key_hash_prefix,
             path=request.url.path,
         )
 

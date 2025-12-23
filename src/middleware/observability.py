@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 # Service identification constants
 SERVICE_NAME = "isl"
 
+# Maximum response size for hashing (1MB) - skip hashing for larger responses
+# to avoid memory amplification from buffering large payloads
+MAX_RESPONSE_HASH_SIZE = 1 * 1024 * 1024  # 1MB
+
 
 class ObservabilityMiddleware(BaseHTTPMiddleware):
     """
@@ -95,15 +99,25 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         response_body = None
 
         if self._should_hash_response(request, response):
-            # Consume the response body for hashing
+            # Consume the response body for hashing (with size guard)
             response_body = b""
+            size_exceeded = False
             async for chunk in response.body_iterator:
                 response_body += chunk
+                # Stop hashing if response exceeds size limit (but still collect body)
+                if len(response_body) > MAX_RESPONSE_HASH_SIZE:
+                    size_exceeded = True
 
-            # Compute canonical hash
-            response_hash = self._compute_response_hash(response_body, request)
-            if response_hash:
-                response.headers["x-olumi-response-hash"] = response_hash
+            # Compute canonical hash only if size is within limit
+            if not size_exceeded:
+                response_hash = self._compute_response_hash(response_body, request)
+                if response_hash:
+                    response.headers["x-olumi-response-hash"] = response_hash
+            else:
+                logger.debug(
+                    "Skipping response hash - body exceeded size limit during streaming",
+                    extra={"path": request.url.path, "body_size": len(response_body)}
+                )
 
             # Recreate the response with the consumed body
             response = Response(
@@ -135,6 +149,19 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         content_type = response.headers.get("content-type", "")
         if "application/json" not in content_type:
             return False
+
+        # Skip hashing for large responses (check Content-Length if available)
+        content_length = response.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > MAX_RESPONSE_HASH_SIZE:
+                    logger.debug(
+                        "Skipping response hash - body too large",
+                        extra={"path": request.url.path, "content_length": content_length}
+                    )
+                    return False
+            except ValueError:
+                pass  # Invalid Content-Length, proceed with caution
 
         return True
 

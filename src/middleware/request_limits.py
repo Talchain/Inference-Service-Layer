@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import get_settings
-from src.models.responses import ErrorResponse, RecoveryHints
+from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
 from src.utils.tracing import get_trace_id
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                     request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
                     max_mb = int(self.max_size_bytes / (1024 * 1024))
                     error_response = ErrorResponse(
-                        code="REQUEST_TOO_LARGE",
+                        code=ErrorCode.REQUEST_TOO_LARGE.value,
                         message=f"Request body too large. Maximum size is {max_mb}MB.",
                         reason="payload_exceeds_limit",
                         recovery=RecoveryHints(
@@ -232,7 +232,7 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
             )
             request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
             error_response = ErrorResponse(
-                code="REQUEST_TIMEOUT",
+                code=ErrorCode.TIMEOUT.value,
                 message=f"Request processing timed out after {timeout} seconds.",
                 reason="processing_timeout",
                 recovery=RecoveryHints(

@@ -271,7 +271,7 @@ def get_rate_limiter() -> RedisRateLimiter:
                     raise RuntimeError(
                         "Redis is required for production rate limiting. "
                         "Distributed rate limiting cannot function without Redis across multiple replicas. "
-                        "Please configure REDIS_URL and ensure Redis is available."
+                        "Please configure REDIS_HOST, REDIS_PORT, and REDIS_PASSWORD environment variables."
                     )
                 else:
                     logger.info("Rate limiter using in-memory backend (Redis unavailable)")

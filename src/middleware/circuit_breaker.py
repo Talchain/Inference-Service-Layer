@@ -45,8 +45,8 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
         Returns:
             Response (503 if circuit open, normal response otherwise)
         """
-        # Skip circuit breaker for health checks
-        if request.url.path in ["/health", "/metrics"]:
+        # Skip circuit breaker for health/readiness checks
+        if request.url.path in ["/health", "/ready", "/metrics"]:
             return await call_next(request)
 
         # Check system memory
@@ -133,8 +133,8 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
         Returns:
             Response (503 if unhealthy, normal response otherwise)
         """
-        # Skip circuit breaker for health endpoints
-        if request.url.path in ["/health", "/metrics"]:
+        # Skip circuit breaker for health/readiness endpoints
+        if request.url.path in ["/health", "/ready", "/metrics"]:
             return await call_next(request)
 
         # Periodic health check (every 30 seconds)
