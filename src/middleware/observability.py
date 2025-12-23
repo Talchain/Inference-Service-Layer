@@ -37,9 +37,11 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
     - x-olumi-service: Service name (e.g., "isl")
     - x-olumi-service-build: Git commit SHA (short form)
     - x-olumi-response-hash: SHA-256 of response body (JSON endpoints only)
+    - x-olumi-trace-received: Echo of received request_id:payload_hash (for debugging)
+    - x-olumi-downstream-calls: Empty (ISL is a leaf service)
 
     Logs:
-    - boundary.request: Incoming request with payload hash
+    - boundary.request: Incoming request with payload hash and received_from_header flag
     - boundary.response: Outgoing response with response hash
     """
 
@@ -56,11 +58,19 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         request_id = get_trace_id()
 
-        # Extract incoming payload hash header (for request verification)
+        # Extract received trace info from headers (for echo/debugging)
+        received_request_id = request.headers.get("X-Request-Id")
         incoming_payload_hash = request.headers.get("x-olumi-payload-hash")
+        caller_service = request.headers.get("x-olumi-caller-service")
 
-        # Log boundary.request event
-        self._log_boundary_request(request, request_id, incoming_payload_hash)
+        # Log boundary.request event with received_from_header flag
+        self._log_boundary_request(
+            request=request,
+            request_id=request_id,
+            payload_hash=incoming_payload_hash,
+            received_from_header=incoming_payload_hash is not None,
+            caller_service=caller_service,
+        )
 
         # Process request
         response = await call_next(request)
@@ -71,6 +81,13 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         # Add service identification headers to all responses
         response.headers["x-olumi-service"] = SERVICE_NAME
         response.headers["x-olumi-service-build"] = GIT_COMMIT_SHORT
+
+        # Add trace echo header for debugging (confirms what ISL received)
+        trace_received = f"{received_request_id or 'none'}:{incoming_payload_hash or 'none'}"
+        response.headers["x-olumi-trace-received"] = trace_received
+
+        # Add downstream calls header (empty - ISL is a leaf service)
+        response.headers["x-olumi-downstream-calls"] = ""
 
         # Calculate and add response hash for JSON responses
         # Must capture body from streaming response for hashing
@@ -148,6 +165,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         request: Request,
         request_id: str,
         payload_hash: Optional[str],
+        received_from_header: bool = False,
+        caller_service: Optional[str] = None,
     ) -> None:
         """Log boundary.request event for incoming requests."""
         # Use unified IP extraction for consistency with rate limiting/auth
@@ -167,6 +186,11 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         # Include payload hash if provided by caller
         if payload_hash:
             log_extra["payload_hash"] = payload_hash
+            log_extra["received_from_header"] = received_from_header
+
+        # Include caller service if provided
+        if caller_service:
+            log_extra["caller_service"] = caller_service
 
         # Include content length if present
         content_length = request.headers.get("content-length")

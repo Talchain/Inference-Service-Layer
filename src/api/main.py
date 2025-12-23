@@ -295,6 +295,9 @@ app.add_middleware(
         "x-olumi-service",
         "x-olumi-service-build",
         "x-olumi-response-hash",
+        # Trace echo headers (for debugging)
+        "x-olumi-trace-received",
+        "x-olumi-downstream-calls",
     ],
     max_age=600,  # Cache preflight requests for 10 minutes
 )

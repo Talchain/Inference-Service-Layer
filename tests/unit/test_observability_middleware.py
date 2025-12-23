@@ -305,3 +305,222 @@ class TestServiceIdentification:
         """Test Git commit short format."""
         # Should be either "unknown" or 7 characters
         assert GIT_COMMIT_SHORT == "unknown" or len(GIT_COMMIT_SHORT) == 7
+
+
+class TestTraceEcho:
+    """Tests for trace echo functionality."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_adds_trace_received_header(self):
+        """Test dispatch adds x-olumi-trace-received header."""
+        app = MagicMock()
+        middleware = ObservabilityMiddleware(app)
+
+        mock_request = MagicMock()
+        mock_request.method = "POST"
+        mock_request.url.path = "/api/v1/causal/validate"
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = MagicMock()
+        mock_request.headers.get = MagicMock(
+            side_effect=lambda h: {
+                "X-Request-Id": "7792611a-5e97-40c6-9293-d238f6e65268",
+                "x-olumi-payload-hash": "def456789012",
+            }.get(h)
+        )
+
+        class MockHeaders(dict):
+            def get(self, key, default=None):
+                return super().get(key, default)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = MockHeaders()
+        mock_response.body = None
+
+        async def mock_call_next(req):
+            return mock_response
+
+        with patch("src.middleware.observability.get_trace_id", return_value="req_test123"):
+            with patch("src.middleware.observability.get_client_ip", return_value="127.0.0.1"):
+                result = await middleware.dispatch(mock_request, mock_call_next)
+
+        # Check trace-received header
+        assert "x-olumi-trace-received" in result.headers
+        assert result.headers["x-olumi-trace-received"] == "7792611a-5e97-40c6-9293-d238f6e65268:def456789012"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_trace_received_with_missing_headers(self):
+        """Test trace-received header handles missing values gracefully."""
+        app = MagicMock()
+        middleware = ObservabilityMiddleware(app)
+
+        mock_request = MagicMock()
+        mock_request.method = "GET"
+        mock_request.url.path = "/health"
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = MagicMock()
+        mock_request.headers.get = MagicMock(return_value=None)
+
+        class MockHeaders(dict):
+            def get(self, key, default=None):
+                return super().get(key, default)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = MockHeaders()
+        mock_response.body = None
+
+        async def mock_call_next(req):
+            return mock_response
+
+        with patch("src.middleware.observability.get_trace_id", return_value="req_test123"):
+            with patch("src.middleware.observability.get_client_ip", return_value="127.0.0.1"):
+                result = await middleware.dispatch(mock_request, mock_call_next)
+
+        # Check trace-received header shows "none" for missing values
+        assert result.headers["x-olumi-trace-received"] == "none:none"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_adds_downstream_calls_header(self):
+        """Test dispatch adds empty x-olumi-downstream-calls header."""
+        app = MagicMock()
+        middleware = ObservabilityMiddleware(app)
+
+        mock_request = MagicMock()
+        mock_request.method = "GET"
+        mock_request.url.path = "/health"
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = MagicMock()
+        mock_request.headers.get = MagicMock(return_value=None)
+
+        class MockHeaders(dict):
+            def get(self, key, default=None):
+                return super().get(key, default)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = MockHeaders()
+        mock_response.body = None
+
+        async def mock_call_next(req):
+            return mock_response
+
+        with patch("src.middleware.observability.get_trace_id", return_value="req_test123"):
+            with patch("src.middleware.observability.get_client_ip", return_value="127.0.0.1"):
+                result = await middleware.dispatch(mock_request, mock_call_next)
+
+        # ISL is a leaf service - no downstream calls
+        assert result.headers["x-olumi-downstream-calls"] == ""
+
+
+class TestReceivedFromHeaderLogging:
+    """Tests for received_from_header field in boundary logs."""
+
+    @pytest.fixture
+    def middleware(self):
+        """Create middleware instance."""
+        app = MagicMock()
+        return ObservabilityMiddleware(app)
+
+    @pytest.fixture
+    def mock_request(self):
+        """Create mock request."""
+        request = MagicMock()
+        request.method = "POST"
+        request.url.path = "/api/v1/causal/validate"
+        request.client.host = "192.168.1.1"
+        request.headers = MagicMock()
+        request.headers.get = MagicMock(return_value=None)
+        return request
+
+    def test_received_from_header_true_when_hash_provided(self, middleware, mock_request, caplog):
+        """Test received_from_header is True when payload hash comes from header."""
+        with patch("src.middleware.observability.get_client_ip", return_value="192.168.1.1"):
+            with caplog.at_level(logging.INFO):
+                middleware._log_boundary_request(
+                    request=mock_request,
+                    request_id="req_abc123",
+                    payload_hash="def456789012",
+                    received_from_header=True,
+                )
+
+        record = caplog.records[0]
+        assert record.__dict__.get("payload_hash") == "def456789012"
+        assert record.__dict__.get("received_from_header") is True
+
+    def test_received_from_header_not_present_when_no_hash(self, middleware, mock_request, caplog):
+        """Test received_from_header is not logged when no payload hash."""
+        with patch("src.middleware.observability.get_client_ip", return_value="192.168.1.1"):
+            with caplog.at_level(logging.INFO):
+                middleware._log_boundary_request(
+                    request=mock_request,
+                    request_id="req_abc123",
+                    payload_hash=None,
+                    received_from_header=False,
+                )
+
+        record = caplog.records[0]
+        assert record.__dict__.get("payload_hash") is None
+        assert record.__dict__.get("received_from_header") is None
+
+    def test_caller_service_logged_when_provided(self, middleware, mock_request, caplog):
+        """Test caller_service is logged when provided."""
+        with patch("src.middleware.observability.get_client_ip", return_value="192.168.1.1"):
+            with caplog.at_level(logging.INFO):
+                middleware._log_boundary_request(
+                    request=mock_request,
+                    request_id="req_abc123",
+                    payload_hash="def456789012",
+                    received_from_header=True,
+                    caller_service="plot",
+                )
+
+        record = caplog.records[0]
+        assert record.__dict__.get("caller_service") == "plot"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_logs_received_from_header(self, caplog):
+        """Test dispatch logs received_from_header field."""
+        app = MagicMock()
+        middleware = ObservabilityMiddleware(app)
+
+        mock_request = MagicMock()
+        mock_request.method = "POST"
+        mock_request.url.path = "/api/v1/causal/validate"
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = MagicMock()
+        mock_request.headers.get = MagicMock(
+            side_effect=lambda h: {
+                "X-Request-Id": "test-request-id",
+                "x-olumi-payload-hash": "incoming_hash_123",
+                "x-olumi-caller-service": "cee",
+            }.get(h)
+        )
+
+        class MockHeaders(dict):
+            def get(self, key, default=None):
+                return super().get(key, default)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = MockHeaders()
+        mock_response.body = None
+
+        async def mock_call_next(req):
+            return mock_response
+
+        with patch("src.middleware.observability.get_trace_id", return_value="req_test123"):
+            with patch("src.middleware.observability.get_client_ip", return_value="127.0.0.1"):
+                with caplog.at_level(logging.INFO):
+                    await middleware.dispatch(mock_request, mock_call_next)
+
+        # Check that received_from_header and caller_service were logged
+        boundary_request_logs = [
+            r for r in caplog.records
+            if r.__dict__.get("event") == "boundary.request"
+        ]
+        assert len(boundary_request_logs) >= 1
+        log_record = boundary_request_logs[0]
+        assert log_record.__dict__.get("payload_hash") == "incoming_hash_123"
+        assert log_record.__dict__.get("received_from_header") is True
+        assert log_record.__dict__.get("caller_service") == "cee"
