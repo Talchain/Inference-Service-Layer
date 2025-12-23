@@ -12,7 +12,8 @@ from typing import List, Optional
 
 from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
-from pythonjsonlogger import jsonlogger
+
+# Note: CorrelationIDFormatter import is deferred to setup_logging() to avoid circular imports
 
 
 # Git SHA build-time injection (Render provides RENDER_GIT_COMMIT)
@@ -285,11 +286,19 @@ def get_settings() -> Settings:
 
 def setup_logging() -> logging.Logger:
     """
-    Configure structured JSON logging.
+    Configure structured JSON logging with correlation ID injection and PII redaction.
+
+    Uses CorrelationIDFormatter to automatically:
+    - Inject correlation_id and trace_id from request context
+    - Apply PII redaction to sensitive fields
+    - Format timestamps in ISO 8601 format
 
     Returns:
         logging.Logger: Configured root logger
     """
+    # Deferred import to avoid circular imports (secure_logging imports tracing)
+    from src.utils.secure_logging import CorrelationIDFormatter
+
     settings = get_settings()
 
     logger = logging.getLogger()
@@ -298,11 +307,15 @@ def setup_logging() -> logging.Logger:
     # Remove existing handlers
     logger.handlers = []
 
-    # Create stdout handler with JSON formatter
+    # Create stdout handler with CorrelationIDFormatter for:
+    # - Automatic correlation_id/trace_id injection
+    # - PII redaction
+    # - Consistent JSON structure
     handler = logging.StreamHandler(sys.stdout)
-    formatter = jsonlogger.JsonFormatter(
+    formatter = CorrelationIDFormatter(
         "%(asctime)s %(name)s %(levelname)s %(message)s",
         rename_fields={"asctime": "timestamp", "levelname": "level", "name": "logger"},
+        redact_pii=True,
     )
     handler.setFormatter(formatter)
     logger.addHandler(handler)

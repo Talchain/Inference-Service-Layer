@@ -83,7 +83,8 @@ jobs:
       - name: Run linters
         run: |
           poetry run black --check src/ tests/
-          poetry run ruff check --select I src/ tests/
+          # Full ruff check (not just imports) to catch real issues
+          poetry run ruff check src/ tests/
           poetry run mypy src/
 
   deploy-staging:
@@ -93,6 +94,19 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install smoke test dependencies
+        run: poetry install --only main --with test --no-interaction
 
       - name: Deploy to Render (Staging)
         env:
@@ -151,6 +165,19 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install smoke test dependencies
+        run: poetry install --only main --with test --no-interaction
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')

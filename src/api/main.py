@@ -214,8 +214,13 @@ async def add_security_headers(request: Request, call_next: Callable) -> Respons
     # Legacy XSS protection (still useful for older browsers)
     response.headers["X-XSS-Protection"] = "1; mode=block"
 
-    # HSTS: Force HTTPS for 1 year (only if request is HTTPS)
-    if request.url.scheme == "https":
+    # HSTS: Force HTTPS for 1 year
+    # Check both direct HTTPS and X-Forwarded-Proto (for TLS-terminating proxies)
+    is_https = (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").lower() == "https"
+    )
+    if is_https:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
     # CSP: API-only service shouldn't load any resources
@@ -286,6 +291,10 @@ app.add_middleware(
         "Accept",
         "Accept-Language",
         "Content-Language",
+        # Observability request headers (for caller-provided payload hash)
+        "x-olumi-payload-hash",
+        "x-olumi-caller-service",
+        "x-olumi-trace-id",
     ],
     expose_headers=[
         "X-RateLimit-Limit",

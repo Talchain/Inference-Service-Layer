@@ -200,6 +200,13 @@ async def analyze_robustness_v2(
     request_id = request.request_id or x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
     try:
+        # Enhanced logging for parameter uncertainty debugging
+        param_uncertainties = request.parameter_uncertainties or []
+        nodes_with_observed_state = sum(
+            1 for n in request.graph.nodes
+            if n.observed_state is not None and n.observed_state.value is not None
+        )
+
         logger.info(
             "robustness_v2_analysis_request",
             extra={
@@ -208,6 +215,10 @@ async def analyze_robustness_v2(
                 "n_edges": len(request.graph.edges),
                 "n_samples": request.n_samples,
                 "goal_node": request.goal_node_id,
+                "n_parameter_uncertainties": len(param_uncertainties),
+                "parameter_uncertainty_nodes": [u.node_id for u in param_uncertainties],
+                "n_nodes_with_observed_state": nodes_with_observed_state,
+                "analysis_types": request.analysis_types,
             },
         )
 
@@ -230,6 +241,13 @@ async def analyze_robustness_v2(
                 "confidence": response.recommendation_confidence,
                 "is_robust": response.robustness.is_robust,
                 "execution_time_ms": response.metadata.execution_time_ms,
+                # Response content indicators for debugging
+                "has_sensitivity": len(response.sensitivity) > 0,
+                "n_sensitivity_results": len(response.sensitivity),
+                "has_factor_sensitivity": len(response.factor_sensitivity) > 0,
+                "n_factor_sensitivity_results": len(response.factor_sensitivity),
+                "has_robustness": response.robustness is not None,
+                "n_fragile_edges": len(response.robustness.fragile_edges),
             },
         )
 
@@ -287,6 +305,23 @@ async def analyze_robustness_unified(
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
     try:
+        # Log raw request keys for debugging schema issues
+        logger.info(
+            "robustness_unified_request_received",
+            extra={
+                "request_id": request_id,
+                "top_level_keys": list(request.keys()),
+                "has_graph": "graph" in request,
+                "has_options": "options" in request,
+                "has_parameter_uncertainties": "parameter_uncertainties" in request,
+                "parameter_uncertainties_value": (
+                    request.get("parameter_uncertainties")
+                    if "parameter_uncertainties" in request
+                    else "NOT_PROVIDED"
+                ),
+            },
+        )
+
         # Detect schema version
         schema_version = detect_schema_version(request)
 
@@ -310,9 +345,25 @@ async def analyze_robustness_unified(
 
     except ValueError as e:
         # Schema detection failed
+        logger.warning(
+            "robustness_unified_schema_error",
+            extra={"request_id": request_id, "error": str(e)},
+        )
         raise HTTPException(status_code=400, detail=str(e))
     except ValidationError as e:
-        raise HTTPException(status_code=422, detail=e.errors())
+        # Log detailed validation errors to help debug schema issues
+        errors = e.errors()
+        logger.warning(
+            "robustness_unified_validation_error",
+            extra={
+                "request_id": request_id,
+                "error_count": len(errors),
+                "errors": errors,
+                "has_parameter_uncertainties": "parameter_uncertainties" in request,
+                "parameter_uncertainties_type": type(request.get("parameter_uncertainties")).__name__,
+            },
+        )
+        raise HTTPException(status_code=422, detail=errors)
     except HTTPException:
         raise
     except Exception as e:

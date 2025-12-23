@@ -13,14 +13,14 @@ RUN pip install poetry==1.7.1
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml ./
+# Copy dependency files (including lock for reproducible builds)
+COPY pyproject.toml poetry.lock ./
 
 # Configure poetry to not create virtual env (we're in a container)
 RUN poetry config virtualenvs.create false
 
-# Install dependencies
-RUN poetry install --no-root --no-interaction --no-ansi
+# Install only production dependencies (no dev/test deps)
+RUN poetry install --only main --no-root --no-interaction --no-ansi
 
 # Production stage
 FROM python:3.11-slim
@@ -54,9 +54,9 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check (using stdlib - no external deps required)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"
 
 # Run application
 CMD ["python", "-m", "uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
