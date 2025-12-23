@@ -5,6 +5,7 @@ Handles all environment variables and application settings.
 """
 
 import logging
+import os
 import sys
 from functools import lru_cache
 from typing import List, Optional
@@ -12,6 +13,32 @@ from typing import List, Optional
 from pydantic import ConfigDict, Field, field_validator
 from pydantic_settings import BaseSettings
 from pythonjsonlogger import jsonlogger
+
+
+# Git SHA build-time injection (Render provides RENDER_GIT_COMMIT)
+def _validate_git_sha(sha: str) -> str:
+    """
+    Validate Git SHA format and return validated value or 'unknown'.
+
+    Accepts:
+    - 40-char hex (SHA-1, most common)
+    - 64-char hex (SHA-256, newer Git repos)
+    - Any other value returns 'unknown'
+    """
+    if sha and sha.lower() != "unknown":
+        # Check if valid hex and expected length (40 for SHA-1, 64 for SHA-256)
+        try:
+            int(sha, 16)  # Validates hex
+            if len(sha) in (40, 64):
+                return sha
+        except ValueError:
+            pass
+    return "unknown"
+
+
+_raw_sha = os.environ.get("RENDER_GIT_COMMIT", os.environ.get("GIT_COMMIT_SHA", ""))
+GIT_COMMIT_SHA: str = _validate_git_sha(_raw_sha)
+GIT_COMMIT_SHORT: str = GIT_COMMIT_SHA[:7] if GIT_COMMIT_SHA != "unknown" else "unknown"
 
 
 class Settings(BaseSettings):

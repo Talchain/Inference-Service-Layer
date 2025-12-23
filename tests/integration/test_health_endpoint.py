@@ -28,6 +28,24 @@ async def test_health_endpoint_fields(client):
     response = await client.get("/health")
     data = response.json()
 
-    required_fields = ["status", "version", "timestamp"]
+    required_fields = ["status", "version", "timestamp", "build"]
     for field in required_fields:
         assert field in data, f"Health response missing field: {field}"
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_build_field(client):
+    """Test health endpoint returns build field with Git SHA."""
+    response = await client.get("/health")
+    data = response.json()
+
+    # build field should always be present
+    assert "build" in data
+
+    # build should be either "unknown" or 7-char Git SHA
+    build = data["build"]
+    assert build == "unknown" or len(build) == 7
+
+    # build_full is optional (only present if Git SHA is known)
+    if "build_full" in data and data["build_full"] is not None:
+        assert len(data["build_full"]) == 40  # Full SHA-1 hex

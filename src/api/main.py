@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from src.config import get_settings, setup_logging
 from src.middleware.auth import APIKeyAuthMiddleware
 from src.middleware.circuit_breaker import MemoryCircuitBreaker
+from src.middleware.observability import ObservabilityMiddleware
 from src.middleware.rate_limiting import RateLimitMiddleware
 from src.middleware.request_limits import RequestSizeLimitMiddleware, RequestTimeoutMiddleware
 from src.models.responses import ErrorCode, ErrorResponse
@@ -236,6 +237,9 @@ app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 # Distributed tracing (adds X-Trace-Id to all requests/responses)
 app.add_middleware(TracingMiddleware)
 
+# Observability (service headers, payload hashing, boundary logging)
+app.add_middleware(ObservabilityMiddleware)
+
 # API Key Authentication (validates X-API-Key header)
 # SECURITY: Authentication is REQUIRED by default. Explicit opt-out via ISL_AUTH_DISABLED=true.
 # Supports both ISL_API_KEYS (preferred) and ISL_API_KEY (legacy) for backward compatibility
@@ -282,7 +286,16 @@ app.add_middleware(
         "Accept-Language",
         "Content-Language",
     ],
-    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "X-Request-Id", "X-Trace-Id"],
+    expose_headers=[
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-Request-Id",
+        "X-Trace-Id",
+        # Observability headers (Week 1)
+        "x-olumi-service",
+        "x-olumi-service-build",
+        "x-olumi-response-hash",
+    ],
     max_age=600,  # Cache preflight requests for 10 minutes
 )
 

@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 from fastapi import APIRouter
 
 from src.__version__ import __version__
-from src.config import get_settings
+from src.config import get_settings, GIT_COMMIT_SHA, GIT_COMMIT_SHORT
 from src.infrastructure.memory_cache import get_memory_cache
 from src.models.metadata import generate_config_fingerprint
 from src.models.responses import HealthResponse
@@ -34,11 +34,13 @@ async def health_check() -> HealthResponse:
     Check service health.
 
     Returns:
-        HealthResponse: Health status with version and timestamp
+        HealthResponse: Health status with version, build, and timestamp
     """
     return HealthResponse(
         status="healthy",
         version=__version__,
+        build=GIT_COMMIT_SHORT,
+        build_full=GIT_COMMIT_SHA if GIT_COMMIT_SHA != "unknown" else None,
         timestamp=datetime.utcnow().isoformat() + "Z",
         config_fingerprint=generate_config_fingerprint(),
     )
@@ -61,11 +63,13 @@ async def readiness_check() -> HealthResponse:
     readiness to accept traffic (useful for Kubernetes readiness probes).
 
     Returns:
-        HealthResponse: Readiness status with version and timestamp
+        HealthResponse: Readiness status with version, build, and timestamp
     """
     return HealthResponse(
         status="healthy",
         version=__version__,
+        build=GIT_COMMIT_SHORT,
+        build_full=GIT_COMMIT_SHA if GIT_COMMIT_SHA != "unknown" else None,
         timestamp=datetime.utcnow().isoformat() + "Z",
         config_fingerprint=generate_config_fingerprint(),
     )

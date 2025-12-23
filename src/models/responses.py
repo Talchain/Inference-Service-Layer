@@ -897,6 +897,14 @@ class HealthResponse(BaseModel):
 
     status: str = Field(default="healthy", description="Service status")
     version: str = Field(..., description="Service version")
+    build: str = Field(
+        default="unknown",
+        description="Short Git commit SHA (7 chars)"
+    )
+    build_full: Optional[str] = Field(
+        default=None,
+        description="Full Git commit SHA (40 chars)"
+    )
     timestamp: str = Field(..., description="Current timestamp")
     config_fingerprint: Optional[str] = Field(
         default=None,
@@ -907,7 +915,9 @@ class HealthResponse(BaseModel):
         "json_schema_extra": {
             "example": {
                 "status": "healthy",
-                "version": "0.1.0",
+                "version": "1.0.0",
+                "build": "f380662",
+                "build_full": "f380662abc123def456789012345678901234567",
                 "timestamp": "2025-01-15T10:30:00Z",
             }
         }
