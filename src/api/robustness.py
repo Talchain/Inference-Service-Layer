@@ -6,16 +6,36 @@ Provides FACET-based robustness verification for counterfactual recommendations.
 Supports two schema versions:
 - v1: Legacy single-uncertainty model (fixed edge weights)
 - v2: Dual uncertainty model (edge existence + strength distribution)
+
+Response versioning:
+- response_version=1 (default): Original response format (backward compatible)
+- response_version=2: Enhanced response with status fields, diagnostics, critiques
 """
 
 import logging
+import math
 import uuid
 from typing import Any, Dict, Optional, Union
 
-from fastapi import APIRouter, Header, HTTPException
+import numpy as np
+from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from src.constants import (
+    DEFAULT_EXISTS_PROBABILITY_THRESHOLD,
+    DEFAULT_RESPONSE_VERSION,
+    DEFAULT_STRENGTH_THRESHOLD,
+)
 from src.models.metadata import create_response_metadata
+from src.models.response_v2 import (
+    DiagnosticsV2,
+    FactorSensitivityV2,
+    ISLResponseV2,
+    OptionResultV2,
+    OutcomeDistributionV2,
+    RobustnessResultV2,
+)
 from src.models.robustness import RobustnessRequest, RobustnessResponse
 from src.models.robustness_v2 import (
     RobustnessRequestV2,
@@ -25,6 +45,18 @@ from src.models.robustness_v2 import (
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 from src.utils.business_metrics import track_robustness_analysis
+from src.utils.response_builder import (
+    ResponseBuilder,
+    build_request_echo,
+    determine_option_status,
+    hash_node_id,
+)
+from src.utils.numerical_stability import validate_mc_samples
+from src.utils.rng import compute_seed_from_graph
+from src.utils.tracing import sanitize_request_id
+from src.validation.degenerate_detector import detect_degenerate_outcomes
+from src.validation.path_validator import PathValidationConfig
+from src.validation.request_validator import RequestValidator
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -150,7 +182,7 @@ async def analyze_robustness(
 
 @router.post(
     "/analyze/v2",
-    response_model=RobustnessResponseV2,
+    response_model=None,  # Disable response model - we handle both v1 and v2 formats
     summary="Analyze robustness with dual uncertainty (v2.2 schema)",
     description="""
     Performs robustness analysis with dual uncertainty support:
@@ -167,38 +199,88 @@ async def analyze_robustness(
     - `options`: Decision alternatives to compare
     - `goal_node_id`: Target outcome to optimize
 
-    **Output:**
+    **Output (response_version=1, default):**
     - Outcome distributions per option
     - Win probabilities
     - Sensitivity to edge existence AND magnitude
     - Overall robustness assessment
+
+    **Output (response_version=2):**
+    - All of the above, plus:
+    - Explicit status fields (analysis_status, robustness_status, factor_sensitivity_status)
+    - Structured critiques with severity levels
+    - Optional diagnostics (when include_diagnostics=true)
+    - Request echo for debugging
 
     **Performance:** 100-2000ms depending on n_samples (default 1000)
     """,
     responses={
         200: {"description": "Robustness analysis completed successfully"},
         400: {"description": "Invalid input schema"},
-        422: {"description": "Validation error"},
+        422: {"description": "Validation error or structured V2 response with blockers"},
         500: {"description": "Internal computation error"},
     },
 )
 async def analyze_robustness_v2(
     request: RobustnessRequestV2,
+    response_version: int = Query(
+        default=DEFAULT_RESPONSE_VERSION,
+        ge=1,
+        le=2,
+        description="Response format version (1=legacy, 2=enhanced)",
+    ),
+    include_diagnostics: bool = Query(
+        default=False,
+        description="Include detailed diagnostics (V2 only)",
+    ),
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> RobustnessResponseV2:
+    x_isl_response_version: Optional[int] = Header(
+        default=None,
+        alias="X-ISL-Response-Version",
+        description="Alternative way to specify response version via header",
+    ),
+):
     """
     Analyze robustness with dual uncertainty (v2.2 schema).
 
     Args:
         request: V2 robustness analysis request with dual uncertainty edges
+        response_version: Response format version (1=legacy, 2=enhanced)
+        include_diagnostics: Whether to include detailed diagnostics (V2 only)
         x_request_id: Optional request ID for tracing
+        x_isl_response_version: Alternative way to specify response version via header
 
     Returns:
-        RobustnessResponseV2: Complete robustness analysis with sensitivity
+        RobustnessResponseV2 (v1) or ISLResponseV2 (v2): Analysis results
     """
-    # Use request_id from request or header
-    request_id = request.request_id or x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+    # Determine response version (header takes precedence)
+    version = x_isl_response_version or response_version
 
+    # P2-ISL-2: Request ID handling with sanitization for security
+    # Priority: request body > header > generated
+    inbound_id = request.request_id or x_request_id
+    if inbound_id:
+        # Sanitize inbound ID (prevents log injection, header abuse)
+        request_id, _ = sanitize_request_id(inbound_id)
+    else:
+        # Generate ISL-prefixed ID if none provided
+        request_id = f"isl-{uuid.uuid4().hex[:12]}"
+
+    # For V1 responses, use the legacy handler
+    if version == 1:
+        return await _analyze_robustness_v2_legacy(request, request_id)
+
+    # V2 response format with validation and structured output
+    return await _analyze_robustness_v2_enhanced(
+        request, request_id, include_diagnostics
+    )
+
+
+async def _analyze_robustness_v2_legacy(
+    request: RobustnessRequestV2,
+    request_id: str,
+) -> RobustnessResponseV2:
+    """Legacy V1 response handler (backward compatible)."""
     try:
         # Enhanced logging for parameter uncertainty debugging
         param_uncertainties = request.parameter_uncertainties or []
@@ -211,6 +293,7 @@ async def analyze_robustness_v2(
             "robustness_v2_analysis_request",
             extra={
                 "request_id": request_id,
+                "response_version": 1,
                 "n_options": len(request.options),
                 "n_edges": len(request.graph.edges),
                 "n_samples": request.n_samples,
@@ -230,18 +313,18 @@ async def analyze_robustness_v2(
             status="robust" if response.robustness.is_robust else "fragile",
             robustness_score=response.recommendation_confidence,
             is_fragile=not response.robustness.is_robust,
-            regions_found=0,  # v2 doesn't use regions concept
+            regions_found=0,
         )
 
         logger.info(
             "robustness_v2_analysis_completed",
             extra={
                 "request_id": request_id,
+                "response_version": 1,
                 "recommended_option": response.recommended_option_id,
                 "confidence": response.recommendation_confidence,
                 "is_robust": response.robustness.is_robust,
                 "execution_time_ms": response.metadata.execution_time_ms,
-                # Response content indicators for debugging
                 "has_sensitivity": len(response.sensitivity) > 0,
                 "n_sensitivity_results": len(response.sensitivity),
                 "has_factor_sensitivity": len(response.factor_sensitivity) > 0,
@@ -266,6 +349,249 @@ async def analyze_robustness_v2(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to perform v2 robustness analysis: {str(e)}",
+        )
+
+
+async def _analyze_robustness_v2_enhanced(
+    request: RobustnessRequestV2,
+    request_id: str,
+    include_diagnostics: bool,
+) -> JSONResponse:
+    """Enhanced V2 response handler with validation and structured output."""
+    # Build request echo (no sensitive data)
+    request_echo = build_request_echo(
+        graph_node_count=len(request.graph.nodes),
+        graph_edge_count=len(request.graph.edges),
+        options_count=len(request.options),
+        goal_node_id=request.goal_node_id,
+        n_samples=request.n_samples,
+        response_version=2,
+        include_diagnostics=include_diagnostics,
+    )
+
+    # P2-ISL-1: Compute effective seed (single source of truth)
+    # Must match analyzer's logic: request.seed or compute_seed_from_graph()
+    effective_seed = (
+        request.seed if request.seed is not None else compute_seed_from_graph(request.graph)
+    )
+    seed_str = str(effective_seed)
+    builder = ResponseBuilder(
+        request_id=request_id, request_echo=request_echo, seed_used=seed_str
+    )
+
+    try:
+        # Convert request to dict for validation
+        graph_dict = {
+            "nodes": [n.model_dump() for n in request.graph.nodes],
+            "edges": [e.model_dump(by_alias=True) for e in request.graph.edges],
+        }
+        options_dict = [o.model_dump() for o in request.options]
+
+        # Validate request structure
+        path_config = PathValidationConfig(
+            exists_probability_threshold=DEFAULT_EXISTS_PROBABILITY_THRESHOLD,
+            strength_threshold=DEFAULT_STRENGTH_THRESHOLD,
+        )
+        validator = RequestValidator(
+            graph=graph_dict,
+            options=options_dict,
+            goal_node_id=request.goal_node_id,
+            path_config=path_config,
+        )
+        validation = validator.validate()
+
+        builder.add_critiques(validation.critiques)
+
+        # Build diagnostics if requested
+        if include_diagnostics:
+            nodes_by_id = {n.id: n for n in request.graph.nodes}
+            diagnostics = DiagnosticsV2(
+                goal_node_id_hash=hash_node_id(request.goal_node_id),
+                goal_node_found=request.goal_node_id in nodes_by_id,
+                option_diagnostics=validation.option_diagnostics,
+                n_samples_requested=request.n_samples,
+                n_samples_completed=0,  # Updated after analysis
+                identifiability_status="unknown",
+                path_exists_probability_threshold=DEFAULT_EXISTS_PROBABILITY_THRESHOLD,
+                path_strength_threshold=DEFAULT_STRENGTH_THRESHOLD,
+            )
+            builder.set_diagnostics(diagnostics)
+
+        if validation.has_blockers:
+            # Return 422 with unwrapped ISLV2Error422 (P2-ISL-3)
+            logger.warning(
+                "robustness_v2_validation_blocked",
+                extra={
+                    "request_id": request_id,
+                    "blocker_count": sum(
+                        1 for c in validation.critiques if c.severity == "blocker"
+                    ),
+                    "blocker_codes": [
+                        c.code for c in validation.critiques if c.severity == "blocker"
+                    ],
+                },
+            )
+            error_response = builder.build_422_response()
+            return JSONResponse(
+                status_code=422,
+                content=error_response.model_dump(),
+                headers={
+                    "X-Request-Id": request_id,
+                    "X-Processing-Time-Ms": str(builder.get_processing_time_ms()),
+                },
+            )
+
+        # Log request
+        logger.info(
+            "robustness_v2_analysis_request",
+            extra={
+                "request_id": request_id,
+                "response_version": 2,
+                "n_options": len(request.options),
+                "n_edges": len(request.graph.edges),
+                "n_samples": request.n_samples,
+                "goal_node_hash": hash_node_id(request.goal_node_id),
+                "include_diagnostics": include_diagnostics,
+            },
+        )
+
+        # Run analysis
+        v1_response = robustness_analyzer_v2.analyze(request)
+
+        # Convert V1 response to V2 option results
+        option_results = []
+        for result in v1_response.results:
+            dist = result.outcome_distribution
+
+            # P2-ISL-5: Validate and clean MC samples with proper critiques
+            n_total = request.n_samples
+            if dist.samples is not None and len(dist.samples) > 0:
+                # Use numerical stability utility for validation + critique emission
+                samples_array = np.array(dist.samples)
+                cleaned_samples, sample_critiques = validate_mc_samples(samples_array)
+
+                # Add any numerical stability critiques (once per option set)
+                for critique in sample_critiques:
+                    # Add option context to critique
+                    critique.affected_option_ids = [result.option_id]
+                    builder.add_critique(critique)
+
+                # Count valid samples from cleaned array
+                n_valid = int(np.sum(np.isfinite(cleaned_samples)))
+            else:
+                # V1 analyzer doesn't track validity - assume all valid
+                n_valid = n_total
+
+            validity_ratio = n_valid / n_total if n_total > 0 else 0.0
+            status = determine_option_status(n_valid, n_total)
+
+            option_results.append(
+                OptionResultV2(
+                    id=result.option_id,
+                    label=None,  # V1 doesn't include label in results
+                    outcome=OutcomeDistributionV2(
+                        mean=dist.mean,
+                        std=dist.std,
+                        p10=dist.ci_lower,  # Use CI as approximation
+                        p50=dist.median,
+                        p90=dist.ci_upper,
+                        n_samples=n_total,
+                        n_valid_samples=n_valid,
+                        validity_ratio=validity_ratio,
+                    ),
+                    status=status,
+                    status_reason=(
+                        "Numerical issues in sampling"
+                        if status != "computed"
+                        else None
+                    ),
+                )
+            )
+
+        # Check for degenerate outcomes
+        degen_critique = detect_degenerate_outcomes(option_results)
+        if degen_critique:
+            builder.add_critique(degen_critique)
+
+        # Convert robustness result
+        robustness_result = None
+        if v1_response.robustness:
+            # Map is_robust to level
+            if v1_response.robustness.is_robust:
+                level = "high" if v1_response.robustness.confidence > 0.8 else "moderate"
+            else:
+                level = "low" if v1_response.robustness.confidence > 0.5 else "very_low"
+
+            robustness_result = RobustnessResultV2(
+                level=level,
+                confidence=v1_response.robustness.confidence,
+            )
+
+        # Convert factor sensitivity
+        factor_sensitivity = None
+        if v1_response.factor_sensitivity:
+            factor_sensitivity = [
+                FactorSensitivityV2(
+                    node_id=fs.node_id,
+                    label=fs.node_label,
+                    sensitivity_score=fs.elasticity,
+                    direction="positive" if fs.elasticity > 0 else "negative",
+                    confidence=0.8,  # V1 doesn't provide per-factor confidence
+                )
+                for fs in v1_response.factor_sensitivity
+            ]
+
+        builder.set_results(
+            options=option_results,
+            robustness=robustness_result,
+            factor_sensitivity=factor_sensitivity,
+        )
+
+        # Update diagnostics with sampling info
+        if include_diagnostics and builder.diagnostics:
+            builder.diagnostics.n_samples_completed = request.n_samples
+
+        # Track metrics
+        track_robustness_analysis(
+            status="robust" if v1_response.robustness.is_robust else "fragile",
+            robustness_score=v1_response.recommendation_confidence,
+            is_fragile=not v1_response.robustness.is_robust,
+            regions_found=0,
+        )
+
+        logger.info(
+            "robustness_v2_analysis_completed",
+            extra={
+                "request_id": request_id,
+                "response_version": 2,
+                "recommended_option": v1_response.recommended_option_id,
+                "confidence": v1_response.recommendation_confidence,
+                "critique_count": len(builder.critiques),
+                "analysis_status": "computed",
+            },
+        )
+
+        # Return 200 with response (P2-ISL-2: Add tracing headers)
+        response = builder.build()
+        return JSONResponse(
+            status_code=200,
+            content=response.model_dump(by_alias=True),  # Use 'version' alias
+            headers={
+                "X-Request-Id": request_id,
+                "X-Processing-Time-Ms": str(response.processing_time_ms),
+            },
+        )
+
+    except Exception as e:
+        logger.exception(f"Analysis failed for request {request_id}: {e}")
+        response = builder.build_error_response(e)
+        return JSONResponse(
+            status_code=500,
+            content=response.model_dump(by_alias=True),
+            headers={
+                "X-Request-Id": request_id,
+                "X-Processing-Time-Ms": str(response.processing_time_ms),
+            },
         )
 
 

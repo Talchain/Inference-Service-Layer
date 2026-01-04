@@ -2,6 +2,8 @@
 Enhanced sensitivity analysis service for quantifying assumption robustness.
 
 Implements continuous sensitivity metrics instead of discrete robustness scores.
+
+P2-ISL-5: Uses epsilon-guarded calculations for baseline near-zero protection.
 """
 
 import logging
@@ -11,6 +13,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 from scipy import stats
 
+from src.constants import BASELINE_EPSILON
 from src.models.metadata import ResponseMetadata
 from src.models.sensitivity import (
     AssumptionType,
@@ -22,6 +25,7 @@ from src.models.sensitivity import (
     ViolationType,
 )
 from src.models.shared import ConfidenceLevel
+from src.utils.numerical_stability import safe_percent_change
 
 logger = logging.getLogger(__name__)
 
@@ -152,11 +156,13 @@ class EnhancedSensitivityAnalyzer:
                     }
                     severity_score = severity_map.get(violation.severity, 0.5)
 
+                    # P2-ISL-5: Use safe_percent_change for epsilon protection
+                    deviation_pct, _ = safe_percent_change(outcome, baseline_outcome)
                     violation_details.append({
                         "magnitude": violation.magnitude,
                         "severity_score": severity_score,
                         "outcome": outcome,
-                        "deviation_percent": abs(outcome - baseline_outcome) / abs(baseline_outcome) * 100
+                        "deviation_percent": abs(deviation_pct)
                     })
 
                 # Compute sensitivity metrics
@@ -408,21 +414,25 @@ class EnhancedSensitivityAnalyzer:
         max_outcome = max(outcomes)
         outcome_range = (min_outcome, max_outcome)
 
-        # Maximum deviation
+        # Maximum deviation (P2-ISL-5: epsilon-guarded)
         max_deviation = max(
             abs(min_outcome - baseline_outcome),
             abs(max_outcome - baseline_outcome)
         )
-        max_deviation_percent = (max_deviation / abs(baseline_outcome)) * 100
+        # Use safe division for max_deviation_percent
+        max_dev_pct, _ = safe_percent_change(
+            baseline_outcome + max_deviation, baseline_outcome
+        )
+        max_deviation_percent = abs(max_dev_pct)
 
         # Elasticity: % change in outcome per % change in violation
         # Use regression to estimate slope
         if len(outcomes) > 1 and len(violation_magnitudes) > 1:
-            # Convert to percent changes
-            outcome_pct_changes = [
-                (o - baseline_outcome) / abs(baseline_outcome) * 100
-                for o in outcomes
-            ]
+            # Convert to percent changes (P2-ISL-5: epsilon-guarded)
+            outcome_pct_changes = []
+            for o in outcomes:
+                pct, _ = safe_percent_change(o, baseline_outcome)
+                outcome_pct_changes.append(pct)
             violation_pct = [v * 100 for v in violation_magnitudes]  # 0-1 to 0-100
 
             # Linear regression

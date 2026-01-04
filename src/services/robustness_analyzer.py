@@ -120,7 +120,7 @@ class RobustnessAnalyzer:
                         min_samples=request.min_samples,
                         confidence_level=request.confidence_level,
                         request_id=request_id,
-                        seed=seed,
+                        seed=rng.seed,
                     )
 
                     if is_robust:
