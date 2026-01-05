@@ -32,6 +32,7 @@ from src.models.response_v2 import (
     DiagnosticsV2,
     FactorSensitivityV2,
     ISLResponseV2,
+    ISLV2Error422,
     OptionResultV2,
     OutcomeDistributionV2,
     RobustnessResultV2,
@@ -215,9 +216,15 @@ async def analyze_robustness(
     **Performance:** 100-2000ms depending on n_samples (default 1000)
     """,
     responses={
-        200: {"description": "Robustness analysis completed successfully"},
+        200: {
+            "model": ISLResponseV2,
+            "description": "Robustness analysis completed successfully",
+        },
         400: {"description": "Invalid input schema"},
-        422: {"description": "Validation error or structured V2 response with blockers"},
+        422: {
+            "model": ISLV2Error422,
+            "description": "Validation error with structured critiques",
+        },
         500: {"description": "Internal computation error"},
     },
 )

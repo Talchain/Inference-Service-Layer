@@ -11,8 +11,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.constants import IDENTICAL_OPTIONS_VALUE_TOLERANCE
 from src.models.critique import (
+    EDGE_STRENGTH_OUT_OF_RANGE,
     EMPTY_INTERVENTIONS,
     GRAPH_CYCLE_DETECTED,
+    GRAPH_DISCONNECTED,
+    GRAPH_EMPTY,
     IDENTICAL_OPTIONS,
     INVALID_INTERVENTION_TARGET,
     MISSING_GOAL_NODE,
@@ -197,7 +200,16 @@ class RequestValidator:
         critiques: List[CritiqueV2] = []
         option_diagnostics: List[OptionDiagnosticV2] = []
 
-        # 0. Check for cycles in graph (DAG required)
+        # 0a. Check for empty graph
+        if not self.nodes:
+            critiques.append(GRAPH_EMPTY.build())
+            return ValidationResult(
+                is_valid=False,
+                critiques=critiques,
+                option_diagnostics=[],
+            )
+
+        # 0b. Check for cycles in graph (DAG required)
         if detect_graph_cycle(self.edges):
             critiques.append(GRAPH_CYCLE_DETECTED.build())
             return ValidationResult(
@@ -205,6 +217,28 @@ class RequestValidator:
                 critiques=critiques,
                 option_diagnostics=[],
             )
+
+        # 0c. Check for disconnected components (warning only)
+        disconnected_count = self._count_disconnected_components()
+        if disconnected_count > 1:
+            critiques.append(
+                GRAPH_DISCONNECTED.build(count=disconnected_count)
+            )
+
+        # 0d. Check edge strength ranges (warning only)
+        for edge in self.edges:
+            strength = edge.get("strength", {})
+            mean = strength.get("mean", 0)
+            from_node = edge.get("from") or edge.get("from_")
+            to_node = edge.get("to")
+            if abs(mean) > 3.0:
+                critiques.append(
+                    EDGE_STRENGTH_OUT_OF_RANGE.build(
+                        from_node=from_node,
+                        to_node=to_node,
+                        value=mean,
+                    )
+                )
 
         # 1. Validate goal node exists
         goal_found = self.goal_node_id in self.nodes_by_id
@@ -299,3 +333,40 @@ class RequestValidator:
             critiques=critiques,
             option_diagnostics=option_diagnostics,
         )
+
+    def _count_disconnected_components(self) -> int:
+        """
+        Count disconnected components in the graph using Union-Find.
+
+        Returns:
+            Number of connected components (1 = fully connected)
+        """
+        if not self.nodes:
+            return 0
+
+        # Build undirected adjacency (for connectivity, direction doesn't matter)
+        node_ids = set(n["id"] for n in self.nodes)
+
+        # Union-Find with path compression
+        parent: Dict[str, str] = {nid: nid for nid in node_ids}
+
+        def find(x: str) -> str:
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        def union(a: str, b: str) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        # Union nodes connected by edges
+        for edge in self.edges:
+            from_node = edge.get("from") or edge.get("from_")
+            to_node = edge.get("to")
+            if from_node in node_ids and to_node in node_ids:
+                union(from_node, to_node)
+
+        # Count unique roots
+        roots = set(find(nid) for nid in node_ids)
+        return len(roots)
