@@ -191,12 +191,27 @@ class SensitiveFactorV2(BaseModel):
 class RobustnessResultV2(BaseModel):
     """Robustness analysis result."""
 
+    # V2 fields
     level: Literal["high", "moderate", "low", "very_low"] = Field(
         ..., description="Robustness level"
     )
     confidence: float = Field(..., ge=0, le=1, description="Confidence [0, 1]")
     sensitive_factors: Optional[List[SensitiveFactorV2]] = Field(
         None, description="Factor sensitivity breakdown"
+    )
+
+    # V1 backward-compatibility fields (for PLoT integration)
+    is_robust: Optional[bool] = Field(
+        None, description="Whether recommendation is robust (V1 compat)"
+    )
+    fragile_edges: Optional[List[str]] = Field(
+        None, description="Edges that could flip the decision (V1 compat)"
+    )
+    robust_edges: Optional[List[str]] = Field(
+        None, description="Edges that don't significantly affect decision (V1 compat)"
+    )
+    recommendation_stability: Optional[float] = Field(
+        None, ge=0, le=1, description="P(same recommendation across samples) (V1 compat)"
     )
 
 

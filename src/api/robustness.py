@@ -520,7 +520,7 @@ async def _analyze_robustness_v2_enhanced(
         if degen_critique:
             builder.add_critique(degen_critique)
 
-        # Convert robustness result
+        # Convert robustness result (include V1 fields for backward compatibility)
         robustness_result = None
         if v1_response.robustness:
             # Map is_robust to level
@@ -530,8 +530,14 @@ async def _analyze_robustness_v2_enhanced(
                 level = "low" if v1_response.robustness.confidence > 0.5 else "very_low"
 
             robustness_result = RobustnessResultV2(
+                # V2 fields
                 level=level,
                 confidence=v1_response.robustness.confidence,
+                # V1 backward-compatibility fields
+                is_robust=v1_response.robustness.is_robust,
+                fragile_edges=v1_response.robustness.fragile_edges,
+                robust_edges=v1_response.robustness.robust_edges,
+                recommendation_stability=v1_response.robustness.recommendation_stability,
             )
 
         # Convert factor sensitivity
