@@ -532,3 +532,117 @@ class TestConformalResponseStructure:
         coverage = data["coverage_guarantee"]
         # Guaranteed should be slightly below nominal (finite-sample correction)
         assert coverage["guaranteed_coverage"] <= coverage["nominal_coverage"] + 1e-6
+
+
+class TestConformalInterventionValidation:
+    """Tests for intervention validation in conformal endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_empty_intervention_returns_400(self, client, simple_conformal_request):
+        """Test that empty intervention {} returns 400 with ISL_INVALID_INTERVENTION."""
+        request = simple_conformal_request.copy()
+        request["intervention"] = {}
+
+        response = await client.post(
+            "/api/v1/causal/counterfactual/conformal",
+            json=request,
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+
+        # Check error structure
+        assert data["code"] == "ISL_INVALID_INTERVENTION"
+        assert "intervention" in data["message"].lower()
+        assert data["reason"] == "empty_or_null_intervention"
+        assert data["retryable"] is False
+        assert data["source"] == "isl"
+
+        # Check recovery hints are present
+        assert "recovery" in data
+        assert "hints" in data["recovery"]
+        assert len(data["recovery"]["hints"]) > 0
+        assert "suggestion" in data["recovery"]
+
+    @pytest.mark.asyncio
+    async def test_null_intervention_returns_error(self, client, simple_conformal_request):
+        """Test that null intervention returns validation error."""
+        request = simple_conformal_request.copy()
+        request["intervention"] = None
+
+        response = await client.post(
+            "/api/v1/causal/counterfactual/conformal",
+            json=request,
+        )
+
+        # Should return 422 (Pydantic validation) or 400 (our validation)
+        assert response.status_code in [400, 422]
+
+    @pytest.mark.asyncio
+    async def test_missing_intervention_returns_error(self, client, simple_conformal_request):
+        """Test that missing intervention field returns validation error."""
+        request = simple_conformal_request.copy()
+        del request["intervention"]
+
+        response = await client.post(
+            "/api/v1/causal/counterfactual/conformal",
+            json=request,
+        )
+
+        # Should return 422 (Pydantic validation - missing required field)
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_valid_intervention_returns_200(self, client, simple_conformal_request):
+        """Test that valid intervention returns 200 (regression test)."""
+        # simple_conformal_request already has valid intervention {"Price": 50}
+        response = await client.post(
+            "/api/v1/causal/counterfactual/conformal",
+            json=simple_conformal_request,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+
+        # Verify normal response structure
+        assert "prediction_interval" in data
+        assert "coverage_guarantee" in data
+
+    @pytest.mark.asyncio
+    async def test_empty_intervention_has_request_id(self, client, simple_conformal_request):
+        """Test that error response includes request_id when provided."""
+        request = simple_conformal_request.copy()
+        request["intervention"] = {}
+        custom_request_id = "test-invalid-intervention-123"
+
+        response = await client.post(
+            "/api/v1/causal/counterfactual/conformal",
+            json=request,
+            headers={"X-Request-Id": custom_request_id},
+        )
+
+        assert response.status_code == 400
+        data = response.json()
+
+        # Error response should include our custom request ID
+        assert data["request_id"] == custom_request_id
+
+    @pytest.mark.asyncio
+    async def test_multiple_variable_intervention_valid(self, client, simple_conformal_request):
+        """Test that intervention with multiple variables works."""
+        request = simple_conformal_request.copy()
+        # Add a second variable to the model
+        request["model"]["variables"] = ["Price", "Discount", "Revenue"]
+        request["model"]["equations"]["Revenue"] = "10000 + 500*Price - 200*Discount"
+        request["intervention"] = {"Price": 50, "Discount": 10}
+
+        # Update calibration data to include Discount
+        for point in request["calibration_data"]:
+            point["inputs"]["Discount"] = 5
+
+        response = await client.post(
+            "/api/v1/causal/counterfactual/conformal",
+            json=request,
+        )
+
+        assert response.status_code == 200

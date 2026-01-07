@@ -10,7 +10,8 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Header, HTTPException
-from typing import Optional
+from fastapi.responses import JSONResponse
+from typing import Optional, Union
 
 from src.models.metadata import create_response_metadata
 from src.models.requests import (
@@ -37,6 +38,7 @@ from src.models.responses import (
     ErrorResponse,
     ExperimentRecommendationResponse,
     ParameterRecommendationResponse,
+    RecoveryHints,
     TransportabilityResponse,
     ValidationStrategyResponse,
 )
@@ -420,7 +422,7 @@ async def analyze_batch_counterfactual(
 async def conformal_counterfactual_prediction(
     request: ConformalCounterfactualRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> ConformalCounterfactualResponse:
+) -> Union[ConformalCounterfactualResponse, JSONResponse]:
     """
     Generate counterfactual with conformal prediction interval.
 
@@ -433,6 +435,45 @@ async def conformal_counterfactual_prediction(
     """
     # Generate request ID if not provided
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    # Validate intervention is present and non-empty
+    # This is a counterfactual endpoint - intervention is semantically required
+    def _is_intervention_valid(intervention: dict) -> bool:
+        """Check if intervention has at least one non-null value."""
+        if not intervention:
+            return False
+        # Check if all values are None/null
+        return any(v is not None for v in intervention.values())
+
+    if not _is_intervention_valid(request.intervention):
+        logger.warning(
+            "conformal_counterfactual_invalid_intervention",
+            extra={
+                "request_id": request_id,
+                "intervention": request.intervention,
+                "reason": "empty_or_null_intervention",
+            },
+        )
+        error_response = ErrorResponse(
+            code=ErrorCode.INVALID_INTERVENTION.value,
+            message="Intervention object is required and cannot be empty for counterfactual prediction",
+            reason="empty_or_null_intervention",
+            recovery=RecoveryHints(
+                hints=[
+                    "Provide at least one variable/value pair in the intervention object",
+                    "Ensure intervention values are not null",
+                    "This endpoint requires an intervention - use observational endpoints for non-interventional queries",
+                ],
+                suggestion="Provide at least one variable/value pair, e.g. { \"Price\": 50 }",
+            ),
+            retryable=False,
+            source="isl",
+            request_id=request_id,
+        )
+        return JSONResponse(
+            status_code=400,
+            content=error_response.model_dump(exclude_none=True),
+        )
 
     try:
         logger.info(
