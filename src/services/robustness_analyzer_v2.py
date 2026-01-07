@@ -24,6 +24,7 @@ from src.models.robustness_v2 import (
     ClampMetrics,
     EdgeV2,
     FactorSensitivityResult,
+    FragileEdgeEnhanced,
     GraphV2,
     InterventionOption,
     NodeV2,
@@ -1073,19 +1074,31 @@ class RobustnessAnalyzerV2:
         recommendation_stability = option_wins[most_frequent_winner] / n_samples
 
         # Identify fragile and robust edges (by edge_id string)
-        fragile_edge_ids = set()
-        robust_edge_ids = set()
-
-        # Map edge_id -> (from_id, to_id) for fragile edges
-        fragile_edge_info: Dict[str, Tuple[str, str]] = {}
+        # IMPORTANT: Aggregate sensitivities per edge BEFORE categorization
+        # Each edge may have multiple sensitivity entries (existence + magnitude)
+        # Use max(abs(elasticity)) to determine the edge's sensitivity level
+        edge_max_elasticity: Dict[str, float] = {}
+        edge_info: Dict[str, Tuple[str, str]] = {}  # edge_id -> (from_id, to_id)
 
         for sens in sensitivity:
             edge_id = f"{sens.edge_from}->{sens.edge_to}"
-            if abs(sens.elasticity) > self.FRAGILE_THRESHOLD:
+            current_max = edge_max_elasticity.get(edge_id, 0.0)
+            edge_max_elasticity[edge_id] = max(current_max, abs(sens.elasticity))
+            edge_info[edge_id] = (sens.edge_from, sens.edge_to)
+
+        # Now categorize edges based on their max elasticity
+        # Thresholds: fragile > 0.1, robust < 0.05, moderate = [0.05, 0.1]
+        fragile_edge_ids = set()
+        robust_edge_ids = set()
+        fragile_edge_info: Dict[str, Tuple[str, str]] = {}
+
+        for edge_id, max_elasticity in edge_max_elasticity.items():
+            if max_elasticity > self.FRAGILE_THRESHOLD:
                 fragile_edge_ids.add(edge_id)
-                fragile_edge_info[edge_id] = (sens.edge_from, sens.edge_to)
-            elif abs(sens.elasticity) < 0.05:
+                fragile_edge_info[edge_id] = edge_info[edge_id]
+            elif max_elasticity < 0.05:
                 robust_edge_ids.add(edge_id)
+            # Edges with 0.05 <= elasticity <= 0.1 are implicitly "moderate" (uncategorized)
 
         fragile_edges = list(fragile_edge_ids)
         robust_edges = list(robust_edge_ids)
@@ -1142,7 +1155,7 @@ class RobustnessAnalyzerV2:
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
         winner_per_sample: List[str],
         overall_winner: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[FragileEdgeEnhanced]:
         """
         Compute alternative winners for fragile edges.
 
@@ -1156,7 +1169,7 @@ class RobustnessAnalyzerV2:
             overall_winner: The overall recommended option
 
         Returns:
-            List of dicts with enhanced fragile edge information
+            List of FragileEdgeEnhanced objects with enhanced fragile edge information
         """
         results = []
 
@@ -1170,13 +1183,13 @@ class RobustnessAnalyzerV2:
 
             if not strengths:
                 # No data for this edge
-                results.append({
-                    "edge_id": edge_id,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                    "alternative_winner_id": None,
-                    "switch_probability": None,
-                })
+                results.append(FragileEdgeEnhanced(
+                    edge_id=edge_id,
+                    from_id=from_id,
+                    to_id=to_id,
+                    alternative_winner_id=None,
+                    switch_probability=None,
+                ))
                 continue
 
             # Find bottom 25% threshold (weak edge samples)
@@ -1189,13 +1202,13 @@ class RobustnessAnalyzerV2:
             ]
 
             if not weak_sample_indices:
-                results.append({
-                    "edge_id": edge_id,
-                    "from_id": from_id,
-                    "to_id": to_id,
-                    "alternative_winner_id": None,
-                    "switch_probability": None,
-                })
+                results.append(FragileEdgeEnhanced(
+                    edge_id=edge_id,
+                    from_id=from_id,
+                    to_id=to_id,
+                    alternative_winner_id=None,
+                    switch_probability=None,
+                ))
                 continue
 
             # Count winner distribution in weak-edge samples
@@ -1208,24 +1221,36 @@ class RobustnessAnalyzerV2:
             weak_winner_count = weak_winner_counts[weak_winner]
             total_weak_samples = len(weak_sample_indices)
 
-            # Compute switch probability
-            switch_probability = weak_winner_count / total_weak_samples
-
-            # Determine alternative winner
+            # Determine alternative winner and switch probability
+            # The alternative is the best option OTHER than the overall winner
+            # switch_probability is the probability of that alternative in weak scenarios
             if weak_winner != overall_winner:
+                # Clear case: a different option wins when edge is weak
                 alternative_winner_id = weak_winner
+                switch_probability = weak_winner_count / total_weak_samples
             else:
-                # Same option wins even when edge is weak - stable recommendation
-                # Return 0.0 (not None) to indicate "no switching" for cleaner analytics
-                alternative_winner_id = None
-                switch_probability = 0.0
+                # Same option wins most often, but we want to show the risk
+                # Find the best alternative (second most frequent) and its probability
+                alternatives = {
+                    opt: count for opt, count in weak_winner_counts.items()
+                    if opt != overall_winner
+                }
+                if alternatives:
+                    # There's at least one alternative winner in weak scenarios
+                    best_alt = max(alternatives, key=alternatives.get)
+                    alternative_winner_id = best_alt
+                    switch_probability = alternatives[best_alt] / total_weak_samples
+                else:
+                    # Only the overall winner appeared in weak scenarios - truly stable
+                    alternative_winner_id = None
+                    switch_probability = 0.0
 
-            results.append({
-                "edge_id": edge_id,
-                "from_id": from_id,
-                "to_id": to_id,
-                "alternative_winner_id": alternative_winner_id,
-                "switch_probability": switch_probability,
-            })
+            results.append(FragileEdgeEnhanced(
+                edge_id=edge_id,
+                from_id=from_id,
+                to_id=to_id,
+                alternative_winner_id=alternative_winner_id,
+                switch_probability=switch_probability,
+            ))
 
         return results

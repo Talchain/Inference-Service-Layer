@@ -5,6 +5,8 @@ Supports both structural uncertainty (edge existence) and parametric
 uncertainty (effect magnitude) for proper robustness analysis.
 """
 
+from __future__ import annotations
+
 import math
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
@@ -684,6 +686,30 @@ class FactorSensitivityResult(BaseModel):
     }
 
 
+class FragileEdgeEnhanced(BaseModel):
+    """Enhanced fragile edge data with alternative winner analysis.
+
+    Used internally by the analyzer. Maps 1:1 with FragileEdgeV2 in response_v2.py
+    for API responses.
+    """
+
+    edge_id: str = Field(..., description="Edge identifier in 'from->to' format")
+    from_id: str = Field(..., description="Source node ID")
+    to_id: str = Field(..., description="Target node ID")
+    alternative_winner_id: Optional[str] = Field(
+        None,
+        description="Option that wins most often when this edge is weak (bottom quartile). "
+        "Null if same option wins regardless of edge strength.",
+    )
+    switch_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Probability of alternative winner in weak-edge scenarios. "
+        "0.0 if same option wins (stable), null only if no data available.",
+    )
+
+
 class RobustnessResult(BaseModel):
     """Overall robustness assessment."""
 
@@ -701,7 +727,7 @@ class RobustnessResult(BaseModel):
         default_factory=list,
         description="Edges that could flip the decision (format: 'from->to')"
     )
-    fragile_edges_enhanced: Optional[List[Dict[str, Any]]] = Field(
+    fragile_edges_enhanced: Optional[List[FragileEdgeEnhanced]] = Field(
         default=None,
         description="Enhanced fragile edge data with alternative winner analysis"
     )

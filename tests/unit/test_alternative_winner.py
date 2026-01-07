@@ -18,6 +18,7 @@ from src.services.robustness_analyzer_v2 import (
 )
 from src.models.robustness_v2 import (
     EdgeV2,
+    FragileEdgeEnhanced,
     GraphV2,
     InterventionOption,
     NodeV2,
@@ -149,13 +150,14 @@ class TestAlternativeWinnerComputation:
 
         assert len(results) == 1
         edge_result = results[0]
-        assert edge_result["edge_id"] == "price->revenue"
-        assert edge_result["from_id"] == "price"
-        assert edge_result["to_id"] == "revenue"
+        assert isinstance(edge_result, FragileEdgeEnhanced)
+        assert edge_result.edge_id == "price->revenue"
+        assert edge_result.from_id == "price"
+        assert edge_result.to_id == "revenue"
         # In weak samples, option_b should win most often
-        assert edge_result["alternative_winner_id"] == "option_b"
-        assert edge_result["switch_probability"] is not None
-        assert edge_result["switch_probability"] > 0.5
+        assert edge_result.alternative_winner_id == "option_b"
+        assert edge_result.switch_probability is not None
+        assert edge_result.switch_probability > 0.5
 
     def test_no_alternative_winner(self, analyzer):
         """Handles case where same option wins regardless of edge strength."""
@@ -184,10 +186,11 @@ class TestAlternativeWinnerComputation:
 
         assert len(results) == 1
         edge_result = results[0]
+        assert isinstance(edge_result, FragileEdgeEnhanced)
         # No alternative winner since same option wins
         # switch_probability = 0.0 (not None) to indicate "no switching"
-        assert edge_result["alternative_winner_id"] is None
-        assert edge_result["switch_probability"] == 0.0
+        assert edge_result.alternative_winner_id is None
+        assert edge_result.switch_probability == 0.0
 
     def test_multi_option_decision(self, analyzer):
         """Correctly identifies alternative winner among multiple options."""
@@ -228,8 +231,9 @@ class TestAlternativeWinnerComputation:
 
         assert len(results) == 1
         edge_result = results[0]
+        assert isinstance(edge_result, FragileEdgeEnhanced)
         # In weak edge scenario, economy should win most
-        assert edge_result["alternative_winner_id"] == "economy"
+        assert edge_result.alternative_winner_id == "economy"
 
     def test_multiple_fragile_edges(self, analyzer):
         """Handles multiple fragile edges independently."""
@@ -265,7 +269,8 @@ class TestAlternativeWinnerComputation:
         )
 
         assert len(results) == 2
-        edge_ids = {r["edge_id"] for r in results}
+        assert all(isinstance(r, FragileEdgeEnhanced) for r in results)
+        edge_ids = {r.edge_id for r in results}
         assert "price->revenue" in edge_ids
         assert "demand->sales" in edge_ids
 
@@ -299,8 +304,8 @@ class TestAlternativeWinnerComputation:
         result2 = run_analysis(42)
 
         # Same seed should produce identical results
-        assert result1[0]["alternative_winner_id"] == result2[0]["alternative_winner_id"]
-        assert result1[0]["switch_probability"] == result2[0]["switch_probability"]
+        assert result1[0].alternative_winner_id == result2[0].alternative_winner_id
+        assert result1[0].switch_probability == result2[0].switch_probability
 
 
 class TestEndToEndAlternativeWinner:
@@ -370,11 +375,12 @@ class TestEndToEndAlternativeWinner:
             assert response.robustness.fragile_edges_enhanced is not None
 
             for enhanced in response.robustness.fragile_edges_enhanced:
-                assert "edge_id" in enhanced
-                assert "from_id" in enhanced
-                assert "to_id" in enhanced
-                assert "alternative_winner_id" in enhanced
-                assert "switch_probability" in enhanced
+                # Now returns FragileEdgeEnhanced objects, not dicts
+                assert isinstance(enhanced, FragileEdgeEnhanced)
+                assert enhanced.edge_id is not None
+                assert enhanced.from_id is not None
+                assert enhanced.to_id is not None
+                # alternative_winner_id and switch_probability can be None
 
     def test_api_response_format(self, simple_graph, binary_options):
         """API response has correct fragile_edges format."""
@@ -427,8 +433,8 @@ class TestSwitchProbabilityCalculation:
             "opt_a",
         )
 
-        if results[0]["switch_probability"] is not None:
-            prob = results[0]["switch_probability"]
+        if results[0].switch_probability is not None:
+            prob = results[0].switch_probability
             assert 0 <= prob <= 1
 
     def test_switch_probability_100_percent(self, analyzer):
@@ -456,6 +462,211 @@ class TestSwitchProbabilityCalculation:
         )
 
         edge_result = results[0]
+        assert isinstance(edge_result, FragileEdgeEnhanced)
         # All weak samples go to option_b
-        assert edge_result["alternative_winner_id"] == "option_b"
-        assert edge_result["switch_probability"] == 1.0
+        assert edge_result.alternative_winner_id == "option_b"
+        assert edge_result.switch_probability == 1.0
+
+
+class TestShapeConsistency:
+    """Test response shape consistency across V1/V2 formats.
+
+    Ensures:
+    - fragile_edges (V2) are typed objects (FragileEdgeV2)
+    - fragile_edges_v1 are strings ("from->to")
+    - robust_edges are strings ("from->to")
+    - fragile and robust edge sets are disjoint
+    """
+
+    @pytest.fixture
+    def graph_with_edges(self):
+        """Create a graph with multiple edges of varying sensitivity."""
+        return GraphV2(
+            nodes=[
+                NodeV2(
+                    id="price",
+                    kind="factor",
+                    label="Price",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(
+                    id="quality",
+                    kind="factor",
+                    label="Quality",
+                    observed_state=ObservedState(value=0.8),
+                ),
+                NodeV2(
+                    id="demand",
+                    kind="factor",
+                    label="Demand",
+                    observed_state=ObservedState(value=500.0),
+                ),
+                NodeV2(id="revenue", kind="goal", label="Revenue"),
+            ],
+            edges=[
+                # High variance edge - likely fragile
+                EdgeV2(
+                    from_="price",
+                    to="revenue",
+                    exists_probability=0.95,
+                    strength=StrengthDistribution(mean=0.8, std=0.4),
+                ),
+                # Low variance edge - likely robust
+                EdgeV2(
+                    from_="quality",
+                    to="revenue",
+                    exists_probability=0.99,
+                    strength=StrengthDistribution(mean=0.5, std=0.05),
+                ),
+                # Medium variance edge
+                EdgeV2(
+                    from_="demand",
+                    to="revenue",
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=0.6, std=0.15),
+                ),
+            ],
+        )
+
+    @pytest.fixture
+    def options(self):
+        """Create test options."""
+        return [
+            InterventionOption(
+                id="option_a",
+                label="Option A",
+                interventions={"price": 120.0},
+            ),
+            InterventionOption(
+                id="option_b",
+                label="Option B",
+                interventions={"price": 80.0},
+            ),
+        ]
+
+    def test_fragile_edges_enhanced_are_typed_objects(self, graph_with_edges, options):
+        """Analyzer returns typed FragileEdgeEnhanced objects, not dicts."""
+        request = RobustnessRequestV2(
+            graph=graph_with_edges,
+            options=options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        if response.robustness.fragile_edges_enhanced:
+            for fe in response.robustness.fragile_edges_enhanced:
+                # Must be FragileEdgeEnhanced objects, NOT dicts
+                assert isinstance(fe, FragileEdgeEnhanced), (
+                    f"Expected FragileEdgeEnhanced, got {type(fe)}"
+                )
+                # Must have typed attributes
+                assert hasattr(fe, "edge_id")
+                assert hasattr(fe, "from_id")
+                assert hasattr(fe, "to_id")
+                assert hasattr(fe, "alternative_winner_id")
+                assert hasattr(fe, "switch_probability")
+
+    def test_fragile_edges_v1_are_strings(self, graph_with_edges, options):
+        """V1 fragile_edges are strings in 'from->to' format."""
+        request = RobustnessRequestV2(
+            graph=graph_with_edges,
+            options=options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # V1 format: List[str]
+        for edge in response.robustness.fragile_edges:
+            assert isinstance(edge, str), f"Expected str, got {type(edge)}"
+            assert "->" in edge, f"Expected 'from->to' format, got {edge}"
+
+    def test_robust_edges_are_strings(self, graph_with_edges, options):
+        """robust_edges are always strings in 'from->to' format."""
+        request = RobustnessRequestV2(
+            graph=graph_with_edges,
+            options=options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # robust_edges: List[str]
+        for edge in response.robustness.robust_edges:
+            assert isinstance(edge, str), f"Expected str, got {type(edge)}"
+            assert "->" in edge, f"Expected 'from->to' format, got {edge}"
+
+    def test_fragile_robust_sets_are_disjoint(self, graph_with_edges, options):
+        """An edge cannot be both fragile AND robust (Bug 2 regression test)."""
+        request = RobustnessRequestV2(
+            graph=graph_with_edges,
+            options=options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        fragile_set = set(response.robustness.fragile_edges)
+        robust_set = set(response.robustness.robust_edges)
+
+        # Sets must be disjoint
+        overlap = fragile_set & robust_set
+        assert len(overlap) == 0, (
+            f"Edge overlap detected! Edges in both sets: {overlap}"
+        )
+
+    def test_serialized_response_shape(self, graph_with_edges, options):
+        """Serialized JSON response has correct shape for API consumption."""
+        request = RobustnessRequestV2(
+            graph=graph_with_edges,
+            options=options,
+            goal_node_id="revenue",
+            n_samples=200,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Serialize as API would
+        data = response.model_dump()
+
+        robustness = data["robustness"]
+
+        # fragile_edges (V1 strings)
+        assert isinstance(robustness["fragile_edges"], list)
+        for edge in robustness["fragile_edges"]:
+            assert isinstance(edge, str)
+
+        # robust_edges (strings)
+        assert isinstance(robustness["robust_edges"], list)
+        for edge in robustness["robust_edges"]:
+            assert isinstance(edge, str)
+
+        # fragile_edges_enhanced (objects when serialized)
+        if robustness["fragile_edges_enhanced"]:
+            for fe in robustness["fragile_edges_enhanced"]:
+                assert isinstance(fe, dict), "Serialized should be dict"
+                assert "edge_id" in fe
+                assert "from_id" in fe
+                assert "to_id" in fe
+                assert "alternative_winner_id" in fe
+                assert "switch_probability" in fe

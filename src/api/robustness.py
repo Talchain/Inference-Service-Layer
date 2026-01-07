@@ -532,16 +532,16 @@ async def _analyze_robustness_v2_enhanced(
             else:
                 level = "low" if v1_response.robustness.confidence > 0.5 else "very_low"
 
-            # Build enhanced fragile edges from fragile_edges_enhanced
+            # Convert FragileEdgeEnhanced to FragileEdgeV2 (same schema, different modules)
             fragile_edges_v2 = None
             if v1_response.robustness.fragile_edges_enhanced:
                 fragile_edges_v2 = [
                     FragileEdgeV2(
-                        edge_id=fe["edge_id"],
-                        from_id=fe["from_id"],
-                        to_id=fe["to_id"],
-                        alternative_winner_id=fe.get("alternative_winner_id"),
-                        switch_probability=fe.get("switch_probability"),
+                        edge_id=fe.edge_id,
+                        from_id=fe.from_id,
+                        to_id=fe.to_id,
+                        alternative_winner_id=fe.alternative_winner_id,
+                        switch_probability=fe.switch_probability,
                     )
                     for fe in v1_response.robustness.fragile_edges_enhanced
                 ]
@@ -620,7 +620,7 @@ async def _analyze_robustness_v2_enhanced(
         response = builder.build_error_response(e)
         return JSONResponse(
             status_code=500,
-            content=response.model_dump(by_alias=True),
+            content=response.model_dump(by_alias=True, exclude_none=True),
             headers={
                 "X-Request-Id": request_id,
                 "X-Processing-Time-Ms": str(response.processing_time_ms),
