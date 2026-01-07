@@ -160,6 +160,18 @@ class OptionResultV2(BaseModel):
     id: str = Field(..., description="Option identifier")
     label: Optional[str] = Field(None, description="Human-readable label")
     outcome: OutcomeDistributionV2 = Field(..., description="Outcome distribution")
+    win_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="P(this option is best) - fraction of samples where this option had highest outcome"
+    )
+    probability_of_goal: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
+    )
     status: Literal["computed", "partial", "failed"] = Field(
         ..., description="Option-specific status"
     )
@@ -184,6 +196,35 @@ class SensitiveFactorV2(BaseModel):
 
 
 # =============================================================================
+# Fragile Edge (V2 enhanced format)
+# =============================================================================
+
+
+class FragileEdgeV2(BaseModel):
+    """Fragile edge with alternative winner analysis.
+
+    Identifies edges where the recommendation is sensitive to assumption changes
+    and what option would win if the edge is weaker than modelled.
+    """
+
+    edge_id: str = Field(..., description="Edge identifier in 'from->to' format")
+    from_id: str = Field(..., description="Source node ID")
+    to_id: str = Field(..., description="Target node ID")
+    alternative_winner_id: Optional[str] = Field(
+        None,
+        description="Option that wins most often when this edge is weak (bottom quartile). "
+        "Null if same option wins regardless of edge strength.",
+    )
+    switch_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Proportion of MC samples where alternative wins when edge is weak. "
+        "0.0 if same option wins (stable), null only if no data available.",
+    )
+
+
+# =============================================================================
 # Robustness Result
 # =============================================================================
 
@@ -200,12 +241,19 @@ class RobustnessResultV2(BaseModel):
         None, description="Factor sensitivity breakdown"
     )
 
+    # V2 enhanced fragile edges with alternative winner analysis
+    fragile_edges: Optional[List[FragileEdgeV2]] = Field(
+        None,
+        description="Edges that could flip the decision, with alternative winner analysis",
+    )
+
     # V1 backward-compatibility fields (for PLoT integration)
     is_robust: Optional[bool] = Field(
         None, description="Whether recommendation is robust (V1 compat)"
     )
-    fragile_edges: Optional[List[str]] = Field(
-        None, description="Edges that could flip the decision (V1 compat)"
+    fragile_edges_v1: Optional[List[str]] = Field(
+        None,
+        description="Edges that could flip the decision (V1 compat, string format)",
     )
     robust_edges: Optional[List[str]] = Field(
         None, description="Edges that don't significantly affect decision (V1 compat)"

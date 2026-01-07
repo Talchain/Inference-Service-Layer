@@ -362,8 +362,12 @@ class RequestValidator:
 
         # Union nodes connected by edges
         for edge in self.edges:
-            from_node = edge.get("from") or edge.get("from_")
-            to_node = edge.get("to")
+            from_node = (
+                edge.get("from")
+                or edge.get("from_")
+                or edge.get("source_id")
+            )
+            to_node = edge.get("to") or edge.get("target_id")
             if from_node in node_ids and to_node in node_ids:
                 union(from_node, to_node)
 

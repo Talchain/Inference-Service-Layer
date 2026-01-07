@@ -472,3 +472,122 @@ class TestSeedTruthfulness:
 
         # Different graphs → different computed seeds
         assert data1["seed_used"] != data2["seed_used"]
+
+
+# Request payload with goal_threshold for testing probability_of_goal
+V2_REQUEST_WITH_GOAL_THRESHOLD = {
+    "graph": {
+        "nodes": [
+            {"id": "input", "kind": "factor", "label": "Input", "observed_state": {"value": 100.0}},
+            {"id": "output", "kind": "goal", "label": "Output"},
+        ],
+        "edges": [
+            {
+                "from": "input",
+                "to": "output",
+                "exists_probability": 1.0,
+                "strength": {"mean": 2.0, "std": 0.01},  # Output ~ 2 * input
+            }
+        ],
+    },
+    "options": [
+        {"id": "low", "label": "Low Input", "interventions": {"input": 50}},
+        {"id": "high", "label": "High Input", "interventions": {"input": 150}},
+    ],
+    "goal_node_id": "output",
+    "seed": 42,
+    "n_samples": 100,
+    "goal_threshold": 200.0,  # Between low output (100) and high output (300)
+}
+
+
+class TestGoalThresholdProbabilityEndpoint:
+    """Integration tests for goal_threshold and probability_of_goal feature."""
+
+    def test_probability_of_goal_included_when_threshold_provided(self, client):
+        """When goal_threshold is provided, probability_of_goal should be in each result."""
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=V2_REQUEST_WITH_GOAL_THRESHOLD,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # V2 response uses 'options' field for results
+        assert "options" in data, f"Expected 'options' in response, got keys: {list(data.keys())}"
+        for option in data["options"]:
+            assert "probability_of_goal" in option, (
+                f"probability_of_goal missing from result for option {option['id']}"
+            )
+            prob = option["probability_of_goal"]
+            assert isinstance(prob, float)
+            assert 0.0 <= prob <= 1.0
+
+    def test_probability_of_goal_values_correct_for_options(self, client):
+        """Low option should have low probability, high option should have high probability."""
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=V2_REQUEST_WITH_GOAL_THRESHOLD,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # V2 response uses 'options' field and 'id' (not 'option_id')
+        results_by_id = {r["id"]: r for r in data["options"]}
+
+        # Low option: input=50, output~100, threshold=200 → should rarely meet
+        low_prob = results_by_id["low"]["probability_of_goal"]
+        assert low_prob < 0.1, f"Expected low probability for 'low' option, got {low_prob}"
+
+        # High option: input=150, output~300, threshold=200 → should almost always meet
+        high_prob = results_by_id["high"]["probability_of_goal"]
+        assert high_prob > 0.99, f"Expected high probability for 'high' option, got {high_prob}"
+
+    def test_probability_of_goal_absent_when_no_threshold(self, client):
+        """When goal_threshold is not provided, probability_of_goal should be absent."""
+        # Create request without goal_threshold
+        request = {
+            k: v for k, v in V2_REQUEST_WITH_GOAL_THRESHOLD.items() if k != "goal_threshold"
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # V2 response uses 'options' field
+        assert "options" in data, f"Expected 'options' in response, got keys: {list(data.keys())}"
+        for option in data["options"]:
+            assert "probability_of_goal" not in option, (
+                f"probability_of_goal should be absent when threshold not provided, "
+                f"but found in option {option['id']}"
+            )
+
+    def test_invalid_goal_threshold_rejected(self, client):
+        """NaN/inf goal_threshold should return 422 validation error."""
+        # NaN threshold
+        nan_request = dict(V2_REQUEST_WITH_GOAL_THRESHOLD)
+        nan_request["goal_threshold"] = float("nan")
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=nan_request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422
+
+        # Infinity threshold
+        inf_request = dict(V2_REQUEST_WITH_GOAL_THRESHOLD)
+        inf_request["goal_threshold"] = float("inf")
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=inf_request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422

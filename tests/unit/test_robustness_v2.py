@@ -2259,3 +2259,310 @@ class TestFactorSamplingIntegration:
         low_impact = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
 
         assert abs(high_impact.elasticity) > abs(low_impact.elasticity)
+
+
+# =============================================================================
+# Goal Threshold Probability Tests
+# =============================================================================
+
+
+class TestGoalThresholdProbability:
+    """Tests for goal_threshold and probability_of_goal feature."""
+
+    @pytest.fixture
+    def deterministic_graph(self):
+        """Create a graph with deterministic edges for predictable outcomes."""
+        return GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-deterministic
+                )
+            ],
+        )
+
+    def test_basic_goal_threshold_probability_computation(self, deterministic_graph):
+        """Test basic probability_of_goal computation."""
+        request = RobustnessRequestV2(
+            request_id="goal-threshold-basic",
+            graph=deterministic_graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            goal_threshold=50.0,  # Well below expected outcome of ~100
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With input=100 and strength=1.0, output should be ~100
+        # Threshold=50 should be met by nearly all samples
+        assert response.results[0].probability_of_goal is not None
+        assert response.results[0].probability_of_goal >= 0.95  # Should be nearly 1.0
+
+    def test_no_goal_threshold_field_absent_in_response(self, deterministic_graph):
+        """Test probability_of_goal is absent (not null) when goal_threshold not provided."""
+        request = RobustnessRequestV2(
+            request_id="no-threshold",
+            graph=deterministic_graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            # goal_threshold not provided
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # probability_of_goal should be None internally
+        assert response.results[0].probability_of_goal is None
+
+        # When serialized, it should be absent due to exclude_none
+        result_dict = response.results[0].model_dump(exclude_none=True)
+        assert "probability_of_goal" not in result_dict
+
+    def test_threshold_above_all_samples_zero_probability(self, deterministic_graph):
+        """Test probability_of_goal is 0.0 when threshold exceeds all outcomes."""
+        request = RobustnessRequestV2(
+            request_id="threshold-too-high",
+            graph=deterministic_graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            goal_threshold=1000.0,  # Well above expected outcome of ~100
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With outcome ~100, threshold=1000 should never be met
+        assert response.results[0].probability_of_goal == 0.0
+
+    def test_threshold_below_all_samples_one_probability(self, deterministic_graph):
+        """Test probability_of_goal is 1.0 when all outcomes exceed threshold."""
+        request = RobustnessRequestV2(
+            request_id="threshold-too-low",
+            graph=deterministic_graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            goal_threshold=-100.0,  # Well below expected outcome of ~100
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # All samples should exceed threshold
+        assert response.results[0].probability_of_goal == 1.0
+
+    def test_exact_threshold_match_uses_gte_semantics(self, deterministic_graph):
+        """Test >= semantics: samples exactly at threshold count as meeting it."""
+        # Create a graph that produces exactly 100.0 (deterministic)
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.0001),  # Very tight around 1.0
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="exact-threshold",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            goal_threshold=100.0,  # Exactly at expected outcome
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With >= semantics, samples at exactly 100 should count
+        # Most samples should be very close to 100, so probability should be ~0.5
+        # (half above, half below due to normal distribution around 100)
+        assert response.results[0].probability_of_goal is not None
+        assert 0.3 <= response.results[0].probability_of_goal <= 0.7
+
+    def test_nan_goal_threshold_rejected(self, deterministic_graph):
+        """Test NaN goal_threshold raises validation error."""
+        with pytest.raises(ValueError, match="finite"):
+            RobustnessRequestV2(
+                request_id="nan-threshold",
+                graph=deterministic_graph,
+                options=[
+                    InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+                ],
+                goal_node_id="output",
+                n_samples=100,
+                goal_threshold=float("nan"),
+            )
+
+    def test_inf_goal_threshold_rejected(self, deterministic_graph):
+        """Test positive infinity goal_threshold raises validation error."""
+        with pytest.raises(ValueError, match="finite"):
+            RobustnessRequestV2(
+                request_id="inf-threshold",
+                graph=deterministic_graph,
+                options=[
+                    InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+                ],
+                goal_node_id="output",
+                n_samples=100,
+                goal_threshold=float("inf"),
+            )
+
+    def test_neg_inf_goal_threshold_rejected(self, deterministic_graph):
+        """Test negative infinity goal_threshold raises validation error."""
+        with pytest.raises(ValueError, match="finite"):
+            RobustnessRequestV2(
+                request_id="neg-inf-threshold",
+                graph=deterministic_graph,
+                options=[
+                    InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+                ],
+                goal_node_id="output",
+                n_samples=100,
+                goal_threshold=float("-inf"),
+            )
+
+    def test_negative_threshold_accepted(self, deterministic_graph):
+        """Test negative goal_threshold is accepted (valid for outcomes that can be negative)."""
+        request = RobustnessRequestV2(
+            request_id="negative-threshold",
+            graph=deterministic_graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            goal_threshold=-50.0,  # Negative threshold
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # All positive outcomes should exceed negative threshold
+        assert response.results[0].probability_of_goal == 1.0
+
+    def test_zero_threshold_accepted(self, deterministic_graph):
+        """Test zero goal_threshold is accepted."""
+        request = RobustnessRequestV2(
+            request_id="zero-threshold",
+            graph=deterministic_graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+            goal_threshold=0.0,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # All positive outcomes should exceed 0
+        assert response.results[0].probability_of_goal == 1.0
+
+    def test_goal_threshold_with_multiple_options(self):
+        """Test probability_of_goal computed correctly for each option independently."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="investment", kind="factor", label="Investment", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "investment", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.01),  # 2x multiplier
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="multi-option",
+            graph=graph,
+            options=[
+                InterventionOption(id="low", label="Low Investment", interventions={"investment": 50.0}),
+                InterventionOption(id="high", label="High Investment", interventions={"investment": 150.0}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+            goal_threshold=200.0,  # Between low (100) and high (300) expected outcomes
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        low_result = next(r for r in response.results if r.option_id == "low")
+        high_result = next(r for r in response.results if r.option_id == "high")
+
+        # Low: outcome ~100, threshold 200 -> should rarely meet
+        # High: outcome ~300, threshold 200 -> should always meet
+        assert low_result.probability_of_goal < 0.1  # Near 0
+        assert high_result.probability_of_goal > 0.99  # Near 1.0
+
+    def test_goal_threshold_with_stochastic_outcomes(self):
+        """Test probability_of_goal reflects actual sample distribution."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.2),  # High variance
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="stochastic",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,  # More samples for stable estimate
+            seed=42,
+            goal_threshold=100.0,  # At mean
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With threshold at mean, probability should be around 0.5
+        # Allow some variance due to non-symmetric distributions
+        assert 0.3 <= response.results[0].probability_of_goal <= 0.7

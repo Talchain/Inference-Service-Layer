@@ -31,6 +31,7 @@ from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
     DiagnosticsV2,
     FactorSensitivityV2,
+    FragileEdgeV2,
     ISLResponseV2,
     ISLV2Error422,
     OptionResultV2,
@@ -506,6 +507,8 @@ async def _analyze_robustness_v2_enhanced(
                         n_valid_samples=n_valid,
                         validity_ratio=validity_ratio,
                     ),
+                    win_probability=result.win_probability,
+                    probability_of_goal=result.probability_of_goal,
                     status=status,
                     status_reason=(
                         "Numerical issues in sampling"
@@ -529,13 +532,29 @@ async def _analyze_robustness_v2_enhanced(
             else:
                 level = "low" if v1_response.robustness.confidence > 0.5 else "very_low"
 
+            # Build enhanced fragile edges from fragile_edges_enhanced
+            fragile_edges_v2 = None
+            if v1_response.robustness.fragile_edges_enhanced:
+                fragile_edges_v2 = [
+                    FragileEdgeV2(
+                        edge_id=fe["edge_id"],
+                        from_id=fe["from_id"],
+                        to_id=fe["to_id"],
+                        alternative_winner_id=fe.get("alternative_winner_id"),
+                        switch_probability=fe.get("switch_probability"),
+                    )
+                    for fe in v1_response.robustness.fragile_edges_enhanced
+                ]
+
             robustness_result = RobustnessResultV2(
                 # V2 fields
                 level=level,
                 confidence=v1_response.robustness.confidence,
+                # V2 enhanced fragile edges
+                fragile_edges=fragile_edges_v2,
                 # V1 backward-compatibility fields
                 is_robust=v1_response.robustness.is_robust,
-                fragile_edges=v1_response.robustness.fragile_edges,
+                fragile_edges_v1=v1_response.robustness.fragile_edges,
                 robust_edges=v1_response.robustness.robust_edges,
                 recommendation_stability=v1_response.robustness.recommendation_stability,
             )
@@ -588,7 +607,8 @@ async def _analyze_robustness_v2_enhanced(
         response = builder.build()
         return JSONResponse(
             status_code=200,
-            content=response.model_dump(by_alias=True),  # Use 'version' alias
+            # Use by_alias for 'version' field, exclude_none for optional fields like probability_of_goal
+            content=response.model_dump(by_alias=True, exclude_none=True),
             headers={
                 "X-Request-Id": request_id,
                 "X-Processing-Time-Ms": str(response.processing_time_ms),

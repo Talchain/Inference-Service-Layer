@@ -462,6 +462,22 @@ class RobustnessRequestV2(BaseModel):
         "If not provided, factor nodes use observed_state.value as fixed values."
     )
 
+    # Goal threshold configuration
+    goal_threshold: Optional[float] = Field(
+        None,
+        description="Success threshold for goal outcome. When provided, "
+        "computes probability_of_goal (fraction of samples meeting/exceeding threshold)."
+    )
+
+    @field_validator("goal_threshold")
+    @classmethod
+    def validate_goal_threshold_finite(cls, v: Optional[float]) -> Optional[float]:
+        """Reject NaN and infinite values for goal_threshold."""
+        import math
+        if v is not None and (math.isnan(v) or math.isinf(v)):
+            raise ValueError("goal_threshold must be a finite number, not NaN or infinite")
+        return v
+
     @field_validator("goal_node_id")
     @classmethod
     def validate_goal_node_exists(cls, v: str, info) -> str:
@@ -569,6 +585,12 @@ class OptionResult(BaseModel):
         le=1,
         description="P(this option is best)"
     )
+    probability_of_goal: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -581,7 +603,8 @@ class OptionResult(BaseModel):
                     "ci_lower": 40000.0,
                     "ci_upper": 60000.0
                 },
-                "win_probability": 0.65
+                "win_probability": 0.65,
+                "probability_of_goal": 0.72
             }
         }
     }
@@ -677,6 +700,10 @@ class RobustnessResult(BaseModel):
     fragile_edges: List[str] = Field(
         default_factory=list,
         description="Edges that could flip the decision (format: 'from->to')"
+    )
+    fragile_edges_enhanced: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Enhanced fragile edge data with alternative winner analysis"
     )
     robust_edges: List[str] = Field(
         default_factory=list,

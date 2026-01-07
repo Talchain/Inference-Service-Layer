@@ -1,5 +1,5 @@
 """
-FACET-based robustness analyzer with dual uncertainty support (v2.2).
+FACET-based robustness analyzer with dual uncertainty support (v2.3).
 
 Implements Monte Carlo robustness analysis that samples both:
 - Structural uncertainty: Edge existence (Bernoulli)
@@ -8,13 +8,15 @@ Implements Monte Carlo robustness analysis that samples both:
 This enables answering:
 - "Is my decision robust to uncertainty about whether this relationship exists?"
 - "Is my decision robust to the effect being stronger/weaker than estimated?"
+- "If an edge is weaker than modelled, which alternative option would win?"
 """
 
 import logging
 import time
 import uuid
 from collections import defaultdict
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -39,6 +41,22 @@ from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Fragile Edge with Alternative Winner
+# =============================================================================
+
+
+@dataclass
+class FragileEdge:
+    """Internal representation of a fragile edge with alternative winner analysis."""
+
+    edge_id: str  # "from->to" format
+    from_id: str
+    to_id: str
+    alternative_winner_id: Optional[str] = None  # Option that wins when edge is weak
+    switch_probability: Optional[float] = None  # P(alternative wins | edge weak)
 
 
 # =============================================================================
@@ -465,9 +483,12 @@ class RobustnessAnalyzerV2:
         )
 
         # Run Monte Carlo simulation
-        option_outcomes, option_wins, winner_per_sample = self._run_monte_carlo(
-            request, sampler, factor_sampler, evaluator
-        )
+        (
+            option_outcomes,
+            option_wins,
+            winner_per_sample,
+            edge_configs_per_sample,
+        ) = self._run_monte_carlo(request, sampler, factor_sampler, evaluator)
 
         # Compute results
         results = self._compute_option_results(
@@ -488,9 +509,13 @@ class RobustnessAnalyzerV2:
                 request, option_outcomes, rng_factor, evaluator
             )
 
-        # Compute robustness assessment
+        # Compute robustness assessment (with alternative winner analysis)
         robustness = self._compute_robustness(
-            option_wins, winner_per_sample, sensitivity, request
+            option_wins,
+            winner_per_sample,
+            sensitivity,
+            request,
+            edge_configs_per_sample,
         )
 
         execution_time = int((time.time() - start_time) * 1000)
@@ -536,18 +561,24 @@ class RobustnessAnalyzerV2:
         sampler: DualUncertaintySampler,
         factor_sampler: FactorSampler,
         evaluator: SCMEvaluatorV2,
-    ) -> Tuple[Dict[str, List[float]], Dict[str, int], List[str]]:
+    ) -> Tuple[
+        Dict[str, List[float]],
+        Dict[str, int],
+        List[str],
+        List[Dict[Tuple[str, str], float]],
+    ]:
         """
         Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
 
         Returns:
-            (option_outcomes, option_wins, winner_per_sample)
+            (option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample)
         """
         option_outcomes: Dict[str, List[float]] = {
             opt.id: [] for opt in request.options
         }
         option_wins: Dict[str, int] = {opt.id: 0 for opt in request.options}
         winner_per_sample: List[str] = []
+        edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
 
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
@@ -573,7 +604,10 @@ class RobustnessAnalyzerV2:
             option_wins[winner] += 1
             winner_per_sample.append(winner)
 
-        return option_outcomes, option_wins, winner_per_sample
+            # Store edge config for alternative winner analysis
+            edge_configs_per_sample.append(edge_config)
+
+        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample
 
     def _compute_option_results(
         self,
@@ -594,6 +628,12 @@ class RobustnessAnalyzerV2:
                 samples_array, request.confidence_level
             )
 
+            # Compute probability_of_goal if threshold is provided
+            probability_of_goal = None
+            if request.goal_threshold is not None:
+                n_meets_threshold = int(np.sum(samples_array >= request.goal_threshold))
+                probability_of_goal = n_meets_threshold / len(samples)
+
             results.append(
                 OptionResult(
                     option_id=option.id,
@@ -605,6 +645,7 @@ class RobustnessAnalyzerV2:
                         ci_upper=ci_upper,
                     ),
                     win_probability=wins[option.id] / request.n_samples,
+                    probability_of_goal=probability_of_goal,
                 )
             )
 
@@ -1023,29 +1064,39 @@ class RobustnessAnalyzerV2:
         winner_per_sample: List[str],
         sensitivity: List[SensitivityResult],
         request: RobustnessRequestV2,
+        edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
     ) -> RobustnessResult:
-        """Compute overall robustness assessment."""
+        """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
         n_samples = request.n_samples
         most_frequent_winner = max(option_wins, key=option_wins.get)
         recommendation_stability = option_wins[most_frequent_winner] / n_samples
 
-        # Identify fragile and robust edges
-        fragile_edges = []
-        robust_edges = []
+        # Identify fragile and robust edges (by edge_id string)
+        fragile_edge_ids = set()
+        robust_edge_ids = set()
+
+        # Map edge_id -> (from_id, to_id) for fragile edges
+        fragile_edge_info: Dict[str, Tuple[str, str]] = {}
 
         for sens in sensitivity:
             edge_id = f"{sens.edge_from}->{sens.edge_to}"
             if abs(sens.elasticity) > self.FRAGILE_THRESHOLD:
-                if edge_id not in fragile_edges:
-                    fragile_edges.append(edge_id)
+                fragile_edge_ids.add(edge_id)
+                fragile_edge_info[edge_id] = (sens.edge_from, sens.edge_to)
             elif abs(sens.elasticity) < 0.05:
-                if edge_id not in robust_edges:
-                    robust_edges.append(edge_id)
+                robust_edge_ids.add(edge_id)
 
-        # Remove duplicates (edges appear twice: existence + magnitude)
-        fragile_edges = list(set(fragile_edges))
-        robust_edges = list(set(robust_edges))
+        fragile_edges = list(fragile_edge_ids)
+        robust_edges = list(robust_edge_ids)
+
+        # Compute alternative winners for fragile edges
+        fragile_edges_enhanced = self._compute_alternative_winners(
+            fragile_edge_info,
+            edge_configs_per_sample,
+            winner_per_sample,
+            most_frequent_winner,
+        )
 
         # Overall robustness
         is_robust = (
@@ -1079,7 +1130,102 @@ class RobustnessAnalyzerV2:
             is_robust=is_robust,
             confidence=confidence,
             fragile_edges=fragile_edges,
+            fragile_edges_enhanced=fragile_edges_enhanced,
             robust_edges=robust_edges,
             recommendation_stability=recommendation_stability,
             interpretation=interpretation,
         )
+
+    def _compute_alternative_winners(
+        self,
+        fragile_edge_info: Dict[str, Tuple[str, str]],
+        edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
+        winner_per_sample: List[str],
+        overall_winner: str,
+    ) -> List[Dict[str, Any]]:
+        """
+        Compute alternative winners for fragile edges.
+
+        For each fragile edge, identifies which option wins most often when
+        the edge is "weak" (bottom 25% of sampled strengths).
+
+        Args:
+            fragile_edge_info: Map of edge_id -> (from_id, to_id)
+            edge_configs_per_sample: Edge strengths for each MC sample
+            winner_per_sample: Winner option ID for each MC sample
+            overall_winner: The overall recommended option
+
+        Returns:
+            List of dicts with enhanced fragile edge information
+        """
+        results = []
+
+        for edge_id, (from_id, to_id) in fragile_edge_info.items():
+            edge_key = (from_id, to_id)
+
+            # Collect edge strengths across all samples
+            strengths = [
+                config.get(edge_key, 0.0) for config in edge_configs_per_sample
+            ]
+
+            if not strengths:
+                # No data for this edge
+                results.append({
+                    "edge_id": edge_id,
+                    "from_id": from_id,
+                    "to_id": to_id,
+                    "alternative_winner_id": None,
+                    "switch_probability": None,
+                })
+                continue
+
+            # Find bottom 25% threshold (weak edge samples)
+            strength_array = np.array(strengths)
+            weak_threshold = np.percentile(strength_array, 25)
+
+            # Get samples where edge is weak
+            weak_sample_indices = [
+                i for i, s in enumerate(strengths) if s <= weak_threshold
+            ]
+
+            if not weak_sample_indices:
+                results.append({
+                    "edge_id": edge_id,
+                    "from_id": from_id,
+                    "to_id": to_id,
+                    "alternative_winner_id": None,
+                    "switch_probability": None,
+                })
+                continue
+
+            # Count winner distribution in weak-edge samples
+            weak_winner_counts: Dict[str, int] = defaultdict(int)
+            for idx in weak_sample_indices:
+                weak_winner_counts[winner_per_sample[idx]] += 1
+
+            # Find most frequent winner in weak-edge samples
+            weak_winner = max(weak_winner_counts, key=weak_winner_counts.get)
+            weak_winner_count = weak_winner_counts[weak_winner]
+            total_weak_samples = len(weak_sample_indices)
+
+            # Compute switch probability
+            switch_probability = weak_winner_count / total_weak_samples
+
+            # Determine alternative winner
+            if weak_winner != overall_winner:
+                alternative_winner_id = weak_winner
+            else:
+                # Same option wins even when edge is weak - stable recommendation
+                # Return 0.0 (not None) to indicate "no switching" for cleaner analytics
+                alternative_winner_id = None
+                switch_probability = 0.0
+
+            results.append({
+                "edge_id": edge_id,
+                "from_id": from_id,
+                "to_id": to_id,
+                "alternative_winner_id": alternative_winner_id,
+                "switch_probability": switch_probability,
+            })
+
+        return results
