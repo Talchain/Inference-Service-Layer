@@ -655,7 +655,11 @@ class RobustnessAnalyzerV2:
     def _compute_confidence_interval(
         self, samples: np.ndarray, confidence_level: float
     ) -> Tuple[float, float]:
-        """Compute confidence interval from samples."""
+        """Compute percentile-based prediction interval from Monte Carlo samples.
+
+        Note: Returns percentile bounds (not a frequentist confidence interval).
+        For 95% level, returns 2.5th and 97.5th percentiles of the sample distribution.
+        """
         alpha = 1 - confidence_level
         lower = float(np.percentile(samples, alpha / 2 * 100))
         upper = float(np.percentile(samples, (1 - alpha / 2) * 100))

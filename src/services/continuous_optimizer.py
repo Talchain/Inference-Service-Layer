@@ -263,7 +263,12 @@ class ContinuousOptimizer:
     def _compute_confidence_interval(
         self, value: float, noise_std: float, confidence_level: float
     ) -> ConfidenceInterval:
-        """Compute confidence interval for objective value."""
+        """Compute prediction interval for objective value.
+
+        Uses normal distribution assumption: interval = value ± z * noise_std.
+        Note: Named "confidence_interval" for API consistency but represents
+        predicted range of outcomes given noise uncertainty.
+        """
         z_score = stats.norm.ppf((1 + confidence_level) / 2)
         half_width = z_score * noise_std
 

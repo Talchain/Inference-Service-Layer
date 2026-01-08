@@ -249,13 +249,28 @@ class ExplanationMetadata(BaseModel):
 
 
 class ConfidenceInterval(BaseModel):
-    """Confidence interval for numerical estimates."""
+    """Prediction interval for numerical estimates.
 
-    lower: float = Field(..., description="Lower bound of confidence interval")
-    upper: float = Field(..., description="Upper bound of confidence interval")
+    Note on terminology: While named "confidence interval" for API consistency,
+    these bounds are computed as percentiles from Monte Carlo simulation samples.
+    Specifically, for a 95% interval:
+    - lower = 2.5th percentile of simulated outcomes
+    - upper = 97.5th percentile of simulated outcomes
+
+    This represents the range containing 95% of predicted outcomes given
+    uncertainty in model parameters and inputs. Statistically, this is closer
+    to a Bayesian credible interval or prediction interval than a frequentist
+    confidence interval.
+
+    Interpretation: "Given our model and uncertainty estimates, 95% of
+    simulated outcomes fall within this range."
+    """
+
+    lower: float = Field(..., description="Lower bound (e.g., 2.5th percentile for 95% level)")
+    upper: float = Field(..., description="Upper bound (e.g., 97.5th percentile for 95% level)")
     confidence_level: float = Field(
         default=0.95,
-        description="Confidence level (default 95%)",
+        description="Coverage level (proportion of distribution captured)",
     )
 
     model_config = {

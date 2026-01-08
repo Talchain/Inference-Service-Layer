@@ -481,14 +481,16 @@ class CounterfactualEngine:
         """
         outcome_samples = samples[outcome_var]
 
-        # Point estimate (median for robustness)
+        # Point estimate (median for robustness to outliers)
         point_estimate = float(np.median(outcome_samples))
 
-        # Confidence interval (95% by default)
+        # Prediction interval (95% by default)
+        # Note: Named "confidence_interval" in API for legacy reasons, but these are
+        # percentile-based bounds from Monte Carlo simulation (see ConfidenceInterval docstring)
         ci_lower = float(np.percentile(outcome_samples, 2.5))
         ci_upper = float(np.percentile(outcome_samples, 97.5))
 
-        # Sensitivity range (10th to 90th percentile)
+        # Sensitivity range (10th to 90th percentile) - narrower band for typical outcomes
         sens_lower = float(np.percentile(outcome_samples, 10))
         sens_upper = float(np.percentile(outcome_samples, 90))
 

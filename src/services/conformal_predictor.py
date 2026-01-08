@@ -438,16 +438,20 @@ class ConformalPredictor:
         samples: int,
     ) -> Dict[str, ConfidenceInterval]:
         """
-        Generate standard Monte Carlo confidence interval for comparison.
+        Generate Monte Carlo prediction interval for comparison.
+
+        Computes percentile-based bounds from simulated samples. For a 95% interval,
+        returns the 2.5th and 97.5th percentiles. Named "confidence interval" in
+        return type for API consistency but represents a prediction interval.
 
         Args:
             scm: Structural causal model
             intervention: Intervention values
-            confidence_level: Confidence level
+            confidence_level: Coverage level (e.g., 0.95)
             samples: Number of Monte Carlo samples
 
         Returns:
-            Monte Carlo confidence intervals
+            Percentile-based prediction intervals per outcome variable
         """
         try:
             # Simulate from model
