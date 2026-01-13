@@ -15429,6 +15429,32 @@
             "type": "string",
             "title": "Config Fingerprint",
             "description": "Hash of determinism-critical config"
+          },
+          "tie_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Count",
+            "description": "Number of Monte Carlo samples with tied outcomes"
+          },
+          "tie_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tie Rate",
+            "description": "Fraction of samples with tied outcomes (tie_count / n_samples)"
           }
         },
         "type": "object",
@@ -16126,6 +16152,14 @@
               }
             ],
             "description": "Execution metadata"
+          },
+          "critiques": {
+            "items": {
+              "$ref": "#/components/schemas/CritiqueV2"
+            },
+            "type": "array",
+            "title": "Critiques",
+            "description": "Analysis critiques and warnings"
           }
         },
         "type": "object",
@@ -16147,8 +16181,11 @@
             "isl_version": "1.0.0",
             "n_samples_used": 1000,
             "schema_version": "2.2",
-            "seed_used": 12345
+            "seed_used": 12345,
+            "tie_count": 0,
+            "tie_rate": 0.0
           },
+          "critiques": [],
           "recommendation_confidence": 0.65,
           "recommended_option_id": "opt1",
           "request_id": "req-001",
