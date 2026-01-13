@@ -76,20 +76,21 @@ def main():
             print("Run 'python scripts/generate_openapi.py' to regenerate it.")
             print()
 
-            # Show actual diff for debugging
-            import difflib
-            diff = list(difflib.unified_diff(
-                committed_json.splitlines()[:100],  # First 100 lines only
-                generated_json.splitlines()[:100],
-                fromfile='committed',
-                tofile='generated',
-                lineterm=''
-            ))
-            if diff:
-                print("First differences found:")
-                for line in diff[:50]:  # Limit output
-                    print(line)
-                print()
+            # Find first difference
+            committed_lines = committed_json.splitlines()
+            generated_lines = generated_json.splitlines()
+            for i, (c, g) in enumerate(zip(committed_lines, generated_lines)):
+                if c != g:
+                    print(f"First difference at line {i+1}:")
+                    print(f"  Committed: {c[:100]}")
+                    print(f"  Generated: {g[:100]}")
+                    break
+            else:
+                if len(committed_lines) != len(generated_lines):
+                    print(f"Line count differs: committed={len(committed_lines)}, generated={len(generated_lines)}")
+                else:
+                    print("Files appear identical but comparison failed - possible encoding issue")
+            print()
 
             # Show summary of differences
             generated_paths = set(schema.get('paths', {}).keys())
