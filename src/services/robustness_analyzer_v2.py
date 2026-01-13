@@ -37,6 +37,7 @@ from src.models.robustness_v2 import (
     RobustnessResult,
     SensitivityResult,
 )
+from src.constants import ZERO_VARIANCE_TOLERANCE
 from src.models.critique import (
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
@@ -524,9 +525,10 @@ class RobustnessAnalyzerV2:
         critiques: List[CritiqueV2] = []
 
         # Check for zero-variance options (degenerate outcomes)
+        # Use tolerance to catch near-zero values from floating point arithmetic
         option_labels = {opt.id: (opt.label or opt.id) for opt in request.options}
         for result in results:
-            if result.outcome_distribution.std == 0.0:
+            if result.outcome_distribution.std < ZERO_VARIANCE_TOLERANCE:
                 critiques.append(
                     DEGENERATE_OPTION_ZERO_VARIANCE.build(
                         option_label=option_labels.get(result.option_id, result.option_id),

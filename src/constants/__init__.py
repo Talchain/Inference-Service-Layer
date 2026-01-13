@@ -65,3 +65,12 @@ RESPONSE_SCHEMA_VERSION_V2 = "2.0"
 
 # Minimum baseline magnitude for safe division (epsilon guard)
 BASELINE_EPSILON = 1e-8
+
+
+# =============================================================================
+# Zero Variance Detection
+# =============================================================================
+
+# Values below this threshold are considered effectively zero variance
+# (accounts for floating point precision in numerical computations)
+ZERO_VARIANCE_TOLERANCE = 1e-10

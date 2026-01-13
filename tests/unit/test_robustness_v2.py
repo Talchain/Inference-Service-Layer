@@ -2969,6 +2969,112 @@ class TestDegenerateOptionZeroVariance:
         ]
         assert len(zero_var_critiques) == 0
 
+    def test_near_zero_variance_triggers_warning(self):
+        """Test that near-zero variance (floating point artifact) triggers warning.
+
+        Values like 1e-15 from numerical computation are effectively zero
+        but won't match exact equality check.
+        """
+        from src.services.robustness_analyzer_v2 import ZERO_VARIANCE_TOLERANCE
+
+        # Create a mock result with near-zero std (below tolerance)
+        near_zero_std = 1e-15  # Typical floating point precision artifact
+
+        # Verify the tolerance check would catch this
+        assert near_zero_std < ZERO_VARIANCE_TOLERANCE
+
+        # Full integration test: graph where isolated node produces near-zero variance
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="isolated", kind="factor", label="Isolated"),
+                NodeV2(id="connected", kind="factor", label="Connected"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "connected", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="near-zero-variance-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt_isolated",
+                    label="Isolated Option",
+                    interventions={"isolated": 1.0},
+                ),
+                InterventionOption(
+                    id="opt_connected",
+                    label="Connected Option",
+                    interventions={"connected": 1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should trigger the zero variance critique
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) >= 1
+
+    def test_small_but_real_variance_no_warning(self):
+        """Test that small but real variance (e.g., 0.001) does NOT trigger warning."""
+        from src.services.robustness_analyzer_v2 import ZERO_VARIANCE_TOLERANCE
+
+        # Small but real variance - should be above tolerance
+        small_variance = 0.001
+        assert small_variance > ZERO_VARIANCE_TOLERANCE
+
+        # Graph with very small but real edge strength std
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    # Very small std but definitely above tolerance
+                    strength=StrengthDistribution(mean=1.0, std=0.001),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="small-variance-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 2.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should NOT trigger zero variance critique - variance is small but real
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) == 0
+
 
 # =============================================================================
 # Test High Tie Rate Critiques
