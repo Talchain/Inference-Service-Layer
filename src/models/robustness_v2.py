@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
+from src.models.response_v2 import CritiqueV2
+
 
 # =============================================================================
 # Enums
@@ -824,6 +826,16 @@ class ResponseMetadataV2(BaseModel):
         ...,
         description="Hash of determinism-critical config"
     )
+    tie_count: Optional[int] = Field(
+        None,
+        description="Number of Monte Carlo samples with tied outcomes"
+    )
+    tie_rate: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of samples with tied outcomes (tie_count / n_samples)"
+    )
 
 
 class RobustnessResponseV2(BaseModel):
@@ -875,6 +887,12 @@ class RobustnessResponseV2(BaseModel):
         alias="_metadata"
     )
 
+    # Analysis critiques (warnings about degenerate options, high tie rates, etc.)
+    critiques: List[CritiqueV2] = Field(
+        default_factory=list,
+        description="Analysis critiques and warnings"
+    )
+
     model_config = {
         "populate_by_name": True,
         "json_schema_extra": {
@@ -911,8 +929,11 @@ class RobustnessResponseV2(BaseModel):
                     "seed_used": 12345,
                     "execution_time_ms": 150,
                     "edge_existence_rates": {},
-                    "config_fingerprint": "abc123"
-                }
+                    "config_fingerprint": "abc123",
+                    "tie_count": 0,
+                    "tie_rate": 0.0
+                },
+                "critiques": []
             }
         }
     }

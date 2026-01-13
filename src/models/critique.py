@@ -284,6 +284,34 @@ IDENTIFIABILITY_ISSUE = CritiqueDefinition(
     default_suggestion="Results should be interpreted with caution",
 )
 
+DEGENERATE_OPTION_ZERO_VARIANCE = CritiqueDefinition(
+    code="DEGENERATE_OPTION_ZERO_VARIANCE",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "Option '{option_label}' has zero variance — "
+        "intervention may have no causal path to goal"
+    ),
+    default_suggestion=(
+        "Check that intervention targets are connected to the goal "
+        "with non-zero edge strengths"
+    ),
+)
+
+HIGH_TIE_RATE = CritiqueDefinition(
+    code="HIGH_TIE_RATE",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "{tie_rate_pct}% of samples resulted in ties between options — "
+        "win probabilities may be misleading"
+    ),
+    default_suggestion=(
+        "High tie rates often indicate sparse edge existence or "
+        "interventions with no effective path to goal"
+    ),
+)
+
 
 # =============================================================================
 # Engine Critiques (internal errors)
@@ -335,6 +363,8 @@ CRITIQUES = {
     "IDENTIFIABILITY_ISSUE": IDENTIFIABILITY_ISSUE,
     "MONTE_CARLO_FAILED": MONTE_CARLO_FAILED,
     "BASELINE_NEAR_ZERO": BASELINE_NEAR_ZERO,
+    "DEGENERATE_OPTION_ZERO_VARIANCE": DEGENERATE_OPTION_ZERO_VARIANCE,
+    "HIGH_TIE_RATE": HIGH_TIE_RATE,
     # Engine
     "INTERNAL_ERROR": INTERNAL_ERROR,
     "INFERENCE_TIMEOUT": INFERENCE_TIMEOUT,

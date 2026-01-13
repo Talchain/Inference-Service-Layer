@@ -2857,3 +2857,430 @@ class TestAutoScaledNoise:
         assert result.outcome_distribution.mean == pytest.approx(100.0, rel=0.01)
         # Std should be very small (nearly zero due to near-zero edge variance)
         assert result.outcome_distribution.std < 0.1
+
+
+# =============================================================================
+# Test Degenerate Option Critiques (Zero Variance)
+# =============================================================================
+
+
+class TestDegenerateOptionZeroVariance:
+    """Test DEGENERATE_OPTION_ZERO_VARIANCE critique detection."""
+
+    def test_zero_variance_option_triggers_critique(self):
+        """Test that option with no path to goal triggers zero variance critique."""
+        # Graph where option 1's intervention has NO path to goal
+        # isolated_node is not connected to goal
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="isolated_node", kind="factor", label="Isolated"),
+                NodeV2(id="connected_node", kind="factor", label="Connected"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                # Only connected_node -> goal edge exists
+                EdgeV2(
+                    **{"from": "connected_node", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-variance-test",
+            graph=graph,
+            options=[
+                # Option 1 intervenes on isolated node (no path to goal)
+                InterventionOption(
+                    id="opt_isolated",
+                    label="Isolated Option",
+                    interventions={"isolated_node": 1.0},
+                ),
+                # Option 2 intervenes on connected node (has path)
+                InterventionOption(
+                    id="opt_connected",
+                    label="Connected Option",
+                    interventions={"connected_node": 1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Find the result for isolated option
+        isolated_result = next(r for r in response.results if r.option_id == "opt_isolated")
+
+        # Isolated option should have zero std
+        assert isolated_result.outcome_distribution.std == 0.0
+
+        # Should have DEGENERATE_OPTION_ZERO_VARIANCE critique
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) >= 1
+
+        # Critique should reference the isolated option
+        critique = zero_var_critiques[0]
+        assert "Isolated Option" in critique.message
+        assert critique.severity == "warning"
+        assert critique.source == "analysis"
+
+    def test_no_critique_when_variance_nonzero(self):
+        """Test that options with non-zero variance don't trigger critique."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.5),  # Non-zero std
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="nonzero-variance-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 2.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should NOT have zero variance critique
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) == 0
+
+
+# =============================================================================
+# Test High Tie Rate Critiques
+# =============================================================================
+
+
+class TestHighTieRateCritique:
+    """Test HIGH_TIE_RATE critique detection."""
+
+    def test_high_tie_rate_triggers_critique(self):
+        """Test that >50% tie rate triggers HIGH_TIE_RATE critique."""
+        # Graph where all options produce identical outcomes (100% ties)
+        # Both options intervene on same node with same value
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="high-tie-rate-test",
+            graph=graph,
+            options=[
+                # Both options have SAME intervention value -> 100% ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 1.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should have HIGH_TIE_RATE critique
+        tie_rate_critiques = [
+            c for c in response.critiques
+            if c.code == "HIGH_TIE_RATE"
+        ]
+        assert len(tie_rate_critiques) == 1
+
+        critique = tie_rate_critiques[0]
+        assert "100%" in critique.message or "tie" in critique.message.lower()
+        assert critique.severity == "warning"
+        assert critique.source == "analysis"
+
+    def test_no_critique_when_tie_rate_below_threshold(self):
+        """Test that tie rate below 50% does not trigger critique."""
+        # Graph where options produce different outcomes (low tie rate)
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="low-tie-rate-test",
+            graph=graph,
+            options=[
+                # Different intervention values -> different outcomes -> low tie rate
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 10.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should NOT have HIGH_TIE_RATE critique
+        tie_rate_critiques = [
+            c for c in response.critiques
+            if c.code == "HIGH_TIE_RATE"
+        ]
+        assert len(tie_rate_critiques) == 0
+
+
+# =============================================================================
+# Test Fair Tie-Breaking (Split Ties)
+# =============================================================================
+
+
+class TestFairTieBreaking:
+    """Test that ties are split fairly between options."""
+
+    def test_identical_options_get_equal_win_probability(self):
+        """Test two identical options get 50%/50% win probability."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="equal-split-test",
+            graph=graph,
+            options=[
+                # Identical interventions -> 100% ties -> should split 50/50
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 5.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 5.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        opt1_result = next(r for r in response.results if r.option_id == "opt1")
+        opt2_result = next(r for r in response.results if r.option_id == "opt2")
+
+        # Both should have approximately 50% win probability
+        assert opt1_result.win_probability == pytest.approx(0.5, abs=0.01)
+        assert opt2_result.win_probability == pytest.approx(0.5, abs=0.01)
+
+        # Sum should equal 1.0
+        total = opt1_result.win_probability + opt2_result.win_probability
+        assert total == pytest.approx(1.0, abs=0.001)
+
+    def test_three_way_tie_splits_equally(self):
+        """Test three identical options get ~33.3% each."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="three-way-split-test",
+            graph=graph,
+            options=[
+                # Three identical interventions -> all ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 3.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 3.0}),
+                InterventionOption(id="opt3", label="Option 3", interventions={"input": 3.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # All three should have approximately 33.3% win probability
+        for result in response.results:
+            assert result.win_probability == pytest.approx(1/3, abs=0.01)
+
+        # Sum should equal 1.0
+        total = sum(r.win_probability for r in response.results)
+        assert total == pytest.approx(1.0, abs=0.001)
+
+
+# =============================================================================
+# Test Tie Rate in Metadata/Diagnostics
+# =============================================================================
+
+
+class TestTieRateInMetadata:
+    """Test that tie_rate and tie_count are included in metadata."""
+
+    def test_tie_rate_in_metadata_high_ties(self):
+        """Test tie_rate is present in metadata with high tie scenario."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="tie-rate-metadata-test",
+            graph=graph,
+            options=[
+                # Identical -> 100% ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 1.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Check metadata has tie_rate and tie_count
+        assert response.metadata.tie_count is not None
+        assert response.metadata.tie_rate is not None
+
+        # Should be 100% ties
+        assert response.metadata.tie_count == 100
+        assert response.metadata.tie_rate == pytest.approx(1.0, abs=0.01)
+
+    def test_tie_rate_in_metadata_no_ties(self):
+        """Test tie_rate is present in metadata with no ties."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="no-tie-metadata-test",
+            graph=graph,
+            options=[
+                # Very different values -> no ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Check metadata has tie_rate and tie_count
+        assert response.metadata.tie_count is not None
+        assert response.metadata.tie_rate is not None
+
+        # Should be 0% ties (or very close)
+        assert response.metadata.tie_count == 0
+        assert response.metadata.tie_rate == 0.0
+
+    def test_tie_rate_serializes_in_response(self):
+        """Test tie_rate appears in JSON serialization."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="tie-rate-json-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 1.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Convert to dict/JSON
+        response_dict = response.model_dump(by_alias=True)
+
+        # Check _metadata contains tie fields
+        assert "_metadata" in response_dict
+        assert "tie_rate" in response_dict["_metadata"]
+        assert "tie_count" in response_dict["_metadata"]

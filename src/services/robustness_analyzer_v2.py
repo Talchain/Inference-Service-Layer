@@ -37,6 +37,11 @@ from src.models.robustness_v2 import (
     RobustnessResult,
     SensitivityResult,
 )
+from src.models.critique import (
+    DEGENERATE_OPTION_ZERO_VARIANCE,
+    HIGH_TIE_RATE,
+)
+from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SeededRNG, compute_seed_from_graph
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
@@ -494,7 +499,11 @@ class RobustnessAnalyzerV2:
             option_wins,
             winner_per_sample,
             edge_configs_per_sample,
+            tie_count,
         ) = self._run_monte_carlo(request, sampler, factor_sampler, evaluator)
+
+        # Compute tie rate
+        tie_rate = tie_count / request.n_samples
 
         # Apply auto-scaled noise to outcome/risk nodes (V08 scientific accuracy)
         # Uses separate RNG stream (seed + 2) for determinism
@@ -510,6 +519,28 @@ class RobustnessAnalyzerV2:
         results = self._compute_option_results(
             option_outcomes, option_wins, request
         )
+
+        # Build critiques for analysis warnings
+        critiques: List[CritiqueV2] = []
+
+        # Check for zero-variance options (degenerate outcomes)
+        option_labels = {opt.id: (opt.label or opt.id) for opt in request.options}
+        for result in results:
+            if result.outcome_distribution.std == 0.0:
+                critiques.append(
+                    DEGENERATE_OPTION_ZERO_VARIANCE.build(
+                        option_label=option_labels.get(result.option_id, result.option_id),
+                        affected_option_ids=[result.option_id],
+                    )
+                )
+
+        # Check for high tie rate
+        if tie_rate > 0.5:
+            critiques.append(
+                HIGH_TIE_RATE.build(
+                    tie_rate_pct=int(tie_rate * 100),
+                )
+            )
 
         # Compute sensitivity if requested
         sensitivity = []
@@ -555,7 +586,10 @@ class RobustnessAnalyzerV2:
                 execution_time_ms=execution_time,
                 edge_existence_rates=sampler.get_existence_rates(),
                 config_fingerprint=generate_config_fingerprint(),
+                tie_count=tie_count,
+                tie_rate=tie_rate,
             ),
+            critiques=critiques,
         )
 
         self.logger.info(
@@ -579,22 +613,27 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
     ) -> Tuple[
         Dict[str, List[float]],
-        Dict[str, int],
+        Dict[str, float],
         List[str],
         List[Dict[Tuple[str, str], float]],
+        int,
     ]:
         """
         Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
 
         Returns:
-            (option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample)
+            (option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count)
+
+        Note: option_wins uses float to support split-tie handling where ties are
+        divided equally among tied options.
         """
         option_outcomes: Dict[str, List[float]] = {
             opt.id: [] for opt in request.options
         }
-        option_wins: Dict[str, int] = {opt.id: 0 for opt in request.options}
+        option_wins: Dict[str, float] = {opt.id: 0.0 for opt in request.options}
         winner_per_sample: List[str] = []
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
+        tie_count = 0
 
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
@@ -615,15 +654,27 @@ class RobustnessAnalyzerV2:
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
 
-            # Track winner (highest outcome)
-            winner = max(sample_outcomes, key=sample_outcomes.get)
-            option_wins[winner] += 1
-            winner_per_sample.append(winner)
+            # Track winner with fair tie-breaking (split ties equally)
+            max_outcome = max(sample_outcomes.values())
+            winners = [opt_id for opt_id, val in sample_outcomes.items() if val == max_outcome]
+
+            if len(winners) == 1:
+                # Clear winner
+                option_wins[winners[0]] += 1.0
+                winner_per_sample.append(winners[0])
+            else:
+                # Tie: split win equally among tied options
+                tie_count += 1
+                split_value = 1.0 / len(winners)
+                for winner in winners:
+                    option_wins[winner] += split_value
+                # For winner_per_sample, use first winner (for backward compat in alternative winner analysis)
+                winner_per_sample.append(winners[0])
 
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
 
-        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample
+        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count
 
     def _apply_auto_scaled_noise(
         self,
@@ -685,7 +736,7 @@ class RobustnessAnalyzerV2:
     def _compute_option_results(
         self,
         outcomes: Dict[str, List[float]],
-        wins: Dict[str, int],
+        wins: Dict[str, float],
         request: RobustnessRequestV2,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option."""
@@ -1137,7 +1188,7 @@ class RobustnessAnalyzerV2:
 
     def _compute_robustness(
         self,
-        option_wins: Dict[str, int],
+        option_wins: Dict[str, float],
         winner_per_sample: List[str],
         sensitivity: List[SensitivityResult],
         request: RobustnessRequestV2,
