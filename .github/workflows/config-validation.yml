@@ -159,22 +159,32 @@ jobs:
           else:
               print('✅ Production config validation passed')
 
-          # Test that insecure config is rejected
-          insecure_settings = Settings(
-              ENVIRONMENT='production',
-              ISL_AUTH_DISABLED=True,  # This should be flagged
-              CORS_ORIGINS='*',  # This should be rejected
-          )
-
+          # Test that insecure CORS is rejected at instantiation
+          print('Testing CORS wildcard rejection...')
           try:
-              # CORS validation should fail
-              print('Testing CORS wildcard rejection...')
-          except ValueError as e:
+              insecure_settings = Settings(
+                  ENVIRONMENT='production',
+                  ISL_AUTH_DISABLED=True,
+                  CORS_ORIGINS='*',  # This should be rejected by Pydantic validator
+              )
+              # If we get here, the validation failed to reject
+              print('❌ ERROR: Wildcard CORS should have been rejected')
+              sys.exit(1)
+          except Exception as e:
               print(f'✅ Correctly rejected insecure CORS: {e}')
 
-          errors = insecure_settings.validate_production_config()
+          # Test that auth disabled is flagged by validate_production_config
+          print('Testing auth disabled detection...')
+          auth_disabled_settings = Settings(
+              ENVIRONMENT='production',
+              ISL_AUTH_DISABLED=True,
+              ISL_API_KEYS='test_key',
+              CORS_ORIGINS='https://app.example.com',
+              REDIS_HOST='redis.example.com'
+          )
+          errors = auth_disabled_settings.validate_production_config()
           if not errors:
-              print('❌ ERROR: Insecure config should have been flagged')
+              print('❌ ERROR: Auth disabled should have been flagged')
               sys.exit(1)
           else:
               print(f'✅ Correctly identified {len(errors)} insecure configuration(s)')
