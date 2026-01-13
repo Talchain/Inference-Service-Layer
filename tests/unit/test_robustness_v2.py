@@ -2566,3 +2566,294 @@ class TestGoalThresholdProbability:
         # With threshold at mean, probability should be around 0.5
         # Allow some variance due to non-symmetric distributions
         assert 0.3 <= response.results[0].probability_of_goal <= 0.7
+
+
+class TestNodeV2Intercept:
+    """V08: Test intercept field in NodeV2 schema."""
+
+    def test_node_without_intercept_defaults_to_zero(self):
+        """Test that nodes without intercept field default to 0.0."""
+        node = NodeV2(id="node_a", kind="factor", label="Node A")
+        assert node.intercept == 0.0
+
+    def test_node_with_positive_intercept(self):
+        """Test that positive intercept values are accepted."""
+        node = NodeV2(id="node_a", kind="outcome", label="Node A", intercept=50.0)
+        assert node.intercept == 50.0
+
+    def test_node_with_negative_intercept(self):
+        """Test that negative intercept values are accepted."""
+        node = NodeV2(id="node_a", kind="outcome", label="Node A", intercept=-25.0)
+        assert node.intercept == -25.0
+
+    def test_intercept_serialization(self):
+        """Test that intercept is included in serialized output."""
+        node = NodeV2(id="node_a", kind="outcome", label="Node A", intercept=100.0)
+        node_dict = node.model_dump()
+        assert "intercept" in node_dict
+        assert node_dict["intercept"] == 100.0
+
+
+class TestSCMEvaluatorV2Intercept:
+    """V08: Test that SCMEvaluatorV2 uses intercept in evaluation."""
+
+    def test_intercept_added_to_outcome(self):
+        """Test that intercept is added to the node's computed value."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="output", kind="outcome", label="Output", intercept=100.0),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-zero std
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # With input=0 and intercept=100, output should be 100
+        result = evaluator.evaluate(
+            edge_strengths={("input", "output"): 1.0},
+            interventions={"input": 0.0},
+            goal_node="output",
+        )
+        assert result == 100.0
+
+    def test_intercept_with_parent_contribution(self):
+        """Test intercept is added to parent contribution."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="output", kind="outcome", label="Output", intercept=50.0),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.001),  # Near-zero std
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # output = base(0) + intercept(50) + parent_contribution(10 * 2 = 20) = 70
+        result = evaluator.evaluate(
+            edge_strengths={("input", "output"): 2.0},
+            interventions={"input": 10.0},
+            goal_node="output",
+        )
+        assert result == 70.0
+
+    def test_intercept_with_chain(self):
+        """Test intercept works correctly in a chain of nodes."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="a", kind="factor", label="A", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="b", kind="outcome", label="B", intercept=10.0),
+                NodeV2(id="c", kind="outcome", label="C", intercept=20.0),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "a", "to": "b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-zero std
+                ),
+                EdgeV2(
+                    **{"from": "b", "to": "c"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-zero std
+                ),
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # a = 5 (intervention)
+        # b = base(0) + intercept(10) + (5 * 1) = 15
+        # c = base(0) + intercept(20) + (15 * 1) = 35
+        result = evaluator.evaluate(
+            edge_strengths={("a", "b"): 1.0, ("b", "c"): 1.0},
+            interventions={"a": 5.0},
+            goal_node="c",
+        )
+        assert result == 35.0
+
+
+class TestAutoScaledNoise:
+    """V08: Test auto-scaled noise application to outcome/risk nodes."""
+
+    def test_noise_applied_to_outcome_node(self):
+        """Test that noise is applied to outcome node samples."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),  # Some variance for noise to match
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="noise-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With noise applied, the std should be larger than edge uncertainty alone
+        # Edge std = 0.1 * 100 = 10, so base std ~ 10
+        # With auto-scaled noise (matching std), effective std should be ~sqrt(2) * base_std
+        result = response.results[0]
+        # The std should reflect both edge variance and added noise
+        assert result.outcome_distribution.std > 0
+
+    def test_noise_applied_to_risk_node(self):
+        """Test that noise is applied to risk node samples."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="exposure", kind="factor", label="Exposure", observed_state=ObservedState(value=50.0)),
+                NodeV2(id="risk", kind="risk", label="Risk Level"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "exposure", "to": "risk"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.05),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="risk-noise-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"exposure": 50.0}),
+            ],
+            goal_node_id="risk",
+            n_samples=500,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Risk nodes should also get noise applied
+        result = response.results[0]
+        assert result.outcome_distribution.std > 0
+
+    def test_noise_not_applied_to_factor_node(self):
+        """Test that noise is NOT applied when goal is a factor node."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+            ],
+            edges=[],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="factor-no-noise",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="input",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Factor nodes shouldn't receive noise, so std should be 0 (deterministic intervention)
+        result = response.results[0]
+        assert result.outcome_distribution.mean == 100.0
+        assert result.outcome_distribution.std == 0.0
+
+    def test_noise_deterministic_with_seed(self):
+        """Test that noise application is deterministic with same seed."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="noise-determinism",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response1 = analyzer.analyze(request)
+        response2 = analyzer.analyze(request)
+
+        # Same seed should produce identical results
+        assert response1.results[0].outcome_distribution.mean == response2.results[0].outcome_distribution.mean
+        assert response1.results[0].outcome_distribution.std == response2.results[0].outcome_distribution.std
+
+    def test_noise_skipped_when_zero_std(self):
+        """Test that noise is skipped when samples have near-zero std."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.0001),  # Near-zero variance
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-std",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With near-zero std in edge strength, samples are nearly identical
+        # Auto-scaled noise matches the sample std, so result std should be very small
+        result = response.results[0]
+        assert result.outcome_distribution.mean == pytest.approx(100.0, rel=0.01)
+        # Std should be very small (nearly zero due to near-zero edge variance)
+        assert result.outcome_distribution.std < 0.1

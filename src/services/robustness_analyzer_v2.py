@@ -386,6 +386,9 @@ class SCMEvaluatorV2:
                 # Interventional value overrides structural equations
                 node_values[node_id] = interventions[node_id]
             else:
+                # Get node object (used for observed_state and intercept)
+                node = self._nodes_by_id.get(node_id)
+
                 # Determine base value for this node
                 # Priority: factor_values > observed_state.value > base_values > 0
                 if node_id in factor_values:
@@ -396,7 +399,6 @@ class SCMEvaluatorV2:
                     base = base_values[node_id]
                 else:
                     # Check for observed_state.value on root nodes
-                    node = self._nodes_by_id.get(node_id)
                     is_root = len(self._parents.get(node_id, [])) == 0
                     if is_root and node and node.observed_state and node.observed_state.value is not None:
                         base = node.observed_state.value
@@ -411,7 +413,10 @@ class SCMEvaluatorV2:
                     parent_value = node_values.get(parent, 0.0)
                     parents_contribution += parent_value * strength
 
-                node_values[node_id] = base + parents_contribution
+                # Get node intercept (default 0.0 if not set)
+                intercept = getattr(node, 'intercept', 0.0) if node else 0.0
+
+                node_values[node_id] = base + intercept + parents_contribution
 
         return node_values.get(goal_node, 0.0)
 
@@ -490,6 +495,16 @@ class RobustnessAnalyzerV2:
             winner_per_sample,
             edge_configs_per_sample,
         ) = self._run_monte_carlo(request, sampler, factor_sampler, evaluator)
+
+        # Apply auto-scaled noise to outcome/risk nodes (V08 scientific accuracy)
+        # Uses separate RNG stream (seed + 2) for determinism
+        rng_noise = SeededRNG(seed + 2)
+        option_outcomes = self._apply_auto_scaled_noise(
+            option_outcomes,
+            request.goal_node_id,
+            request.graph.nodes,
+            rng_noise,
+        )
 
         # Compute results
         results = self._compute_option_results(
@@ -609,6 +624,63 @@ class RobustnessAnalyzerV2:
             edge_configs_per_sample.append(edge_config)
 
         return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample
+
+    def _apply_auto_scaled_noise(
+        self,
+        option_outcomes: Dict[str, List[float]],
+        goal_node_id: str,
+        graph_nodes: List,
+        rng: "SeededRNG",
+    ) -> Dict[str, List[float]]:
+        """
+        Apply auto-scaled noise to outcome/risk node samples.
+
+        Per Neil Bramley's heuristic: "Match unexplained noise to explained variance"
+        - Only outcome and risk nodes receive noise
+        - Noise std = std(samples) from the model
+        - If std = 0, skip noise entirely (no model uncertainty)
+
+        Args:
+            option_outcomes: Dict of option_id -> list of outcome samples
+            goal_node_id: The goal node being measured
+            graph_nodes: List of graph nodes to check node kind
+            rng: Seeded RNG for determinism
+
+        Returns:
+            Modified option_outcomes with noise applied
+        """
+        # Find the goal node and check its kind
+        goal_node = None
+        for node in graph_nodes:
+            if node.id == goal_node_id:
+                goal_node = node
+                break
+
+        if goal_node is None:
+            return option_outcomes
+
+        # Only apply noise to outcome and risk nodes
+        node_kind = getattr(goal_node, 'kind', '').lower()
+        if node_kind not in ('outcome', 'risk'):
+            return option_outcomes
+
+        # Apply noise to each option's samples
+        for option_id, samples in option_outcomes.items():
+            if not samples:
+                continue
+
+            samples_array = np.array(samples)
+            outcome_std = float(np.std(samples_array))
+
+            # If std = 0, skip noise (no model uncertainty to match)
+            if outcome_std <= 0:
+                continue
+
+            # Add noise ~ N(0, outcome_std) to each sample
+            noise = np.array([rng.normal(0, outcome_std) for _ in range(len(samples))])
+            option_outcomes[option_id] = (samples_array + noise).tolist()
+
+        return option_outcomes
 
     def _compute_option_results(
         self,

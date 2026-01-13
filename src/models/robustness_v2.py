@@ -279,6 +279,11 @@ class NodeV2(BaseModel):
         None,
         description="Observed state for quantitative factor nodes (value, baseline, unit, source)"
     )
+    intercept: float = Field(
+        default=0.0,
+        description="Node intercept term (constant added to structural equation). "
+                    "Represents the baseline value when all parent contributions are zero."
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -286,6 +291,7 @@ class NodeV2(BaseModel):
                 "id": "revenue",
                 "kind": "outcome",
                 "label": "Total Revenue",
+                "intercept": 0.0,
                 "observed_state": {
                     "value": 59.0,
                     "baseline": 49.0,
