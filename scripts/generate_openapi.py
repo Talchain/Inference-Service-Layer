@@ -108,9 +108,9 @@ def main():
         print(f"  Paths: {len(schema.get('paths', {}))}")
         sys.exit(0)
 
-    # Normal mode: write schema to file
+    # Normal mode: write schema to file with sorted keys for determinism
     with open(output_path, "w") as f:
-        json.dump(schema, f, indent=2)
+        json.dump(schema, f, indent=2, sort_keys=True)
         f.write("\n")  # Ensure file ends with newline
 
     print(f"OpenAPI schema generated: {output_path}")
