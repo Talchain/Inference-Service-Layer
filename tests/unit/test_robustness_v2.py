@@ -3390,3 +3390,137 @@ class TestTieRateInMetadata:
         assert "_metadata" in response_dict
         assert "tie_rate" in response_dict["_metadata"]
         assert "tie_count" in response_dict["_metadata"]
+
+
+class TestOptionIdPreservation:
+    """Test that ISL echoes original option IDs from request to response.
+
+    This is critical for upstream systems (like PLoT) to match results
+    to their original options.
+    """
+
+    def test_custom_option_ids_are_echoed_in_response(self):
+        """Test that custom option IDs like 'increase_pro_price_to_59' are preserved.
+
+        ISL must echo the exact option ID from the request in the response.
+        This is standard API behavior - identifiers provided by the caller
+        must be returned unchanged.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="price", kind="decision", label="Price"),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        # Use realistic option IDs like PLoT would send
+        custom_option_ids = [
+            "increase_pro_price_to_59",
+            "maintain_current_price_49",
+            "reduce_price_to_39",
+        ]
+
+        request = RobustnessRequestV2(
+            request_id="option-id-preservation-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id=custom_option_ids[0],
+                    label="Increase Pro Price to £59",
+                    interventions={"price": 59.0},
+                ),
+                InterventionOption(
+                    id=custom_option_ids[1],
+                    label="Maintain Current Price £49",
+                    interventions={"price": 49.0},
+                ),
+                InterventionOption(
+                    id=custom_option_ids[2],
+                    label="Reduce Price to £39",
+                    interventions={"price": 39.0},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Verify all original option IDs appear in the response
+        response_option_ids = {r.option_id for r in response.results}
+        expected_option_ids = set(custom_option_ids)
+
+        assert response_option_ids == expected_option_ids, (
+            f"Option IDs not preserved. "
+            f"Expected: {expected_option_ids}, Got: {response_option_ids}"
+        )
+
+        # Verify we can look up each result by its original ID
+        for original_id in custom_option_ids:
+            result = next(
+                (r for r in response.results if r.option_id == original_id),
+                None
+            )
+            assert result is not None, (
+                f"Could not find result for option ID '{original_id}'"
+            )
+
+        # Verify recommended_option_id is also one of the original IDs
+        assert response.recommended_option_id in custom_option_ids, (
+            f"recommended_option_id '{response.recommended_option_id}' "
+            f"is not one of the original option IDs: {custom_option_ids}"
+        )
+
+    def test_option_ids_with_special_characters(self):
+        """Test that option IDs with hyphens, underscores, colons are preserved."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        # Option IDs with various allowed characters
+        special_ids = [
+            "option-with-hyphens",
+            "option_with_underscores",
+            "option:with:colons",
+            "mixed-option_id:123",
+        ]
+
+        request = RobustnessRequestV2(
+            request_id="special-chars-test",
+            graph=graph,
+            options=[
+                InterventionOption(id=sid, label=f"Label {i}", interventions={"input": float(i)})
+                for i, sid in enumerate(special_ids)
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        response_option_ids = {r.option_id for r in response.results}
+        assert response_option_ids == set(special_ids), (
+            f"Special character option IDs not preserved. "
+            f"Expected: {set(special_ids)}, Got: {response_option_ids}"
+        )
