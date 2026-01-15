@@ -240,11 +240,13 @@ app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=settings.REQUEST_TI
 # Memory circuit breaker (reject requests when memory >85%)
 app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 
-# Distributed tracing (adds X-Trace-Id to all requests/responses)
-app.add_middleware(TracingMiddleware)
-
 # Observability (service headers, payload hashing, boundary logging)
+# NOTE: Must be added BEFORE TracingMiddleware so TracingMiddleware runs first (LIFO)
 app.add_middleware(ObservabilityMiddleware)
+
+# Distributed tracing (adds X-Trace-Id to all requests/responses)
+# Sets trace ID from X-Request-Id header or generates unique ID per request
+app.add_middleware(TracingMiddleware)
 
 # API Key Authentication (validates X-API-Key header)
 # SECURITY: Authentication is REQUIRED by default. Explicit opt-out via ISL_AUTH_DISABLED=true.
