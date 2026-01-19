@@ -49,6 +49,44 @@ from src.models.metadata import generate_config_fingerprint
 
 logger = logging.getLogger(__name__)
 
+# Safety net: nodes that must not participate in inference
+NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+
+
+def filter_inference_graph(graph: GraphV2) -> GraphV2:
+    """Filter out non-inference nodes and incident edges as a safety net."""
+    filtered_nodes = [
+        node for node in graph.nodes if node.kind.lower() not in NON_INFERENCE_KINDS
+    ]
+    removed_nodes = len(graph.nodes) - len(filtered_nodes)
+
+    if removed_nodes == 0:
+        return graph
+
+    kept_node_ids = {node.id for node in filtered_nodes}
+    filtered_edges = [
+        edge
+        for edge in graph.edges
+        if edge.from_ in kept_node_ids and edge.to in kept_node_ids
+    ]
+    removed_edges = len(graph.edges) - len(filtered_edges)
+    removed_node_ids = [
+        node.id for node in graph.nodes if node.kind.lower() in NON_INFERENCE_KINDS
+    ]
+
+    logger.warning(
+        "robustness_v2_filtered_non_inference_nodes",
+        extra={
+            "removed_node_count": removed_nodes,
+            "removed_edge_count": removed_edges,
+            "removed_node_ids": removed_node_ids,
+            "remaining_node_count": len(filtered_nodes),
+            "remaining_edge_count": len(filtered_edges),
+        },
+    )
+
+    return GraphV2(nodes=filtered_nodes, edges=filtered_edges)
+
 
 # =============================================================================
 # Fragile Edge with Alternative Winner
@@ -470,6 +508,11 @@ class RobustnessAnalyzerV2:
 
         # Generate request_id if not provided
         request_id = request.request_id or f"robustness-{uuid.uuid4().hex[:12]}"
+
+        # Safety net: remove non-inference nodes/edges before analysis
+        filtered_graph = filter_inference_graph(request.graph)
+        if filtered_graph is not request.graph:
+            request = request.model_copy(update={"graph": filtered_graph})
 
         # Setup - use separate RNG streams for edge and factor sampling
         # to prevent fragile determinism coupling

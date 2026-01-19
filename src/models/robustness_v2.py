@@ -58,8 +58,8 @@ class StrengthDistribution(BaseModel):
     )
     std: float = Field(
         ...,
-        gt=0,
-        description="Standard deviation of effect size"
+        gt=0.001,
+        description="Standard deviation of effect size (must be > 0.001)"
     )
 
     model_config = {

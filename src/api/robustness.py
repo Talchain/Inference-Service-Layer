@@ -313,28 +313,8 @@ async def _analyze_robustness_v2_legacy(
             },
         )
 
-        # TEMPORARY: Trace option IDs at boundary (P2-ISL debug)
-        incoming_option_ids = [o.id for o in request.options]
-        logger.info(
-            "[ISL] Received option IDs (v1)",
-            extra={
-                "request_id": request_id,
-                "option_ids": incoming_option_ids,
-            },
-        )
-
         # Perform v2 analysis
         response = robustness_analyzer_v2.analyze(request)
-
-        # TEMPORARY: Trace option IDs at boundary (P2-ISL debug)
-        outgoing_option_ids = [r.option_id for r in response.results]
-        logger.info(
-            "[ISL] Returning option IDs (v1)",
-            extra={
-                "request_id": request_id,
-                "option_ids": outgoing_option_ids,
-            },
-        )
 
         # Track metrics
         track_robustness_analysis(
@@ -483,28 +463,8 @@ async def _analyze_robustness_v2_enhanced(
             },
         )
 
-        # TEMPORARY: Trace option IDs at boundary (P2-ISL debug)
-        incoming_option_ids = [o.id for o in request.options]
-        logger.info(
-            "[ISL] Received option IDs",
-            extra={
-                "request_id": request_id,
-                "option_ids": incoming_option_ids,
-            },
-        )
-
         # Run analysis
         v1_response = robustness_analyzer_v2.analyze(request)
-
-        # TEMPORARY: Trace option IDs at boundary (P2-ISL debug)
-        outgoing_option_ids = [r.option_id for r in v1_response.results]
-        logger.info(
-            "[ISL] Returning option IDs",
-            extra={
-                "request_id": request_id,
-                "option_ids": outgoing_option_ids,
-            },
-        )
 
         # Convert V1 response to V2 option results
         option_results = []

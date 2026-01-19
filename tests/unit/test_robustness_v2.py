@@ -11,6 +11,7 @@ Tests:
 - Schema version detection
 """
 
+import logging
 import numpy as np
 import pytest
 
@@ -49,7 +50,7 @@ def simple_graph():
     """Create a simple two-node graph for testing."""
     return GraphV2(
         nodes=[
-            NodeV2(id="price", kind="decision", label="Price"),
+            NodeV2(id="price", kind="factor", label="Price"),
             NodeV2(id="revenue", kind="outcome", label="Revenue"),
         ],
         edges=[
@@ -68,7 +69,7 @@ def complex_graph():
     return GraphV2(
         nodes=[
             NodeV2(id="marketing", kind="factor", label="Marketing Spend"),
-            NodeV2(id="price", kind="decision", label="Price"),
+            NodeV2(id="price", kind="factor", label="Price"),
             NodeV2(id="demand", kind="chance", label="Demand"),
             NodeV2(id="revenue", kind="outcome", label="Revenue"),
         ],
@@ -151,6 +152,11 @@ class TestStrengthDistribution:
         """Test rejection of negative std."""
         with pytest.raises(ValueError):
             StrengthDistribution(mean=0.5, std=-0.1)
+
+    def test_invalid_minimum_std(self):
+        """Test rejection of std at or below minimum threshold."""
+        with pytest.raises(ValueError):
+            StrengthDistribution(mean=0.5, std=0.001)
 
 
 class TestObservedState:
@@ -837,6 +843,57 @@ class TestRobustnessAnalyzerV2:
         assert response.request_id == simple_request.request_id
         assert len(response.results) == len(simple_request.options)
 
+    def test_non_inference_nodes_filtered_with_warning(self, caplog):
+        """Non-inference nodes and edges should be filtered with warning."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="decision", kind="decision", label="Decision"),
+                NodeV2(id="factor", kind="factor", label="Factor"),
+                NodeV2(id="outcome", kind="outcome", label="Outcome"),
+                NodeV2(id="constraint", kind="constraint", label="Constraint"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "decision", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "factor", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "constraint", "to": "factor"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="filter-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1", label="Option 1", interventions={"factor": 1.0}
+                )
+            ],
+            goal_node_id="outcome",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        with caplog.at_level(logging.WARNING):
+            response = analyzer.analyze(request)
+
+        assert any(
+            record.message == "robustness_v2_filtered_non_inference_nodes"
+            for record in caplog.records
+        )
+        assert set(response.metadata.edge_existence_rates.keys()) == {"factor->outcome"}
+
     def test_deterministic_results(self, simple_request):
         """Test same request with same seed produces same results."""
         analyzer = RobustnessAnalyzerV2()
@@ -904,7 +961,7 @@ class TestRobustnessAnalyzerV2:
         """Test graph with certain edges has high stability."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="price", kind="decision", label="Price"),
+                NodeV2(id="price", kind="factor", label="Price"),
                 NodeV2(id="revenue", kind="outcome", label="Revenue"),
             ],
             edges=[
@@ -1008,7 +1065,7 @@ class TestRobustnessV2Integration:
         """Test negative strength.mean produces inverse relationships."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="price", kind="decision", label="Price"),
+                NodeV2(id="price", kind="factor", label="Price"),
                 NodeV2(id="demand", kind="outcome", label="Demand"),
             ],
             edges=[
@@ -1309,7 +1366,7 @@ class TestObservedStateIntegration:
             nodes=[
                 NodeV2(
                     id="price",
-                    kind="decision",
+                    kind="factor",
                     label="Price",
                     observed_state=ObservedState(value=49.0, baseline=39.0, unit="£")
                 ),
@@ -1390,7 +1447,7 @@ class TestObservedStateIntegration:
                 ),
                 NodeV2(
                     id="price",
-                    kind="decision",
+                    kind="factor",
                     label="Price",
                     # No observed_state
                 ),
@@ -2281,7 +2338,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-deterministic
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-deterministic
                 )
             ],
         )
@@ -2384,7 +2441,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.0001),  # Very tight around 1.0
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Very tight around 1.0
                 )
             ],
         )
@@ -2608,7 +2665,7 @@ class TestSCMEvaluatorV2Intercept:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-zero std
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero std
                 )
             ],
         )
@@ -2634,7 +2691,7 @@ class TestSCMEvaluatorV2Intercept:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=2.0, std=0.001),  # Near-zero std
+                    strength=StrengthDistribution(mean=2.0, std=0.0011),  # Near-zero std
                 )
             ],
         )
@@ -2661,12 +2718,12 @@ class TestSCMEvaluatorV2Intercept:
                 EdgeV2(
                     **{"from": "a", "to": "b"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-zero std
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero std
                 ),
                 EdgeV2(
                     **{"from": "b", "to": "c"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-zero std
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero std
                 ),
             ],
         )
@@ -2832,7 +2889,7 @@ class TestAutoScaledNoise:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.0001),  # Near-zero variance
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero variance
                 )
             ],
         )
@@ -2851,12 +2908,12 @@ class TestAutoScaledNoise:
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
 
-        # With near-zero std in edge strength, samples are nearly identical
-        # Auto-scaled noise matches the sample std, so result std should be very small
+        # With small std in edge strength (0.0011), samples have low variance
+        # Auto-scaled noise matches the sample std, so result std should be small
         result = response.results[0]
         assert result.outcome_distribution.mean == pytest.approx(100.0, rel=0.01)
-        # Std should be very small (nearly zero due to near-zero edge variance)
-        assert result.outcome_distribution.std < 0.1
+        # Std should be small due to low edge variance (but not zero due to minimum std floor)
+        assert result.outcome_distribution.std < 0.2
 
 
 # =============================================================================
@@ -3030,11 +3087,11 @@ class TestDegenerateOptionZeroVariance:
         assert len(zero_var_critiques) >= 1
 
     def test_small_but_real_variance_no_warning(self):
-        """Test that small but real variance (e.g., 0.001) does NOT trigger warning."""
+        """Test that small but real variance (e.g., 0.0011) does NOT trigger warning."""
         from src.services.robustness_analyzer_v2 import ZERO_VARIANCE_TOLERANCE
 
         # Small but real variance - should be above tolerance
-        small_variance = 0.001
+        small_variance = 0.0011
         assert small_variance > ZERO_VARIANCE_TOLERANCE
 
         # Graph with very small but real edge strength std
@@ -3048,7 +3105,7 @@ class TestDegenerateOptionZeroVariance:
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
                     # Very small std but definitely above tolerance
-                    strength=StrengthDistribution(mean=1.0, std=0.001),
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),
                 ),
             ],
         )
@@ -3408,7 +3465,7 @@ class TestOptionIdPreservation:
         """
         graph = GraphV2(
             nodes=[
-                NodeV2(id="price", kind="decision", label="Price"),
+                NodeV2(id="price", kind="factor", label="Price"),
                 NodeV2(id="revenue", kind="outcome", label="Revenue"),
             ],
             edges=[
