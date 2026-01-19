@@ -252,14 +252,14 @@ class FactorSampler:
                 mean = node.observed_state.value
 
             # Sample from specified distribution
-            sampled_value = self._sample_from_distribution(uncertainty, mean)
+            sampled_value = self._sample_from_distribution(uncertainty, mean, node_id)
             factor_values[node_id] = sampled_value
             self._value_sums[node_id] += sampled_value
 
         return factor_values
 
     def _sample_from_distribution(
-        self, uncertainty: ParameterUncertainty, mean: float
+        self, uncertainty: ParameterUncertainty, mean: float, node_id: str
     ) -> float:
         """
         Sample a value from the specified distribution.
@@ -267,6 +267,7 @@ class FactorSampler:
         Args:
             uncertainty: Distribution specification
             mean: Mean value (from observed_state.value)
+            node_id: Node ID for error messages
 
         Returns:
             Sampled value
@@ -288,14 +289,14 @@ class FactorSampler:
             range_max = uncertainty.range_max
             if range_min is None or range_max is None:
                 raise ValueError(
-                    f"Uniform distribution for node {node_id} requires range_min and range_max"
+                    f"Uniform distribution for node '{node_id}' requires range_min and range_max"
                 )
             return self.rng.uniform(range_min, range_max)
 
         else:
             # Unknown distribution - fail fast instead of silent fallback
             raise ValueError(
-                f"Unknown distribution '{dist}' for node {node_id}. "
+                f"Unknown distribution '{dist}' for node '{node_id}'. "
                 f"Supported: point_mass, normal, uniform"
             )
 
@@ -513,6 +514,30 @@ class RobustnessAnalyzerV2:
         filtered_graph = filter_inference_graph(request.graph)
         if filtered_graph is not request.graph:
             request = request.model_copy(update={"graph": filtered_graph})
+
+            # Post-filter validation: ensure goal node still exists
+            filtered_node_ids = {node.id for node in filtered_graph.nodes}
+            if request.goal_node_id not in filtered_node_ids:
+                raise ValueError(
+                    f"Goal node '{request.goal_node_id}' was filtered out as non-inference node. "
+                    f"Goal nodes must be of kind: factor, chance, outcome, or risk."
+                )
+
+            # Post-filter validation: warn if intervention nodes were filtered
+            for option in request.options:
+                missing_interventions = [
+                    node_id for node_id in option.interventions.keys()
+                    if node_id not in filtered_node_ids
+                ]
+                if missing_interventions:
+                    self.logger.warning(
+                        "robustness_v2_interventions_filtered",
+                        extra={
+                            "request_id": request_id,
+                            "option_id": option.id,
+                            "filtered_intervention_nodes": missing_interventions,
+                        },
+                    )
 
         # Setup - use separate RNG streams for edge and factor sampling
         # to prevent fragile determinism coupling
