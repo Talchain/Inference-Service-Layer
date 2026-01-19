@@ -278,6 +278,15 @@ class FactorSensitivityV2(BaseModel):
         ..., description="Direction of effect"
     )
     confidence: float = Field(..., ge=0, le=1, description="Confidence level")
+    importance_rank: Optional[int] = Field(
+        None, ge=1, description="Rank by importance (1 = most important)"
+    )
+    observed_value: Optional[float] = Field(
+        None, description="Factor's current value used in calculation"
+    )
+    interpretation: Optional[str] = Field(
+        None, description="Human-readable explanation of sensitivity"
+    )
 
 
 # =============================================================================

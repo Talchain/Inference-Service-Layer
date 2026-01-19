@@ -574,6 +574,9 @@ async def _analyze_robustness_v2_enhanced(
                     sensitivity_score=fs.elasticity,
                     direction="positive" if fs.elasticity > 0 else "negative",
                     confidence=0.8,  # V1 doesn't provide per-factor confidence
+                    importance_rank=fs.importance_rank,
+                    observed_value=fs.observed_value,
+                    interpretation=fs.interpretation,
                 )
                 for fs in v1_response.factor_sensitivity
             ]
