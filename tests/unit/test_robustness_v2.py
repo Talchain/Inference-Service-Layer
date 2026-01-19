@@ -3581,3 +3581,285 @@ class TestOptionIdPreservation:
             f"Special character option IDs not preserved. "
             f"Expected: {set(special_ids)}, Got: {response_option_ids}"
         )
+
+
+# =============================================================================
+# Test Edge Cases: Cycles, Empty Graphs, Extreme Values (High-Risk Coverage)
+# =============================================================================
+
+
+class TestCyclicGraphHandling:
+    """Test behavior when graph contains cycles."""
+
+    def test_cyclic_graph_logs_warning_and_continues(self, caplog):
+        """Test that cyclic graphs log a warning but analysis continues."""
+        # Create a graph with a cycle: A -> B -> C -> A
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="node_a", kind="factor", label="Node A", observed_state=ObservedState(value=10.0)),
+                NodeV2(id="node_b", kind="factor", label="Node B"),
+                NodeV2(id="node_c", kind="outcome", label="Node C"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "node_a", "to": "node_b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "node_b", "to": "node_c"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "node_c", "to": "node_a"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="cycle-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"node_a": 5.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"node_a": 15.0}),
+            ],
+            goal_node_id="node_c",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        with caplog.at_level(logging.WARNING):
+            response = analyzer.analyze(request)
+
+        # Should have logged a warning about cycles
+        cycle_warnings = [r for r in caplog.records if "cycle" in r.message.lower()]
+        assert len(cycle_warnings) > 0, "Expected warning about graph cycles"
+
+        # Analysis should still complete (graceful degradation)
+        assert response is not None
+        assert len(response.results) == 2
+
+
+class TestAllEdgesFilteredScenario:
+    """Test behavior when all edges are filtered out."""
+
+    def test_all_non_inference_nodes_filtered(self, caplog):
+        """Test analysis when all nodes are non-inference types."""
+        # Graph with only decision/option/constraint nodes (all should be filtered)
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="decision1", kind="decision", label="Decision 1"),
+                NodeV2(id="option1", kind="option", label="Option 1"),
+                NodeV2(id="outcome", kind="outcome", label="Outcome"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "decision1", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "option1", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="all-filtered-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"outcome": 10.0}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"outcome": 20.0}),
+            ],
+            goal_node_id="outcome",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        with caplog.at_level(logging.WARNING):
+            response = analyzer.analyze(request)
+
+        # Should have logged a warning about filtering
+        filter_warnings = [
+            r for r in caplog.records
+            if "robustness_v2_filtered_non_inference_nodes" in r.message
+        ]
+        assert len(filter_warnings) > 0, "Expected warning about filtered nodes"
+
+        # Analysis should still complete
+        assert response is not None
+        assert len(response.results) == 2
+
+    def test_graph_with_no_path_to_goal(self):
+        """Test analysis when interventions have no path to goal node."""
+        # Graph where intervention node is disconnected from goal
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="isolated", kind="factor", label="Isolated"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                # No edge from isolated to anywhere meaningful
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="no-path-test",
+            graph=graph,
+            options=[
+                # Intervene on isolated node (no path to goal)
+                InterventionOption(id="opt1", label="Opt 1", interventions={"isolated": 100.0}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"isolated": 200.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Both options should have identical outcomes (intervention has no effect)
+        assert response is not None
+        outcomes = [r.outcome_distribution.mean for r in response.results]
+        assert abs(outcomes[0] - outcomes[1]) < 0.01, "Outcomes should be nearly identical"
+
+
+class TestExtremeNumericalValues:
+    """Test numerical stability with extreme values."""
+
+    @pytest.mark.parametrize("scale", [0.01, 0.1, 10.0, 100.0, 1000.0])
+    def test_extreme_edge_strength_scales(self, scale):
+        """Test analysis with varying edge strength scales."""
+        # Note: std must be > 0.001 per schema v2.6 D.4
+        std_value = max(scale * 0.1, 0.0011)  # Ensure std > 0.001
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=1.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=scale, std=std_value),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id=f"scale-{scale}-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"input": 2.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete without NaN/Inf
+        assert response is not None
+        for result in response.results:
+            assert not np.isnan(result.outcome_distribution.mean), f"NaN mean at scale {scale}"
+            assert not np.isinf(result.outcome_distribution.mean), f"Inf mean at scale {scale}"
+            assert not np.isnan(result.outcome_distribution.std), f"NaN std at scale {scale}"
+            assert not np.isinf(result.outcome_distribution.std), f"Inf std at scale {scale}"
+
+    def test_extreme_intervention_values(self):
+        """Test analysis with very large intervention values."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="extreme-intervention-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"input": 1e10}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"input": 1e-10}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete without NaN/Inf
+        assert response is not None
+        for result in response.results:
+            assert np.isfinite(result.outcome_distribution.mean)
+            assert np.isfinite(result.outcome_distribution.std)
+
+    def test_mixed_scale_graph(self):
+        """Test graph with nodes at vastly different scales."""
+        # Note: std must be > 0.001 per schema v2.6 D.4
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="tiny", kind="factor", label="Tiny", observed_state=ObservedState(value=0.001)),
+                NodeV2(id="huge", kind="factor", label="Huge", observed_state=ObservedState(value=1000.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "tiny", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1000.0, std=100.0),  # Scale up tiny
+                ),
+                EdgeV2(
+                    **{"from": "huge", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.001, std=0.0011),  # Scale down huge (min std)
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="mixed-scale-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"tiny": 1e-8}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"huge": 1e8}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete without numerical issues
+        assert response is not None
+        for result in response.results:
+            assert np.isfinite(result.outcome_distribution.mean)
+            assert np.isfinite(result.outcome_distribution.std)
