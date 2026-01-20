@@ -37,11 +37,55 @@ from src.models.robustness_v2 import (
     RobustnessResult,
     SensitivityResult,
 )
+from src.constants import ZERO_VARIANCE_TOLERANCE
+from src.models.critique import (
+    DEGENERATE_OPTION_ZERO_VARIANCE,
+    HIGH_TIE_RATE,
+)
+from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SeededRNG, compute_seed_from_graph
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
 
 logger = logging.getLogger(__name__)
+
+# Safety net: nodes that must not participate in inference
+NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+
+
+def filter_inference_graph(graph: GraphV2) -> GraphV2:
+    """Filter out non-inference nodes and incident edges as a safety net."""
+    filtered_nodes = [
+        node for node in graph.nodes if node.kind.lower() not in NON_INFERENCE_KINDS
+    ]
+    removed_nodes = len(graph.nodes) - len(filtered_nodes)
+
+    if removed_nodes == 0:
+        return graph
+
+    kept_node_ids = {node.id for node in filtered_nodes}
+    filtered_edges = [
+        edge
+        for edge in graph.edges
+        if edge.from_ in kept_node_ids and edge.to in kept_node_ids
+    ]
+    removed_edges = len(graph.edges) - len(filtered_edges)
+    removed_node_ids = [
+        node.id for node in graph.nodes if node.kind.lower() in NON_INFERENCE_KINDS
+    ]
+
+    logger.warning(
+        "robustness_v2_filtered_non_inference_nodes",
+        extra={
+            "removed_node_count": removed_nodes,
+            "removed_edge_count": removed_edges,
+            "removed_node_ids": removed_node_ids,
+            "remaining_node_count": len(filtered_nodes),
+            "remaining_edge_count": len(filtered_edges),
+        },
+    )
+
+    return GraphV2(nodes=filtered_nodes, edges=filtered_edges)
 
 
 # =============================================================================
@@ -208,14 +252,14 @@ class FactorSampler:
                 mean = node.observed_state.value
 
             # Sample from specified distribution
-            sampled_value = self._sample_from_distribution(uncertainty, mean)
+            sampled_value = self._sample_from_distribution(uncertainty, mean, node_id)
             factor_values[node_id] = sampled_value
             self._value_sums[node_id] += sampled_value
 
         return factor_values
 
     def _sample_from_distribution(
-        self, uncertainty: ParameterUncertainty, mean: float
+        self, uncertainty: ParameterUncertainty, mean: float, node_id: str
     ) -> float:
         """
         Sample a value from the specified distribution.
@@ -223,6 +267,7 @@ class FactorSampler:
         Args:
             uncertainty: Distribution specification
             mean: Mean value (from observed_state.value)
+            node_id: Node ID for error messages
 
         Returns:
             Sampled value
@@ -244,14 +289,14 @@ class FactorSampler:
             range_max = uncertainty.range_max
             if range_min is None or range_max is None:
                 raise ValueError(
-                    f"Uniform distribution for node {node_id} requires range_min and range_max"
+                    f"Uniform distribution for node '{node_id}' requires range_min and range_max"
                 )
             return self.rng.uniform(range_min, range_max)
 
         else:
             # Unknown distribution - fail fast instead of silent fallback
             raise ValueError(
-                f"Unknown distribution '{dist}' for node {node_id}. "
+                f"Unknown distribution '{dist}' for node '{node_id}'. "
                 f"Supported: point_mass, normal, uniform"
             )
 
@@ -386,6 +431,9 @@ class SCMEvaluatorV2:
                 # Interventional value overrides structural equations
                 node_values[node_id] = interventions[node_id]
             else:
+                # Get node object (used for observed_state and intercept)
+                node = self._nodes_by_id.get(node_id)
+
                 # Determine base value for this node
                 # Priority: factor_values > observed_state.value > base_values > 0
                 if node_id in factor_values:
@@ -396,7 +444,6 @@ class SCMEvaluatorV2:
                     base = base_values[node_id]
                 else:
                     # Check for observed_state.value on root nodes
-                    node = self._nodes_by_id.get(node_id)
                     is_root = len(self._parents.get(node_id, [])) == 0
                     if is_root and node and node.observed_state and node.observed_state.value is not None:
                         base = node.observed_state.value
@@ -411,7 +458,10 @@ class SCMEvaluatorV2:
                     parent_value = node_values.get(parent, 0.0)
                     parents_contribution += parent_value * strength
 
-                node_values[node_id] = base + parents_contribution
+                # Get node intercept (default 0.0 if not set)
+                intercept = getattr(node, 'intercept', 0.0) if node else 0.0
+
+                node_values[node_id] = base + intercept + parents_contribution
 
         return node_values.get(goal_node, 0.0)
 
@@ -460,6 +510,35 @@ class RobustnessAnalyzerV2:
         # Generate request_id if not provided
         request_id = request.request_id or f"robustness-{uuid.uuid4().hex[:12]}"
 
+        # Safety net: remove non-inference nodes/edges before analysis
+        filtered_graph = filter_inference_graph(request.graph)
+        if filtered_graph is not request.graph:
+            request = request.model_copy(update={"graph": filtered_graph})
+
+            # Post-filter validation: ensure goal node still exists
+            filtered_node_ids = {node.id for node in filtered_graph.nodes}
+            if request.goal_node_id not in filtered_node_ids:
+                raise ValueError(
+                    f"Goal node '{request.goal_node_id}' was filtered out as non-inference node. "
+                    f"Goal nodes must be of kind: factor, chance, outcome, or risk."
+                )
+
+            # Post-filter validation: warn if intervention nodes were filtered
+            for option in request.options:
+                missing_interventions = [
+                    node_id for node_id in option.interventions.keys()
+                    if node_id not in filtered_node_ids
+                ]
+                if missing_interventions:
+                    self.logger.warning(
+                        "robustness_v2_interventions_filtered",
+                        extra={
+                            "request_id": request_id,
+                            "option_id": option.id,
+                            "filtered_intervention_nodes": missing_interventions,
+                        },
+                    )
+
         # Setup - use separate RNG streams for edge and factor sampling
         # to prevent fragile determinism coupling
         seed = request.seed or compute_seed_from_graph(request.graph)
@@ -489,12 +568,49 @@ class RobustnessAnalyzerV2:
             option_wins,
             winner_per_sample,
             edge_configs_per_sample,
+            tie_count,
         ) = self._run_monte_carlo(request, sampler, factor_sampler, evaluator)
+
+        # Compute tie rate
+        tie_rate = tie_count / request.n_samples
+
+        # Apply auto-scaled noise to outcome/risk nodes (V08 scientific accuracy)
+        # Uses separate RNG stream (seed + 2) for determinism
+        rng_noise = SeededRNG(seed + 2)
+        option_outcomes = self._apply_auto_scaled_noise(
+            option_outcomes,
+            request.goal_node_id,
+            request.graph.nodes,
+            rng_noise,
+        )
 
         # Compute results
         results = self._compute_option_results(
             option_outcomes, option_wins, request
         )
+
+        # Build critiques for analysis warnings
+        critiques: List[CritiqueV2] = []
+
+        # Check for zero-variance options (degenerate outcomes)
+        # Use tolerance to catch near-zero values from floating point arithmetic
+        option_labels = {opt.id: (opt.label or opt.id) for opt in request.options}
+        for result in results:
+            if result.outcome_distribution.std < ZERO_VARIANCE_TOLERANCE:
+                critiques.append(
+                    DEGENERATE_OPTION_ZERO_VARIANCE.build(
+                        option_label=option_labels.get(result.option_id, result.option_id),
+                        affected_option_ids=[result.option_id],
+                    )
+                )
+
+        # Check for high tie rate
+        if tie_rate > 0.5:
+            critiques.append(
+                HIGH_TIE_RATE.build(
+                    tie_rate_pct=int(tie_rate * 100),
+                )
+            )
 
         # Compute sensitivity if requested
         sensitivity = []
@@ -540,7 +656,10 @@ class RobustnessAnalyzerV2:
                 execution_time_ms=execution_time,
                 edge_existence_rates=sampler.get_existence_rates(),
                 config_fingerprint=generate_config_fingerprint(),
+                tie_count=tie_count,
+                tie_rate=tie_rate,
             ),
+            critiques=critiques,
         )
 
         self.logger.info(
@@ -564,22 +683,27 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
     ) -> Tuple[
         Dict[str, List[float]],
-        Dict[str, int],
+        Dict[str, float],
         List[str],
         List[Dict[Tuple[str, str], float]],
+        int,
     ]:
         """
         Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
 
         Returns:
-            (option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample)
+            (option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count)
+
+        Note: option_wins uses float to support split-tie handling where ties are
+        divided equally among tied options.
         """
         option_outcomes: Dict[str, List[float]] = {
             opt.id: [] for opt in request.options
         }
-        option_wins: Dict[str, int] = {opt.id: 0 for opt in request.options}
+        option_wins: Dict[str, float] = {opt.id: 0.0 for opt in request.options}
         winner_per_sample: List[str] = []
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
+        tie_count = 0
 
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
@@ -600,20 +724,89 @@ class RobustnessAnalyzerV2:
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
 
-            # Track winner (highest outcome)
-            winner = max(sample_outcomes, key=sample_outcomes.get)
-            option_wins[winner] += 1
-            winner_per_sample.append(winner)
+            # Track winner with fair tie-breaking (split ties equally)
+            max_outcome = max(sample_outcomes.values())
+            winners = [opt_id for opt_id, val in sample_outcomes.items() if val == max_outcome]
+
+            if len(winners) == 1:
+                # Clear winner
+                option_wins[winners[0]] += 1.0
+                winner_per_sample.append(winners[0])
+            else:
+                # Tie: split win equally among tied options
+                tie_count += 1
+                split_value = 1.0 / len(winners)
+                for winner in winners:
+                    option_wins[winner] += split_value
+                # For winner_per_sample, use first winner (for backward compat in alternative winner analysis)
+                winner_per_sample.append(winners[0])
 
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
 
-        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample
+        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count
+
+    def _apply_auto_scaled_noise(
+        self,
+        option_outcomes: Dict[str, List[float]],
+        goal_node_id: str,
+        graph_nodes: List,
+        rng: "SeededRNG",
+    ) -> Dict[str, List[float]]:
+        """
+        Apply auto-scaled noise to outcome/risk node samples.
+
+        Per Neil Bramley's heuristic: "Match unexplained noise to explained variance"
+        - Only outcome and risk nodes receive noise
+        - Noise std = std(samples) from the model
+        - If std = 0, skip noise entirely (no model uncertainty)
+
+        Args:
+            option_outcomes: Dict of option_id -> list of outcome samples
+            goal_node_id: The goal node being measured
+            graph_nodes: List of graph nodes to check node kind
+            rng: Seeded RNG for determinism
+
+        Returns:
+            Modified option_outcomes with noise applied
+        """
+        # Find the goal node and check its kind
+        goal_node = None
+        for node in graph_nodes:
+            if node.id == goal_node_id:
+                goal_node = node
+                break
+
+        if goal_node is None:
+            return option_outcomes
+
+        # Only apply noise to outcome and risk nodes
+        node_kind = getattr(goal_node, 'kind', '').lower()
+        if node_kind not in ('outcome', 'risk'):
+            return option_outcomes
+
+        # Apply noise to each option's samples
+        for option_id, samples in option_outcomes.items():
+            if not samples:
+                continue
+
+            samples_array = np.array(samples)
+            outcome_std = float(np.std(samples_array))
+
+            # If std = 0, skip noise (no model uncertainty to match)
+            if outcome_std <= 0:
+                continue
+
+            # Add noise ~ N(0, outcome_std) to each sample
+            noise = np.array([rng.normal(0, outcome_std) for _ in range(len(samples))])
+            option_outcomes[option_id] = (samples_array + noise).tolist()
+
+        return option_outcomes
 
     def _compute_option_results(
         self,
         outcomes: Dict[str, List[float]],
-        wins: Dict[str, int],
+        wins: Dict[str, float],
         request: RobustnessRequestV2,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option."""
@@ -1065,7 +1258,7 @@ class RobustnessAnalyzerV2:
 
     def _compute_robustness(
         self,
-        option_wins: Dict[str, int],
+        option_wins: Dict[str, float],
         winner_per_sample: List[str],
         sensitivity: List[SensitivityResult],
         request: RobustnessRequestV2,

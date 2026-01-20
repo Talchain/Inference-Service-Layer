@@ -21,6 +21,7 @@ from src.models.responses import (
     RobustnessSummary,
 )
 from src.models.shared import DistributionType
+from src.constants import ZERO_VARIANCE_TOLERANCE
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +153,8 @@ class ConditionalRecommendationEngine:
         # Get uncertainty from primary option's distribution
         primary_std = self._get_distribution_std(primary)
 
-        # Calculate ratio
-        if primary_std > 0:
+        # Calculate ratio (use tolerance to avoid near-zero division)
+        if primary_std >= ZERO_VARIANCE_TOLERANCE:
             gap_ratio = gap / primary_std
         else:
             gap_ratio = float('inf')
@@ -285,7 +286,7 @@ class ConditionalRecommendationEngine:
         # Simplified: assume linear relationship with parameter
         primary_std = self._get_distribution_std(primary)
 
-        if primary_std == 0:
+        if primary_std < ZERO_VARIANCE_TOLERANCE:
             return None
 
         # Threshold where primary drops enough for crossover

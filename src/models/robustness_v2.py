@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
+from src.models.response_v2 import CritiqueV2
+
 
 # =============================================================================
 # Enums
@@ -56,8 +58,8 @@ class StrengthDistribution(BaseModel):
     )
     std: float = Field(
         ...,
-        gt=0,
-        description="Standard deviation of effect size"
+        gt=0.001,
+        description="Standard deviation of effect size (must be > 0.001)"
     )
 
     model_config = {
@@ -279,6 +281,11 @@ class NodeV2(BaseModel):
         None,
         description="Observed state for quantitative factor nodes (value, baseline, unit, source)"
     )
+    intercept: float = Field(
+        default=0.0,
+        description="Node intercept term (constant added to structural equation). "
+                    "Represents the baseline value when all parent contributions are zero."
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -286,6 +293,7 @@ class NodeV2(BaseModel):
                 "id": "revenue",
                 "kind": "outcome",
                 "label": "Total Revenue",
+                "intercept": 0.0,
                 "observed_state": {
                     "value": 59.0,
                     "baseline": 49.0,
@@ -818,6 +826,16 @@ class ResponseMetadataV2(BaseModel):
         ...,
         description="Hash of determinism-critical config"
     )
+    tie_count: Optional[int] = Field(
+        None,
+        description="Number of Monte Carlo samples with tied outcomes"
+    )
+    tie_rate: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of samples with tied outcomes (tie_count / n_samples)"
+    )
 
 
 class RobustnessResponseV2(BaseModel):
@@ -869,6 +887,12 @@ class RobustnessResponseV2(BaseModel):
         alias="_metadata"
     )
 
+    # Analysis critiques (warnings about degenerate options, high tie rates, etc.)
+    critiques: List[CritiqueV2] = Field(
+        default_factory=list,
+        description="Analysis critiques and warnings"
+    )
+
     model_config = {
         "populate_by_name": True,
         "json_schema_extra": {
@@ -905,8 +929,11 @@ class RobustnessResponseV2(BaseModel):
                     "seed_used": 12345,
                     "execution_time_ms": 150,
                     "edge_existence_rates": {},
-                    "config_fingerprint": "abc123"
-                }
+                    "config_fingerprint": "abc123",
+                    "tie_count": 0,
+                    "tie_rate": 0.0
+                },
+                "critiques": []
             }
         }
     }

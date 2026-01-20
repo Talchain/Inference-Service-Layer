@@ -60,9 +60,12 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with observability enhancements."""
         start_time = time.time()
+
+        # Get trace ID (set by TracingMiddleware which runs before us due to LIFO)
         request_id = get_trace_id()
 
         # Extract received trace info from headers (for echo/debugging)
+        # correlation_id = caller-provided X-Request-Id for distributed tracing
         received_request_id = request.headers.get("X-Request-Id")
         incoming_payload_hash = request.headers.get("x-olumi-payload-hash")
         caller_service = request.headers.get("x-olumi-caller-service")
@@ -71,6 +74,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         self._log_boundary_request(
             request=request,
             request_id=request_id,
+            correlation_id=received_request_id,
             payload_hash=incoming_payload_hash,
             received_from_header=incoming_payload_hash is not None,
             caller_service=caller_service,
@@ -132,6 +136,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             request=request,
             response=response,
             request_id=request_id,
+            correlation_id=received_request_id,
             elapsed_ms=elapsed_ms,
             incoming_payload_hash=incoming_payload_hash,
             response_hash=response_hash,
@@ -194,6 +199,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         payload_hash: Optional[str],
         received_from_header: bool = False,
         caller_service: Optional[str] = None,
+        correlation_id: Optional[str] = None,
     ) -> None:
         """Log boundary.request event for incoming requests."""
         # Use unified IP extraction for consistency with rate limiting/auth
@@ -209,6 +215,10 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             "client": client_ip,
             "build": GIT_COMMIT_SHORT,
         }
+
+        # Include correlation_id if caller provided X-Request-Id header
+        if correlation_id:
+            log_extra["correlation_id"] = correlation_id
 
         # Include payload hash if provided by caller
         if payload_hash:
@@ -234,6 +244,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         elapsed_ms: float,
         incoming_payload_hash: Optional[str],
         response_hash: Optional[str],
+        correlation_id: Optional[str] = None,
     ) -> None:
         """Log boundary.response event for outgoing responses."""
         log_extra = {
@@ -247,6 +258,10 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             "elapsed_ms": round(elapsed_ms, 2),
             "build": GIT_COMMIT_SHORT,
         }
+
+        # Include correlation_id if caller provided X-Request-Id header
+        if correlation_id:
+            log_extra["correlation_id"] = correlation_id
 
         # Include hashes for verification
         if incoming_payload_hash:

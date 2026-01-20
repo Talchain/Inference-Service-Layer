@@ -523,6 +523,11 @@ async def _analyze_robustness_v2_enhanced(
         if degen_critique:
             builder.add_critique(degen_critique)
 
+        # Propagate analysis critiques from v1_response to enhanced response
+        # (e.g., DEGENERATE_OPTION_ZERO_VARIANCE, HIGH_TIE_RATE)
+        if v1_response.critiques:
+            builder.add_critiques(v1_response.critiques)
+
         # Convert robustness result (include V1 fields for backward compatibility)
         robustness_result = None
         if v1_response.robustness:
@@ -568,7 +573,10 @@ async def _analyze_robustness_v2_enhanced(
                     label=fs.node_label,
                     sensitivity_score=fs.elasticity,
                     direction="positive" if fs.elasticity > 0 else "negative",
-                    confidence=0.8,  # V1 doesn't provide per-factor confidence
+                    importance_rank=fs.importance_rank,
+                    observed_value=fs.observed_value,
+                    interpretation=fs.interpretation,
+                    # confidence omitted - V1 analyzer doesn't compute per-factor confidence
                 )
                 for fs in v1_response.factor_sensitivity
             ]

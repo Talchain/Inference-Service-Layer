@@ -11,6 +11,7 @@ Tests:
 - Schema version detection
 """
 
+import logging
 import numpy as np
 import pytest
 
@@ -49,7 +50,7 @@ def simple_graph():
     """Create a simple two-node graph for testing."""
     return GraphV2(
         nodes=[
-            NodeV2(id="price", kind="decision", label="Price"),
+            NodeV2(id="price", kind="factor", label="Price"),
             NodeV2(id="revenue", kind="outcome", label="Revenue"),
         ],
         edges=[
@@ -68,7 +69,7 @@ def complex_graph():
     return GraphV2(
         nodes=[
             NodeV2(id="marketing", kind="factor", label="Marketing Spend"),
-            NodeV2(id="price", kind="decision", label="Price"),
+            NodeV2(id="price", kind="factor", label="Price"),
             NodeV2(id="demand", kind="chance", label="Demand"),
             NodeV2(id="revenue", kind="outcome", label="Revenue"),
         ],
@@ -151,6 +152,11 @@ class TestStrengthDistribution:
         """Test rejection of negative std."""
         with pytest.raises(ValueError):
             StrengthDistribution(mean=0.5, std=-0.1)
+
+    def test_invalid_minimum_std(self):
+        """Test rejection of std at or below minimum threshold."""
+        with pytest.raises(ValueError):
+            StrengthDistribution(mean=0.5, std=0.001)
 
 
 class TestObservedState:
@@ -837,6 +843,57 @@ class TestRobustnessAnalyzerV2:
         assert response.request_id == simple_request.request_id
         assert len(response.results) == len(simple_request.options)
 
+    def test_non_inference_nodes_filtered_with_warning(self, caplog):
+        """Non-inference nodes and edges should be filtered with warning."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="decision", kind="decision", label="Decision"),
+                NodeV2(id="factor", kind="factor", label="Factor"),
+                NodeV2(id="outcome", kind="outcome", label="Outcome"),
+                NodeV2(id="constraint", kind="constraint", label="Constraint"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "decision", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "factor", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "constraint", "to": "factor"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="filter-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1", label="Option 1", interventions={"factor": 1.0}
+                )
+            ],
+            goal_node_id="outcome",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        with caplog.at_level(logging.WARNING):
+            response = analyzer.analyze(request)
+
+        assert any(
+            record.message == "robustness_v2_filtered_non_inference_nodes"
+            for record in caplog.records
+        )
+        assert set(response.metadata.edge_existence_rates.keys()) == {"factor->outcome"}
+
     def test_deterministic_results(self, simple_request):
         """Test same request with same seed produces same results."""
         analyzer = RobustnessAnalyzerV2()
@@ -904,7 +961,7 @@ class TestRobustnessAnalyzerV2:
         """Test graph with certain edges has high stability."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="price", kind="decision", label="Price"),
+                NodeV2(id="price", kind="factor", label="Price"),
                 NodeV2(id="revenue", kind="outcome", label="Revenue"),
             ],
             edges=[
@@ -1008,7 +1065,7 @@ class TestRobustnessV2Integration:
         """Test negative strength.mean produces inverse relationships."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="price", kind="decision", label="Price"),
+                NodeV2(id="price", kind="factor", label="Price"),
                 NodeV2(id="demand", kind="outcome", label="Demand"),
             ],
             edges=[
@@ -1309,7 +1366,7 @@ class TestObservedStateIntegration:
             nodes=[
                 NodeV2(
                     id="price",
-                    kind="decision",
+                    kind="factor",
                     label="Price",
                     observed_state=ObservedState(value=49.0, baseline=39.0, unit="£")
                 ),
@@ -1390,7 +1447,7 @@ class TestObservedStateIntegration:
                 ),
                 NodeV2(
                     id="price",
-                    kind="decision",
+                    kind="factor",
                     label="Price",
                     # No observed_state
                 ),
@@ -2281,7 +2338,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.001),  # Near-deterministic
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-deterministic
                 )
             ],
         )
@@ -2384,7 +2441,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.0001),  # Very tight around 1.0
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Very tight around 1.0
                 )
             ],
         )
@@ -2566,3 +2623,1243 @@ class TestGoalThresholdProbability:
         # With threshold at mean, probability should be around 0.5
         # Allow some variance due to non-symmetric distributions
         assert 0.3 <= response.results[0].probability_of_goal <= 0.7
+
+
+class TestNodeV2Intercept:
+    """V08: Test intercept field in NodeV2 schema."""
+
+    def test_node_without_intercept_defaults_to_zero(self):
+        """Test that nodes without intercept field default to 0.0."""
+        node = NodeV2(id="node_a", kind="factor", label="Node A")
+        assert node.intercept == 0.0
+
+    def test_node_with_positive_intercept(self):
+        """Test that positive intercept values are accepted."""
+        node = NodeV2(id="node_a", kind="outcome", label="Node A", intercept=50.0)
+        assert node.intercept == 50.0
+
+    def test_node_with_negative_intercept(self):
+        """Test that negative intercept values are accepted."""
+        node = NodeV2(id="node_a", kind="outcome", label="Node A", intercept=-25.0)
+        assert node.intercept == -25.0
+
+    def test_intercept_serialization(self):
+        """Test that intercept is included in serialized output."""
+        node = NodeV2(id="node_a", kind="outcome", label="Node A", intercept=100.0)
+        node_dict = node.model_dump()
+        assert "intercept" in node_dict
+        assert node_dict["intercept"] == 100.0
+
+
+class TestSCMEvaluatorV2Intercept:
+    """V08: Test that SCMEvaluatorV2 uses intercept in evaluation."""
+
+    def test_intercept_added_to_outcome(self):
+        """Test that intercept is added to the node's computed value."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="output", kind="outcome", label="Output", intercept=100.0),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero std
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # With input=0 and intercept=100, output should be 100
+        result = evaluator.evaluate(
+            edge_strengths={("input", "output"): 1.0},
+            interventions={"input": 0.0},
+            goal_node="output",
+        )
+        assert result == 100.0
+
+    def test_intercept_with_parent_contribution(self):
+        """Test intercept is added to parent contribution."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="output", kind="outcome", label="Output", intercept=50.0),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.0011),  # Near-zero std
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # output = base(0) + intercept(50) + parent_contribution(10 * 2 = 20) = 70
+        result = evaluator.evaluate(
+            edge_strengths={("input", "output"): 2.0},
+            interventions={"input": 10.0},
+            goal_node="output",
+        )
+        assert result == 70.0
+
+    def test_intercept_with_chain(self):
+        """Test intercept works correctly in a chain of nodes."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="a", kind="factor", label="A", observed_state=ObservedState(value=0.0)),
+                NodeV2(id="b", kind="outcome", label="B", intercept=10.0),
+                NodeV2(id="c", kind="outcome", label="C", intercept=20.0),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "a", "to": "b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero std
+                ),
+                EdgeV2(
+                    **{"from": "b", "to": "c"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero std
+                ),
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph)
+
+        # a = 5 (intervention)
+        # b = base(0) + intercept(10) + (5 * 1) = 15
+        # c = base(0) + intercept(20) + (15 * 1) = 35
+        result = evaluator.evaluate(
+            edge_strengths={("a", "b"): 1.0, ("b", "c"): 1.0},
+            interventions={"a": 5.0},
+            goal_node="c",
+        )
+        assert result == 35.0
+
+
+class TestAutoScaledNoise:
+    """V08: Test auto-scaled noise application to outcome/risk nodes."""
+
+    def test_noise_applied_to_outcome_node(self):
+        """Test that noise is applied to outcome node samples."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),  # Some variance for noise to match
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="noise-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With noise applied, the std should be larger than edge uncertainty alone
+        # Edge std = 0.1 * 100 = 10, so base std ~ 10
+        # With auto-scaled noise (matching std), effective std should be ~sqrt(2) * base_std
+        result = response.results[0]
+        # The std should reflect both edge variance and added noise
+        assert result.outcome_distribution.std > 0
+
+    def test_noise_applied_to_risk_node(self):
+        """Test that noise is applied to risk node samples."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="exposure", kind="factor", label="Exposure", observed_state=ObservedState(value=50.0)),
+                NodeV2(id="risk", kind="risk", label="Risk Level"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "exposure", "to": "risk"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.05),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="risk-noise-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"exposure": 50.0}),
+            ],
+            goal_node_id="risk",
+            n_samples=500,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Risk nodes should also get noise applied
+        result = response.results[0]
+        assert result.outcome_distribution.std > 0
+
+    def test_noise_not_applied_to_factor_node(self):
+        """Test that noise is NOT applied when goal is a factor node."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+            ],
+            edges=[],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="factor-no-noise",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="input",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Factor nodes shouldn't receive noise, so std should be 0 (deterministic intervention)
+        result = response.results[0]
+        assert result.outcome_distribution.mean == 100.0
+        assert result.outcome_distribution.std == 0.0
+
+    def test_noise_deterministic_with_seed(self):
+        """Test that noise application is deterministic with same seed."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="noise-determinism",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response1 = analyzer.analyze(request)
+        response2 = analyzer.analyze(request)
+
+        # Same seed should produce identical results
+        assert response1.results[0].outcome_distribution.mean == response2.results[0].outcome_distribution.mean
+        assert response1.results[0].outcome_distribution.std == response2.results[0].outcome_distribution.std
+
+    def test_noise_skipped_when_zero_std(self):
+        """Test that noise is skipped when samples have near-zero std."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Near-zero variance
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-std",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With small std in edge strength (0.0011), samples have low variance
+        # Auto-scaled noise matches the sample std, so result std should be small
+        result = response.results[0]
+        assert result.outcome_distribution.mean == pytest.approx(100.0, rel=0.01)
+        # Std should be small due to low edge variance (but not zero due to minimum std floor)
+        assert result.outcome_distribution.std < 0.2
+
+
+# =============================================================================
+# Test Degenerate Option Critiques (Zero Variance)
+# =============================================================================
+
+
+class TestDegenerateOptionZeroVariance:
+    """Test DEGENERATE_OPTION_ZERO_VARIANCE critique detection."""
+
+    def test_zero_variance_option_triggers_critique(self):
+        """Test that option with no path to goal triggers zero variance critique."""
+        # Graph where option 1's intervention has NO path to goal
+        # isolated_node is not connected to goal
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="isolated_node", kind="factor", label="Isolated"),
+                NodeV2(id="connected_node", kind="factor", label="Connected"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                # Only connected_node -> goal edge exists
+                EdgeV2(
+                    **{"from": "connected_node", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-variance-test",
+            graph=graph,
+            options=[
+                # Option 1 intervenes on isolated node (no path to goal)
+                InterventionOption(
+                    id="opt_isolated",
+                    label="Isolated Option",
+                    interventions={"isolated_node": 1.0},
+                ),
+                # Option 2 intervenes on connected node (has path)
+                InterventionOption(
+                    id="opt_connected",
+                    label="Connected Option",
+                    interventions={"connected_node": 1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Find the result for isolated option
+        isolated_result = next(r for r in response.results if r.option_id == "opt_isolated")
+
+        # Isolated option should have zero std
+        assert isolated_result.outcome_distribution.std == 0.0
+
+        # Should have DEGENERATE_OPTION_ZERO_VARIANCE critique
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) >= 1
+
+        # Critique should reference the isolated option
+        critique = zero_var_critiques[0]
+        assert "Isolated Option" in critique.message
+        assert critique.severity == "warning"
+        assert critique.source == "analysis"
+
+    def test_no_critique_when_variance_nonzero(self):
+        """Test that options with non-zero variance don't trigger critique."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.5),  # Non-zero std
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="nonzero-variance-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 2.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should NOT have zero variance critique
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) == 0
+
+    def test_near_zero_variance_triggers_warning(self):
+        """Test that near-zero variance (floating point artifact) triggers warning.
+
+        Values like 1e-15 from numerical computation are effectively zero
+        but won't match exact equality check.
+        """
+        from src.services.robustness_analyzer_v2 import ZERO_VARIANCE_TOLERANCE
+
+        # Create a mock result with near-zero std (below tolerance)
+        near_zero_std = 1e-15  # Typical floating point precision artifact
+
+        # Verify the tolerance check would catch this
+        assert near_zero_std < ZERO_VARIANCE_TOLERANCE
+
+        # Full integration test: graph where isolated node produces near-zero variance
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="isolated", kind="factor", label="Isolated"),
+                NodeV2(id="connected", kind="factor", label="Connected"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "connected", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="near-zero-variance-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt_isolated",
+                    label="Isolated Option",
+                    interventions={"isolated": 1.0},
+                ),
+                InterventionOption(
+                    id="opt_connected",
+                    label="Connected Option",
+                    interventions={"connected": 1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should trigger the zero variance critique
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) >= 1
+
+    def test_small_but_real_variance_no_warning(self):
+        """Test that small but real variance (e.g., 0.0011) does NOT trigger warning."""
+        from src.services.robustness_analyzer_v2 import ZERO_VARIANCE_TOLERANCE
+
+        # Small but real variance - should be above tolerance
+        small_variance = 0.0011
+        assert small_variance > ZERO_VARIANCE_TOLERANCE
+
+        # Graph with very small but real edge strength std
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    # Very small std but definitely above tolerance
+                    strength=StrengthDistribution(mean=1.0, std=0.0011),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="small-variance-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 2.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should NOT trigger zero variance critique - variance is small but real
+        zero_var_critiques = [
+            c for c in response.critiques
+            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert len(zero_var_critiques) == 0
+
+
+# =============================================================================
+# Test High Tie Rate Critiques
+# =============================================================================
+
+
+class TestHighTieRateCritique:
+    """Test HIGH_TIE_RATE critique detection."""
+
+    def test_high_tie_rate_triggers_critique(self):
+        """Test that >50% tie rate triggers HIGH_TIE_RATE critique."""
+        # Graph where all options produce identical outcomes (100% ties)
+        # Both options intervene on same node with same value
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="high-tie-rate-test",
+            graph=graph,
+            options=[
+                # Both options have SAME intervention value -> 100% ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 1.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should have HIGH_TIE_RATE critique
+        tie_rate_critiques = [
+            c for c in response.critiques
+            if c.code == "HIGH_TIE_RATE"
+        ]
+        assert len(tie_rate_critiques) == 1
+
+        critique = tie_rate_critiques[0]
+        assert "100%" in critique.message or "tie" in critique.message.lower()
+        assert critique.severity == "warning"
+        assert critique.source == "analysis"
+
+    def test_no_critique_when_tie_rate_below_threshold(self):
+        """Test that tie rate below 50% does not trigger critique."""
+        # Graph where options produce different outcomes (low tie rate)
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="low-tie-rate-test",
+            graph=graph,
+            options=[
+                # Different intervention values -> different outcomes -> low tie rate
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 10.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should NOT have HIGH_TIE_RATE critique
+        tie_rate_critiques = [
+            c for c in response.critiques
+            if c.code == "HIGH_TIE_RATE"
+        ]
+        assert len(tie_rate_critiques) == 0
+
+
+# =============================================================================
+# Test Fair Tie-Breaking (Split Ties)
+# =============================================================================
+
+
+class TestFairTieBreaking:
+    """Test that ties are split fairly between options."""
+
+    def test_identical_options_get_equal_win_probability(self):
+        """Test two identical options get 50%/50% win probability."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="equal-split-test",
+            graph=graph,
+            options=[
+                # Identical interventions -> 100% ties -> should split 50/50
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 5.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 5.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        opt1_result = next(r for r in response.results if r.option_id == "opt1")
+        opt2_result = next(r for r in response.results if r.option_id == "opt2")
+
+        # Both should have approximately 50% win probability
+        assert opt1_result.win_probability == pytest.approx(0.5, abs=0.01)
+        assert opt2_result.win_probability == pytest.approx(0.5, abs=0.01)
+
+        # Sum should equal 1.0
+        total = opt1_result.win_probability + opt2_result.win_probability
+        assert total == pytest.approx(1.0, abs=0.001)
+
+    def test_three_way_tie_splits_equally(self):
+        """Test three identical options get ~33.3% each."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="three-way-split-test",
+            graph=graph,
+            options=[
+                # Three identical interventions -> all ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 3.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 3.0}),
+                InterventionOption(id="opt3", label="Option 3", interventions={"input": 3.0}),
+            ],
+            goal_node_id="output",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # All three should have approximately 33.3% win probability
+        for result in response.results:
+            assert result.win_probability == pytest.approx(1/3, abs=0.01)
+
+        # Sum should equal 1.0
+        total = sum(r.win_probability for r in response.results)
+        assert total == pytest.approx(1.0, abs=0.001)
+
+
+# =============================================================================
+# Test Tie Rate in Metadata/Diagnostics
+# =============================================================================
+
+
+class TestTieRateInMetadata:
+    """Test that tie_rate and tie_count are included in metadata."""
+
+    def test_tie_rate_in_metadata_high_ties(self):
+        """Test tie_rate is present in metadata with high tie scenario."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="tie-rate-metadata-test",
+            graph=graph,
+            options=[
+                # Identical -> 100% ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 1.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Check metadata has tie_rate and tie_count
+        assert response.metadata.tie_count is not None
+        assert response.metadata.tie_rate is not None
+
+        # Should be 100% ties
+        assert response.metadata.tie_count == 100
+        assert response.metadata.tie_rate == pytest.approx(1.0, abs=0.01)
+
+    def test_tie_rate_in_metadata_no_ties(self):
+        """Test tie_rate is present in metadata with no ties."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="no-tie-metadata-test",
+            graph=graph,
+            options=[
+                # Very different values -> no ties
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 100.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Check metadata has tie_rate and tie_count
+        assert response.metadata.tie_count is not None
+        assert response.metadata.tie_rate is not None
+
+        # Should be 0% ties (or very close)
+        assert response.metadata.tie_count == 0
+        assert response.metadata.tie_rate == 0.0
+
+    def test_tie_rate_serializes_in_response(self):
+        """Test tie_rate appears in JSON serialization."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="tie-rate-json-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"input": 1.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Convert to dict/JSON
+        response_dict = response.model_dump(by_alias=True)
+
+        # Check _metadata contains tie fields
+        assert "_metadata" in response_dict
+        assert "tie_rate" in response_dict["_metadata"]
+        assert "tie_count" in response_dict["_metadata"]
+
+
+class TestOptionIdPreservation:
+    """Test that ISL echoes original option IDs from request to response.
+
+    This is critical for upstream systems (like PLoT) to match results
+    to their original options.
+    """
+
+    def test_custom_option_ids_are_echoed_in_response(self):
+        """Test that custom option IDs like 'increase_pro_price_to_59' are preserved.
+
+        ISL must echo the exact option ID from the request in the response.
+        This is standard API behavior - identifiers provided by the caller
+        must be returned unchanged.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="price", kind="factor", label="Price"),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        # Use realistic option IDs like PLoT would send
+        custom_option_ids = [
+            "increase_pro_price_to_59",
+            "maintain_current_price_49",
+            "reduce_price_to_39",
+        ]
+
+        request = RobustnessRequestV2(
+            request_id="option-id-preservation-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id=custom_option_ids[0],
+                    label="Increase Pro Price to £59",
+                    interventions={"price": 59.0},
+                ),
+                InterventionOption(
+                    id=custom_option_ids[1],
+                    label="Maintain Current Price £49",
+                    interventions={"price": 49.0},
+                ),
+                InterventionOption(
+                    id=custom_option_ids[2],
+                    label="Reduce Price to £39",
+                    interventions={"price": 39.0},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Verify all original option IDs appear in the response
+        response_option_ids = {r.option_id for r in response.results}
+        expected_option_ids = set(custom_option_ids)
+
+        assert response_option_ids == expected_option_ids, (
+            f"Option IDs not preserved. "
+            f"Expected: {expected_option_ids}, Got: {response_option_ids}"
+        )
+
+        # Verify we can look up each result by its original ID
+        for original_id in custom_option_ids:
+            result = next(
+                (r for r in response.results if r.option_id == original_id),
+                None
+            )
+            assert result is not None, (
+                f"Could not find result for option ID '{original_id}'"
+            )
+
+        # Verify recommended_option_id is also one of the original IDs
+        assert response.recommended_option_id in custom_option_ids, (
+            f"recommended_option_id '{response.recommended_option_id}' "
+            f"is not one of the original option IDs: {custom_option_ids}"
+        )
+
+    def test_option_ids_with_special_characters(self):
+        """Test that option IDs with hyphens, underscores, colons are preserved."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        # Option IDs with various allowed characters
+        special_ids = [
+            "option-with-hyphens",
+            "option_with_underscores",
+            "option:with:colons",
+            "mixed-option_id:123",
+        ]
+
+        request = RobustnessRequestV2(
+            request_id="special-chars-test",
+            graph=graph,
+            options=[
+                InterventionOption(id=sid, label=f"Label {i}", interventions={"input": float(i)})
+                for i, sid in enumerate(special_ids)
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        response_option_ids = {r.option_id for r in response.results}
+        assert response_option_ids == set(special_ids), (
+            f"Special character option IDs not preserved. "
+            f"Expected: {set(special_ids)}, Got: {response_option_ids}"
+        )
+
+
+# =============================================================================
+# Test Edge Cases: Cycles, Empty Graphs, Extreme Values (High-Risk Coverage)
+# =============================================================================
+
+
+class TestCyclicGraphHandling:
+    """Test behavior when graph contains cycles."""
+
+    def test_cyclic_graph_logs_warning_and_continues(self, caplog):
+        """Test that cyclic graphs log a warning but analysis continues."""
+        # Create a graph with a cycle: A -> B -> C -> A
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="node_a", kind="factor", label="Node A", observed_state=ObservedState(value=10.0)),
+                NodeV2(id="node_b", kind="factor", label="Node B"),
+                NodeV2(id="node_c", kind="outcome", label="Node C"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "node_a", "to": "node_b"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "node_b", "to": "node_c"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "node_c", "to": "node_a"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="cycle-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={"node_a": 5.0}),
+                InterventionOption(id="opt2", label="Option 2", interventions={"node_a": 15.0}),
+            ],
+            goal_node_id="node_c",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        with caplog.at_level(logging.WARNING):
+            response = analyzer.analyze(request)
+
+        # Should have logged a warning about cycles
+        cycle_warnings = [r for r in caplog.records if "cycle" in r.message.lower()]
+        assert len(cycle_warnings) > 0, "Expected warning about graph cycles"
+
+        # Analysis should still complete (graceful degradation)
+        assert response is not None
+        assert len(response.results) == 2
+
+
+class TestAllEdgesFilteredScenario:
+    """Test behavior when all edges are filtered out."""
+
+    def test_all_non_inference_nodes_filtered(self, caplog):
+        """Test analysis when all nodes are non-inference types."""
+        # Graph with only decision/option/constraint nodes (all should be filtered)
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="decision1", kind="decision", label="Decision 1"),
+                NodeV2(id="option1", kind="option", label="Option 1"),
+                NodeV2(id="outcome", kind="outcome", label="Outcome"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "decision1", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "option1", "to": "outcome"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="all-filtered-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"outcome": 10.0}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"outcome": 20.0}),
+            ],
+            goal_node_id="outcome",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        with caplog.at_level(logging.WARNING):
+            response = analyzer.analyze(request)
+
+        # Should have logged a warning about filtering
+        filter_warnings = [
+            r for r in caplog.records
+            if "robustness_v2_filtered_non_inference_nodes" in r.message
+        ]
+        assert len(filter_warnings) > 0, "Expected warning about filtered nodes"
+
+        # Analysis should still complete
+        assert response is not None
+        assert len(response.results) == 2
+
+    def test_graph_with_no_path_to_goal(self):
+        """Test analysis when interventions have no path to goal node."""
+        # Graph where intervention node is disconnected from goal
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="isolated", kind="factor", label="Isolated"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+                # No edge from isolated to anywhere meaningful
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="no-path-test",
+            graph=graph,
+            options=[
+                # Intervene on isolated node (no path to goal)
+                InterventionOption(id="opt1", label="Opt 1", interventions={"isolated": 100.0}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"isolated": 200.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Both options should have identical outcomes (intervention has no effect)
+        assert response is not None
+        outcomes = [r.outcome_distribution.mean for r in response.results]
+        assert abs(outcomes[0] - outcomes[1]) < 0.01, "Outcomes should be nearly identical"
+
+
+class TestExtremeNumericalValues:
+    """Test numerical stability with extreme values."""
+
+    @pytest.mark.parametrize("scale", [0.01, 0.1, 10.0, 100.0, 1000.0])
+    def test_extreme_edge_strength_scales(self, scale):
+        """Test analysis with varying edge strength scales."""
+        # Note: std must be > 0.001 per schema v2.6 D.4
+        std_value = max(scale * 0.1, 0.0011)  # Ensure std > 0.001
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=1.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=scale, std=std_value),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id=f"scale-{scale}-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"input": 1.0}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"input": 2.0}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete without NaN/Inf
+        assert response is not None
+        for result in response.results:
+            assert not np.isnan(result.outcome_distribution.mean), f"NaN mean at scale {scale}"
+            assert not np.isinf(result.outcome_distribution.mean), f"Inf mean at scale {scale}"
+            assert not np.isnan(result.outcome_distribution.std), f"NaN std at scale {scale}"
+            assert not np.isinf(result.outcome_distribution.std), f"Inf std at scale {scale}"
+
+    def test_extreme_intervention_values(self):
+        """Test analysis with very large intervention values."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="extreme-intervention-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"input": 1e10}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"input": 1e-10}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete without NaN/Inf
+        assert response is not None
+        for result in response.results:
+            assert np.isfinite(result.outcome_distribution.mean)
+            assert np.isfinite(result.outcome_distribution.std)
+
+    def test_mixed_scale_graph(self):
+        """Test graph with nodes at vastly different scales."""
+        # Note: std must be > 0.001 per schema v2.6 D.4
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="tiny", kind="factor", label="Tiny", observed_state=ObservedState(value=0.001)),
+                NodeV2(id="huge", kind="factor", label="Huge", observed_state=ObservedState(value=1000.0)),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "tiny", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1000.0, std=100.0),  # Scale up tiny
+                ),
+                EdgeV2(
+                    **{"from": "huge", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.001, std=0.0011),  # Scale down huge (min std)
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="mixed-scale-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={"tiny": 1e-8}),
+                InterventionOption(id="opt2", label="Opt 2", interventions={"huge": 1e8}),
+            ],
+            goal_node_id="output",
+            n_samples=100,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Analysis should complete without numerical issues
+        assert response is not None
+        for result in response.results:
+            assert np.isfinite(result.outcome_distribution.mean)
+            assert np.isfinite(result.outcome_distribution.std)
