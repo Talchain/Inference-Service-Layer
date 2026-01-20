@@ -6209,11 +6209,18 @@
         "description": "Factor sensitivity for drivers analysis.",
         "properties": {
           "confidence": {
-            "description": "Confidence level",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Confidence",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Confidence level (omitted when not computed)",
+            "title": "Confidence"
           },
           "direction": {
             "description": "Direction of effect",
@@ -6223,6 +6230,31 @@
             ],
             "title": "Direction",
             "type": "string"
+          },
+          "importance_rank": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rank by importance (1 = most important)",
+            "title": "Importance Rank"
+          },
+          "interpretation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable explanation of sensitivity",
+            "title": "Interpretation"
           },
           "label": {
             "anyOf": [
@@ -6241,6 +6273,18 @@
             "title": "Node Id",
             "type": "string"
           },
+          "observed_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Factor's current value used in calculation",
+            "title": "Observed Value"
+          },
           "sensitivity_score": {
             "description": "Sensitivity score",
             "title": "Sensitivity Score",
@@ -6250,8 +6294,7 @@
         "required": [
           "node_id",
           "sensitivity_score",
-          "direction",
-          "confidence"
+          "direction"
         ],
         "title": "FactorSensitivityV2",
         "type": "object"
@@ -15380,8 +15423,8 @@
             "type": "number"
           },
           "std": {
-            "description": "Standard deviation of effect size",
-            "exclusiveMinimum": 0.0,
+            "description": "Standard deviation of effect size (must be > 0.001)",
+            "exclusiveMinimum": 0.001,
             "title": "Std",
             "type": "number"
           }
