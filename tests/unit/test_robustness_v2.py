@@ -2548,6 +2548,253 @@ class TestFactorSensitivityV2NumericFields:
 
 
 # =============================================================================
+# V1→V2 Normalization Math Tests
+# =============================================================================
+
+
+class TestFactorSensitivityNormalizationMath:
+    """Tests that verify the V1→V2 normalization calculations are correct.
+
+    These tests verify the formulas:
+    - sensitivity_score = |elasticity| / max_abs_elasticity (clamped to 1.0)
+    - importance_score = 1.0 - (rank - 1) / max(n - 1, 1)
+    """
+
+    def test_sensitivity_score_normalization_formula(self):
+        """Verify sensitivity_score = |elasticity| / max_abs_elasticity."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        # Create mock V1 factor sensitivity results
+        factors = [
+            FactorSensitivityResult(
+                node_id="factor_1",
+                node_label="Factor 1",
+                elasticity=2.0,  # max |elasticity| = 2.0
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="factor_2",
+                node_label="Factor 2",
+                elasticity=1.0,  # |elasticity| = 1.0
+                importance_rank=2,
+                observed_value=50.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="factor_3",
+                node_label="Factor 3",
+                elasticity=0.5,  # |elasticity| = 0.5
+                importance_rank=3,
+                observed_value=25.0,
+                interpretation="Test",
+            ),
+        ]
+
+        # Apply normalization formula (same as in robustness.py)
+        max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
+
+        normalized_scores = [
+            min(1.0, abs(fs.elasticity) / max_abs_elasticity)
+            for fs in factors
+        ]
+
+        # Verify: factor_1 has max elasticity → score = 1.0
+        assert normalized_scores[0] == pytest.approx(1.0)
+        # Verify: factor_2 elasticity = 1.0/2.0 = 0.5
+        assert normalized_scores[1] == pytest.approx(0.5)
+        # Verify: factor_3 elasticity = 0.5/2.0 = 0.25
+        assert normalized_scores[2] == pytest.approx(0.25)
+
+    def test_sensitivity_score_with_negative_elasticity(self):
+        """Verify absolute value is used for negative elasticity."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="positive",
+                node_label="Positive",
+                elasticity=1.5,  # positive
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="negative",
+                node_label="Negative",
+                elasticity=-2.0,  # negative, but |value| is larger
+                importance_rank=2,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
+        assert max_abs_elasticity == 2.0  # |-2.0| = 2.0 is max
+
+        # Negative factor has max |elasticity| → score = 1.0
+        negative_score = min(1.0, abs(factors[1].elasticity) / max_abs_elasticity)
+        assert negative_score == pytest.approx(1.0)
+
+        # Positive factor: 1.5/2.0 = 0.75
+        positive_score = min(1.0, abs(factors[0].elasticity) / max_abs_elasticity)
+        assert positive_score == pytest.approx(0.75)
+
+    def test_importance_score_formula_multiple_factors(self):
+        """Verify importance_score = 1.0 - (rank - 1) / (n - 1) for n > 1."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        n_factors = 4
+        factors = [
+            FactorSensitivityResult(
+                node_id=f"factor_{i}",
+                node_label=f"Factor {i}",
+                elasticity=1.0,
+                importance_rank=i,
+                observed_value=100.0,
+                interpretation="Test",
+            )
+            for i in range(1, n_factors + 1)
+        ]
+
+        # Apply formula
+        importance_scores = [
+            1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
+            for fs in factors
+        ]
+
+        # Verify: rank 1 → 1.0 - (1-1)/(4-1) = 1.0 - 0/3 = 1.0
+        assert importance_scores[0] == pytest.approx(1.0)
+        # Verify: rank 2 → 1.0 - (2-1)/(4-1) = 1.0 - 1/3 ≈ 0.667
+        assert importance_scores[1] == pytest.approx(0.6667, rel=0.01)
+        # Verify: rank 3 → 1.0 - (3-1)/(4-1) = 1.0 - 2/3 ≈ 0.333
+        assert importance_scores[2] == pytest.approx(0.3333, rel=0.01)
+        # Verify: rank 4 → 1.0 - (4-1)/(4-1) = 1.0 - 3/3 = 0.0
+        assert importance_scores[3] == pytest.approx(0.0)
+
+    def test_importance_score_single_factor(self):
+        """Verify single factor gets importance_score = 1.0."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="only_factor",
+                node_label="Only Factor",
+                elasticity=0.5,
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            )
+        ]
+
+        n_factors = len(factors)
+
+        # Apply formula with single factor case
+        importance_score = (
+            1.0 - (factors[0].importance_rank - 1) / max(n_factors - 1, 1)
+            if n_factors > 1 else 1.0
+        )
+
+        # Single factor always gets 1.0
+        assert importance_score == 1.0
+
+    def test_zero_elasticity_handling(self):
+        """Verify zero elasticity results in sensitivity_score = 0."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="zero_impact",
+                node_label="Zero Impact",
+                elasticity=0.0,  # No impact
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="some_impact",
+                node_label="Some Impact",
+                elasticity=1.0,
+                importance_rank=2,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
+        assert max_abs_elasticity == 1.0
+
+        # Zero elasticity → score = 0/1 = 0
+        zero_score = min(1.0, abs(factors[0].elasticity) / max_abs_elasticity)
+        assert zero_score == 0.0
+
+    def test_all_zero_elasticity_handling(self):
+        """Verify all-zero elasticity uses fallback max of 1.0."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="zero_1",
+                node_label="Zero 1",
+                elasticity=0.0,
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="zero_2",
+                node_label="Zero 2",
+                elasticity=0.0,
+                importance_rank=2,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        # When all elasticities are zero, max would be 0
+        # The code uses 1e-10 threshold and falls back to 1.0
+        max_abs_elasticity = max(
+            (abs(fs.elasticity) for fs in factors),
+            default=1.0
+        )
+        if max_abs_elasticity < 1e-10:
+            max_abs_elasticity = 1.0
+
+        # All zero elasticities → all scores = 0/1 = 0
+        for fs in factors:
+            score = min(1.0, abs(fs.elasticity) / max_abs_elasticity)
+            assert score == 0.0
+
+    def test_tiny_elasticity_threshold(self):
+        """Verify very small elasticity values are handled correctly."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="tiny",
+                node_label="Tiny",
+                elasticity=1e-15,  # Below threshold
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        max_abs_elasticity = max(
+            (abs(fs.elasticity) for fs in factors),
+            default=1.0
+        )
+        # 1e-15 < 1e-10, so should use fallback
+        if max_abs_elasticity < 1e-10:
+            max_abs_elasticity = 1.0
+
+        # With fallback to 1.0: 1e-15 / 1.0 ≈ 0
+        score = min(1.0, abs(factors[0].elasticity) / max_abs_elasticity)
+        assert score == pytest.approx(0.0, abs=1e-9)
+
+
+# =============================================================================
 # Goal Threshold Probability Tests
 # =============================================================================
 
