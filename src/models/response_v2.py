@@ -273,7 +273,15 @@ class FactorSensitivityV2(BaseModel):
 
     node_id: str = Field(..., description="Factor node ID")
     label: Optional[str] = Field(None, description="Human-readable node label")
-    sensitivity_score: float = Field(..., description="Sensitivity score")
+    sensitivity_score: float = Field(
+        ..., ge=0, le=1, description="Normalized sensitivity score (0-1, higher = more sensitive)"
+    )
+    importance_score: Optional[float] = Field(
+        None, ge=0, le=1, description="Relative importance (0-1, higher = more important)"
+    )
+    elasticity: Optional[float] = Field(
+        None, description="Raw elasticity: % change in outcome per % change in factor"
+    )
     direction: Literal["positive", "negative"] = Field(
         ..., description="Direction of effect"
     )

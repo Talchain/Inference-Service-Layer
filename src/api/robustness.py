@@ -564,14 +564,32 @@ async def _analyze_robustness_v2_enhanced(
                 recommendation_stability=v1_response.robustness.recommendation_stability,
             )
 
-        # Convert factor sensitivity
+        # Convert factor sensitivity with normalized scores
         factor_sensitivity = None
         if v1_response.factor_sensitivity:
+            # Compute max absolute elasticity for normalization
+            max_abs_elasticity = max(
+                (abs(fs.elasticity) for fs in v1_response.factor_sensitivity),
+                default=1.0
+            )
+            # Avoid division by zero
+            if max_abs_elasticity < 1e-10:
+                max_abs_elasticity = 1.0
+
+            n_factors = len(v1_response.factor_sensitivity)
+
             factor_sensitivity = [
                 FactorSensitivityV2(
                     node_id=fs.node_id,
                     label=fs.node_label,
-                    sensitivity_score=fs.elasticity,
+                    # Normalize to 0-1: relative to max sensitivity in this analysis
+                    sensitivity_score=min(1.0, abs(fs.elasticity) / max_abs_elasticity),
+                    # importance_score: 1.0 for rank 1, decreasing linearly
+                    importance_score=(
+                        1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
+                        if n_factors > 1 else 1.0
+                    ),
+                    elasticity=fs.elasticity,  # Preserve raw elasticity
                     direction="positive" if fs.elasticity > 0 else "negative",
                     importance_rank=fs.importance_rank,
                     observed_value=fs.observed_value,
