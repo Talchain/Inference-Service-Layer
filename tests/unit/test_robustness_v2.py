@@ -4703,6 +4703,93 @@ class TestZeroReasonClassification:
         assert fs.elasticity == 0.0
         assert fs.zero_reason == ZeroSensitivityReason.POINT_MASS
 
+    def test_intervention_factor_has_intervention_override_reason(self):
+        """Factor that is an intervention target should have INTERVENTION_OVERRIDE zero_reason."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="intervention-override-test",
+            graph=graph,
+            options=[
+                # This option sets factor1 via intervention, overriding its natural value
+                InterventionOption(id="opt1", label="Opt 1", interventions={"factor1": 1.0}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        from src.models.response_v2 import ZeroSensitivityReason
+        # Since factor1 is overridden by intervention, sensitivity should be ~0
+        # and zero_reason should be INTERVENTION_OVERRIDE
+        assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
+
+    def test_zero_delta_factor_has_zero_delta_reason(self):
+        """Factor with std ≈ 0 (delta < 1e-10) should have ZERO_DELTA zero_reason."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-delta-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                # std is effectively zero, so delta will be < 1e-10
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=1e-15),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        from src.models.response_v2 import ZeroSensitivityReason
+        assert fs.elasticity == 0.0
+        assert fs.zero_reason == ZeroSensitivityReason.ZERO_DELTA
+
 
 class TestFactorSensitivityFieldSerialization:
     """Tests for factor sensitivity field serialization."""

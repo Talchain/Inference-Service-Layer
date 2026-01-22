@@ -1191,6 +1191,11 @@ class RobustnessAnalyzerV2:
         ref_option = request.options[0]
         baseline_mean = np.mean(baseline_outcomes[ref_option.id])
 
+        # Build set of intervention factor IDs for INTERVENTION_OVERRIDE detection
+        intervention_factor_ids = (
+            set(ref_option.interventions.keys()) if ref_option.interventions else set()
+        )
+
         # Diagnostic: log baseline
         self.logger.info(
             "factor_sensitivity_baseline",
@@ -1282,10 +1287,20 @@ class RobustnessAnalyzerV2:
             elasticity_display = max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, elasticity))
 
             # Determine zero_reason if elasticity is effectively zero
+            # Priority order: INTERVENTION_OVERRIDE > ZERO_DELTA > ZERO_OUTCOME_DIFF > BASELINE_NORMALISED
+            # (DISCONNECTED and POINT_MASS are handled elsewhere)
             zero_reason = None
             if abs(elasticity) < 1e-10:
-                if abs(outcome_diff) < 1e-10:
+                # Check if factor is overridden by intervention (highest priority)
+                if uncertainty.node_id in intervention_factor_ids:
+                    zero_reason = ZeroSensitivityReason.INTERVENTION_OVERRIDE
+                # Check if delta is too small to perturb meaningfully
+                elif abs(delta) < 1e-10:
+                    zero_reason = ZeroSensitivityReason.ZERO_DELTA
+                # Check if perturbation didn't affect outcome
+                elif abs(outcome_diff) < 1e-10:
                     zero_reason = ZeroSensitivityReason.ZERO_OUTCOME_DIFF
+                # Check if epsilon denominator was applied
                 elif baseline_near_zero:
                     zero_reason = ZeroSensitivityReason.BASELINE_NORMALISED
                 else:
