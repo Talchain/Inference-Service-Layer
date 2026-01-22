@@ -39,6 +39,22 @@ class SensitivityType(str, Enum):
     MAGNITUDE = "magnitude"
 
 
+class ZeroSensitivityReason(str, Enum):
+    """
+    Explains why a sensitivity score is zero (debug-only field).
+
+    Used to distinguish between:
+    - Legitimate zero sensitivity (factor truly has no impact)
+    - Computational artifacts (near-zero values, intervention overrides)
+    """
+    ZERO_OUTCOME_DIFF = "zero_outcome_diff"      # Perturbation doesn't affect outcome
+    ZERO_DELTA = "zero_delta"                    # std/delta too small to perturb
+    INTERVENTION_OVERRIDE = "intervention_override"  # Intervention dominates factor
+    DISCONNECTED = "disconnected"                # No causal path to goal
+    BASELINE_NORMALISED = "baseline_normalised"  # Epsilon denom applied, still zero
+    POINT_MASS = "point_mass"                    # Distribution has no uncertainty
+
+
 # =============================================================================
 # Core V2 Schema Components
 # =============================================================================
@@ -664,7 +680,11 @@ class FactorSensitivityResult(BaseModel):
     node_label: Optional[str] = Field(None, description="Human-readable node label")
     elasticity: float = Field(
         ...,
-        description="% change in outcome per % change in factor value"
+        description="% change in outcome per % change in factor value (raw, unclamped)"
+    )
+    elasticity_display: Optional[float] = Field(
+        None,
+        description="UI-safe elasticity clamped to [-100, 100] (debug/display only)"
     )
     importance_rank: int = Field(
         ...,
@@ -679,6 +699,15 @@ class FactorSensitivityResult(BaseModel):
         ...,
         description="Human-readable explanation"
     )
+    # Debug-only fields (not part of product contract)
+    zero_reason: Optional[ZeroSensitivityReason] = Field(
+        None,
+        description="Debug: explains why sensitivity is zero (only present when elasticity ≈ 0)"
+    )
+    baseline_near_zero: Optional[bool] = Field(
+        None,
+        description="Debug: True if epsilon denominator was applied due to near-zero baseline"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -686,6 +715,7 @@ class FactorSensitivityResult(BaseModel):
                 "node_id": "marketing_spend",
                 "node_label": "Marketing Spend",
                 "elasticity": 0.32,
+                "elasticity_display": 0.32,
                 "importance_rank": 2,
                 "observed_value": 50000.0,
                 "interpretation": "Decision is moderately sensitive to marketing_spend value"

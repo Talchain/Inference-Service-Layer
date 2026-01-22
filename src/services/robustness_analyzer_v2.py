@@ -36,6 +36,7 @@ from src.models.robustness_v2 import (
     RobustnessResponseV2,
     RobustnessResult,
     SensitivityResult,
+    ZeroSensitivityReason,
 )
 from src.constants import (
     ELASTICITY_CLAMP_MAX,
@@ -1143,6 +1144,32 @@ class RobustnessAnalyzerV2:
         For each factor with uncertainty specified, measures how much
         the outcome changes when the factor value is varied by ±1 std
         (or ±10% of range for uniform distributions).
+
+        Intervention vs Non-Intervention Factor Behavior
+        ------------------------------------------------
+        This function computes sensitivity for NON-INTERVENTION factors only
+        (contextual variables like market conditions, user attributes, etc.).
+
+        - **Non-intervention factors**: Variables that affect the outcome but
+          are not directly controlled by the decision options. Sensitivity
+          reflects how much uncertainty in these factors affects the decision.
+
+        - **Intervention factors**: Variables set by options (e.g., marketing
+          spend, pricing). These are NOT included in parameter_uncertainties
+          because their values are determined by the option, not estimated.
+
+        If a factor that is also an intervention target appears in
+        parameter_uncertainties, its sensitivity may be zero or near-zero
+        because the intervention value overrides the perturbed value.
+        This is expected behavior—use zero_reason="intervention_override"
+        to diagnose such cases.
+
+        Debug Fields
+        ------------
+        - elasticity: Raw (unclamped) value for determinism/audit
+        - elasticity_display: Clamped to [-100, 100] for UI safety
+        - zero_reason: Explains why sensitivity is zero (if applicable)
+        - baseline_near_zero: True if epsilon denominator was applied
         """
         # Diagnostic: log entry point
         self.logger.info(
@@ -1213,8 +1240,11 @@ class RobustnessAnalyzerV2:
                     "node_id": uncertainty.node_id,
                     "node_label": node.label,
                     "elasticity": 0.0,
+                    "elasticity_display": 0.0,
                     "observed_value": observed_value,
                     "interpretation": f"Factor {node.label} has no uncertainty (point mass)",
+                    "zero_reason": ZeroSensitivityReason.POINT_MASS,
+                    "baseline_near_zero": False,
                 })
                 continue
 
@@ -1240,13 +1270,27 @@ class RobustnessAnalyzerV2:
             # Compute true elasticity: (%Δ outcome) / (%Δ factor)
             # Use epsilon-stabilised denominators to handle near-zero baselines
             # (e.g., binary factors 0/1 where observed_state.value = 0)
+            baseline_near_zero = abs(baseline_mean) < FACTOR_SENSITIVITY_BASELINE_EPSILON
             baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
             factor_denom = max(abs(mean_value), FACTOR_SENSITIVITY_VALUE_EPSILON)
 
             pct_outcome_change = outcome_diff / baseline_denom
             pct_factor_change = (2 * delta) / factor_denom
-            raw_elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
-            elasticity = max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, raw_elasticity))
+            # Raw elasticity is canonical (unclamped) for determinism
+            elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            # Display elasticity is clamped for UI safety
+            elasticity_display = max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, elasticity))
+
+            # Determine zero_reason if elasticity is effectively zero
+            zero_reason = None
+            if abs(elasticity) < 1e-10:
+                if abs(outcome_diff) < 1e-10:
+                    zero_reason = ZeroSensitivityReason.ZERO_OUTCOME_DIFF
+                elif baseline_near_zero:
+                    zero_reason = ZeroSensitivityReason.BASELINE_NORMALISED
+                else:
+                    # Computation resulted in zero (rare edge case)
+                    zero_reason = ZeroSensitivityReason.ZERO_OUTCOME_DIFF
 
             # Diagnostic logging for factor sensitivity computation
             self.logger.info(
@@ -1264,7 +1308,10 @@ class RobustnessAnalyzerV2:
                     "factor_denom": factor_denom,
                     "pct_outcome_change": pct_outcome_change,
                     "pct_factor_change": pct_factor_change,
-                    "computed_elasticity": elasticity,
+                    "elasticity": elasticity,
+                    "elasticity_display": elasticity_display,
+                    "zero_reason": zero_reason.value if zero_reason else None,
+                    "baseline_near_zero": baseline_near_zero,
                 },
             )
 
@@ -1272,10 +1319,13 @@ class RobustnessAnalyzerV2:
                 "node_id": uncertainty.node_id,
                 "node_label": node.label,
                 "elasticity": elasticity,
+                "elasticity_display": elasticity_display,
                 "observed_value": observed_value,
                 "interpretation": self._interpret_factor_sensitivity(
                     node.label, elasticity
                 ),
+                "zero_reason": zero_reason,
+                "baseline_near_zero": baseline_near_zero,
             })
 
         # Sort by absolute elasticity
@@ -1289,9 +1339,12 @@ class RobustnessAnalyzerV2:
                     node_id=s["node_id"],
                     node_label=s["node_label"],
                     elasticity=s["elasticity"],
+                    elasticity_display=s.get("elasticity_display"),
                     importance_rank=i + 1,
                     observed_value=s["observed_value"],
                     interpretation=s["interpretation"],
+                    zero_reason=s.get("zero_reason"),
+                    baseline_near_zero=s.get("baseline_near_zero"),
                 )
             )
 
