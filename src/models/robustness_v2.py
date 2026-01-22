@@ -749,6 +749,13 @@ class FragileEdgeEnhanced(BaseModel):
         description="Probability of alternative winner in weak-edge scenarios. "
         "0.0 if same option wins (stable), null only if no data available.",
     )
+    marginal_switch_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Probability of decision flip when ONLY this edge varies "
+        "(all other edges held at baseline). Isolates individual edge contribution.",
+    )
 
 
 class RobustnessResult(BaseModel):

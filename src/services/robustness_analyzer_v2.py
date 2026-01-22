@@ -11,6 +11,7 @@ This enables answering:
 - "If an edge is weaker than modelled, which alternative option would win?"
 """
 
+import hashlib
 import logging
 import time
 import uuid
@@ -57,6 +58,13 @@ logger = logging.getLogger(__name__)
 
 # Safety net: nodes that must not participate in inference
 NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+
+# Edge strength bounds from schema v2.6
+EDGE_STRENGTH_MIN = -1.0
+EDGE_STRENGTH_MAX = 1.0
+
+# Default samples for marginal switch probability calculation
+MARGINAL_K_SAMPLES = 100
 
 
 def filter_inference_graph(graph: GraphV2) -> GraphV2:
@@ -108,6 +116,7 @@ class FragileEdge:
     to_id: str
     alternative_winner_id: Optional[str] = None  # Option that wins when edge is weak
     switch_probability: Optional[float] = None  # P(alternative wins | edge weak)
+    marginal_switch_probability: Optional[float] = None  # P(flip | only this edge varies)
 
 
 # =============================================================================
@@ -639,6 +648,8 @@ class RobustnessAnalyzerV2:
             sensitivity,
             request,
             edge_configs_per_sample,
+            evaluator,
+            seed,
         )
 
         execution_time = int((time.time() - start_time) * 1000)
@@ -1491,6 +1502,8 @@ class RobustnessAnalyzerV2:
         sensitivity: List[SensitivityResult],
         request: RobustnessRequestV2,
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
+        evaluator: SCMEvaluatorV2,
+        global_seed: int,
     ) -> RobustnessResult:
         """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
@@ -1528,12 +1541,15 @@ class RobustnessAnalyzerV2:
         fragile_edges = list(fragile_edge_ids)
         robust_edges = list(robust_edge_ids)
 
-        # Compute alternative winners for fragile edges
+        # Compute alternative winners for fragile edges (includes marginal calculation)
         fragile_edges_enhanced = self._compute_alternative_winners(
             fragile_edge_info,
             edge_configs_per_sample,
             winner_per_sample,
             most_frequent_winner,
+            request,
+            evaluator,
+            global_seed,
         )
 
         # Overall robustness
@@ -1580,26 +1596,53 @@ class RobustnessAnalyzerV2:
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
         winner_per_sample: List[str],
         overall_winner: str,
+        request: Optional[RobustnessRequestV2] = None,
+        evaluator: Optional[SCMEvaluatorV2] = None,
+        global_seed: Optional[int] = None,
     ) -> List[FragileEdgeEnhanced]:
         """
         Compute alternative winners for fragile edges.
 
         For each fragile edge, identifies which option wins most often when
-        the edge is "weak" (bottom 25% of sampled strengths).
+        the edge is "weak" (bottom 25% of sampled strengths). Also computes
+        marginal switch probability (isolated edge contribution) when
+        request, evaluator, and global_seed are provided.
 
         Args:
             fragile_edge_info: Map of edge_id -> (from_id, to_id)
             edge_configs_per_sample: Edge strengths for each MC sample
             winner_per_sample: Winner option ID for each MC sample
             overall_winner: The overall recommended option
+            request: Full robustness request with graph and options (optional)
+            evaluator: SCM evaluator instance (optional)
+            global_seed: Request-level seed for reproducibility (optional)
 
         Returns:
             List of FragileEdgeEnhanced objects with enhanced fragile edge information
         """
+        # Check if marginal calculation is possible
+        can_compute_marginal = (
+            request is not None
+            and evaluator is not None
+            and global_seed is not None
+        )
+
         results = []
 
         for edge_id, (from_id, to_id) in fragile_edge_info.items():
             edge_key = (from_id, to_id)
+
+            # Compute marginal switch probability (isolated edge contribution)
+            # Only computed when all required parameters are provided
+            # Note: marginal computes its own baseline winner under expected-value config
+            marginal_prob: Optional[float] = None
+            if can_compute_marginal:
+                marginal_prob = self._compute_marginal_switch_probability(
+                    edge_key=edge_key,
+                    request=request,
+                    evaluator=evaluator,
+                    global_seed=global_seed,
+                )
 
             # Collect edge strengths across all samples
             strengths = [
@@ -1607,13 +1650,14 @@ class RobustnessAnalyzerV2:
             ]
 
             if not strengths:
-                # No data for this edge
+                # No data for this edge (joint sampling unavailable)
                 results.append(FragileEdgeEnhanced(
                     edge_id=edge_id,
                     from_id=from_id,
                     to_id=to_id,
                     alternative_winner_id=None,
                     switch_probability=None,
+                    marginal_switch_probability=marginal_prob,
                 ))
                 continue
 
@@ -1633,6 +1677,7 @@ class RobustnessAnalyzerV2:
                     to_id=to_id,
                     alternative_winner_id=None,
                     switch_probability=None,
+                    marginal_switch_probability=marginal_prob,
                 ))
                 continue
 
@@ -1676,6 +1721,116 @@ class RobustnessAnalyzerV2:
                 to_id=to_id,
                 alternative_winner_id=alternative_winner_id,
                 switch_probability=switch_probability,
+                marginal_switch_probability=marginal_prob,
             ))
 
         return results
+
+    def _compute_marginal_switch_probability(
+        self,
+        edge_key: Tuple[str, str],
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        global_seed: int,
+        k_samples: int = MARGINAL_K_SAMPLES,
+    ) -> float:
+        """Compute probability of decision flip when ONLY this edge varies.
+
+        Samples this edge K times from its uncertainty distribution while holding
+        all other edges at their expected values (mean * exists_probability).
+        Returns fraction of samples where the winner changes.
+
+        Baseline semantics:
+        - Other edges: held at expected value (mean * exists_probability)
+        - Target edge: samples BOTH existence (Bernoulli) AND strength (Normal)
+        - Baseline winner: computed under the same baseline config (not MC overall_winner)
+
+        This ensures the marginal calculation is self-consistent: we compare
+        sampled outcomes against the winner under the same baseline assumptions.
+
+        Args:
+            edge_key: (from_id, to_id) tuple
+            request: Full robustness request with graph and options
+            evaluator: SCM evaluator instance
+            global_seed: Request-level seed for reproducibility
+            k_samples: Number of samples (default 100)
+
+        Returns:
+            Probability in [0.0, 1.0] that this edge alone flips the recommendation
+        """
+        from_id, to_id = edge_key
+
+        # Deterministic seed: SHA256 (process-safe, NOT Python hash())
+        edge_seed_str = f"{global_seed}:{from_id}->{to_id}"
+        edge_seed = int(hashlib.sha256(edge_seed_str.encode()).hexdigest()[:8], 16)
+        rng = np.random.default_rng(edge_seed)
+
+        # Get target edge's parameters
+        edge = next(
+            (e for e in request.graph.edges if (e.from_, e.to) == edge_key),
+            None
+        )
+        if edge is None:
+            self.logger.warning(
+                "marginal_switch_edge_not_found",
+                extra={"edge_key": f"{from_id}->{to_id}"},
+            )
+            return 0.0
+
+        # Build baseline config: all edges at expected value (mean * exists_probability)
+        # This is consistent with how existence is a sampling gate in the rest of the system
+        baseline_config = {
+            (e.from_, e.to): e.strength.mean * e.exists_probability
+            for e in request.graph.edges
+        }
+
+        # Compute baseline winner under this config (not overall_winner from MC)
+        # This ensures we compare against the correct reference point
+        baseline_outcomes = {}
+        for option in request.options:
+            baseline_outcomes[option.id] = evaluator.evaluate(
+                edge_strengths=baseline_config,
+                interventions=option.interventions,
+                goal_node=request.goal_node_id,
+            )
+        # Deterministic tie-breaking for baseline winner
+        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
+        marginal_baseline_winner = sorted_baseline[0][0]
+
+        flip_count = 0
+
+        for _ in range(k_samples):
+            # Sample existence (Bernoulli)
+            exists = rng.random() < edge.exists_probability
+
+            if not exists:
+                # Edge doesn't exist in this sample → effective strength is 0
+                sampled_strength = 0.0
+            else:
+                # Sample strength from Normal(mean, std), clamped to schema bounds
+                sampled_strength = rng.normal(edge.strength.mean, edge.strength.std)
+                sampled_strength = np.clip(
+                    sampled_strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX
+                )
+
+            # Build counterfactual config: this edge sampled, others at baseline
+            counterfactual_config = baseline_config.copy()
+            counterfactual_config[edge_key] = sampled_strength
+
+            # Evaluate all options under counterfactual
+            outcomes = {}
+            for option in request.options:
+                outcomes[option.id] = evaluator.evaluate(
+                    edge_strengths=counterfactual_config,
+                    interventions=option.interventions,
+                    goal_node=request.goal_node_id,
+                )
+
+            # Determine winner with deterministic tie-breaking (sort by option_id)
+            sorted_options = sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))
+            sample_winner = sorted_options[0][0]
+
+            if sample_winner != marginal_baseline_winner:
+                flip_count += 1
+
+        return flip_count / k_samples

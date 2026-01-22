@@ -547,6 +547,7 @@ async def _analyze_robustness_v2_enhanced(
                         to_id=fe.to_id,
                         alternative_winner_id=fe.alternative_winner_id,
                         switch_probability=fe.switch_probability,
+                        marginal_switch_probability=fe.marginal_switch_probability,
                     )
                     for fe in v1_response.robustness.fragile_edges_enhanced
                 ]
