@@ -2795,6 +2795,152 @@ class TestFactorSensitivityNormalizationMath:
 
 
 # =============================================================================
+# Zero-Baseline Factor Sensitivity Tests
+# =============================================================================
+
+
+class TestZeroBaselineFactorSensitivity:
+    """Tests for factor sensitivity when observed_state.value = 0.
+
+    This covers the case of binary factors (0/1) where the baseline is zero,
+    which previously caused elasticity to be forced to 0.0 due to division issues.
+    """
+
+    def test_binary_factor_with_zero_baseline_has_nonzero_sensitivity(self):
+        """Verify binary factor at 0 still produces meaningful sensitivity."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="binary_factor",
+                    kind="factor",
+                    label="Binary Factor (0/1)",
+                    observed_state=ObservedState(value=0.0),  # Zero baseline!
+                ),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "binary_factor", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-baseline-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(
+                    node_id="binary_factor",
+                    distribution="normal",
+                    std=0.3,  # Typical for binary factor
+                ),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should have factor sensitivity computed
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Key assertion: elasticity should NOT be zero despite zero baseline
+        # The epsilon-stabilised denominator should produce a meaningful value
+        assert fs.elasticity != 0.0, (
+            "Binary factor with observed_state.value=0 should have non-zero elasticity"
+        )
+
+        # Should have interpretation (not just "robust" due to zero elasticity)
+        assert fs.interpretation is not None
+
+    def test_multiple_zero_baseline_factors_ranked_correctly(self):
+        """Verify multiple zero-baseline factors are ranked by sensitivity."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="high_impact",
+                    kind="factor",
+                    label="High Impact",
+                    observed_state=ObservedState(value=0.0),
+                ),
+                NodeV2(
+                    id="low_impact",
+                    kind="factor",
+                    label="Low Impact",
+                    observed_state=ObservedState(value=0.0),
+                ),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "high_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.1),  # Strong effect
+                ),
+                EdgeV2(
+                    **{"from": "low_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),  # Weaker effect
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="multi-zero-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="high_impact", distribution="normal", std=0.3),
+                ParameterUncertainty(node_id="low_impact", distribution="normal", std=0.3),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 2
+
+        # Both should have non-zero elasticity
+        for fs in response.factor_sensitivity:
+            assert fs.elasticity != 0.0
+
+        # High impact factor should have higher absolute elasticity
+        high_impact_fs = next(
+            fs for fs in response.factor_sensitivity if fs.node_id == "high_impact"
+        )
+        low_impact_fs = next(
+            fs for fs in response.factor_sensitivity if fs.node_id == "low_impact"
+        )
+
+        assert abs(high_impact_fs.elasticity) > abs(low_impact_fs.elasticity), (
+            "Higher edge strength should result in higher elasticity"
+        )
+
+        # High impact should be ranked first (importance_rank=1)
+        assert high_impact_fs.importance_rank == 1
+        assert low_impact_fs.importance_rank == 2
+
+
+# =============================================================================
 # Goal Threshold Probability Tests
 # =============================================================================
 

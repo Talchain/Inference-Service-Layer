@@ -37,7 +37,11 @@ from src.models.robustness_v2 import (
     RobustnessResult,
     SensitivityResult,
 )
-from src.constants import ZERO_VARIANCE_TOLERANCE
+from src.constants import (
+    FACTOR_SENSITIVITY_BASELINE_EPSILON,
+    FACTOR_SENSITIVITY_VALUE_EPSILON,
+    ZERO_VARIANCE_TOLERANCE,
+)
 from src.models.critique import (
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
@@ -1208,12 +1212,14 @@ class RobustnessAnalyzerV2:
             outcome_diff = outcome_high - outcome_low
 
             # Compute true elasticity: (%Δ outcome) / (%Δ factor)
-            if abs(baseline_mean) < 1e-10:
-                elasticity = 0.0
-            else:
-                pct_outcome_change = outcome_diff / baseline_mean
-                pct_factor_change = (2 * delta) / mean_value if abs(mean_value) > 1e-10 else 1.0
-                elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            # Use epsilon-stabilised denominators to handle near-zero baselines
+            # (e.g., binary factors 0/1 where observed_state.value = 0)
+            baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
+            factor_denom = max(abs(mean_value), FACTOR_SENSITIVITY_VALUE_EPSILON)
+
+            pct_outcome_change = outcome_diff / baseline_denom
+            pct_factor_change = (2 * delta) / factor_denom
+            elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
 
             sensitivities.append({
                 "node_id": uncertainty.node_id,
