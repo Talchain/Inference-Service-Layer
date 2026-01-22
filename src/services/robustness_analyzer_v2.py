@@ -38,6 +38,7 @@ from src.models.robustness_v2 import (
     SensitivityResult,
 )
 from src.constants import (
+    ELASTICITY_CLAMP_MAX,
     FACTOR_SENSITIVITY_BASELINE_EPSILON,
     FACTOR_SENSITIVITY_VALUE_EPSILON,
     ZERO_VARIANCE_TOLERANCE,
@@ -978,11 +979,12 @@ class RobustnessAnalyzerV2:
         mean_off = np.mean(outcomes_off)
         outcome_diff = mean_on - mean_off
 
-        if abs(baseline_mean) < 1e-10:
-            return 0.0
+        # Use epsilon-stabilised denominator to handle near-zero baselines
+        baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
 
         # Elasticity: relative change in outcome for existence change (0 -> 1)
-        return (outcome_diff / baseline_mean) if baseline_mean != 0 else 0.0
+        raw_elasticity = outcome_diff / baseline_denom
+        return max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, raw_elasticity))
 
     def _compute_magnitude_sensitivity(
         self,
@@ -1031,11 +1033,12 @@ class RobustnessAnalyzerV2:
         mean_low = np.mean(outcomes_low)
         outcome_diff = mean_high - mean_low
 
-        if abs(baseline_mean) < 1e-10:
-            return 0.0
+        # Use epsilon-stabilised denominator to handle near-zero baselines
+        baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
 
         # Normalize by 2*std range
-        return (outcome_diff / baseline_mean) / 2.0 if baseline_mean != 0 else 0.0
+        raw_elasticity = (outcome_diff / baseline_denom) / 2.0
+        return max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, raw_elasticity))
 
     def _sample_with_forced_existence(
         self,
@@ -1242,7 +1245,8 @@ class RobustnessAnalyzerV2:
 
             pct_outcome_change = outcome_diff / baseline_denom
             pct_factor_change = (2 * delta) / factor_denom
-            elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            raw_elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            elasticity = max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, raw_elasticity))
 
             # Diagnostic logging for factor sensitivity computation
             self.logger.info(

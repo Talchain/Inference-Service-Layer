@@ -86,3 +86,7 @@ ZERO_VARIANCE_TOLERANCE = 1e-10
 # Note: Values tuned for typical factor scales; may need calibration.
 FACTOR_SENSITIVITY_BASELINE_EPSILON = 0.01  # Min denominator for baseline_mean
 FACTOR_SENSITIVITY_VALUE_EPSILON = 0.01  # Min denominator for factor mean_value
+
+# Maximum elasticity magnitude for presentation (prevents extreme UX values)
+# Elasticity beyond this is clamped to ±ELASTICITY_CLAMP_MAX
+ELASTICITY_CLAMP_MAX = 100.0
