@@ -4485,3 +4485,299 @@ class TestExtremeNumericalValues:
         for result in response.results:
             assert np.isfinite(result.outcome_distribution.mean)
             assert np.isfinite(result.outcome_distribution.std)
+
+
+# =============================================================================
+# Structural Influence Tests
+# =============================================================================
+
+
+class TestStructuralInfluence:
+    """Tests for structural influence computation from causal paths."""
+
+    def test_influence_score_computed_for_factors_with_path_to_goal(self):
+        """Factor with causal path to goal should have non-zero influence_score."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="intermediate", kind="chance", label="Intermediate"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "intermediate"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "intermediate", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.7, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="influence-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Factor has clear path to goal, so influence_score should be > 0
+        assert fs.influence_score is not None
+        assert fs.influence_score > 0
+        assert fs.influence_rank == 1
+
+    def test_disconnected_factor_has_zero_influence(self):
+        """Factor with no path to goal should have influence_score = 0."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="factor2", kind="factor", label="Factor 2 (disconnected)", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                # Only factor1 connects to goal, factor2 is disconnected
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="disconnected-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+                ParameterUncertainty(node_id="factor2", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 2
+
+        # Find disconnected factor
+        disconnected = next(fs for fs in response.factor_sensitivity if fs.node_id == "factor2")
+        connected = next(fs for fs in response.factor_sensitivity if fs.node_id == "factor1")
+
+        # Disconnected factor should have zero influence
+        assert disconnected.influence_score == 0.0
+        # And should have DISCONNECTED as zero_reason
+        from src.models.response_v2 import ZeroSensitivityReason
+        assert disconnected.zero_reason == ZeroSensitivityReason.DISCONNECTED
+
+        # Connected factor should have non-zero influence
+        assert connected.influence_score > 0
+
+    def test_multiple_paths_add_influence(self):
+        """Factor with multiple paths to goal should have higher influence."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="intermediate1", kind="chance", label="Path 1"),
+                NodeV2(id="intermediate2", kind="chance", label="Path 2"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                # Two paths from factor1 to goal
+                EdgeV2(
+                    **{"from": "factor1", "to": "intermediate1"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "intermediate1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "factor1", "to": "intermediate2"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "intermediate2", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="multi-path-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # With two paths each of strength 0.25 (0.5 * 0.5), total should be 0.5
+        # Normalized to 1.0 since it's the only factor
+        assert fs.influence_score == 1.0
+
+
+class TestZeroReasonClassification:
+    """Tests for zero_reason enum value classification."""
+
+    def test_point_mass_factor_has_point_mass_reason(self):
+        """Factor with point_mass distribution should have POINT_MASS zero_reason."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="point-mass-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="point_mass"),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        from src.models.response_v2 import ZeroSensitivityReason
+        assert fs.elasticity == 0.0
+        assert fs.zero_reason == ZeroSensitivityReason.POINT_MASS
+
+
+class TestFactorSensitivityFieldSerialization:
+    """Tests for factor sensitivity field serialization."""
+
+    def test_all_debug_fields_present_in_result(self):
+        """Verify elasticity_display, zero_reason, baseline_near_zero, influence_score, influence_rank are present."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="serialization-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Check all fields are present (not None for required debug fields)
+        assert fs.elasticity is not None
+        assert fs.elasticity_display is not None
+        assert fs.influence_score is not None
+        assert fs.influence_rank is not None
+        # baseline_near_zero should be set
+        assert fs.baseline_near_zero is not None
+
+    def test_model_dump_includes_all_fields(self):
+        """Verify model_dump() includes all fields for JSON serialization."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+        from src.models.response_v2 import ZeroSensitivityReason
+
+        result = FactorSensitivityResult(
+            node_id="test_factor",
+            node_label="Test Factor",
+            elasticity=0.5,
+            elasticity_display=0.5,
+            importance_rank=1,
+            observed_value=1.0,
+            interpretation="Test interpretation",
+            zero_reason=None,
+            baseline_near_zero=False,
+            influence_score=0.8,
+            influence_rank=1,
+        )
+
+        dumped = result.model_dump()
+
+        assert "elasticity" in dumped
+        assert "elasticity_display" in dumped
+        assert "influence_score" in dumped
+        assert "influence_rank" in dumped
+        assert "baseline_near_zero" in dumped
+        assert dumped["elasticity_display"] == 0.5
+        assert dumped["influence_score"] == 0.8

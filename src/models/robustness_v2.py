@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
-from src.models.response_v2 import CritiqueV2
+# Import from response_v2 (no circular import since response_v2 doesn't import this module)
+from src.models.response_v2 import CritiqueV2, ZeroSensitivityReason
 
 
 # =============================================================================
@@ -39,20 +40,8 @@ class SensitivityType(str, Enum):
     MAGNITUDE = "magnitude"
 
 
-class ZeroSensitivityReason(str, Enum):
-    """
-    Explains why a sensitivity score is zero (debug-only field).
-
-    Used to distinguish between:
-    - Legitimate zero sensitivity (factor truly has no impact)
-    - Computational artifacts (near-zero values, intervention overrides)
-    """
-    ZERO_OUTCOME_DIFF = "zero_outcome_diff"      # Perturbation doesn't affect outcome
-    ZERO_DELTA = "zero_delta"                    # std/delta too small to perturb
-    INTERVENTION_OVERRIDE = "intervention_override"  # Intervention dominates factor
-    DISCONNECTED = "disconnected"                # No causal path to goal
-    BASELINE_NORMALISED = "baseline_normalised"  # Epsilon denom applied, still zero
-    POINT_MASS = "point_mass"                    # Distribution has no uncertainty
+# ZeroSensitivityReason is defined in response_v2.py to avoid circular imports
+# Import it from there: from src.models.response_v2 import ZeroSensitivityReason
 
 
 # =============================================================================
@@ -708,6 +697,18 @@ class FactorSensitivityResult(BaseModel):
         None,
         description="Debug: True if epsilon denominator was applied due to near-zero baseline"
     )
+    # Structural influence fields (always computed from graph structure)
+    influence_score: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Structural influence from causal path strengths (0-1, normalized)"
+    )
+    influence_rank: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Rank by influence_score (1 = highest influence)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -718,7 +719,9 @@ class FactorSensitivityResult(BaseModel):
                 "elasticity_display": 0.32,
                 "importance_rank": 2,
                 "observed_value": 50000.0,
-                "interpretation": "Decision is moderately sensitive to marketing_spend value"
+                "interpretation": "Decision is moderately sensitive to marketing_spend value",
+                "influence_score": 0.85,
+                "influence_rank": 1
             }
         }
     }

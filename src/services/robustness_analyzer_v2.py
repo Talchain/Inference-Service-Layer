@@ -36,8 +36,8 @@ from src.models.robustness_v2 import (
     RobustnessResponseV2,
     RobustnessResult,
     SensitivityResult,
-    ZeroSensitivityReason,
 )
+from src.models.response_v2 import ZeroSensitivityReason
 from src.constants import (
     ELASTICITY_CLAMP_MAX,
     FACTOR_SENSITIVITY_BASELINE_EPSILON,
@@ -1328,12 +1328,37 @@ class RobustnessAnalyzerV2:
                 "baseline_near_zero": baseline_near_zero,
             })
 
-        # Sort by absolute elasticity
+        # Compute structural influence for all factors
+        factor_node_ids = [s["node_id"] for s in sensitivities]
+        influence_scores = self._compute_structural_influence(
+            request.graph, factor_node_ids, request.goal_node_id
+        )
+
+        # Add influence scores to sensitivities
+        for s in sensitivities:
+            s["influence_score"] = influence_scores.get(s["node_id"], 0.0)
+
+        # Sort by absolute elasticity for importance_rank
         sensitivities.sort(key=lambda x: abs(x["elasticity"]), reverse=True)
+
+        # Compute influence_rank (sort by influence_score descending)
+        sorted_by_influence = sorted(
+            sensitivities, key=lambda x: x["influence_score"], reverse=True
+        )
+        influence_rank_map = {
+            s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
+        }
 
         # Convert to results with ranks
         results = []
         for i, s in enumerate(sensitivities):
+            # Update zero_reason: DISCONNECTED takes priority if factor has no causal path
+            zero_reason = s.get("zero_reason")
+            if abs(s["elasticity"]) < 1e-10 and s["influence_score"] < 1e-10:
+                # Factor is disconnected (no causal path to goal)
+                # This overrides ZERO_OUTCOME_DIFF since disconnection is the root cause
+                zero_reason = ZeroSensitivityReason.DISCONNECTED
+
             results.append(
                 FactorSensitivityResult(
                     node_id=s["node_id"],
@@ -1343,8 +1368,10 @@ class RobustnessAnalyzerV2:
                     importance_rank=i + 1,
                     observed_value=s["observed_value"],
                     interpretation=s["interpretation"],
-                    zero_reason=s.get("zero_reason"),
+                    zero_reason=zero_reason,
                     baseline_near_zero=s.get("baseline_near_zero"),
+                    influence_score=s["influence_score"],
+                    influence_rank=influence_rank_map[s["node_id"]],
                 )
             )
 
@@ -1361,6 +1388,86 @@ class RobustnessAnalyzerV2:
                 f"Decision is highly sensitive to {node_label} value - "
                 "consider narrowing uncertainty or gathering more data"
             )
+
+    def _compute_structural_influence(
+        self,
+        graph: GraphV2,
+        factor_node_ids: List[str],
+        goal_node_id: str,
+    ) -> Dict[str, float]:
+        """
+        Compute structural influence score for each factor based on causal path strengths.
+
+        Algorithm:
+        1. For each factor, find all paths to goal_node_id
+        2. For each path, compute path_strength = product of edge.strength.mean * exists_probability
+        3. Factor influence = sum of absolute path strengths (multiple paths add)
+        4. Normalize to 0-1 scale across all factors
+
+        Args:
+            graph: Causal graph with edges
+            factor_node_ids: List of factor node IDs to compute influence for
+            goal_node_id: Target goal node ID
+
+        Returns:
+            Dict mapping node_id -> influence_score (0-1, normalized)
+        """
+        # Build adjacency list for path finding
+        adjacency: Dict[str, List[Tuple[str, float]]] = {}
+        for edge in graph.edges:
+            from_node = edge.from_
+            to_node = edge.to
+            # Effective strength = mean * exists_probability
+            effective_strength = edge.strength.mean * edge.exists_probability
+            if from_node not in adjacency:
+                adjacency[from_node] = []
+            adjacency[from_node].append((to_node, effective_strength))
+
+        def find_all_paths_strengths(
+            start: str,
+            end: str,
+            visited: set,
+        ) -> List[float]:
+            """
+            Find all paths from start to end and return list of path strengths.
+            Each path strength is the product of edge strengths along the path.
+            """
+            if start == end:
+                return [1.0]  # Base case: path of strength 1
+
+            if start in visited:
+                return []  # Cycle detection
+
+            if start not in adjacency:
+                return []  # No outgoing edges
+
+            visited.add(start)
+            path_strengths = []
+
+            for next_node, edge_strength in adjacency[start]:
+                sub_paths = find_all_paths_strengths(next_node, end, visited.copy())
+                for sub_strength in sub_paths:
+                    path_strengths.append(edge_strength * sub_strength)
+
+            return path_strengths
+
+        # Compute raw influence for each factor
+        raw_influences: Dict[str, float] = {}
+        for node_id in factor_node_ids:
+            path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
+            # Sum of absolute path strengths (multiple paths add)
+            raw_influences[node_id] = sum(abs(s) for s in path_strengths)
+
+        # Normalize to 0-1 scale
+        max_influence = max(raw_influences.values()) if raw_influences else 0.0
+        if max_influence < 1e-10:
+            # All factors have zero influence
+            return {node_id: 0.0 for node_id in factor_node_ids}
+
+        return {
+            node_id: raw_influences[node_id] / max_influence
+            for node_id in factor_node_ids
+        }
 
     def _compute_robustness(
         self,

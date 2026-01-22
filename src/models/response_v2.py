@@ -12,11 +12,28 @@ P2 Brief Alignment:
 """
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from src.constants import RESPONSE_SCHEMA_VERSION_V2
+
+
+class ZeroSensitivityReason(str, Enum):
+    """
+    Explains why a sensitivity score is zero (debug-only field).
+
+    Used to distinguish between:
+    - Legitimate zero sensitivity (factor truly has no impact)
+    - Computational artifacts (near-zero values, intervention overrides)
+    """
+    ZERO_OUTCOME_DIFF = "zero_outcome_diff"      # Perturbation doesn't affect outcome
+    ZERO_DELTA = "zero_delta"                    # std/delta too small to perturb
+    INTERVENTION_OVERRIDE = "intervention_override"  # Intervention dominates factor
+    DISCONNECTED = "disconnected"                # No causal path to goal
+    BASELINE_NORMALISED = "baseline_normalised"  # Epsilon denom applied, still zero
+    POINT_MASS = "point_mass"                    # Distribution has no uncertainty
 
 
 # =============================================================================
@@ -282,6 +299,9 @@ class FactorSensitivityV2(BaseModel):
     elasticity: Optional[float] = Field(
         None, description="Raw elasticity: % change in outcome per % change in factor"
     )
+    elasticity_display: Optional[float] = Field(
+        None, description="UI-safe elasticity clamped to [-100, 100]"
+    )
     direction: Literal["positive", "negative"] = Field(
         ..., description="Direction of effect"
     )
@@ -296,6 +316,20 @@ class FactorSensitivityV2(BaseModel):
     )
     interpretation: Optional[str] = Field(
         None, description="Human-readable explanation of sensitivity"
+    )
+    # Debug fields (always serialised for debugging)
+    zero_reason: Optional[ZeroSensitivityReason] = Field(
+        None, description="Debug: explains why sensitivity is zero (when elasticity ≈ 0)"
+    )
+    baseline_near_zero: Optional[bool] = Field(
+        None, description="Debug: True if epsilon denominator was applied"
+    )
+    # Structural influence fields
+    influence_score: Optional[float] = Field(
+        None, ge=0, le=1, description="Structural influence from causal path strengths (0-1)"
+    )
+    influence_rank: Optional[int] = Field(
+        None, ge=1, description="Rank by influence_score (1 = highest)"
     )
 
 
@@ -315,6 +349,9 @@ class ISLResponseV2(BaseModel):
     )
     endpoint_version: str = Field(..., description="Endpoint version, e.g., 'analyze/v2'")
     engine_version: str = Field(..., description="ISL engine version")
+    build: Optional[str] = Field(
+        None, description="Git commit hash (7 chars) for build verification"
+    )
 
     # P2-ISL-1: Timestamp in ISO 8601 format
     timestamp: str = Field(

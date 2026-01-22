@@ -590,10 +590,17 @@ async def _analyze_robustness_v2_enhanced(
                         if n_factors > 1 else 1.0
                     ),
                     elasticity=fs.elasticity,  # Preserve raw elasticity
+                    elasticity_display=fs.elasticity_display,  # Clamped for UI
                     direction="positive" if fs.elasticity > 0 else "negative",
                     importance_rank=fs.importance_rank,
                     observed_value=fs.observed_value,
                     interpretation=fs.interpretation,
+                    # Debug fields (always included)
+                    zero_reason=fs.zero_reason,
+                    baseline_near_zero=fs.baseline_near_zero,
+                    # Structural influence from graph path analysis
+                    influence_score=fs.influence_score,
+                    influence_rank=fs.influence_rank,
                     # confidence omitted - V1 analyzer doesn't compute per-factor confidence
                 )
                 for fs in v1_response.factor_sensitivity
