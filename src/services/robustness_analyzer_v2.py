@@ -1141,12 +1141,35 @@ class RobustnessAnalyzerV2:
         the outcome changes when the factor value is varied by ±1 std
         (or ±10% of range for uniform distributions).
         """
+        # Diagnostic: log entry point
+        self.logger.info(
+            "factor_sensitivity_entry",
+            extra={
+                "has_parameter_uncertainties": bool(request.parameter_uncertainties),
+                "num_uncertainties": len(request.parameter_uncertainties) if request.parameter_uncertainties else 0,
+                "uncertainties": [
+                    {"node_id": u.node_id, "distribution": u.distribution, "std": u.std}
+                    for u in (request.parameter_uncertainties or [])
+                ],
+            },
+        )
+
         if not request.parameter_uncertainties:
             return []
 
         sensitivities = []
         ref_option = request.options[0]
         baseline_mean = np.mean(baseline_outcomes[ref_option.id])
+
+        # Diagnostic: log baseline
+        self.logger.info(
+            "factor_sensitivity_baseline",
+            extra={
+                "ref_option_id": ref_option.id,
+                "baseline_mean": baseline_mean,
+                "baseline_outcomes_count": len(baseline_outcomes.get(ref_option.id, [])),
+            },
+        )
 
         # Build node map for labels
         node_map = {n.id: n for n in request.graph.nodes}
@@ -1220,6 +1243,26 @@ class RobustnessAnalyzerV2:
             pct_outcome_change = outcome_diff / baseline_denom
             pct_factor_change = (2 * delta) / factor_denom
             elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+
+            # Diagnostic logging for factor sensitivity computation
+            self.logger.info(
+                "factor_sensitivity_computation",
+                extra={
+                    "node_id": uncertainty.node_id,
+                    "node_label": node.label,
+                    "baseline_mean": baseline_mean,
+                    "mean_value": mean_value,
+                    "delta": delta,
+                    "outcome_high": outcome_high,
+                    "outcome_low": outcome_low,
+                    "outcome_diff": outcome_diff,
+                    "baseline_denom": baseline_denom,
+                    "factor_denom": factor_denom,
+                    "pct_outcome_change": pct_outcome_change,
+                    "pct_factor_change": pct_factor_change,
+                    "computed_elasticity": elasticity,
+                },
+            )
 
             sensitivities.append({
                 "node_id": uncertainty.node_id,
