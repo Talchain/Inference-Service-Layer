@@ -10,7 +10,7 @@ packages = [{include = "src"}]
 python = "^3.11"
 # Security-critical dependencies pinned to stable versions
 # Updated 2025-11 for security patches and performance improvements
-fastapi = "0.109.2"
+fastapi = "0.124.4"
 uvicorn = {extras = ["standard"], version = "0.27.1"}
 pydantic = "2.6.1"
 pydantic-settings = "2.2.1"
