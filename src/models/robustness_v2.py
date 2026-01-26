@@ -14,7 +14,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
-from src.models.response_v2 import CritiqueV2
+# Import from response_v2 (no circular import since response_v2 doesn't import this module)
+from src.models.response_v2 import CritiqueV2, ZeroSensitivityReason
 
 
 # =============================================================================
@@ -37,6 +38,10 @@ class SensitivityType(str, Enum):
     """Types of sensitivity analysis."""
     EXISTENCE = "existence"
     MAGNITUDE = "magnitude"
+
+
+# ZeroSensitivityReason is defined in response_v2.py to avoid circular imports
+# Import it from there: from src.models.response_v2 import ZeroSensitivityReason
 
 
 # =============================================================================
@@ -664,7 +669,11 @@ class FactorSensitivityResult(BaseModel):
     node_label: Optional[str] = Field(None, description="Human-readable node label")
     elasticity: float = Field(
         ...,
-        description="% change in outcome per % change in factor value"
+        description="% change in outcome per % change in factor value (raw, unclamped)"
+    )
+    elasticity_display: Optional[float] = Field(
+        None,
+        description="UI-safe elasticity clamped to [-100, 100] (debug/display only)"
     )
     importance_rank: int = Field(
         ...,
@@ -679,6 +688,27 @@ class FactorSensitivityResult(BaseModel):
         ...,
         description="Human-readable explanation"
     )
+    # Debug-only fields (not part of product contract)
+    zero_reason: Optional[ZeroSensitivityReason] = Field(
+        None,
+        description="Debug: explains why sensitivity is zero (only present when elasticity ≈ 0)"
+    )
+    baseline_near_zero: Optional[bool] = Field(
+        None,
+        description="Debug: True if epsilon denominator was applied due to near-zero baseline"
+    )
+    # Structural influence fields (always computed from graph structure)
+    influence_score: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Structural influence from causal path strengths (0-1, normalized)"
+    )
+    influence_rank: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Rank by influence_score (1 = highest influence)"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -686,9 +716,12 @@ class FactorSensitivityResult(BaseModel):
                 "node_id": "marketing_spend",
                 "node_label": "Marketing Spend",
                 "elasticity": 0.32,
+                "elasticity_display": 0.32,
                 "importance_rank": 2,
                 "observed_value": 50000.0,
-                "interpretation": "Decision is moderately sensitive to marketing_spend value"
+                "interpretation": "Decision is moderately sensitive to marketing_spend value",
+                "influence_score": 0.85,
+                "influence_rank": 1
             }
         }
     }
@@ -715,6 +748,13 @@ class FragileEdgeEnhanced(BaseModel):
         le=1,
         description="Probability of alternative winner in weak-edge scenarios. "
         "0.0 if same option wins (stable), null only if no data available.",
+    )
+    marginal_switch_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Probability of decision flip when ONLY this edge varies "
+        "(all other edges held at baseline). Isolates individual edge contribution.",
     )
 
 

@@ -12,6 +12,7 @@ P2 Brief Alignment:
 
 import hashlib
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -183,9 +184,13 @@ class ResponseBuilder:
         # P2-ISL-1: Generate timestamp
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+        # Get build commit hash from environment (Render sets RENDER_GIT_COMMIT)
+        build_commit = os.environ.get("RENDER_GIT_COMMIT", "dev")[:7]
+
         return ISLResponseV2(
             endpoint_version="analyze/v2",
             engine_version=engine_version,
+            build=build_commit,
             timestamp=timestamp,
             analysis_status=analysis_status,
             robustness_status=robustness_status,

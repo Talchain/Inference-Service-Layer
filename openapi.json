@@ -6231,6 +6231,18 @@
             "title": "Direction",
             "type": "string"
           },
+          "elasticity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw elasticity: % change in outcome per % change in factor",
+            "title": "Elasticity"
+          },
           "importance_rank": {
             "anyOf": [
               {
@@ -6243,6 +6255,20 @@
             ],
             "description": "Rank by importance (1 = most important)",
             "title": "Importance Rank"
+          },
+          "importance_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relative importance (0-1, higher = more important)",
+            "title": "Importance Score"
           },
           "interpretation": {
             "anyOf": [
@@ -6286,7 +6312,9 @@
             "title": "Observed Value"
           },
           "sensitivity_score": {
-            "description": "Sensitivity score",
+            "description": "Normalized sensitivity score (0-1, higher = more sensitive)",
+            "maximum": 1.0,
+            "minimum": 0.0,
             "title": "Sensitivity Score",
             "type": "number"
           }

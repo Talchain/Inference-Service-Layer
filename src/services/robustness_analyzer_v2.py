@@ -11,6 +11,7 @@ This enables answering:
 - "If an edge is weaker than modelled, which alternative option would win?"
 """
 
+import hashlib
 import logging
 import time
 import uuid
@@ -37,7 +38,13 @@ from src.models.robustness_v2 import (
     RobustnessResult,
     SensitivityResult,
 )
-from src.constants import ZERO_VARIANCE_TOLERANCE
+from src.models.response_v2 import ZeroSensitivityReason
+from src.constants import (
+    ELASTICITY_CLAMP_MAX,
+    FACTOR_SENSITIVITY_BASELINE_EPSILON,
+    FACTOR_SENSITIVITY_VALUE_EPSILON,
+    ZERO_VARIANCE_TOLERANCE,
+)
 from src.models.critique import (
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
@@ -51,6 +58,13 @@ logger = logging.getLogger(__name__)
 
 # Safety net: nodes that must not participate in inference
 NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+
+# Edge strength bounds from schema v2.6
+EDGE_STRENGTH_MIN = -1.0
+EDGE_STRENGTH_MAX = 1.0
+
+# Default samples for marginal switch probability calculation
+MARGINAL_K_SAMPLES = 100
 
 
 def filter_inference_graph(graph: GraphV2) -> GraphV2:
@@ -102,6 +116,7 @@ class FragileEdge:
     to_id: str
     alternative_winner_id: Optional[str] = None  # Option that wins when edge is weak
     switch_probability: Optional[float] = None  # P(alternative wins | edge weak)
+    marginal_switch_probability: Optional[float] = None  # P(flip | only this edge varies)
 
 
 # =============================================================================
@@ -633,6 +648,8 @@ class RobustnessAnalyzerV2:
             sensitivity,
             request,
             edge_configs_per_sample,
+            evaluator,
+            seed,
         )
 
         execution_time = int((time.time() - start_time) * 1000)
@@ -974,11 +991,12 @@ class RobustnessAnalyzerV2:
         mean_off = np.mean(outcomes_off)
         outcome_diff = mean_on - mean_off
 
-        if abs(baseline_mean) < 1e-10:
-            return 0.0
+        # Use epsilon-stabilised denominator to handle near-zero baselines
+        baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
 
         # Elasticity: relative change in outcome for existence change (0 -> 1)
-        return (outcome_diff / baseline_mean) if baseline_mean != 0 else 0.0
+        raw_elasticity = outcome_diff / baseline_denom
+        return max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, raw_elasticity))
 
     def _compute_magnitude_sensitivity(
         self,
@@ -1027,11 +1045,12 @@ class RobustnessAnalyzerV2:
         mean_low = np.mean(outcomes_low)
         outcome_diff = mean_high - mean_low
 
-        if abs(baseline_mean) < 1e-10:
-            return 0.0
+        # Use epsilon-stabilised denominator to handle near-zero baselines
+        baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
 
         # Normalize by 2*std range
-        return (outcome_diff / baseline_mean) / 2.0 if baseline_mean != 0 else 0.0
+        raw_elasticity = (outcome_diff / baseline_denom) / 2.0
+        return max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, raw_elasticity))
 
     def _sample_with_forced_existence(
         self,
@@ -1136,13 +1155,67 @@ class RobustnessAnalyzerV2:
         For each factor with uncertainty specified, measures how much
         the outcome changes when the factor value is varied by ±1 std
         (or ±10% of range for uniform distributions).
+
+        Intervention vs Non-Intervention Factor Behavior
+        ------------------------------------------------
+        This function computes sensitivity for NON-INTERVENTION factors only
+        (contextual variables like market conditions, user attributes, etc.).
+
+        - **Non-intervention factors**: Variables that affect the outcome but
+          are not directly controlled by the decision options. Sensitivity
+          reflects how much uncertainty in these factors affects the decision.
+
+        - **Intervention factors**: Variables set by options (e.g., marketing
+          spend, pricing). These are NOT included in parameter_uncertainties
+          because their values are determined by the option, not estimated.
+
+        If a factor that is also an intervention target appears in
+        parameter_uncertainties, its sensitivity may be zero or near-zero
+        because the intervention value overrides the perturbed value.
+        This is expected behavior—use zero_reason="intervention_override"
+        to diagnose such cases.
+
+        Debug Fields
+        ------------
+        - elasticity: Raw (unclamped) value for determinism/audit
+        - elasticity_display: Clamped to [-100, 100] for UI safety
+        - zero_reason: Explains why sensitivity is zero (if applicable)
+        - baseline_near_zero: True if epsilon denominator was applied
         """
+        # Diagnostic: log entry point
+        self.logger.info(
+            "factor_sensitivity_entry",
+            extra={
+                "has_parameter_uncertainties": bool(request.parameter_uncertainties),
+                "num_uncertainties": len(request.parameter_uncertainties) if request.parameter_uncertainties else 0,
+                "uncertainties": [
+                    {"node_id": u.node_id, "distribution": u.distribution, "std": u.std}
+                    for u in (request.parameter_uncertainties or [])
+                ],
+            },
+        )
+
         if not request.parameter_uncertainties:
             return []
 
         sensitivities = []
         ref_option = request.options[0]
         baseline_mean = np.mean(baseline_outcomes[ref_option.id])
+
+        # Build set of intervention factor IDs for INTERVENTION_OVERRIDE detection
+        intervention_factor_ids = (
+            set(ref_option.interventions.keys()) if ref_option.interventions else set()
+        )
+
+        # Diagnostic: log baseline
+        self.logger.info(
+            "factor_sensitivity_baseline",
+            extra={
+                "ref_option_id": ref_option.id,
+                "baseline_mean": baseline_mean,
+                "baseline_outcomes_count": len(baseline_outcomes.get(ref_option.id, [])),
+            },
+        )
 
         # Build node map for labels
         node_map = {n.id: n for n in request.graph.nodes}
@@ -1183,8 +1256,11 @@ class RobustnessAnalyzerV2:
                     "node_id": uncertainty.node_id,
                     "node_label": node.label,
                     "elasticity": 0.0,
+                    "elasticity_display": 0.0,
                     "observed_value": observed_value,
                     "interpretation": f"Factor {node.label} has no uncertainty (point mass)",
+                    "zero_reason": ZeroSensitivityReason.POINT_MASS,
+                    "baseline_near_zero": False,
                 })
                 continue
 
@@ -1208,37 +1284,120 @@ class RobustnessAnalyzerV2:
             outcome_diff = outcome_high - outcome_low
 
             # Compute true elasticity: (%Δ outcome) / (%Δ factor)
-            if abs(baseline_mean) < 1e-10:
-                elasticity = 0.0
-            else:
-                pct_outcome_change = outcome_diff / baseline_mean
-                pct_factor_change = (2 * delta) / mean_value if abs(mean_value) > 1e-10 else 1.0
-                elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            # Use epsilon-stabilised denominators to handle near-zero baselines
+            # (e.g., binary factors 0/1 where observed_state.value = 0)
+            baseline_near_zero = abs(baseline_mean) < FACTOR_SENSITIVITY_BASELINE_EPSILON
+            baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
+            factor_denom = max(abs(mean_value), FACTOR_SENSITIVITY_VALUE_EPSILON)
+
+            pct_outcome_change = outcome_diff / baseline_denom
+            pct_factor_change = (2 * delta) / factor_denom
+            # Raw elasticity is canonical (unclamped) for determinism
+            elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            # Display elasticity is clamped for UI safety
+            elasticity_display = max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, elasticity))
+
+            # Determine zero_reason if elasticity is effectively zero
+            # Priority order: INTERVENTION_OVERRIDE > ZERO_DELTA > ZERO_OUTCOME_DIFF > BASELINE_NORMALISED
+            # (DISCONNECTED and POINT_MASS are handled elsewhere)
+            zero_reason = None
+            if abs(elasticity) < 1e-10:
+                # Check if factor is overridden by intervention (highest priority)
+                if uncertainty.node_id in intervention_factor_ids:
+                    zero_reason = ZeroSensitivityReason.INTERVENTION_OVERRIDE
+                # Check if delta is too small to perturb meaningfully
+                elif abs(delta) < 1e-10:
+                    zero_reason = ZeroSensitivityReason.ZERO_DELTA
+                # Check if perturbation didn't affect outcome
+                elif abs(outcome_diff) < 1e-10:
+                    zero_reason = ZeroSensitivityReason.ZERO_OUTCOME_DIFF
+                # Check if epsilon denominator was applied
+                elif baseline_near_zero:
+                    zero_reason = ZeroSensitivityReason.BASELINE_NORMALISED
+                else:
+                    # Computation resulted in zero (rare edge case)
+                    zero_reason = ZeroSensitivityReason.ZERO_OUTCOME_DIFF
+
+            # Diagnostic logging for factor sensitivity computation
+            self.logger.info(
+                "factor_sensitivity_computation",
+                extra={
+                    "node_id": uncertainty.node_id,
+                    "node_label": node.label,
+                    "baseline_mean": baseline_mean,
+                    "mean_value": mean_value,
+                    "delta": delta,
+                    "outcome_high": outcome_high,
+                    "outcome_low": outcome_low,
+                    "outcome_diff": outcome_diff,
+                    "baseline_denom": baseline_denom,
+                    "factor_denom": factor_denom,
+                    "pct_outcome_change": pct_outcome_change,
+                    "pct_factor_change": pct_factor_change,
+                    "elasticity": elasticity,
+                    "elasticity_display": elasticity_display,
+                    "zero_reason": zero_reason.value if zero_reason else None,
+                    "baseline_near_zero": baseline_near_zero,
+                },
+            )
 
             sensitivities.append({
                 "node_id": uncertainty.node_id,
                 "node_label": node.label,
                 "elasticity": elasticity,
+                "elasticity_display": elasticity_display,
                 "observed_value": observed_value,
                 "interpretation": self._interpret_factor_sensitivity(
                     node.label, elasticity
                 ),
+                "zero_reason": zero_reason,
+                "baseline_near_zero": baseline_near_zero,
             })
 
-        # Sort by absolute elasticity
+        # Compute structural influence for all factors
+        factor_node_ids = [s["node_id"] for s in sensitivities]
+        influence_scores = self._compute_structural_influence(
+            request.graph, factor_node_ids, request.goal_node_id
+        )
+
+        # Add influence scores to sensitivities
+        for s in sensitivities:
+            s["influence_score"] = influence_scores.get(s["node_id"], 0.0)
+
+        # Sort by absolute elasticity for importance_rank
         sensitivities.sort(key=lambda x: abs(x["elasticity"]), reverse=True)
+
+        # Compute influence_rank (sort by influence_score descending)
+        sorted_by_influence = sorted(
+            sensitivities, key=lambda x: x["influence_score"], reverse=True
+        )
+        influence_rank_map = {
+            s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
+        }
 
         # Convert to results with ranks
         results = []
         for i, s in enumerate(sensitivities):
+            # Update zero_reason: DISCONNECTED takes priority if factor has no causal path
+            zero_reason = s.get("zero_reason")
+            if abs(s["elasticity"]) < 1e-10 and s["influence_score"] < 1e-10:
+                # Factor is disconnected (no causal path to goal)
+                # This overrides ZERO_OUTCOME_DIFF since disconnection is the root cause
+                zero_reason = ZeroSensitivityReason.DISCONNECTED
+
             results.append(
                 FactorSensitivityResult(
                     node_id=s["node_id"],
                     node_label=s["node_label"],
                     elasticity=s["elasticity"],
+                    elasticity_display=s.get("elasticity_display"),
                     importance_rank=i + 1,
                     observed_value=s["observed_value"],
                     interpretation=s["interpretation"],
+                    zero_reason=zero_reason,
+                    baseline_near_zero=s.get("baseline_near_zero"),
+                    influence_score=s["influence_score"],
+                    influence_rank=influence_rank_map[s["node_id"]],
                 )
             )
 
@@ -1256,6 +1415,86 @@ class RobustnessAnalyzerV2:
                 "consider narrowing uncertainty or gathering more data"
             )
 
+    def _compute_structural_influence(
+        self,
+        graph: GraphV2,
+        factor_node_ids: List[str],
+        goal_node_id: str,
+    ) -> Dict[str, float]:
+        """
+        Compute structural influence score for each factor based on causal path strengths.
+
+        Algorithm:
+        1. For each factor, find all paths to goal_node_id
+        2. For each path, compute path_strength = product of edge.strength.mean * exists_probability
+        3. Factor influence = sum of absolute path strengths (multiple paths add)
+        4. Normalize to 0-1 scale across all factors
+
+        Args:
+            graph: Causal graph with edges
+            factor_node_ids: List of factor node IDs to compute influence for
+            goal_node_id: Target goal node ID
+
+        Returns:
+            Dict mapping node_id -> influence_score (0-1, normalized)
+        """
+        # Build adjacency list for path finding
+        adjacency: Dict[str, List[Tuple[str, float]]] = {}
+        for edge in graph.edges:
+            from_node = edge.from_
+            to_node = edge.to
+            # Effective strength = mean * exists_probability
+            effective_strength = edge.strength.mean * edge.exists_probability
+            if from_node not in adjacency:
+                adjacency[from_node] = []
+            adjacency[from_node].append((to_node, effective_strength))
+
+        def find_all_paths_strengths(
+            start: str,
+            end: str,
+            visited: set,
+        ) -> List[float]:
+            """
+            Find all paths from start to end and return list of path strengths.
+            Each path strength is the product of edge strengths along the path.
+            """
+            if start == end:
+                return [1.0]  # Base case: path of strength 1
+
+            if start in visited:
+                return []  # Cycle detection
+
+            if start not in adjacency:
+                return []  # No outgoing edges
+
+            visited.add(start)
+            path_strengths = []
+
+            for next_node, edge_strength in adjacency[start]:
+                sub_paths = find_all_paths_strengths(next_node, end, visited.copy())
+                for sub_strength in sub_paths:
+                    path_strengths.append(edge_strength * sub_strength)
+
+            return path_strengths
+
+        # Compute raw influence for each factor
+        raw_influences: Dict[str, float] = {}
+        for node_id in factor_node_ids:
+            path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
+            # Sum of absolute path strengths (multiple paths add)
+            raw_influences[node_id] = sum(abs(s) for s in path_strengths)
+
+        # Normalize to 0-1 scale
+        max_influence = max(raw_influences.values()) if raw_influences else 0.0
+        if max_influence < 1e-10:
+            # All factors have zero influence
+            return {node_id: 0.0 for node_id in factor_node_ids}
+
+        return {
+            node_id: raw_influences[node_id] / max_influence
+            for node_id in factor_node_ids
+        }
+
     def _compute_robustness(
         self,
         option_wins: Dict[str, float],
@@ -1263,6 +1502,8 @@ class RobustnessAnalyzerV2:
         sensitivity: List[SensitivityResult],
         request: RobustnessRequestV2,
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
+        evaluator: SCMEvaluatorV2,
+        global_seed: int,
     ) -> RobustnessResult:
         """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
@@ -1300,29 +1541,38 @@ class RobustnessAnalyzerV2:
         fragile_edges = list(fragile_edge_ids)
         robust_edges = list(robust_edge_ids)
 
-        # Compute alternative winners for fragile edges
+        # Compute alternative winners for fragile edges (includes marginal calculation)
         fragile_edges_enhanced = self._compute_alternative_winners(
             fragile_edge_info,
             edge_configs_per_sample,
             winner_per_sample,
             most_frequent_winner,
+            request,
+            evaluator,
+            global_seed,
         )
 
         # Overall robustness
-        is_robust = (
-            recommendation_stability >= self.ROBUST_THRESHOLD
-            and len(fragile_edges) == 0
-        )
+        # Per Decision Model Schema v2.6: is_robust = recommendation_stability >= 0.7
+        # fragile_edges is a separate indicator of edge-level sensitivity
+        is_robust = recommendation_stability >= self.ROBUST_THRESHOLD
 
         # Confidence based on sample size and stability
         confidence = min(0.99, recommendation_stability * (1 - 1 / np.sqrt(n_samples)))
 
         # Interpretation
         if is_robust:
-            interpretation = (
-                f"Recommendation is ROBUST with {confidence:.0%} confidence. "
-                f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios."
-            )
+            if fragile_edges:
+                interpretation = (
+                    f"Recommendation is ROBUST with {confidence:.0%} confidence. "
+                    f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios. "
+                    f"({len(fragile_edges)} sensitive edge{'s' if len(fragile_edges) > 1 else ''} identified)"
+                )
+            else:
+                interpretation = (
+                    f"Recommendation is ROBUST with {confidence:.0%} confidence. "
+                    f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios."
+                )
         elif recommendation_stability >= 0.5:
             interpretation = (
                 f"Recommendation is MODERATELY ROBUST. "
@@ -1352,26 +1602,53 @@ class RobustnessAnalyzerV2:
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
         winner_per_sample: List[str],
         overall_winner: str,
+        request: Optional[RobustnessRequestV2] = None,
+        evaluator: Optional[SCMEvaluatorV2] = None,
+        global_seed: Optional[int] = None,
     ) -> List[FragileEdgeEnhanced]:
         """
         Compute alternative winners for fragile edges.
 
         For each fragile edge, identifies which option wins most often when
-        the edge is "weak" (bottom 25% of sampled strengths).
+        the edge is "weak" (bottom 25% of sampled strengths). Also computes
+        marginal switch probability (isolated edge contribution) when
+        request, evaluator, and global_seed are provided.
 
         Args:
             fragile_edge_info: Map of edge_id -> (from_id, to_id)
             edge_configs_per_sample: Edge strengths for each MC sample
             winner_per_sample: Winner option ID for each MC sample
             overall_winner: The overall recommended option
+            request: Full robustness request with graph and options (optional)
+            evaluator: SCM evaluator instance (optional)
+            global_seed: Request-level seed for reproducibility (optional)
 
         Returns:
             List of FragileEdgeEnhanced objects with enhanced fragile edge information
         """
+        # Check if marginal calculation is possible
+        can_compute_marginal = (
+            request is not None
+            and evaluator is not None
+            and global_seed is not None
+        )
+
         results = []
 
         for edge_id, (from_id, to_id) in fragile_edge_info.items():
             edge_key = (from_id, to_id)
+
+            # Compute marginal switch probability (isolated edge contribution)
+            # Only computed when all required parameters are provided
+            # Note: marginal computes its own baseline winner under expected-value config
+            marginal_prob: Optional[float] = None
+            if can_compute_marginal:
+                marginal_prob = self._compute_marginal_switch_probability(
+                    edge_key=edge_key,
+                    request=request,
+                    evaluator=evaluator,
+                    global_seed=global_seed,
+                )
 
             # Collect edge strengths across all samples
             strengths = [
@@ -1379,13 +1656,14 @@ class RobustnessAnalyzerV2:
             ]
 
             if not strengths:
-                # No data for this edge
+                # No data for this edge (joint sampling unavailable)
                 results.append(FragileEdgeEnhanced(
                     edge_id=edge_id,
                     from_id=from_id,
                     to_id=to_id,
                     alternative_winner_id=None,
                     switch_probability=None,
+                    marginal_switch_probability=marginal_prob,
                 ))
                 continue
 
@@ -1405,6 +1683,7 @@ class RobustnessAnalyzerV2:
                     to_id=to_id,
                     alternative_winner_id=None,
                     switch_probability=None,
+                    marginal_switch_probability=marginal_prob,
                 ))
                 continue
 
@@ -1448,6 +1727,116 @@ class RobustnessAnalyzerV2:
                 to_id=to_id,
                 alternative_winner_id=alternative_winner_id,
                 switch_probability=switch_probability,
+                marginal_switch_probability=marginal_prob,
             ))
 
         return results
+
+    def _compute_marginal_switch_probability(
+        self,
+        edge_key: Tuple[str, str],
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        global_seed: int,
+        k_samples: int = MARGINAL_K_SAMPLES,
+    ) -> float:
+        """Compute probability of decision flip when ONLY this edge varies.
+
+        Samples this edge K times from its uncertainty distribution while holding
+        all other edges at their expected values (mean * exists_probability).
+        Returns fraction of samples where the winner changes.
+
+        Baseline semantics:
+        - Other edges: held at expected value (mean * exists_probability)
+        - Target edge: samples BOTH existence (Bernoulli) AND strength (Normal)
+        - Baseline winner: computed under the same baseline config (not MC overall_winner)
+
+        This ensures the marginal calculation is self-consistent: we compare
+        sampled outcomes against the winner under the same baseline assumptions.
+
+        Args:
+            edge_key: (from_id, to_id) tuple
+            request: Full robustness request with graph and options
+            evaluator: SCM evaluator instance
+            global_seed: Request-level seed for reproducibility
+            k_samples: Number of samples (default 100)
+
+        Returns:
+            Probability in [0.0, 1.0] that this edge alone flips the recommendation
+        """
+        from_id, to_id = edge_key
+
+        # Deterministic seed: SHA256 (process-safe, NOT Python hash())
+        edge_seed_str = f"{global_seed}:{from_id}->{to_id}"
+        edge_seed = int(hashlib.sha256(edge_seed_str.encode()).hexdigest()[:8], 16)
+        rng = np.random.default_rng(edge_seed)
+
+        # Get target edge's parameters
+        edge = next(
+            (e for e in request.graph.edges if (e.from_, e.to) == edge_key),
+            None
+        )
+        if edge is None:
+            self.logger.warning(
+                "marginal_switch_edge_not_found",
+                extra={"edge_key": f"{from_id}->{to_id}"},
+            )
+            return 0.0
+
+        # Build baseline config: all edges at expected value (mean * exists_probability)
+        # This is consistent with how existence is a sampling gate in the rest of the system
+        baseline_config = {
+            (e.from_, e.to): e.strength.mean * e.exists_probability
+            for e in request.graph.edges
+        }
+
+        # Compute baseline winner under this config (not overall_winner from MC)
+        # This ensures we compare against the correct reference point
+        baseline_outcomes = {}
+        for option in request.options:
+            baseline_outcomes[option.id] = evaluator.evaluate(
+                edge_strengths=baseline_config,
+                interventions=option.interventions,
+                goal_node=request.goal_node_id,
+            )
+        # Deterministic tie-breaking for baseline winner
+        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
+        marginal_baseline_winner = sorted_baseline[0][0]
+
+        flip_count = 0
+
+        for _ in range(k_samples):
+            # Sample existence (Bernoulli)
+            exists = rng.random() < edge.exists_probability
+
+            if not exists:
+                # Edge doesn't exist in this sample → effective strength is 0
+                sampled_strength = 0.0
+            else:
+                # Sample strength from Normal(mean, std), clamped to schema bounds
+                sampled_strength = rng.normal(edge.strength.mean, edge.strength.std)
+                sampled_strength = np.clip(
+                    sampled_strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX
+                )
+
+            # Build counterfactual config: this edge sampled, others at baseline
+            counterfactual_config = baseline_config.copy()
+            counterfactual_config[edge_key] = sampled_strength
+
+            # Evaluate all options under counterfactual
+            outcomes = {}
+            for option in request.options:
+                outcomes[option.id] = evaluator.evaluate(
+                    edge_strengths=counterfactual_config,
+                    interventions=option.interventions,
+                    goal_node=request.goal_node_id,
+                )
+
+            # Determine winner with deterministic tie-breaking (sort by option_id)
+            sorted_options = sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))
+            sample_winner = sorted_options[0][0]
+
+            if sample_winner != marginal_baseline_winner:
+                flip_count += 1
+
+        return flip_count / k_samples
