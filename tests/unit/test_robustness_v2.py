@@ -991,6 +991,201 @@ class TestRobustnessAnalyzerV2:
         # Should have very high stability
         assert response.robustness.recommendation_stability > 0.95
 
+    def test_is_robust_with_fragile_edges(self):
+        """Test is_robust depends only on recommendation_stability, not fragile edges.
+
+        Per Decision Model Schema v2.6:
+        is_robust = recommendation_stability >= 0.7
+
+        fragile_edges is a separate indicator and should not affect is_robust.
+        """
+        # Create a graph with high overall stability but potentially fragile edges
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1"),
+                NodeV2(id="factor2", kind="factor", label="Factor 2"),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.5),  # High uncertainty
+                ),
+                EdgeV2(
+                    **{"from": "factor2", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.3),  # Moderate uncertainty
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-is-robust-fragile",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1",
+                    label="Option 1",
+                    interventions={"factor1": 2.0, "factor2": 1.0},
+                ),
+                InterventionOption(
+                    id="opt2",
+                    label="Option 2",
+                    interventions={"factor1": 0.5, "factor2": 0.5},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Verify schema compliance:
+        # If recommendation_stability >= 0.7, then is_robust MUST be True
+        # regardless of fragile_edges
+        if response.robustness.recommendation_stability >= 0.7:
+            assert response.robustness.is_robust is True, (
+                f"Schema violation: recommendation_stability={response.robustness.recommendation_stability:.3f} "
+                f"but is_robust={response.robustness.is_robust}. "
+                f"Per schema: is_robust = recommendation_stability >= 0.7"
+            )
+
+        # Verify that fragile_edges and is_robust are independent indicators
+        # (it's valid to have is_robust=True WITH fragile_edges present)
+        if response.robustness.is_robust and len(response.robustness.fragile_edges) > 0:
+            # This is VALID: decision is overall stable but has sensitive edge assumptions
+            assert response.robustness.recommendation_stability >= 0.7
+
+    def test_is_robust_true_with_fragile_edges_deterministic(self):
+        """Deterministic test: high stability + fragile edges → is_robust=true.
+
+        Uses certain edges with low variance to guarantee high stability,
+        while maintaining edge uncertainty to trigger fragile edge detection.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="price", kind="factor", label="Price"),
+                NodeV2(id="quality", kind="factor", label="Quality"),
+                NodeV2(id="revenue", kind="goal", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.5),  # Low variance → stable
+                ),
+                EdgeV2(
+                    **{"from": "quality", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.5, std=0.4),  # Low variance → stable
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-deterministic-robust-fragile",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="high_price",
+                    label="High Price",
+                    interventions={"price": 1.5, "quality": 1.0},
+                ),
+                InterventionOption(
+                    id="low_price",
+                    label="Low Price",
+                    interventions={"price": 0.5, "quality": 0.5},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=12345,  # Deterministic seed
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # PRECONDITION 1: High recommendation stability
+        assert response.robustness.recommendation_stability >= 0.7, (
+            f"Test setup failed: expected stability >= 0.7, got {response.robustness.recommendation_stability:.3f}. "
+            f"Adjust edge parameters to increase stability."
+        )
+
+        # PRECONDITION 2: Fragile edges detected (non-empty)
+        assert len(response.robustness.fragile_edges) > 0, (
+            f"Test setup failed: expected fragile_edges > 0, got {len(response.robustness.fragile_edges)}. "
+            f"Adjust edge std to trigger fragile edge detection."
+        )
+
+        # ASSERTION: is_robust MUST be True (schema compliance)
+        assert response.robustness.is_robust is True, (
+            f"Schema violation: recommendation_stability={response.robustness.recommendation_stability:.3f} >= 0.7 "
+            f"but is_robust={response.robustness.is_robust}. Per schema: is_robust = recommendation_stability >= 0.7"
+        )
+
+        # ASSERTION: Interpretation should mention fragile edges
+        assert "sensitive edge" in response.robustness.interpretation.lower(), (
+            f"Expected interpretation to mention fragile edges when is_robust=True and fragile_edges > 0. "
+            f"Got: {response.robustness.interpretation}"
+        )
+
+    def test_is_robust_false_when_low_stability(self):
+        """Verify is_robust=false when stability < 0.7.
+
+        Uses high edge uncertainty to create an unstable decision.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor", kind="factor", label="Factor"),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor", "to": "goal"},
+                    exists_probability=0.5,  # High existence uncertainty
+                    strength=StrengthDistribution(mean=1.0, std=2.0),  # Very high variance
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-low-stability",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1",
+                    label="Option 1",
+                    interventions={"factor": 1.0},
+                ),
+                InterventionOption(
+                    id="opt2",
+                    label="Option 2",
+                    interventions={"factor": -1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=500,
+            seed=54321,  # Deterministic seed
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # PRECONDITION: Low recommendation stability
+        assert response.robustness.recommendation_stability < 0.7, (
+            f"Test setup failed: expected stability < 0.7, got {response.robustness.recommendation_stability:.3f}. "
+            f"Adjust edge parameters to decrease stability."
+        )
+
+        # ASSERTION: is_robust MUST be False
+        assert response.robustness.is_robust is False, (
+            f"Schema violation: recommendation_stability={response.robustness.recommendation_stability:.3f} < 0.7 "
+            f"but is_robust={response.robustness.is_robust}. Per schema: is_robust = recommendation_stability >= 0.7"
+        )
+
 
 class TestSensitivityInterpretation:
     """Test sensitivity interpretation generation."""

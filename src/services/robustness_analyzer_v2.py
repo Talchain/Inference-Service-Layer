@@ -1553,20 +1553,26 @@ class RobustnessAnalyzerV2:
         )
 
         # Overall robustness
-        is_robust = (
-            recommendation_stability >= self.ROBUST_THRESHOLD
-            and len(fragile_edges) == 0
-        )
+        # Per Decision Model Schema v2.6: is_robust = recommendation_stability >= 0.7
+        # fragile_edges is a separate indicator of edge-level sensitivity
+        is_robust = recommendation_stability >= self.ROBUST_THRESHOLD
 
         # Confidence based on sample size and stability
         confidence = min(0.99, recommendation_stability * (1 - 1 / np.sqrt(n_samples)))
 
         # Interpretation
         if is_robust:
-            interpretation = (
-                f"Recommendation is ROBUST with {confidence:.0%} confidence. "
-                f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios."
-            )
+            if fragile_edges:
+                interpretation = (
+                    f"Recommendation is ROBUST with {confidence:.0%} confidence. "
+                    f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios. "
+                    f"({len(fragile_edges)} sensitive edge{'s' if len(fragile_edges) > 1 else ''} identified)"
+                )
+            else:
+                interpretation = (
+                    f"Recommendation is ROBUST with {confidence:.0%} confidence. "
+                    f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios."
+                )
         elif recommendation_stability >= 0.5:
             interpretation = (
                 f"Recommendation is MODERATELY ROBUST. "
