@@ -189,6 +189,10 @@ class OptionResultV2(BaseModel):
         le=1,
         description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
     )
+    constraint_analysis: Optional["ConstraintAnalysisV2"] = Field(
+        None,
+        description="Multi-constraint analysis results. Only present when goal_constraints is provided in request."
+    )
     status: Literal["computed", "partial", "failed"] = Field(
         ..., description="Option-specific status"
     )
@@ -209,6 +213,66 @@ class SensitiveFactorV2(BaseModel):
     sensitivity_score: float = Field(..., description="Sensitivity score")
     effect_on_ranking: Literal["none", "minor", "moderate", "major"] = Field(
         ..., description="Effect on option ranking"
+    )
+
+
+# =============================================================================
+# Constraint Analysis (Multi-Constraint Goal Analysis)
+# =============================================================================
+
+
+class ConstraintResultV2(BaseModel):
+    """Result for a single goal constraint."""
+
+    node_id: str = Field(..., description="Node ID the constraint applies to")
+    operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
+    threshold: float = Field(..., description="Threshold value")
+    label: Optional[str] = Field(None, description="Human-readable label for coaching")
+    prob_satisfied: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Probability that this constraint is satisfied (count / n_samples)"
+    )
+    failure_margin_median: Optional[float] = Field(
+        None,
+        description="Median distance from threshold when constraint fails (positive = failing by this amount)"
+    )
+    near_miss_fraction: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of failures within 10% of threshold (near-misses)"
+    )
+    binding: Optional[bool] = Field(
+        None,
+        description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
+    )
+
+
+class ConstraintAnalysisV2(BaseModel):
+    """Multi-constraint analysis results for an option.
+
+    Note: Constraint probabilities are computed from raw Monte Carlo samples
+    (before auto-scaled noise is applied to outcome nodes). This may cause
+    slight differences compared to probability_of_goal which uses noised samples.
+    """
+
+    constraints: List[ConstraintResultV2] = Field(
+        ..., description="Per-constraint probability results"
+    )
+    joint_probability: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="P(all constraints satisfied simultaneously)"
+    )
+    conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
+        None,
+        description="Pairwise conditional probabilities: P(C_j | C_i). "
+        "Format: {constraint_i_idx: {constraint_j_idx: P(C_j | C_i)}}. "
+        "When P(C_i)=0, entries for that constraint are omitted (undefined). "
+        "Indices correspond to order in goal_constraints array."
     )
 
 

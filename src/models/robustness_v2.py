@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
@@ -416,6 +416,53 @@ class InterventionOption(BaseModel):
     }
 
 
+class GoalConstraint(BaseModel):
+    """
+    A constraint on a goal/outcome node for multi-constraint analysis.
+
+    Allows specifying success criteria like "revenue >= 100k" or "cost <= 50k".
+    Multiple constraints can be specified to compute joint probabilities.
+    """
+
+    node_id: str = Field(
+        ...,
+        pattern=r"^[a-z0-9_:-]+$",
+        description="ID of the node this constraint applies to (must exist in graph)"
+    )
+    operator: Literal[">=", "<="] = Field(
+        ...,
+        description="Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold"
+    )
+    threshold: float = Field(
+        ...,
+        description="Threshold value for the constraint"
+    )
+    label: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')"
+    )
+
+    @field_validator("threshold")
+    @classmethod
+    def validate_threshold_finite(cls, v: float) -> float:
+        """Reject NaN and infinite values for threshold."""
+        if not math.isfinite(v):
+            raise ValueError("threshold must be a finite number, not NaN or infinite")
+        return v
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "node_id": "revenue",
+                "operator": ">=",
+                "threshold": 100000.0,
+                "label": "Revenue target"
+            }
+        }
+    }
+
+
 # =============================================================================
 # Request Schema
 # =============================================================================
@@ -477,11 +524,19 @@ class RobustnessRequestV2(BaseModel):
         "If not provided, factor nodes use observed_state.value as fixed values."
     )
 
-    # Goal threshold configuration
+    # Goal threshold configuration (single constraint, legacy)
     goal_threshold: Optional[float] = Field(
         None,
         description="Success threshold for goal outcome. When provided, "
         "computes probability_of_goal (fraction of samples meeting/exceeding threshold)."
+    )
+
+    # Multi-constraint goal analysis (Phase 2)
+    goal_constraints: Optional[List[GoalConstraint]] = Field(
+        None,
+        description="Multiple goal constraints for joint probability analysis. "
+        "When provided, computes per-constraint probabilities, joint probability, "
+        "and conditional probabilities. Requires nodes to exist in graph."
     )
 
     @field_validator("goal_threshold")
@@ -524,6 +579,18 @@ class RobustnessRequestV2(BaseModel):
                 if uncertainty.node_id not in node_ids:
                     raise ValueError(
                         f"ParameterUncertainty references non-existent node: {uncertainty.node_id}"
+                    )
+        return self
+
+    @model_validator(mode="after")
+    def validate_goal_constraints_reference_nodes(self) -> "RobustnessRequestV2":
+        """Validate all goal_constraints node_ids exist in graph."""
+        if self.goal_constraints:
+            node_ids = {node.id for node in self.graph.nodes}
+            for constraint in self.goal_constraints:
+                if constraint.node_id not in node_ids:
+                    raise ValueError(
+                        f"GoalConstraint references non-existent node: {constraint.node_id}"
                     )
         return self
 
@@ -586,6 +653,44 @@ class OutcomeDistribution(BaseModel):
     }
 
 
+class ConstraintResult(BaseModel):
+    """Internal result for a single goal constraint."""
+
+    node_id: str = Field(..., description="Node ID the constraint applies to")
+    operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
+    threshold: float = Field(..., description="Threshold value")
+    label: Optional[str] = Field(None, description="Human-readable label for coaching")
+    prob_satisfied: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Probability that this constraint is satisfied"
+    )
+    failure_margin_median: Optional[float] = Field(
+        None, description="Median distance from threshold when constraint fails"
+    )
+    near_miss_fraction: Optional[float] = Field(
+        None, ge=0, le=1, description="Fraction of failures within 10% of threshold"
+    )
+    binding: Optional[bool] = Field(
+        None, description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
+    )
+
+
+class ConstraintAnalysis(BaseModel):
+    """Internal multi-constraint analysis results for an option."""
+
+    constraints: List[ConstraintResult] = Field(
+        ..., description="Per-constraint probability results"
+    )
+    joint_probability: float = Field(
+        ..., ge=0, le=1, description="P(all constraints satisfied simultaneously)"
+    )
+    conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
+        None, description="Pairwise conditional probabilities: P(C_j | C_i)"
+    )
+
+
 class OptionResult(BaseModel):
     """Results for a single decision option."""
 
@@ -605,6 +710,10 @@ class OptionResult(BaseModel):
         ge=0,
         le=1,
         description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
+    )
+    constraint_analysis: Optional[ConstraintAnalysis] = Field(
+        None,
+        description="Multi-constraint analysis results. Only present when goal_constraints is provided."
     )
 
     model_config = {

@@ -29,6 +29,8 @@ from src.constants import (
 )
 from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
+    ConstraintAnalysisV2,
+    ConstraintResultV2,
     DiagnosticsV2,
     FactorSensitivityV2,
     FragileEdgeV2,
@@ -493,6 +495,28 @@ async def _analyze_robustness_v2_enhanced(
             validity_ratio = n_valid / n_total if n_total > 0 else 0.0
             status = determine_option_status(n_valid, n_total)
 
+            # Convert constraint_analysis if present
+            constraint_analysis_v2 = None
+            if result.constraint_analysis:
+                ca = result.constraint_analysis
+                constraint_analysis_v2 = ConstraintAnalysisV2(
+                    constraints=[
+                        ConstraintResultV2(
+                            node_id=c.node_id,
+                            operator=c.operator,
+                            threshold=c.threshold,
+                            label=c.label,
+                            prob_satisfied=c.prob_satisfied,
+                            failure_margin_median=c.failure_margin_median,
+                            near_miss_fraction=c.near_miss_fraction,
+                            binding=c.binding,
+                        )
+                        for c in ca.constraints
+                    ],
+                    joint_probability=ca.joint_probability,
+                    conditional_probabilities=ca.conditional_probabilities,
+                )
+
             option_results.append(
                 OptionResultV2(
                     id=result.option_id,
@@ -509,6 +533,7 @@ async def _analyze_robustness_v2_enhanced(
                     ),
                     win_probability=result.win_probability,
                     probability_of_goal=result.probability_of_goal,
+                    constraint_analysis=constraint_analysis_v2,
                     status=status,
                     status_reason=(
                         "Numerical issues in sampling"

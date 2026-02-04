@@ -23,9 +23,12 @@ import numpy as np
 
 from src.models.robustness_v2 import (
     ClampMetrics,
+    ConstraintAnalysis,
+    ConstraintResult,
     EdgeV2,
     FactorSensitivityResult,
     FragileEdgeEnhanced,
+    GoalConstraint,
     GraphV2,
     InterventionOption,
     NodeV2,
@@ -480,6 +483,74 @@ class SCMEvaluatorV2:
 
         return node_values.get(goal_node, 0.0)
 
+    def evaluate_multi(
+        self,
+        edge_strengths: Dict[Tuple[str, str], float],
+        interventions: Dict[str, float],
+        target_nodes: List[str],
+        base_values: Optional[Dict[str, float]] = None,
+        factor_values: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, float]:
+        """
+        Evaluate and return values for multiple target nodes.
+
+        Same computational model as evaluate(), but returns a dict of values
+        for the specified target nodes instead of a single goal node value.
+
+        Args:
+            edge_strengths: Sampled edge strengths (0 if edge doesn't exist)
+            interventions: Node interventions (do(X=x))
+            target_nodes: List of node IDs to return values for
+            base_values: Optional base values for nodes (default: 0)
+            factor_values: Optional sampled factor values (overrides observed_state.value)
+
+        Returns:
+            Dict mapping target_node_id -> computed value
+        """
+        if base_values is None:
+            base_values = {}
+        if factor_values is None:
+            factor_values = {}
+
+        node_values: Dict[str, float] = {}
+
+        for node_id in self._node_order:
+            if node_id in interventions:
+                # Interventional value overrides structural equations
+                node_values[node_id] = interventions[node_id]
+            else:
+                # Get node object (used for observed_state and intercept)
+                node = self._nodes_by_id.get(node_id)
+
+                # Determine base value for this node
+                # Priority: factor_values > observed_state.value > base_values > 0
+                if node_id in factor_values:
+                    base = factor_values[node_id]
+                elif node_id in base_values:
+                    base = base_values[node_id]
+                else:
+                    is_root = len(self._parents.get(node_id, [])) == 0
+                    if is_root and node and node.observed_state and node.observed_state.value is not None:
+                        base = node.observed_state.value
+                    else:
+                        base = 0.0
+
+                # Compute contribution from parents
+                parents_contribution = 0.0
+                for parent in self._parents[node_id]:
+                    edge_key = (parent, node_id)
+                    strength = edge_strengths.get(edge_key, 0.0)
+                    parent_value = node_values.get(parent, 0.0)
+                    parents_contribution += parent_value * strength
+
+                # Get node intercept (default 0.0 if not set)
+                intercept = getattr(node, 'intercept', 0.0) if node else 0.0
+
+                node_values[node_id] = base + intercept + parents_contribution
+
+        # Return only the requested target nodes
+        return {node_id: node_values.get(node_id, 0.0) for node_id in target_nodes}
+
 
 # =============================================================================
 # Robustness Analyzer V2
@@ -577,6 +648,13 @@ class RobustnessAnalyzerV2:
             },
         )
 
+        # Determine constraint target nodes for multi-constraint analysis
+        constraint_target_nodes: Optional[List[str]] = None
+        if request.goal_constraints:
+            constraint_target_nodes = list(set(
+                gc.node_id for gc in request.goal_constraints
+            ))
+
         # Run Monte Carlo simulation
         (
             option_outcomes,
@@ -584,7 +662,10 @@ class RobustnessAnalyzerV2:
             winner_per_sample,
             edge_configs_per_sample,
             tie_count,
-        ) = self._run_monte_carlo(request, sampler, factor_sampler, evaluator)
+            constraint_node_values,
+        ) = self._run_monte_carlo(
+            request, sampler, factor_sampler, evaluator, constraint_target_nodes
+        )
 
         # Compute tie rate
         tie_rate = tie_count / request.n_samples
@@ -599,9 +680,9 @@ class RobustnessAnalyzerV2:
             rng_noise,
         )
 
-        # Compute results
+        # Compute results (including constraint analysis if goal_constraints provided)
         results = self._compute_option_results(
-            option_outcomes, option_wins, request
+            option_outcomes, option_wins, request, constraint_node_values
         )
 
         # Build critiques for analysis warnings
@@ -698,18 +779,33 @@ class RobustnessAnalyzerV2:
         sampler: DualUncertaintySampler,
         factor_sampler: FactorSampler,
         evaluator: SCMEvaluatorV2,
+        constraint_target_nodes: Optional[List[str]] = None,
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
         List[str],
         List[Dict[Tuple[str, str], float]],
         int,
+        Optional[Dict[str, Dict[str, List[float]]]],
     ]:
         """
         Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
 
+        Args:
+            request: The robustness analysis request
+            sampler: Edge configuration sampler
+            factor_sampler: Factor value sampler
+            evaluator: SCM evaluator
+            constraint_target_nodes: Optional list of node IDs to track for constraint analysis
+
         Returns:
-            (option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count)
+            Tuple of:
+            - option_outcomes: Dict[option_id, List[outcome_value]]
+            - option_wins: Dict[option_id, win_count] (float for tie splitting)
+            - winner_per_sample: List of winning option ID per sample
+            - edge_configs_per_sample: Edge configurations per sample
+            - tie_count: Number of samples with ties
+            - constraint_node_values: Dict[option_id, Dict[node_id, List[value]]] or None
 
         Note: option_wins uses float to support split-tie handling where ties are
         divided equally among tied options.
@@ -722,6 +818,14 @@ class RobustnessAnalyzerV2:
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
         tie_count = 0
 
+        # Initialize constraint node values tracking if needed
+        constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None
+        if constraint_target_nodes:
+            constraint_node_values = {
+                opt.id: {node_id: [] for node_id in constraint_target_nodes}
+                for opt in request.options
+            }
+
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
@@ -732,12 +836,30 @@ class RobustnessAnalyzerV2:
             # Evaluate each option
             sample_outcomes = {}
             for option in request.options:
-                outcome = evaluator.evaluate(
-                    edge_strengths=edge_config,
-                    interventions=option.interventions,
-                    goal_node=request.goal_node_id,
-                    factor_values=factor_values,
-                )
+                if constraint_target_nodes:
+                    # Use evaluate_multi to get both goal and constraint node values
+                    all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
+                    node_values = evaluator.evaluate_multi(
+                        edge_strengths=edge_config,
+                        interventions=option.interventions,
+                        target_nodes=all_target_nodes,
+                        factor_values=factor_values,
+                    )
+                    outcome = node_values.get(request.goal_node_id, 0.0)
+                    # Store constraint node values
+                    for node_id in constraint_target_nodes:
+                        constraint_node_values[option.id][node_id].append(
+                            node_values.get(node_id, 0.0)
+                        )
+                else:
+                    # Standard evaluation for goal node only
+                    outcome = evaluator.evaluate(
+                        edge_strengths=edge_config,
+                        interventions=option.interventions,
+                        goal_node=request.goal_node_id,
+                        factor_values=factor_values,
+                    )
+
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
 
@@ -761,7 +883,7 @@ class RobustnessAnalyzerV2:
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
 
-        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count
+        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count, constraint_node_values
 
     def _apply_auto_scaled_noise(
         self,
@@ -825,8 +947,17 @@ class RobustnessAnalyzerV2:
         outcomes: Dict[str, List[float]],
         wins: Dict[str, float],
         request: RobustnessRequestV2,
+        constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None,
     ) -> List[OptionResult]:
-        """Compute distribution statistics for each option."""
+        """Compute distribution statistics for each option.
+
+        Args:
+            outcomes: Dict[option_id, List[outcome_samples]]
+            wins: Dict[option_id, win_count]
+            request: The analysis request
+            constraint_node_values: Optional dict of constraint node sample values
+                for multi-constraint analysis
+        """
         results = []
 
         for option in request.options:
@@ -845,6 +976,35 @@ class RobustnessAnalyzerV2:
                 n_meets_threshold = int(np.sum(samples_array >= request.goal_threshold))
                 probability_of_goal = n_meets_threshold / len(samples)
 
+            # Compute constraint analysis if constraints provided
+            constraint_analysis_result: Optional[ConstraintAnalysis] = None
+            if request.goal_constraints and constraint_node_values:
+                analysis_dict = self._compute_constraint_analysis(
+                    constraint_node_values,
+                    request.goal_constraints,
+                    option.id,
+                )
+                if analysis_dict:
+                    # Convert dict to ConstraintAnalysis model
+                    constraint_results = [
+                        ConstraintResult(
+                            node_id=c["node_id"],
+                            operator=c["operator"],
+                            threshold=c["threshold"],
+                            label=c["label"],
+                            prob_satisfied=c["prob_satisfied"],
+                            failure_margin_median=c["failure_margin_median"],
+                            near_miss_fraction=c["near_miss_fraction"],
+                            binding=c["binding"],
+                        )
+                        for c in analysis_dict["constraints"]
+                    ]
+                    constraint_analysis_result = ConstraintAnalysis(
+                        constraints=constraint_results,
+                        joint_probability=analysis_dict["joint_probability"],
+                        conditional_probabilities=analysis_dict["conditional_probabilities"],
+                    )
+
             results.append(
                 OptionResult(
                     option_id=option.id,
@@ -857,6 +1017,7 @@ class RobustnessAnalyzerV2:
                     ),
                     win_probability=wins[option.id] / request.n_samples,
                     probability_of_goal=probability_of_goal,
+                    constraint_analysis=constraint_analysis_result,
                 )
             )
 
@@ -1840,3 +2001,271 @@ class RobustnessAnalyzerV2:
                 flip_count += 1
 
         return flip_count / k_samples
+
+    # =========================================================================
+    # Multi-Constraint Goal Analysis (Phase 2)
+    # =========================================================================
+
+    def _check_constraint_satisfied(
+        self,
+        value: float,
+        constraint: GoalConstraint,
+    ) -> bool:
+        """
+        Check if a value satisfies a constraint.
+
+        Args:
+            value: The node value to check
+            constraint: The constraint to check against
+
+        Returns:
+            True if value satisfies constraint, False otherwise
+        """
+        if constraint.operator == ">=":
+            return value >= constraint.threshold
+        elif constraint.operator == "<=":
+            return value <= constraint.threshold
+        else:
+            # This should never happen due to Pydantic validation
+            raise ValueError(f"Unknown operator: {constraint.operator}")
+
+    def _compute_constraint_probabilities(
+        self,
+        constraint_node_values: Dict[str, Dict[str, List[float]]],
+        constraints: List[GoalConstraint],
+        option_id: str,
+    ) -> Tuple[Dict[str, float], float, List[List[bool]]]:
+        """
+        Compute per-constraint and joint probabilities for an option.
+
+        Args:
+            constraint_node_values: Dict[option_id, Dict[node_id, List[sample_values]]]
+            constraints: List of GoalConstraint objects
+            option_id: The option to compute probabilities for
+
+        Returns:
+            Tuple of:
+            - per_constraint_probs: Dict[constraint_index_str, prob_satisfied]
+            - joint_probability: P(all constraints satisfied)
+            - satisfaction_matrix: List[sample_idx][constraint_idx] -> bool (for conditional prob)
+        """
+        if not constraints:
+            return {}, 1.0, []
+
+        option_values = constraint_node_values[option_id]
+        n_samples = len(next(iter(option_values.values())))
+
+        # Build satisfaction matrix: [sample_idx][constraint_idx] -> bool
+        satisfaction_matrix: List[List[bool]] = []
+        for sample_idx in range(n_samples):
+            sample_satisfactions = []
+            for constraint in constraints:
+                value = option_values[constraint.node_id][sample_idx]
+                satisfied = self._check_constraint_satisfied(value, constraint)
+                sample_satisfactions.append(satisfied)
+            satisfaction_matrix.append(sample_satisfactions)
+
+        # Per-constraint probabilities
+        per_constraint_probs = {}
+        for c_idx, constraint in enumerate(constraints):
+            satisfied_count = sum(
+                1 for sample in satisfaction_matrix if sample[c_idx]
+            )
+            per_constraint_probs[str(c_idx)] = satisfied_count / n_samples
+
+        # Joint probability: all constraints satisfied
+        joint_satisfied_count = sum(
+            1 for sample in satisfaction_matrix if all(sample)
+        )
+        joint_probability = joint_satisfied_count / n_samples
+
+        return per_constraint_probs, joint_probability, satisfaction_matrix
+
+    def _compute_conditional_probabilities(
+        self,
+        satisfaction_matrix: List[List[bool]],
+        constraints: List[GoalConstraint],
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Compute pairwise conditional probabilities: P(C_j | C_i).
+
+        Args:
+            satisfaction_matrix: [sample_idx][constraint_idx] -> bool
+            constraints: List of GoalConstraint objects
+
+        Returns:
+            Dict[constraint_i_idx, Dict[constraint_j_idx, conditional_prob]]
+            Where conditional_prob is P(C_j | C_i) = P(C_i and C_j) / P(C_i)
+        """
+        if len(constraints) < 2:
+            return {}
+
+        n_samples = len(satisfaction_matrix)
+        n_constraints = len(constraints)
+
+        conditional_probs: Dict[str, Dict[str, float]] = {}
+
+        for i in range(n_constraints):
+            conditional_probs[str(i)] = {}
+            # Count samples where constraint i is satisfied
+            count_i = sum(1 for sample in satisfaction_matrix if sample[i])
+
+            if count_i == 0:
+                # P(C_j | C_i) is undefined when P(C_i) = 0 - omit these entries
+                # The dict for this constraint remains empty, indicating undefined
+                pass
+            else:
+                for j in range(n_constraints):
+                    if i != j:
+                        # Count samples where both i and j are satisfied
+                        count_ij = sum(
+                            1 for sample in satisfaction_matrix
+                            if sample[i] and sample[j]
+                        )
+                        conditional_probs[str(i)][str(j)] = count_ij / count_i
+
+        return conditional_probs
+
+    def _compute_near_miss_diagnostics(
+        self,
+        constraint_node_values: Dict[str, Dict[str, List[float]]],
+        constraints: List[GoalConstraint],
+        option_id: str,
+        satisfaction_matrix: List[List[bool]],
+        near_miss_fraction_threshold: float = 0.1,
+    ) -> Dict[int, Dict[str, Any]]:
+        """
+        Compute near-miss diagnostics for each constraint.
+
+        For each constraint, computes:
+        - failure_margin_median: Median distance from threshold when constraint fails
+        - near_miss_fraction: Fraction of failures within near_miss_fraction_threshold of threshold
+        - binding: True if prob_satisfied ∈ [0.4, 0.6] (constraint is borderline)
+
+        Args:
+            constraint_node_values: Dict[option_id, Dict[node_id, List[sample_values]]]
+            constraints: List of GoalConstraint objects
+            option_id: The option to compute diagnostics for
+            satisfaction_matrix: Precomputed satisfaction matrix
+            near_miss_fraction_threshold: Relative threshold for "near miss" (default 10%)
+
+        Returns:
+            Dict[constraint_idx, {failure_margin_median, near_miss_fraction, binding}]
+        """
+        if not constraints:
+            return {}
+
+        option_values = constraint_node_values[option_id]
+        n_samples = len(satisfaction_matrix)
+
+        diagnostics: Dict[int, Dict[str, Any]] = {}
+
+        for c_idx, constraint in enumerate(constraints):
+            values = option_values[constraint.node_id]
+            threshold = constraint.threshold
+
+            # Get failure samples
+            failure_margins = []
+            near_miss_count = 0
+
+            for sample_idx, satisfied in enumerate(
+                sample[c_idx] for sample in satisfaction_matrix
+            ):
+                if not satisfied:
+                    value = values[sample_idx]
+                    # Compute margin (distance from threshold)
+                    if constraint.operator == ">=":
+                        # For >= threshold, margin is threshold - value (positive when failing)
+                        margin = threshold - value
+                    else:  # <=
+                        # For <= threshold, margin is value - threshold (positive when failing)
+                        margin = value - threshold
+
+                    failure_margins.append(margin)
+
+                    # Check if near-miss (within threshold% of the threshold value)
+                    threshold_abs = abs(threshold) if threshold != 0 else 1.0
+                    if margin <= near_miss_fraction_threshold * threshold_abs:
+                        near_miss_count += 1
+
+            # Compute diagnostics
+            n_failures = len(failure_margins)
+            failure_margin_median = (
+                float(np.median(failure_margins)) if failure_margins else None
+            )
+            near_miss_fraction = (
+                near_miss_count / n_failures if n_failures > 0 else None
+            )
+
+            # Compute prob_satisfied for binding determination
+            satisfied_count = sum(
+                1 for sample in satisfaction_matrix if sample[c_idx]
+            )
+            prob_satisfied = satisfied_count / n_samples
+            binding = 0.4 <= prob_satisfied <= 0.6
+
+            diagnostics[c_idx] = {
+                "failure_margin_median": failure_margin_median,
+                "near_miss_fraction": near_miss_fraction,
+                "binding": binding,
+            }
+
+        return diagnostics
+
+    def _compute_constraint_analysis(
+        self,
+        constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]],
+        constraints: Optional[List[GoalConstraint]],
+        option_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Compute full constraint analysis for an option.
+
+        Args:
+            constraint_node_values: Dict[option_id, Dict[node_id, List[sample_values]]]
+            constraints: List of GoalConstraint objects
+            option_id: The option to compute analysis for
+
+        Returns:
+            Dict with constraint analysis results, or None if no constraints
+        """
+        if not constraints or not constraint_node_values:
+            return None
+
+        # T3: Per-constraint and joint probability
+        per_constraint_probs, joint_probability, satisfaction_matrix = (
+            self._compute_constraint_probabilities(
+                constraint_node_values, constraints, option_id
+            )
+        )
+
+        # T4: Pairwise conditional probabilities
+        conditional_probs = self._compute_conditional_probabilities(
+            satisfaction_matrix, constraints
+        )
+
+        # T5: Near-miss diagnostics
+        near_miss_diagnostics = self._compute_near_miss_diagnostics(
+            constraint_node_values, constraints, option_id, satisfaction_matrix
+        )
+
+        # Build constraint results
+        constraint_results = []
+        for c_idx, constraint in enumerate(constraints):
+            diag = near_miss_diagnostics.get(c_idx, {})
+            constraint_results.append({
+                "node_id": constraint.node_id,
+                "operator": constraint.operator,
+                "threshold": constraint.threshold,
+                "label": constraint.label,
+                "prob_satisfied": per_constraint_probs.get(str(c_idx), 0.0),
+                "failure_margin_median": diag.get("failure_margin_median"),
+                "near_miss_fraction": diag.get("near_miss_fraction"),
+                "binding": diag.get("binding", False),
+            })
+
+        return {
+            "constraints": constraint_results,
+            "joint_probability": joint_probability,
+            "conditional_probabilities": conditional_probs if conditional_probs else None,
+        }
