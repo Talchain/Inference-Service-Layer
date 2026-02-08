@@ -468,6 +468,9 @@ async def _analyze_robustness_v2_enhanced(
         # Run analysis
         v1_response = robustness_analyzer_v2.analyze(request)
 
+        # Task 3: Build option label lookup for propagation to V2 response
+        option_label_map = {opt.id: opt.label for opt in request.options}
+
         # Convert V1 response to V2 option results
         option_results = []
         for result in v1_response.results:
@@ -517,16 +520,42 @@ async def _analyze_robustness_v2_enhanced(
                     conditional_probabilities=ca.conditional_probabilities,
                 )
 
+            # Task 2: Compute actual p10/p50/p90 from the *cleaned* samples
+            # (same array used for n_valid_samples and critiques above) instead
+            # of aliasing ci_lower (2.5th) → p10 and ci_upper (97.5th) → p90.
+            # This fixes the percentile semantic drift where a 95% CI was
+            # mislabelled as an 80% interval, and ensures percentiles reflect
+            # the same sample set as validity metrics.
+            if dist.samples is not None and len(dist.samples) > 0:
+                # Use cleaned_samples (from validate_mc_samples above) filtered
+                # to finite values — identical population to n_valid_samples.
+                finite_cleaned = cleaned_samples[np.isfinite(cleaned_samples)]
+                if len(finite_cleaned) > 0:
+                    p10_val = float(np.percentile(finite_cleaned, 10))
+                    p50_val = float(np.percentile(finite_cleaned, 50))
+                    p90_val = float(np.percentile(finite_cleaned, 90))
+                else:
+                    # All samples non-finite; fall back to internal stats
+                    p10_val = dist.ci_lower
+                    p50_val = dist.median
+                    p90_val = dist.ci_upper
+            else:
+                # No raw samples available; fall back to internal stats
+                p10_val = dist.ci_lower
+                p50_val = dist.median
+                p90_val = dist.ci_upper
+
             option_results.append(
                 OptionResultV2(
                     id=result.option_id,
-                    label=None,  # V1 doesn't include label in results
+                    # Task 3: Propagate option label from request to response
+                    label=option_label_map.get(result.option_id),
                     outcome=OutcomeDistributionV2(
                         mean=dist.mean,
                         std=dist.std,
-                        p10=dist.ci_lower,  # Use CI as approximation
-                        p50=dist.median,
-                        p90=dist.ci_upper,
+                        p10=p10_val,
+                        p50=p50_val,
+                        p90=p90_val,
                         n_samples=n_total,
                         n_valid_samples=n_valid,
                         validity_ratio=validity_ratio,

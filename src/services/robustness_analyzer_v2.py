@@ -627,7 +627,9 @@ class RobustnessAnalyzerV2:
 
         # Setup - use separate RNG streams for edge and factor sampling
         # to prevent fragile determinism coupling
-        seed = request.seed or compute_seed_from_graph(request.graph)
+        # Use explicit None check: seed=0 is a valid explicit seed and must not
+        # be treated as falsy (the old `or` expression would discard it).
+        seed = request.seed if request.seed is not None else compute_seed_from_graph(request.graph)
         rng_edge = SeededRNG(seed)
         rng_factor = SeededRNG(seed + 1)
         sampler = DualUncertaintySampler(request.graph.edges, rng_edge)
@@ -1014,6 +1016,9 @@ class RobustnessAnalyzerV2:
                         median=float(np.median(samples_array)),
                         ci_lower=ci_lower,
                         ci_upper=ci_upper,
+                        # Task 2: Store raw samples so the V2 API layer can compute
+                        # actual p10/p50/p90 percentiles instead of aliasing CI bounds.
+                        samples=samples,
                     ),
                     win_probability=wins[option.id] / request.n_samples,
                     probability_of_goal=probability_of_goal,

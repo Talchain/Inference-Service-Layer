@@ -7,9 +7,10 @@ uncertainty (effect magnitude) for proper robustness analysis.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
@@ -67,7 +68,10 @@ class StrengthDistribution(BaseModel):
         description="Standard deviation of effect size (must be > 0.001)"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "mean": 0.5,
@@ -246,7 +250,10 @@ class EdgeV2(BaseModel):
         max_length=500
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "from": "marketing",
@@ -292,7 +299,10 @@ class NodeV2(BaseModel):
                     "Represents the baseline value when all parent contributions are zero."
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "id": "revenue",
@@ -368,7 +378,10 @@ class GraphV2(BaseModel):
                 raise ValueError(f"Self-loop detected on node: {edge.from_}")
         return v
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "nodes": [
@@ -405,7 +418,10 @@ class InterventionOption(BaseModel):
         description="node_id -> intervention value mapping"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "id": "low_price",
@@ -451,7 +467,10 @@ class GoalConstraint(BaseModel):
             raise ValueError("threshold must be a finite number, not NaN or infinite")
         return v
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "node_id": "revenue",
@@ -500,10 +519,33 @@ class RobustnessRequestV2(BaseModel):
         le=10000,
         description="Number of Monte Carlo samples"
     )
-    seed: Optional[int] = Field(
+    # Task 4: Accept str | int | None for cross-service compatibility.
+    # CEE/UI/PLoT may send seed as string; normalised to int internally.
+    seed: Optional[Union[int, str]] = Field(
         default=None,
-        description="Random seed for reproducibility; if None, computed from graph"
+        description="Random seed for reproducibility; if None, computed from graph. "
+        "Accepts int or string. Numeric strings are converted via int(); "
+        "non-numeric strings are hashed deterministically."
     )
+
+    @field_validator("seed", mode="before")
+    @classmethod
+    def normalise_seed_to_int(cls, v):
+        """Normalise seed to int: numeric strings → int, non-numeric → deterministic hash."""
+        if v is None:
+            return v
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                # Stable deterministic hash for non-numeric strings (e.g. "my_seed").
+                # Uses SHA-256 instead of Python's hash() which is randomized
+                # per process (PEP 456) and would break cross-service determinism.
+                return int(hashlib.sha256(v.encode("utf-8")).hexdigest(), 16) % (2**31)
+        # Fallback: try int conversion
+        return int(v)
 
     # Analysis configuration
     analysis_types: List[str] = Field(
@@ -594,7 +636,10 @@ class RobustnessRequestV2(BaseModel):
                     )
         return self
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "request_id": "req-001",

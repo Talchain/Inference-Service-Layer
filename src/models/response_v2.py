@@ -165,6 +165,10 @@ class OutcomeDistributionV2(BaseModel):
         ..., description="n_valid_samples / n_samples"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Option Result
@@ -199,6 +203,10 @@ class OptionResultV2(BaseModel):
     status_reason: Optional[str] = Field(
         None, description="Reason for non-computed status"
     )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -249,6 +257,10 @@ class ConstraintResultV2(BaseModel):
         description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
 
 class ConstraintAnalysisV2(BaseModel):
     """Multi-constraint analysis results for an option.
@@ -274,6 +286,10 @@ class ConstraintAnalysisV2(BaseModel):
         "When P(C_i)=0, entries for that constraint are omitted (undefined). "
         "Indices correspond to order in goal_constraints array."
     )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -310,6 +326,10 @@ class FragileEdgeV2(BaseModel):
         description="Probability of decision flip when ONLY this edge varies "
         "(all other edges held at baseline). Isolates individual edge contribution.",
     )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -349,6 +369,10 @@ class RobustnessResultV2(BaseModel):
     recommendation_stability: Optional[float] = Field(
         None, ge=0, le=1, description="P(same recommendation across samples) (V1 compat)"
     )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -402,6 +426,10 @@ class FactorSensitivityV2(BaseModel):
     influence_rank: Optional[int] = Field(
         None, ge=1, description="Rank by influence_score (1 = highest)"
     )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -479,7 +507,10 @@ class ISLResponseV2(BaseModel):
         None, description="RNG seed used for deterministic reproduction"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "populate_by_name": True,  # Allow both 'version' and 'response_schema_version'
         "json_schema_extra": {
             "example": {
