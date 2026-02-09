@@ -58,6 +58,9 @@ class RequestEchoV2(BaseModel):
         ..., description="Whether diagnostics were requested"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Critique (structured error/warning information)
@@ -88,6 +91,9 @@ class CritiqueV2(BaseModel):
         None, description="Actionable suggestion to resolve the issue"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Diagnostics (optional detailed information)
@@ -117,6 +123,9 @@ class OptionDiagnosticV2(BaseModel):
         default_factory=list, description="Option-specific warnings"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 class DiagnosticsV2(BaseModel):
     """Diagnostic information (only included when requested)."""
@@ -143,6 +152,9 @@ class DiagnosticsV2(BaseModel):
         ..., description="Threshold used for strength.mean"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Outcome Distribution
@@ -154,15 +166,23 @@ class OutcomeDistributionV2(BaseModel):
 
     mean: float = Field(..., description="Mean outcome value")
     std: float = Field(..., description="Standard deviation")
-    p10: float = Field(..., description="10th percentile")
-    p50: float = Field(..., description="50th percentile (median)")
-    p90: float = Field(..., description="90th percentile")
+    # CIL 0.2: Optional — null when true percentiles cannot be computed
+    # (no samples or all non-finite). See code review C3.
+    p10: Optional[float] = Field(None, description="10th percentile (null when unavailable)")
+    p50: Optional[float] = Field(None, description="50th percentile / median (null when unavailable)")
+    p90: Optional[float] = Field(None, description="90th percentile (null when unavailable)")
     n_samples: int = Field(..., description="Total samples")
     n_valid_samples: int = Field(
         ..., description="Samples without NaN/Inf"
     )
     validity_ratio: float = Field(
         ..., description="n_valid_samples / n_samples"
+    )
+    # CIL 0.2: provenance marker for percentile values
+    percentiles_source: Literal["samples", "unavailable"] = Field(
+        default="samples",
+        description="'samples' when p10/p50/p90 computed from actual MC samples; "
+        "'unavailable' when no valid samples exist (p10/p50/p90 will be null)"
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -222,6 +242,9 @@ class SensitiveFactorV2(BaseModel):
     effect_on_ranking: Literal["none", "minor", "moderate", "major"] = Field(
         ..., description="Effect on option ranking"
     )
+
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================

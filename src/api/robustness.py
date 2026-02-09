@@ -526,24 +526,31 @@ async def _analyze_robustness_v2_enhanced(
             # This fixes the percentile semantic drift where a 95% CI was
             # mislabelled as an 80% interval, and ensures percentiles reflect
             # the same sample set as validity metrics.
+            #
+            # CIL 0.2: return null when true percentiles unavailable, not
+            #          mislabelled CI bounds. See code review C3.
             if dist.samples is not None and len(dist.samples) > 0:
                 # Use cleaned_samples (from validate_mc_samples above) filtered
                 # to finite values — identical population to n_valid_samples.
                 finite_cleaned = cleaned_samples[np.isfinite(cleaned_samples)]
                 if len(finite_cleaned) > 0:
-                    p10_val = float(np.percentile(finite_cleaned, 10))
-                    p50_val = float(np.percentile(finite_cleaned, 50))
-                    p90_val = float(np.percentile(finite_cleaned, 90))
+                    # Task 4: single np.percentile call for efficiency
+                    p10_val, p50_val, p90_val = (
+                        float(v) for v in np.percentile(finite_cleaned, [10, 50, 90])
+                    )
+                    percentiles_source = "samples"
                 else:
-                    # All samples non-finite; fall back to internal stats
-                    p10_val = dist.ci_lower
-                    p50_val = dist.median
-                    p90_val = dist.ci_upper
+                    # All samples non-finite — cannot compute true percentiles
+                    p10_val = None
+                    p50_val = None
+                    p90_val = None
+                    percentiles_source = "unavailable"
             else:
-                # No raw samples available; fall back to internal stats
-                p10_val = dist.ci_lower
-                p50_val = dist.median
-                p90_val = dist.ci_upper
+                # No raw samples available — cannot compute true percentiles
+                p10_val = None
+                p50_val = None
+                p90_val = None
+                percentiles_source = "unavailable"
 
             option_results.append(
                 OptionResultV2(
@@ -559,6 +566,7 @@ async def _analyze_robustness_v2_enhanced(
                         n_samples=n_total,
                         n_valid_samples=n_valid,
                         validity_ratio=validity_ratio,
+                        percentiles_source=percentiles_source,
                     ),
                     win_probability=result.win_probability,
                     probability_of_goal=result.probability_of_goal,

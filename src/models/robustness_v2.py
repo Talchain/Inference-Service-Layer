@@ -110,6 +110,11 @@ class ObservedState(BaseModel):
         max_length=100,
         description="Data provenance (e.g., 'brief_extraction', 'user_input', 'computed')"
     )
+    # CIL 0.2: declared std per v2.6 canonical schema (PLoT sends this field)
+    std: Optional[float] = Field(
+        None,
+        description="Standard deviation / uncertainty of the observed value"
+    )
 
     @field_validator("value")
     @classmethod
@@ -127,13 +132,16 @@ class ObservedState(BaseModel):
             raise ValueError("baseline must be finite (not NaN or infinity)")
         return v
 
+    # CIL 0.2: accept unknown fields per cross-service contract
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "value": 59.0,
                 "baseline": 49.0,
                 "unit": "£k",
-                "source": "brief_extraction"
+                "source": "brief_extraction",
+                "std": 5.0
             }
         }
     }
@@ -204,7 +212,9 @@ class ParameterUncertainty(BaseModel):
             )
         return self
 
+    # CIL 0.2: accept unknown fields per cross-service contract
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "node_id": "marketing_spend",
@@ -580,6 +590,16 @@ class RobustnessRequestV2(BaseModel):
         "When provided, computes per-constraint probabilities, joint probability, "
         "and conditional probabilities. Requires nodes to exist in graph."
     )
+
+    @field_validator("options")
+    @classmethod
+    def validate_unique_option_ids(cls, v: List[InterventionOption]) -> List[InterventionOption]:
+        """Validate option IDs are unique (matches GraphV2.validate_unique_node_ids pattern)."""
+        option_ids = [opt.id for opt in v]
+        if len(option_ids) != len(set(option_ids)):
+            duplicates = [oid for oid in option_ids if option_ids.count(oid) > 1]
+            raise ValueError(f"Duplicate option IDs found: {list(set(duplicates))}")
+        return v
 
     @field_validator("goal_threshold")
     @classmethod

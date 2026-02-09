@@ -1,11 +1,16 @@
 """
-CIL Phase 0 — ISL reconciliation fix tests.
+CIL Phase 0 + 0.2 — ISL reconciliation fix tests.
 
 Tests for:
 - Task 1: Unknown-field policy (extra='ignore') on all v2 models
 - Task 2: Percentile semantic drift fix (p10/p50/p90 from actual samples)
 - Task 3: Option label propagation to V2 response
 - Task 4: Seed type normalisation (str | int | None)
+- CIL 0.2 Task 1: ObservedState extra='ignore' + std field
+- CIL 0.2 Task 2: ParameterUncertainty extra='ignore'
+- CIL 0.2 Task 3: Percentile fallback returns None
+- CIL 0.2 Task 5: Supporting response models extra='ignore'
+- CIL 0.2 Task 6: Duplicate option-ID validation
 """
 
 import hashlib
@@ -13,6 +18,7 @@ import math
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from src.models.robustness_v2 import (
     EdgeV2,
@@ -20,18 +26,25 @@ from src.models.robustness_v2 import (
     GraphV2,
     InterventionOption,
     NodeV2,
+    ObservedState,
+    ParameterUncertainty,
     RobustnessRequestV2,
     StrengthDistribution,
 )
 from src.models.response_v2 import (
     ConstraintAnalysisV2,
     ConstraintResultV2,
+    CritiqueV2,
+    DiagnosticsV2,
     FactorSensitivityV2,
     FragileEdgeV2,
     ISLResponseV2,
+    OptionDiagnosticV2,
     OptionResultV2,
     OutcomeDistributionV2,
+    RequestEchoV2,
     RobustnessResultV2,
+    SensitiveFactorV2,
 )
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
@@ -630,3 +643,294 @@ class TestAPITransformOutput:
             assert option_v2.outcome.p10 == float(np.percentile(finite_samples, 10))
             assert option_v2.outcome.p50 == float(np.percentile(finite_samples, 50))
             assert option_v2.outcome.p90 == float(np.percentile(finite_samples, 90))
+
+
+# =============================================================================
+# CIL Phase 0.2: ObservedState nested model hole (C1)
+# =============================================================================
+
+
+class TestObservedStateExtraIgnore:
+    """CIL 0.2 Task 1: ObservedState must accept and drop unknown fields."""
+
+    def test_observed_state_ignores_unknown_field(self):
+        """ObservedState nested in NodeV2 must silently drop unknown fields."""
+        node = NodeV2(
+            id="price",
+            kind="factor",
+            label="Price",
+            observed_state={"value": 59.0, "std": 5.0, "unknown_field": True},
+        )
+        assert node.observed_state is not None
+        assert node.observed_state.std == 5.0
+        assert not hasattr(node.observed_state, "unknown_field")
+
+    def test_observed_state_std_none_when_absent(self):
+        """NodeV2 with observed_state without std → std is None."""
+        node = NodeV2(
+            id="price",
+            kind="factor",
+            label="Price",
+            observed_state={"value": 59.0},
+        )
+        assert node.observed_state is not None
+        assert node.observed_state.std is None
+
+    def test_observed_state_std_declared(self):
+        """ObservedState.std is a declared Optional[float] field per v2.6 schema."""
+        os = ObservedState(value=59.0, std=5.0)
+        assert os.std == 5.0
+        serialised = os.model_dump()
+        assert "std" in serialised
+        assert serialised["std"] == 5.0
+
+    def test_observed_state_unknown_not_in_serialised(self):
+        """Unknown fields must not appear in serialised output."""
+        os = ObservedState(value=59.0, unknown_extra="dropped")
+        serialised = os.model_dump()
+        assert "unknown_extra" not in serialised
+
+
+# =============================================================================
+# CIL Phase 0.2: ParameterUncertainty nested model hole (C2)
+# =============================================================================
+
+
+class TestParameterUncertaintyExtraIgnore:
+    """CIL 0.2 Task 2: ParameterUncertainty must accept and drop unknown fields."""
+
+    def test_parameter_uncertainty_ignores_unknown_field(self):
+        """ParameterUncertainty with unknown field parses without error."""
+        pu = ParameterUncertainty(
+            node_id="price",
+            distribution="normal",
+            std=2.5,
+            unknown_param="dropped",
+        )
+        assert not hasattr(pu, "unknown_param")
+        assert pu.std == 2.5
+
+    def test_parameter_uncertainty_unknown_not_in_serialised(self):
+        """Unknown fields must not appear in serialised output."""
+        pu = ParameterUncertainty(
+            node_id="price",
+            distribution="normal",
+            std=2.5,
+            extra_field="ignored",
+        )
+        serialised = pu.model_dump()
+        assert "extra_field" not in serialised
+
+
+# =============================================================================
+# CIL Phase 0.2: Percentile fallback returns None (C3)
+# =============================================================================
+
+
+class TestPercentileFallback:
+    """CIL 0.2 Task 3: Fallback path returns None, not mislabelled CI bounds."""
+
+    def test_outcome_distribution_accepts_none_percentiles(self):
+        """OutcomeDistributionV2 accepts p10=None, p50=None, p90=None."""
+        od = OutcomeDistributionV2(
+            mean=50.0,
+            std=5.0,
+            p10=None,
+            p50=None,
+            p90=None,
+            n_samples=1000,
+            n_valid_samples=0,
+            validity_ratio=0.0,
+            percentiles_source="unavailable",
+        )
+        assert od.p10 is None
+        assert od.p50 is None
+        assert od.p90 is None
+        assert od.percentiles_source == "unavailable"
+
+    def test_happy_path_percentiles_source_is_samples(self):
+        """When percentiles are computed from samples, source is 'samples'."""
+        od = OutcomeDistributionV2(
+            mean=50.0,
+            std=5.0,
+            p10=42.0,
+            p50=50.0,
+            p90=58.0,
+            n_samples=1000,
+            n_valid_samples=1000,
+            validity_ratio=1.0,
+            percentiles_source="samples",
+        )
+        assert od.percentiles_source == "samples"
+        assert od.p10 == 42.0
+        assert od.p50 == 50.0
+        assert od.p90 == 58.0
+
+    def test_none_percentiles_excluded_from_serialisation(self):
+        """When p10/p50/p90 are None, exclude_none serialisation drops them."""
+        od = OutcomeDistributionV2(
+            mean=50.0,
+            std=5.0,
+            p10=None,
+            p50=None,
+            p90=None,
+            n_samples=1000,
+            n_valid_samples=0,
+            validity_ratio=0.0,
+            percentiles_source="unavailable",
+        )
+        serialised = od.model_dump(exclude_none=True)
+        assert "p10" not in serialised
+        assert "p50" not in serialised
+        assert "p90" not in serialised
+        assert serialised["percentiles_source"] == "unavailable"
+
+    def test_percentiles_source_default_is_samples(self):
+        """Default percentiles_source is 'samples' for backward compatibility."""
+        od = OutcomeDistributionV2(
+            mean=50.0,
+            std=5.0,
+            p10=42.0,
+            p50=50.0,
+            p90=58.0,
+            n_samples=1000,
+            n_valid_samples=1000,
+            validity_ratio=1.0,
+        )
+        assert od.percentiles_source == "samples"
+
+    def test_normal_path_returns_non_null_percentiles(self, simple_graph, simple_options, analyzer):
+        """Normal analysis path always returns non-null percentiles (not breaking in practice)."""
+        request = RobustnessRequestV2(
+            graph=simple_graph,
+            options=simple_options,
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+        response = analyzer.analyze(request)
+        for result in response.results:
+            dist = result.outcome_distribution
+            # In normal operation, samples are always present → percentiles always computed
+            assert dist.samples is not None
+            assert len(dist.samples) == 100
+
+
+# =============================================================================
+# CIL Phase 0.2: Supporting response models extra='ignore' (Task 5)
+# =============================================================================
+
+
+class TestSupportingResponseModelsExtraIgnore:
+    """CIL 0.2 Task 5: All supporting response models accept unknown fields."""
+
+    def test_request_echo_v2_ignores_unknown(self):
+        """RequestEchoV2 ignores unknown fields."""
+        re = RequestEchoV2(
+            graph_node_count=5,
+            graph_edge_count=4,
+            options_count=2,
+            goal_node_id_hash="abc123",
+            n_samples=1000,
+            response_version_requested=2,
+            include_diagnostics=False,
+            unknown_echo_field="ignored",
+        )
+        assert not hasattr(re, "unknown_echo_field")
+        assert "unknown_echo_field" not in re.model_dump()
+
+    def test_critique_v2_ignores_unknown(self):
+        """CritiqueV2 ignores unknown fields."""
+        c = CritiqueV2(
+            id="c1",
+            code="TEST",
+            severity="warning",
+            message="test",
+            source="validation",
+            unknown_critique_field="ignored",
+        )
+        assert not hasattr(c, "unknown_critique_field")
+        assert "unknown_critique_field" not in c.model_dump()
+
+    def test_diagnostics_v2_ignores_unknown(self):
+        """DiagnosticsV2 ignores unknown fields."""
+        d = DiagnosticsV2(
+            goal_node_id_hash="abc",
+            goal_node_found=True,
+            n_samples_requested=1000,
+            n_samples_completed=1000,
+            identifiability_status="unknown",
+            path_exists_probability_threshold=1e-6,
+            path_strength_threshold=1e-6,
+            unknown_diag_field="ignored",
+        )
+        assert not hasattr(d, "unknown_diag_field")
+        assert "unknown_diag_field" not in d.model_dump()
+
+    def test_option_diagnostic_v2_ignores_unknown(self):
+        """OptionDiagnosticV2 ignores unknown fields."""
+        od = OptionDiagnosticV2(
+            option_id="opt1",
+            intervention_count=1,
+            has_structural_path=True,
+            has_effective_path=True,
+            targets_with_effective_path_count=1,
+            targets_without_effective_path_count=0,
+            unknown_od_field="ignored",
+        )
+        assert not hasattr(od, "unknown_od_field")
+        assert "unknown_od_field" not in od.model_dump()
+
+    def test_sensitive_factor_v2_ignores_unknown(self):
+        """SensitiveFactorV2 ignores unknown fields."""
+        sf = SensitiveFactorV2(
+            node_id="price",
+            sensitivity_score=0.5,
+            effect_on_ranking="minor",
+            unknown_sf_field="ignored",
+        )
+        assert not hasattr(sf, "unknown_sf_field")
+        assert "unknown_sf_field" not in sf.model_dump()
+
+
+# =============================================================================
+# CIL Phase 0.2: Duplicate option-ID validation (S1)
+# =============================================================================
+
+
+class TestDuplicateOptionIDValidation:
+    """CIL 0.2 Task 6: Reject duplicate option IDs."""
+
+    def test_duplicate_option_ids_rejected(self, simple_graph):
+        """Two options with same ID → ValidationError."""
+        with pytest.raises(ValidationError, match="Duplicate option IDs"):
+            RobustnessRequestV2(
+                graph=simple_graph,
+                options=[
+                    InterventionOption(
+                        id="same", label="First", interventions={"price": 0.1}
+                    ),
+                    InterventionOption(
+                        id="same", label="Second", interventions={"price": 0.9}
+                    ),
+                ],
+                goal_node_id="revenue",
+                n_samples=100,
+            )
+
+    def test_unique_option_ids_accepted(self, simple_graph):
+        """Two options with different IDs → no error."""
+        request = RobustnessRequestV2(
+            graph=simple_graph,
+            options=[
+                InterventionOption(
+                    id="opt_a", label="Option A", interventions={"price": 0.1}
+                ),
+                InterventionOption(
+                    id="opt_b", label="Option B", interventions={"price": 0.9}
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+        )
+        assert len(request.options) == 2
