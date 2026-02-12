@@ -121,12 +121,13 @@ class TestGoalConstraintModel:
         gc = GoalConstraint(
             node_id="revenue",
             operator=">=",
-            threshold=100.0,
+            value=100.0,
             label="Min Revenue"
         )
         assert gc.node_id == "revenue"
         assert gc.operator == ">="
-        assert gc.threshold == 100.0
+        assert gc.value == 100.0
+        assert gc.threshold == 100.0  # property alias
         assert gc.label == "Min Revenue"
 
     def test_valid_le_constraint(self):
@@ -134,19 +135,19 @@ class TestGoalConstraintModel:
         gc = GoalConstraint(
             node_id="cost",
             operator="<=",
-            threshold=50.0,
+            value=50.0,
             label="Max Cost"
         )
         assert gc.node_id == "cost"
         assert gc.operator == "<="
-        assert gc.threshold == 50.0
+        assert gc.value == 50.0
 
     def test_constraint_without_label(self):
         """Test constraint without optional label."""
         gc = GoalConstraint(
             node_id="revenue",
             operator=">=",
-            threshold=100.0
+            value=100.0
         )
         assert gc.label is None
 
@@ -156,7 +157,7 @@ class TestGoalConstraintModel:
             GoalConstraint(
                 node_id="revenue",
                 operator=">",
-                threshold=100.0
+                value=100.0
             )
 
     def test_invalid_operator_less_than(self):
@@ -165,44 +166,88 @@ class TestGoalConstraintModel:
             GoalConstraint(
                 node_id="revenue",
                 operator="<",
-                threshold=100.0
+                value=100.0
             )
 
     def test_nan_threshold_rejected(self):
-        """Test that NaN threshold is rejected."""
+        """Test that NaN value is rejected."""
         with pytest.raises(ValueError):
             GoalConstraint(
                 node_id="revenue",
                 operator=">=",
-                threshold=float("nan")
+                value=float("nan")
             )
 
     def test_inf_threshold_rejected(self):
-        """Test that infinite threshold is rejected."""
+        """Test that infinite value is rejected."""
         with pytest.raises(ValueError):
             GoalConstraint(
                 node_id="revenue",
                 operator=">=",
-                threshold=float("inf")
+                value=float("inf")
             )
 
     def test_negative_threshold_allowed(self):
-        """Test that negative thresholds are allowed."""
+        """Test that negative values are allowed."""
         gc = GoalConstraint(
             node_id="profit",
             operator=">=",
-            threshold=-10.0
+            value=-10.0
         )
-        assert gc.threshold == -10.0
+        assert gc.value == -10.0
+        assert gc.threshold == -10.0  # property alias
 
     def test_zero_threshold_allowed(self):
-        """Test that zero threshold is allowed."""
+        """Test that zero value is allowed."""
         gc = GoalConstraint(
             node_id="balance",
             operator=">=",
-            threshold=0.0
+            value=0.0
         )
-        assert gc.threshold == 0.0
+        assert gc.value == 0.0
+
+    def test_value_field_matches_v27_contract(self):
+        """Test that GoalConstraint accepts 'value' per Decision Model Schema v2.7.
+
+        CEE/PLoT emit {"value": 0.04, ...}. ISL must accept that field name
+        at the API boundary without requiring 'threshold'.
+        """
+        gc = GoalConstraint(
+            node_id="fac_logo_churn",
+            operator="<=",
+            value=0.04,
+            label="monthly logo churn ceiling",
+        )
+        assert gc.value == 0.04
+        # Internal code can still use .threshold property
+        assert gc.threshold == 0.04
+
+    def test_legacy_threshold_kwarg_accepted_via_compat(self):
+        """Legacy 'threshold' kwarg is coerced to 'value' for backward compat.
+
+        Older clients or stored payloads may still send 'threshold'.
+        The model_validator(mode='before') maps it to 'value' transparently.
+        """
+        gc = GoalConstraint(
+            node_id="revenue",
+            operator=">=",
+            threshold=100.0,  # type: ignore[call-arg]
+        )
+        assert gc.value == 100.0
+        assert gc.threshold == 100.0
+
+    def test_value_takes_precedence_over_legacy_threshold(self):
+        """When both 'value' and 'threshold' are provided, 'value' wins.
+
+        The pre-validator only maps threshold→value when value is absent.
+        """
+        gc = GoalConstraint(
+            node_id="revenue",
+            operator=">=",
+            value=42.0,
+            threshold=999.0,  # type: ignore[call-arg]
+        )
+        assert gc.value == 42.0
 
 
 class TestRequestWithGoalConstraints:
@@ -216,8 +261,8 @@ class TestRequestWithGoalConstraints:
             goal_node_id="revenue",
             n_samples=100,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=50.0),
-                GoalConstraint(node_id="cost", operator="<=", threshold=100.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=50.0),
+                GoalConstraint(node_id="cost", operator="<=", value=100.0),
             ]
         )
         assert len(request.goal_constraints) == 2
@@ -243,7 +288,7 @@ class TestRequestWithGoalConstraints:
                 goal_node_id="revenue",
                 n_samples=100,
                 goal_constraints=[
-                    GoalConstraint(node_id="nonexistent", operator=">=", threshold=50.0),
+                    GoalConstraint(node_id="nonexistent", operator=">=", value=50.0),
                 ]
             )
 
@@ -265,7 +310,7 @@ class TestConstraintProbabilityComputation:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=10.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=10.0),
             ]
         )
 
@@ -275,7 +320,7 @@ class TestConstraintProbabilityComputation:
         for result in response.results:
             assert result.constraint_analysis is not None
             assert len(result.constraint_analysis.constraints) == 1
-            # With threshold=10 and typical outcomes, should have high satisfaction
+            # With value=10 and typical outcomes, should have high satisfaction
             assert 0.0 <= result.constraint_analysis.constraints[0].prob_satisfied <= 1.0
             # Joint probability equals per-constraint with single constraint
             assert result.constraint_analysis.joint_probability == \
@@ -290,8 +335,8 @@ class TestConstraintProbabilityComputation:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=10.0, label="Min Revenue"),
-                GoalConstraint(node_id="cost", operator="<=", threshold=200.0, label="Max Cost"),
+                GoalConstraint(node_id="revenue", operator=">=", value=10.0, label="Min Revenue"),
+                GoalConstraint(node_id="cost", operator="<=", value=200.0, label="Max Cost"),
             ]
         )
 
@@ -323,7 +368,7 @@ class TestConstraintProbabilityComputation:
             seed=42,
             goal_constraints=[
                 # Extremely high threshold that can't be met
-                GoalConstraint(node_id="revenue", operator=">=", threshold=1000000.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=1000000.0),
             ]
         )
 
@@ -344,8 +389,8 @@ class TestConstraintProbabilityComputation:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                # Very low threshold that's always met
-                GoalConstraint(node_id="revenue", operator=">=", threshold=-1000000.0),
+                # Very low value that's always met
+                GoalConstraint(node_id="revenue", operator=">=", value=-1000000.0),
             ]
         )
 
@@ -375,8 +420,8 @@ class TestConditionalProbabilities:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=10.0),
-                GoalConstraint(node_id="cost", operator="<=", threshold=200.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=10.0),
+                GoalConstraint(node_id="cost", operator="<=", value=200.0),
             ]
         )
 
@@ -407,7 +452,7 @@ class TestConditionalProbabilities:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=10.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=10.0),
             ]
         )
 
@@ -431,10 +476,10 @@ class TestConditionalProbabilities:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                # Constraint 0: Impossible to satisfy (very high threshold)
-                GoalConstraint(node_id="revenue", operator=">=", threshold=1000000.0),
+                # Constraint 0: Impossible to satisfy (very high value)
+                GoalConstraint(node_id="revenue", operator=">=", value=1000000.0),
                 # Constraint 1: Easy to satisfy
-                GoalConstraint(node_id="cost", operator="<=", threshold=1000000.0),
+                GoalConstraint(node_id="cost", operator="<=", value=1000000.0),
             ]
         )
 
@@ -479,7 +524,7 @@ class TestNearMissDiagnostics:
             n_samples=1000,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=30.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=30.0),
             ]
         )
 
@@ -503,7 +548,7 @@ class TestNearMissDiagnostics:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=50.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=50.0),
             ]
         )
 
@@ -528,7 +573,7 @@ class TestNearMissDiagnostics:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=50.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=50.0),
             ]
         )
 
@@ -567,7 +612,7 @@ class TestConstraintAnalysisIntegration:
             seed=42,
             goal_threshold=25.0,  # Legacy single threshold
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=25.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=25.0),
             ]
         )
 
@@ -598,8 +643,8 @@ class TestConstraintAnalysisIntegration:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=30.0),
-                GoalConstraint(node_id="cost", operator="<=", threshold=100.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=30.0),
+                GoalConstraint(node_id="cost", operator="<=", value=100.0),
             ]
         )
 
@@ -624,7 +669,7 @@ class TestConstraintAnalysisIntegration:
             seed=42,
             goal_constraints=[
                 # Cost constraint - high_marketing should have higher cost
-                GoalConstraint(node_id="cost", operator="<=", threshold=60.0),
+                GoalConstraint(node_id="cost", operator="<=", value=60.0),
             ]
         )
 
@@ -679,7 +724,7 @@ class TestConstraintAnalysisEdgeCases:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="cost", operator="<=", threshold=100.0),
+                GoalConstraint(node_id="cost", operator="<=", value=100.0),
             ]
         )
 
@@ -700,8 +745,8 @@ class TestConstraintAnalysisEdgeCases:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=10.0, label="Min"),
-                GoalConstraint(node_id="revenue", operator="<=", threshold=100.0, label="Max"),
+                GoalConstraint(node_id="revenue", operator=">=", value=10.0, label="Min"),
+                GoalConstraint(node_id="revenue", operator="<=", value=100.0, label="Max"),
             ]
         )
 
@@ -727,7 +772,7 @@ class TestConstraintAnalysisEdgeCases:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", threshold=20.0),
+                GoalConstraint(node_id="revenue", operator=">=", value=20.0),
             ]
         )
 

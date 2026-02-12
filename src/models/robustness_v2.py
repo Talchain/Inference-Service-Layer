@@ -459,9 +459,9 @@ class GoalConstraint(BaseModel):
         ...,
         description="Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold"
     )
-    threshold: float = Field(
+    value: float = Field(
         ...,
-        description="Threshold value for the constraint"
+        description="Threshold value for the constraint (v2.7 contract field name)"
     )
     label: Optional[str] = Field(
         None,
@@ -469,12 +469,25 @@ class GoalConstraint(BaseModel):
         description="Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')"
     )
 
-    @field_validator("threshold")
+    @model_validator(mode="before")
     @classmethod
-    def validate_threshold_finite(cls, v: float) -> float:
-        """Reject NaN and infinite values for threshold."""
+    def _coerce_legacy_threshold(cls, values: Any) -> Any:
+        """Accept legacy 'threshold' field and map it to 'value' for backward compat."""
+        if isinstance(values, dict) and "value" not in values and "threshold" in values:
+            values["value"] = values.pop("threshold")
+        return values
+
+    @property
+    def threshold(self) -> float:
+        """Alias so internal computation can still reference constraint.threshold."""
+        return self.value
+
+    @field_validator("value")
+    @classmethod
+    def validate_value_finite(cls, v: float) -> float:
+        """Reject NaN and infinite values for value."""
         if not math.isfinite(v):
-            raise ValueError("threshold must be a finite number, not NaN or infinite")
+            raise ValueError("value must be a finite number, not NaN or infinite")
         return v
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -485,7 +498,7 @@ class GoalConstraint(BaseModel):
             "example": {
                 "node_id": "revenue",
                 "operator": ">=",
-                "threshold": 100000.0,
+                "value": 100000.0,
                 "label": "Revenue target"
             }
         }

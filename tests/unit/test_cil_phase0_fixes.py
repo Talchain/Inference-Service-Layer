@@ -173,7 +173,7 @@ class TestUnknownFieldPolicy:
     def test_goal_constraint_ignores_unknown(self):
         """GoalConstraint ignores unknown fields."""
         gc = GoalConstraint(
-            node_id="revenue", operator=">=", threshold=100.0,
+            node_id="revenue", operator=">=", value=100.0,
             unknown_gc_field="ignored",
         )
         assert not hasattr(gc, "unknown_gc_field")
