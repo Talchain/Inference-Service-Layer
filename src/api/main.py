@@ -492,7 +492,19 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
-    """Handle Pydantic validation errors with Olumi Error Schema v1.0."""
+    """Handle Pydantic validation errors.
+
+    CIL F-3: V2 robustness endpoint returns ISLV2Error422 format so PLoT
+    only needs to handle one 422 shape.  All other endpoints continue to
+    use Olumi Error Schema v1.0.
+    """
+    # CIL F-3: Unify 422 format for V2 robustness endpoint.
+    # Normalize path (strip trailing slash) to avoid missing trailing-slash variants.
+    normalized_path = request.url.path.rstrip("/")
+    if normalized_path.endswith("/robustness/analyze/v2"):
+        return _build_v2_pydantic_error_response(request, exc)
+
+    # All other endpoints: Olumi Error Schema v1.0
     from src.models.responses import RecoveryHints
     from src.utils.tracing import get_trace_id
 
@@ -535,6 +547,59 @@ async def validation_exception_handler(
     return JSONResponse(
         status_code=422,
         content=error_response.model_dump(exclude_none=True),
+    )
+
+
+def _build_v2_pydantic_error_response(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Convert Pydantic RequestValidationError to ISLV2Error422 format.
+
+    CIL F-3: Ensures the V2 robustness endpoint always returns the same
+    422 shape regardless of whether the error comes from Pydantic schema
+    validation or ISL's custom RequestValidator.
+    """
+    import uuid
+
+    from src.models.response_v2 import CritiqueV2, ISLV2Error422
+    from src.utils.tracing import get_trace_id, sanitize_request_id
+
+    # Extract request ID (same fallback chain as generic handlers)
+    inbound_id = (
+        request.headers.get("X-Request-Id")
+        or request.headers.get("X-Trace-Id")
+    )
+    if inbound_id:
+        request_id, _ = sanitize_request_id(inbound_id)
+    else:
+        request_id = f"isl-{uuid.uuid4().hex[:12]}"
+
+    # Convert Pydantic errors to CritiqueV2 model instances
+    critiques = []
+    for error in exc.errors():
+        # Strip leading "body" from location path (FastAPI artifact)
+        loc_parts = [str(loc) for loc in error["loc"] if loc != "body"]
+        loc_path = " -> ".join(loc_parts)
+        critiques.append(CritiqueV2(
+            id=f"critique_{uuid.uuid4().hex[:8]}",
+            code="VALIDATION_ERROR",
+            severity="blocker",
+            message=f"{loc_path}: {error['msg']}" if loc_path else error["msg"],
+            source="validation",
+        ))
+
+    status_reason = critiques[0].message if critiques else "Request validation failed"
+
+    error_response = ISLV2Error422(
+        status_reason=status_reason,
+        critiques=critiques,
+        request_id=request_id,
+    )
+
+    return JSONResponse(
+        status_code=422,
+        content=error_response.model_dump(exclude_none=True),
+        headers={"X-Request-Id": request_id},
     )
 
 

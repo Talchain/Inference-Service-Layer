@@ -591,3 +591,121 @@ class TestGoalThresholdProbabilityEndpoint:
             headers={"X-ISL-Response-Version": "2"},
         )
         assert response.status_code == 422
+
+
+# =============================================================================
+# CIL Audit Fix F-3: Unified 422 format for Pydantic validation errors
+# =============================================================================
+
+
+class TestCILF3Unified422Format:
+    """CIL F-3: Pydantic-level 422s on V2 endpoint use ISLV2Error422 format.
+
+    Previously, Pydantic schema validation errors returned the Olumi format
+    ({"code":..., "message":..., "validation_failures":...}) while ISL's
+    custom RequestValidator returned ISLV2Error422 format ({"analysis_status":
+    "blocked", "critiques":[...]}).  Now both return ISLV2Error422 format.
+    """
+
+    def test_pydantic_422_has_analysis_status_blocked(self, client):
+        """Pydantic-level 422 has analysis_status='blocked' (not 'code')."""
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json={},  # Missing required fields → Pydantic error
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert data["analysis_status"] == "blocked"
+
+    def test_pydantic_422_has_critiques(self, client):
+        """Pydantic-level 422 has critiques array with blocker severity."""
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json={"graph": "not_a_dict"},  # Wrong type → Pydantic error
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert isinstance(data["critiques"], list)
+        assert len(data["critiques"]) > 0
+        for critique in data["critiques"]:
+            assert critique["severity"] == "blocker"
+            assert critique["source"] == "validation"
+
+    def test_pydantic_422_no_olumi_fields(self, client):
+        """Pydantic-level 422 does NOT contain Olumi-specific fields."""
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json={},
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422
+        data = response.json()
+        # Must NOT have Olumi format fields
+        assert "code" not in data, "Should not have Olumi 'code' field"
+        assert "validation_failures" not in data, "Should not have Olumi 'validation_failures'"
+        assert "recovery" not in data, "Should not have Olumi 'recovery'"
+        assert "retryable" not in data, "Should not have Olumi 'retryable'"
+
+    def test_pydantic_422_has_request_id_from_header(self, client):
+        """Pydantic-level 422 echoes X-Request-Id from header."""
+        test_id = "cil-f3-pydantic-422"
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json={},
+            headers={
+                "X-ISL-Response-Version": "2",
+                "X-Request-Id": test_id,
+            },
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert data["request_id"] == test_id
+
+    def test_pydantic_422_has_status_reason(self, client):
+        """Pydantic-level 422 includes a status_reason string."""
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json={},
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert isinstance(data["status_reason"], str)
+        assert len(data["status_reason"]) > 0
+
+    def test_pydantic_422_matches_custom_validator_shape(self, client):
+        """Pydantic-level 422 has same top-level keys as custom validator 422."""
+        # Pydantic-level error
+        pydantic_resp = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json={},
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        # Custom validator error (graph cycle — passes Pydantic, fails RequestValidator)
+        custom_resp = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=INVALID_REQUEST_422,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert pydantic_resp.status_code == 422
+        assert custom_resp.status_code == 422
+
+        pydantic_keys = set(pydantic_resp.json().keys())
+        custom_keys = set(custom_resp.json().keys())
+        assert pydantic_keys == custom_keys, (
+            f"Key mismatch: Pydantic={pydantic_keys}, Custom={custom_keys}"
+        )
+
+    def test_non_robustness_422_unchanged(self, client):
+        """Non-robustness endpoints still return Olumi format (not affected)."""
+        response = client.post(
+            "/api/v1/analysis/thresholds",
+            json={"parameter_sweeps": [], "confidence_threshold": 0.1},
+        )
+        assert response.status_code == 422
+        data = response.json()
+        # Should have Olumi format
+        assert "code" in data, "Non-robustness endpoint should use Olumi format"
+        assert "analysis_status" not in data

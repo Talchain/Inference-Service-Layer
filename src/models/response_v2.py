@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from src.constants import RESPONSE_SCHEMA_VERSION_V2
 
@@ -279,6 +279,16 @@ class ConstraintResultV2(BaseModel):
         None,
         description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
     )
+
+    @computed_field
+    @property
+    def value(self) -> float:
+        """Contract-aligned alias for threshold (v2.7 input field name).
+
+        Mirrors `threshold` so the JSON output includes both field names,
+        letting PLoT consume either without translation.
+        """
+        return self.threshold
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -611,7 +621,9 @@ class ISLV2Error422(BaseModel):
         None, description="Request ID for correlation (echoed if available)"
     )
 
+    # CIL: explicit extra='ignore' — consistent with all other V2 models.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "analysis_status": "blocked",

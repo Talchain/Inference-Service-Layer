@@ -39,6 +39,7 @@ from src.models.response_v2 import (
     FactorSensitivityV2,
     FragileEdgeV2,
     ISLResponseV2,
+    ISLV2Error422,
     OptionDiagnosticV2,
     OptionResultV2,
     OutcomeDistributionV2,
@@ -934,3 +935,109 @@ class TestDuplicateOptionIDValidation:
             n_samples=100,
         )
         assert len(request.options) == 2
+
+
+# =============================================================================
+# CIL Audit Fix F-2: ConstraintResultV2 value alias
+# =============================================================================
+
+
+class TestConstraintResultV2ValueAlias:
+    """CIL F-2: ConstraintResultV2 output includes both `threshold` and `value`."""
+
+    def test_model_dump_contains_both_threshold_and_value(self):
+        """model_dump() includes both 'threshold' and 'value' with same numeric value."""
+        cr = ConstraintResultV2(
+            node_id="revenue",
+            operator=">=",
+            threshold=100.0,
+            prob_satisfied=0.8,
+        )
+        dumped = cr.model_dump()
+        assert "threshold" in dumped, "Missing 'threshold' field in model_dump()"
+        assert "value" in dumped, "Missing 'value' field in model_dump()"
+        assert dumped["threshold"] == 100.0
+        assert dumped["value"] == 100.0
+
+    def test_value_mirrors_threshold_for_different_values(self):
+        """value always equals threshold regardless of numeric value."""
+        for threshold_val in [0.0, -42.5, 999.99, 1e6]:
+            cr = ConstraintResultV2(
+                node_id="cost",
+                operator="<=",
+                threshold=threshold_val,
+                prob_satisfied=0.5,
+            )
+            dumped = cr.model_dump()
+            assert dumped["value"] == dumped["threshold"] == threshold_val
+
+    def test_value_present_in_json_serialisation(self):
+        """JSON output includes both fields (important for wire format)."""
+        import json
+
+        cr = ConstraintResultV2(
+            node_id="revenue",
+            operator=">=",
+            threshold=250.0,
+            prob_satisfied=0.7,
+        )
+        json_str = cr.model_dump_json()
+        parsed = json.loads(json_str)
+        assert parsed["threshold"] == 250.0
+        assert parsed["value"] == 250.0
+
+    def test_constraint_analysis_propagates_value(self):
+        """Value alias propagates through ConstraintAnalysisV2 nesting."""
+        ca = ConstraintAnalysisV2(
+            constraints=[
+                ConstraintResultV2(
+                    node_id="revenue",
+                    operator=">=",
+                    threshold=100.0,
+                    prob_satisfied=0.8,
+                ),
+                ConstraintResultV2(
+                    node_id="cost",
+                    operator="<=",
+                    threshold=50.0,
+                    prob_satisfied=0.6,
+                ),
+            ],
+            joint_probability=0.5,
+        )
+        dumped = ca.model_dump()
+        for c in dumped["constraints"]:
+            assert "value" in c
+            assert c["value"] == c["threshold"]
+
+
+# =============================================================================
+# CIL Audit Fix F-8: ISLV2Error422 extra='ignore'
+# =============================================================================
+
+
+class TestISLV2Error422ExtraIgnore:
+    """CIL F-8: ISLV2Error422 has extra='ignore' consistent with all V2 models."""
+
+    def test_unknown_field_silently_dropped(self):
+        """Unknown fields are silently dropped (not included, no error)."""
+        err = ISLV2Error422(
+            status_reason="Test error",
+            critiques=[],
+            unknown_field="should be dropped",
+        )
+        assert not hasattr(err, "unknown_field")
+        assert "unknown_field" not in err.model_dump()
+
+    def test_known_fields_preserved(self):
+        """Known fields are preserved correctly after adding extra='ignore'."""
+        err = ISLV2Error422(
+            status_reason="Validation failed",
+            critiques=[],
+            request_id="req-123",
+        )
+        dumped = err.model_dump()
+        assert dumped["analysis_status"] == "blocked"
+        assert dumped["status_reason"] == "Validation failed"
+        assert dumped["critiques"] == []
+        assert dumped["request_id"] == "req-123"
