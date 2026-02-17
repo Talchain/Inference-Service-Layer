@@ -115,6 +115,28 @@ class ObservedState(BaseModel):
         None,
         description="Standard deviation / uncertainty of the observed value"
     )
+    # CIL: passthrough fields from CEE — ISL preserves these for downstream consumers (ISL-6)
+    raw_value: Optional[float] = Field(
+        None,
+        description="Original pre-normalised value from CEE"
+    )
+    cap: Optional[float] = Field(
+        None,
+        description="Upper bound for normalisation range from CEE"
+    )
+    extractionType: Optional[str] = Field(
+        None,
+        description="How the value was extracted (e.g., 'explicit', 'inferred'). "
+                    "camelCase matches CEE output — do not rename."
+    )
+    factor_type: Optional[str] = Field(
+        None,
+        description="Factor classification from CEE"
+    )
+    uncertainty_drivers: Optional[List[str]] = Field(
+        None,
+        description="List of uncertainty sources for this factor from CEE"
+    )
 
     @field_validator("value")
     @classmethod
@@ -130,6 +152,14 @@ class ObservedState(BaseModel):
         """Validate that baseline, if provided, is finite."""
         if v is not None and not math.isfinite(v):
             raise ValueError("baseline must be finite (not NaN or infinity)")
+        return v
+
+    @field_validator("std", "raw_value", "cap")
+    @classmethod
+    def optional_floats_must_be_finite(cls, v: Optional[float]) -> Optional[float]:
+        """Validate that optional numeric fields, if provided, are finite."""
+        if v is not None and not math.isfinite(v):
+            raise ValueError("value must be finite (not NaN or infinity)")
         return v
 
     # CIL 0.2: accept unknown fields per cross-service contract
@@ -308,6 +338,12 @@ class NodeV2(BaseModel):
         description="Node intercept term (constant added to structural equation). "
                     "Represents the baseline value when all parent contributions are zero."
     )
+    # CIL: preserve CEE node categorisation for downstream consumers (ISL-5)
+    category: Optional[str] = Field(
+        None,
+        description="Node category from CEE (e.g., 'market', 'operational'). "
+                    "Passthrough only — not used by ISL computation."
+    )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -319,6 +355,7 @@ class NodeV2(BaseModel):
                 "kind": "outcome",
                 "label": "Total Revenue",
                 "intercept": 0.0,
+                "category": "financial",
                 "observed_state": {
                     "value": 59.0,
                     "baseline": 49.0,

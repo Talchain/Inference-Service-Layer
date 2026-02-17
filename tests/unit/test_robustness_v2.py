@@ -5063,3 +5063,193 @@ class TestFactorSensitivityFieldSerialization:
         assert "baseline_near_zero" in dumped
         assert dumped["elasticity_display"] == 0.5
         assert dumped["influence_score"] == 0.8
+
+
+# =============================================================================
+# CIL Passthrough Field Preservation (ISL-5, ISL-6)
+# =============================================================================
+
+
+class TestCILPassthroughFields:
+    """Verify that CEE passthrough fields survive Pydantic parsing.
+
+    ISL-5: category on NodeV2
+    ISL-6: raw_value, cap, extractionType, factor_type, uncertainty_drivers on ObservedState
+    """
+
+    def test_node_and_observed_state_passthrough_fields(self):
+        """New passthrough fields survive model construction and serialisation."""
+        node = NodeV2(
+            id="marketing",
+            kind="factor",
+            label="Marketing Spend",
+            category="market",
+            observed_state=ObservedState(
+                value=100000.0,
+                baseline=75000.0,
+                unit="$",
+                source="brief_extraction",
+                std=5000.0,
+                raw_value=100.0,
+                cap=200.0,
+                extractionType="explicit",
+                factor_type="continuous",
+                uncertainty_drivers=["data_quality", "sample_size"],
+            ),
+        )
+
+        # ISL-5: category preserved
+        assert node.category == "market"
+
+        # ISL-6: all ObservedState passthrough fields preserved
+        obs = node.observed_state
+        assert obs.raw_value == 100.0
+        assert obs.cap == 200.0
+        assert obs.extractionType == "explicit"
+        assert obs.factor_type == "continuous"
+        assert obs.uncertainty_drivers == ["data_quality", "sample_size"]
+
+        # Existing fields unchanged
+        assert node.id == "marketing"
+        assert node.kind == "factor"
+        assert node.label == "Marketing Spend"
+        assert obs.value == 100000.0
+        assert obs.baseline == 75000.0
+        assert obs.unit == "$"
+        assert obs.source == "brief_extraction"
+        assert obs.std == 5000.0
+
+        # Serialisation round-trip
+        dumped = node.model_dump()
+        assert dumped["category"] == "market"
+        assert dumped["observed_state"]["raw_value"] == 100.0
+        assert dumped["observed_state"]["cap"] == 200.0
+        assert dumped["observed_state"]["extractionType"] == "explicit"
+        assert dumped["observed_state"]["factor_type"] == "continuous"
+        assert dumped["observed_state"]["uncertainty_drivers"] == [
+            "data_quality",
+            "sample_size",
+        ]
+
+    def test_passthrough_fields_none_by_default(self):
+        """New fields default to None — backward compatible."""
+        node = NodeV2(id="revenue", kind="outcome", label="Revenue")
+        assert node.category is None
+
+        obs = ObservedState(value=42.0)
+        assert obs.raw_value is None
+        assert obs.cap is None
+        assert obs.extractionType is None
+        assert obs.factor_type is None
+        assert obs.uncertainty_drivers is None
+
+    def test_passthrough_fields_survive_request_parsing(self):
+        """Passthrough fields survive through full RobustnessRequestV2 parsing."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing Spend",
+                    category="market",
+                    observed_state=ObservedState(
+                        value=100000.0,
+                        raw_value=100.0,
+                        cap=200.0,
+                        extractionType="explicit",
+                        factor_type="continuous",
+                        uncertainty_drivers=["data_quality"],
+                    ),
+                ),
+                NodeV2(
+                    id="revenue",
+                    kind="outcome",
+                    label="Revenue",
+                    category="financial",
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="cil-passthrough-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="increase",
+                    label="Increase Marketing",
+                    interventions={"marketing": 1.5},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        # Verify fields survive through request parsing
+        marketing = request.graph.nodes[0]
+        revenue = request.graph.nodes[1]
+
+        assert marketing.category == "market"
+        assert revenue.category == "financial"
+
+        obs = marketing.observed_state
+        assert obs.raw_value == 100.0
+        assert obs.cap == 200.0
+        assert obs.extractionType == "explicit"
+        assert obs.factor_type == "continuous"
+        assert obs.uncertainty_drivers == ["data_quality"]
+
+    def test_passthrough_fields_survive_dict_round_trip(self):
+        """Fields survive model_validate(model_dump()) round-trip (JSON ingress pattern)."""
+        data = {
+            "id": "sales",
+            "kind": "factor",
+            "label": "Sales Volume",
+            "category": "commercial",
+            "observed_state": {
+                "value": 1500.0,
+                "raw_value": 15.0,
+                "cap": 100.0,
+                "extractionType": "inferred",
+                "factor_type": "discrete",
+                "uncertainty_drivers": ["model_uncertainty"],
+            },
+        }
+        node = NodeV2.model_validate(data)
+        assert node.category == "commercial"
+        assert node.observed_state.extractionType == "inferred"
+
+        # Round-trip: dump → re-validate
+        rebuilt = NodeV2.model_validate(node.model_dump())
+        assert rebuilt.category == "commercial"
+        assert rebuilt.observed_state.raw_value == 15.0
+        assert rebuilt.observed_state.cap == 100.0
+        assert rebuilt.observed_state.extractionType == "inferred"
+        assert rebuilt.observed_state.factor_type == "discrete"
+        assert rebuilt.observed_state.uncertainty_drivers == ["model_uncertainty"]
+
+    @pytest.mark.parametrize("field", ["raw_value", "cap", "std"])
+    def test_nan_rejected_for_passthrough_numeric_fields(self, field):
+        """NaN/inf in numeric passthrough fields is rejected (invalid JSON risk)."""
+        kwargs = {"value": 42.0, field: float("nan")}
+        with pytest.raises(Exception):
+            ObservedState(**kwargs)
+
+    @pytest.mark.parametrize("field", ["raw_value", "cap", "std"])
+    def test_inf_rejected_for_passthrough_numeric_fields(self, field):
+        """Inf in numeric passthrough fields is rejected."""
+        kwargs = {"value": 42.0, field: float("inf")}
+        with pytest.raises(Exception):
+            ObservedState(**kwargs)
+
+    def test_uncertainty_drivers_rejects_non_string_elements(self):
+        """uncertainty_drivers must be List[str], not arbitrary objects."""
+        with pytest.raises(Exception):
+            ObservedState(value=42.0, uncertainty_drivers=[{"nested": "dict"}])
