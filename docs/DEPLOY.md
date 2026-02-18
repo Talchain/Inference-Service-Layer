@@ -15,6 +15,8 @@ PYTHON_VERSION=3.12 (NOT 3.13 — NumPy 1.26.4 incompatible), ISL_API_KEY.
 
 Render auto-detects Poetry if pyproject.toml exists, but the build command must use `pip install -r requirements.txt` (not Poetry). If build fails about Poetry, check the build command in Render dashboard.
 
+> **Note:** The repo does not maintain a `requirements.txt` in version control. If the Render build command needs one, generate it with `poetry export -f requirements.txt --output requirements.txt --without-hashes` before deploying, or configure Render's build command to run this export step.
+
 ### Deploy steps
 
 1. `git checkout staging && git pull origin staging`

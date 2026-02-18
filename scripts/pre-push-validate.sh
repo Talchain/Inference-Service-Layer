@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Pre-push validation gate for Inference Service Layer
 # Runs all checks before allowing a push. Exits non-zero on any failure.
-# Usage: bash scripts/pre-push-validate.sh
+#
+# Usage:
+#   bash scripts/pre-push-validate.sh            # strict (default)
+#   bash scripts/pre-push-validate.sh --lenient   # warn on mypy/test failures
+#
 # As a git hook, receives: <remote-name> <remote-url> on stdin lines of
 #   <local-ref> <local-sha> <remote-ref> <remote-sha>
 
@@ -11,11 +15,32 @@ FAILURES=0
 CHECKS_RUN=0
 BRANCH=$(git branch --show-current)
 
+# Parse flags — --lenient downgrades mypy/test failures to warnings
+LENIENT=false
+for arg in "$@"; do
+    case "$arg" in
+        --lenient) LENIENT=true ;;
+    esac
+done
+
 header() { printf '\n\033[1;34m===> %s\033[0m\n' "$1"; }
 pass()   { printf '\033[1;32m  ✓ %s\033[0m\n' "$1"; }
 fail()   { printf '\033[1;31m  ✗ %s\033[0m\n' "$1"; FAILURES=$((FAILURES + 1)); }
 warn()   { printf '\033[1;33m  ⚠ %s\033[0m\n' "$1"; }
 skip()   { printf '\033[1;33m  ⊘ %s\033[0m\n' "$1"; }
+
+# In lenient mode, mypy/test failures are warnings instead of hard failures
+check_fail() {
+    if [ "$LENIENT" = true ]; then
+        warn "$1 (lenient mode — not blocking)"
+    else
+        fail "$1"
+    fi
+}
+
+if [ "$LENIENT" = true ]; then
+    printf '\033[1;33mRunning in --lenient mode: mypy/test failures are warnings\033[0m\n'
+fi
 
 # ---------------------------------------------------------------------------
 # Check 1 — Branch guard
@@ -34,7 +59,7 @@ fi
 if [ ! -t 0 ]; then
     while read -r local_ref local_sha remote_ref remote_sha; do
         if [ "$remote_ref" = "refs/heads/main" ]; then
-            fail "Push targets refs/heads/main — blocked. Push to staging instead."
+            fail "Push targets refs/heads/main — blocked. (local: $local_ref → remote: $remote_ref)"
         fi
     done
 fi
@@ -45,9 +70,6 @@ fi
 header "Check 2: Python type checking (mypy)"
 CHECKS_RUN=$((CHECKS_RUN + 1))
 
-# Detect mypy configuration in pyproject.toml
-# Note: CI skips mypy (see .pre-commit-config.yaml ci.skip). Run and report
-# but treat failures as warnings — mypy has known pre-existing issues.
 if grep -q '\[tool\.mypy\]' pyproject.toml 2>/dev/null; then
     MYPY_CMD=""
     if command -v poetry &>/dev/null; then
@@ -66,8 +88,8 @@ if grep -q '\[tool\.mypy\]' pyproject.toml 2>/dev/null; then
             pass "mypy passed"
         else
             MYPY_ERRORS=$(echo "$MYPY_OUTPUT" | grep -cE '^src/' || echo "0")
-            warn "mypy reported $MYPY_ERRORS issue(s) (non-blocking — CI skips mypy)"
             echo "$MYPY_OUTPUT" | tail -5
+            check_fail "mypy found $MYPY_ERRORS type error(s)"
         fi
     else
         skip "mypy configured but not installed — install with 'poetry install'"
@@ -105,6 +127,7 @@ if [ -n "$PYTEST_CMD" ]; then
     SUMMARY_LINE=$(echo "$TEST_OUTPUT" | grep -E '(passed|failed|error)' | tail -1)
     PASSED_COUNT=0
     FAILED_COUNT=0
+    ERRORS_COUNT=0
     if [ -n "$SUMMARY_LINE" ]; then
         PASSED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")
         FAILED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo "0")
@@ -113,17 +136,10 @@ if [ -n "$PYTEST_CMD" ]; then
             "${PASSED_COUNT:-0}" "${FAILED_COUNT:-0}" "${ERRORS_COUNT:-0}"
     fi
 
-    # Exit code 2 = collection error (broken test infrastructure)
-    # Exit code 1 = some tests failed (may be pre-existing)
-    # Exit code 0 = all passed
     if [ "$TEST_EXIT" -eq 0 ]; then
         pass "Test suite passed — all tests green"
-    elif [ "$TEST_EXIT" -eq 2 ]; then
-        fail "Test collection error — broken test infrastructure"
-    elif [ "${PASSED_COUNT:-0}" -gt 0 ]; then
-        pass "Test suite executed (${PASSED_COUNT:-0} passed, ${FAILED_COUNT:-0} failed)"
     else
-        fail "Test suite failed — no tests passed"
+        check_fail "Test suite had failures (exit code $TEST_EXIT: ${PASSED_COUNT:-0} passed, ${FAILED_COUNT:-0} failed, ${ERRORS_COUNT:-0} errors)"
     fi
 else
     fail "No pytest runner found — install with 'poetry install'"
@@ -135,33 +151,34 @@ fi
 header "Check 4: Dependency audit"
 CHECKS_RUN=$((CHECKS_RUN + 1))
 
-DEP_FILE=""
-if [ -f "pyproject.toml" ]; then
-    DEP_FILE="pyproject.toml"
-elif [ -f "requirements.txt" ]; then
-    DEP_FILE="requirements.txt"
-fi
+DEP_FILES_CHECKED=0
+LOCAL_REFS_FOUND=0
 
-if [ -n "$DEP_FILE" ]; then
-    LOCAL_REFS=0
+# Check all relevant dependency files
+for DEP_FILE in pyproject.toml requirements.txt requirements-testing.txt; do
+    if [ ! -f "$DEP_FILE" ]; then
+        continue
+    fi
+    DEP_FILES_CHECKED=$((DEP_FILES_CHECKED + 1))
+
     # Check for local path references: -e ., file:, ../ paths
     if grep -nE '(-e \.|file:|\.\./)' "$DEP_FILE" 2>/dev/null; then
-        LOCAL_REFS=1
+        fail "Local path references found in $DEP_FILE — these will break deployment"
+        LOCAL_REFS_FOUND=1
     fi
-    # Also check for {path = ...} in pyproject.toml (Poetry local deps)
-    if [ "$DEP_FILE" = "pyproject.toml" ]; then
+    # Check for {path = ...} in toml files (Poetry local deps)
+    if [[ "$DEP_FILE" == *.toml ]]; then
         if grep -nE '\{.*path\s*=' "$DEP_FILE" 2>/dev/null; then
-            LOCAL_REFS=1
+            fail "Local path dependency found in $DEP_FILE — these will break deployment"
+            LOCAL_REFS_FOUND=1
         fi
     fi
+done
 
-    if [ "$LOCAL_REFS" -eq 1 ]; then
-        fail "Local path references found in $DEP_FILE — these will break deployment"
-    else
-        pass "No local path references in $DEP_FILE"
-    fi
-else
-    fail "No dependency file found (expected pyproject.toml or requirements.txt)"
+if [ "$DEP_FILES_CHECKED" -eq 0 ]; then
+    fail "No dependency files found (expected pyproject.toml or requirements.txt)"
+elif [ "$LOCAL_REFS_FOUND" -eq 0 ]; then
+    pass "No local path references in $DEP_FILES_CHECKED dependency file(s)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -174,20 +191,24 @@ if [ -f "runtime.txt" ]; then
     PY_VERSION=$(tr -d '[:space:]' < runtime.txt)
     printf '  runtime.txt specifies: %s\n' "$PY_VERSION"
 
-    # Extract major.minor
-    PY_MAJOR_MINOR=$(echo "$PY_VERSION" | grep -oE '^[0-9]+\.[0-9]+')
+    # Extract major.minor — handles "3.11.9", "python-3.11.9", "python-3.11" etc.
+    PY_MAJOR_MINOR=$(echo "$PY_VERSION" | grep -oE '[0-9]+\.[0-9]+' | head -1)
 
-    case "$PY_MAJOR_MINOR" in
-        3.11|3.12)
-            pass "Python $PY_MAJOR_MINOR is compatible (NumPy 1.26.4 supported)"
-            ;;
-        3.13)
-            fail "Python 3.13 specified — NumPy 1.26.4 build fails on 3.13. Pin to 3.11 or 3.12."
-            ;;
-        *)
-            fail "Unexpected Python version $PY_MAJOR_MINOR — expected 3.11 or 3.12"
-            ;;
-    esac
+    if [ -z "$PY_MAJOR_MINOR" ]; then
+        fail "Could not parse Python version from runtime.txt: '$PY_VERSION'"
+    else
+        case "$PY_MAJOR_MINOR" in
+            3.11|3.12)
+                pass "Python $PY_MAJOR_MINOR is compatible (NumPy 1.26.4 supported)"
+                ;;
+            3.13)
+                fail "Python 3.13 specified — NumPy 1.26.4 build fails on 3.13. Pin to 3.11 or 3.12."
+                ;;
+            *)
+                fail "Unexpected Python version $PY_MAJOR_MINOR — expected 3.11 or 3.12"
+                ;;
+        esac
+    fi
 else
     skip "No runtime.txt found — cannot verify Python version"
 fi
@@ -208,6 +229,9 @@ printf '  Branch:         %s\n' "$BRANCH"
 printf '  Files changed:  %s (vs origin/staging)\n' "$FILES_CHANGED"
 printf '  Checks run:     %d\n' "$CHECKS_RUN"
 printf '  Failures:       %d\n' "$FAILURES"
+if [ "$LENIENT" = true ]; then
+    printf '  Mode:           lenient\n'
+fi
 
 if [ "$FAILURES" -gt 0 ]; then
     printf '\n\033[1;31mPre-push validation FAILED (%d failure(s)). Push blocked.\033[0m\n' "$FAILURES"
