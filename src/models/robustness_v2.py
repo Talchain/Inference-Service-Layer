@@ -344,6 +344,14 @@ class NodeV2(BaseModel):
         description="Node category from CEE (e.g., 'market', 'operational'). "
                     "Passthrough only — not used by ISL computation."
     )
+    # CIL: node-level factor type from CEE. Also present on ObservedState for
+    # backward compat — PLoT may send at either or both levels. ISL preserves
+    # both; no precedence rule (neither is used by ISL computation).
+    factor_type: Optional[str] = Field(
+        None,
+        description="Factor classification from CEE (e.g., 'market', 'operational'). "
+                    "Passthrough only — not used by ISL computation."
+    )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -356,6 +364,7 @@ class NodeV2(BaseModel):
                 "label": "Total Revenue",
                 "intercept": 0.0,
                 "category": "financial",
+                "factor_type": "market",
                 "observed_state": {
                     "value": 59.0,
                     "baseline": 49.0,
@@ -1157,6 +1166,12 @@ class RobustnessResponseV2(BaseModel):
         description="Analysis critiques and warnings"
     )
 
+    # Inference warnings (e.g. constraint nodes defaulting to base=0.0)
+    inference_warnings: List[str] = Field(
+        default_factory=list,
+        description="Warnings about inference conditions that may affect result reliability"
+    )
+
     model_config = {
         "populate_by_name": True,
         "json_schema_extra": {
@@ -1197,7 +1212,8 @@ class RobustnessResponseV2(BaseModel):
                     "tie_count": 0,
                     "tie_rate": 0.0
                 },
-                "critiques": []
+                "critiques": [],
+                "inference_warnings": []
             }
         }
     }

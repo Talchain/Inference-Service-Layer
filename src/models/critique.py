@@ -312,6 +312,20 @@ HIGH_TIE_RATE = CritiqueDefinition(
     ),
 )
 
+CONSTRAINT_NODE_DEFAULT_BASE = CritiqueDefinition(
+    code="CONSTRAINT_NODE_DEFAULT_BASE",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "Constraint node '{node_id}' has no ParameterUncertainty and is non-root "
+        "— defaulted to base=0.0, constraint probability may be unreliable"
+    ),
+    default_suggestion=(
+        "Supply a ParameterUncertainty entry (even distribution='point_mass') "
+        "for this node so its observed_state.value is used as the sampling base"
+    ),
+)
+
 
 # =============================================================================
 # Engine Critiques (internal errors)
@@ -365,6 +379,7 @@ CRITIQUES = {
     "BASELINE_NEAR_ZERO": BASELINE_NEAR_ZERO,
     "DEGENERATE_OPTION_ZERO_VARIANCE": DEGENERATE_OPTION_ZERO_VARIANCE,
     "HIGH_TIE_RATE": HIGH_TIE_RATE,
+    "CONSTRAINT_NODE_DEFAULT_BASE": CONSTRAINT_NODE_DEFAULT_BASE,
     # Engine
     "INTERNAL_ERROR": INTERNAL_ERROR,
     "INFERENCE_TIMEOUT": INFERENCE_TIMEOUT,

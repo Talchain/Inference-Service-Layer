@@ -21,7 +21,9 @@ from src.models.robustness_v2 import (
     GraphV2,
     InterventionOption,
     NodeV2,
+    ObservedState,
     OptionResult,
+    ParameterUncertainty,
     RobustnessRequestV2,
     StrengthDistribution,
 )
@@ -782,3 +784,248 @@ class TestConstraintAnalysisEdgeCases:
             ca = result.constraint_analysis
             assert ca is not None
             assert ca.constraints[0].node_id == "revenue"
+
+
+# =============================================================================
+# Inference Warnings Tests
+# =============================================================================
+
+
+class TestInferenceWarningsDefaultBase:
+    """Test that inference_warnings fires when a non-root constraint node
+    has no ParameterUncertainty and therefore defaults to base=0.0."""
+
+    @staticmethod
+    def _make_graph_with_nonroot_factor():
+        """Graph where fac_churn is a non-root factor (has incoming edge)."""
+        return GraphV2(
+            nodes=[
+                NodeV2(id="fac_retention", kind="factor", label="Retention"),
+                NodeV2(
+                    id="fac_churn",
+                    kind="factor",
+                    label="Churn",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "fac_retention", "to": "fac_churn"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=-0.3, std=0.05),
+                ),
+                EdgeV2(
+                    **{"from": "fac_churn", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=-0.5, std=0.1),
+                ),
+            ],
+        )
+
+    def test_warning_when_nonroot_constraint_node_lacks_uncertainty(self, caplog):
+        """Non-root factor without ParameterUncertainty triggers warning."""
+        graph = self._make_graph_with_nonroot_factor()
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="baseline",
+                    label="Baseline",
+                    interventions={"fac_retention": 0.6},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=1,
+            goal_constraints=[
+                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+            ],
+            # No parameter_uncertainties for fac_churn
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+
+        with caplog.at_level("WARNING"):
+            response = analyzer.analyze(request)
+
+        # Assert the structured log was emitted
+        assert any(
+            "isl.constraint.default_base" in r.message
+            for r in caplog.records
+            if r.levelname == "WARNING"
+        ), "Expected structured warning log for defaulted constraint node"
+
+        # Assert inference_warnings populated on response
+        assert len(response.inference_warnings) == 1
+        assert "fac_churn" in response.inference_warnings[0]
+        assert "base=0.0" in response.inference_warnings[0]
+
+        # Assert CritiqueV2 also emitted (visible in V2 response path)
+        constraint_critiques = [
+            c for c in response.critiques
+            if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        ]
+        assert len(constraint_critiques) == 1
+        assert constraint_critiques[0].severity == "warning"
+        assert constraint_critiques[0].affected_node_ids == ["fac_churn"]
+
+    def test_no_warning_when_node_has_parameter_uncertainty(self, caplog):
+        """Non-root factor WITH ParameterUncertainty does NOT trigger warning."""
+        graph = self._make_graph_with_nonroot_factor()
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="baseline",
+                    label="Baseline",
+                    interventions={"fac_retention": 0.6},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=1,
+            goal_constraints=[
+                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+            ],
+            parameter_uncertainties=[
+                ParameterUncertainty(
+                    node_id="fac_churn",
+                    distribution="normal",
+                    std=0.1,
+                ),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+
+        with caplog.at_level("WARNING"):
+            response = analyzer.analyze(request)
+
+        # No warning logs for default_base
+        assert not any(
+            "isl.constraint.default_base" in r.message
+            for r in caplog.records
+            if r.levelname == "WARNING"
+        ), "Should NOT emit warning when ParameterUncertainty is present"
+
+        # inference_warnings should be empty
+        assert response.inference_warnings == []
+
+        # No CONSTRAINT_NODE_DEFAULT_BASE critique
+        assert not any(
+            c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques
+        )
+
+    def test_no_warning_when_all_options_intervene_on_node(self, caplog):
+        """No false positive when every option directly intervenes on the node."""
+        graph = self._make_graph_with_nonroot_factor()
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt_a",
+                    label="Option A",
+                    interventions={"fac_retention": 0.6, "fac_churn": 0.3},
+                ),
+                InterventionOption(
+                    id="opt_b",
+                    label="Option B",
+                    interventions={"fac_retention": 0.8, "fac_churn": 0.2},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=1,
+            goal_constraints=[
+                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+
+        with caplog.at_level("WARNING"):
+            response = analyzer.analyze(request)
+
+        # No warning — intervention overrides base for every option
+        assert response.inference_warnings == []
+        assert not any(
+            c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques
+        )
+
+    def test_warning_with_multiple_constraint_nodes(self, caplog):
+        """Warning emitted for each non-root node missing ParameterUncertainty."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="fac_spend", kind="factor", label="Spend"),
+                NodeV2(
+                    id="fac_churn",
+                    kind="factor",
+                    label="Churn",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(
+                    id="fac_nps",
+                    kind="factor",
+                    label="NPS",
+                    observed_state=ObservedState(value=0.7),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "fac_spend", "to": "fac_churn"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=-0.3, std=0.05),
+                ),
+                EdgeV2(
+                    **{"from": "fac_spend", "to": "fac_nps"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.4, std=0.05),
+                ),
+                EdgeV2(
+                    **{"from": "fac_churn", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=-0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "fac_nps", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.3, std=0.1),
+                ),
+            ],
+        )
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="baseline",
+                    label="Baseline",
+                    interventions={"fac_spend": 100.0},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=1,
+            goal_constraints=[
+                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+                GoalConstraint(node_id="fac_nps", operator=">=", value=0.5),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+
+        with caplog.at_level("WARNING"):
+            response = analyzer.analyze(request)
+
+        # Both non-root nodes should trigger warnings
+        assert len(response.inference_warnings) == 2
+        warned_nodes = {w.split("'")[1] for w in response.inference_warnings}
+        assert warned_nodes == {"fac_churn", "fac_nps"}
+
+        # Both should have corresponding critiques
+        constraint_critiques = [
+            c for c in response.critiques
+            if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        ]
+        assert len(constraint_critiques) == 2

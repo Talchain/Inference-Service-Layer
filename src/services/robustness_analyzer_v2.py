@@ -49,6 +49,7 @@ from src.constants import (
     ZERO_VARIANCE_TOLERANCE,
 )
 from src.models.critique import (
+    CONSTRAINT_NODE_DEFAULT_BASE,
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
 )
@@ -653,9 +654,51 @@ class RobustnessAnalyzerV2:
         # Determine constraint target nodes for multi-constraint analysis
         constraint_target_nodes: Optional[List[str]] = None
         if request.goal_constraints:
-            constraint_target_nodes = list(set(
+            constraint_target_nodes = sorted(set(
                 gc.node_id for gc in request.goal_constraints
             ))
+
+        # Detect constraint target nodes that will silently default to base=0.0
+        # (non-root nodes without ParameterUncertainty, not fully covered by
+        # interventions across all options)
+        inference_warnings: List[str] = []
+        constraint_default_base_critiques: List[CritiqueV2] = []
+        if constraint_target_nodes:
+            parent_map: dict[str, list[str]] = defaultdict(list)
+            for edge in request.graph.edges:
+                parent_map[edge.to].append(edge.from_)
+            uncertainty_node_ids = set(
+                u.node_id for u in (request.parameter_uncertainties or [])
+            )
+            for node_id in constraint_target_nodes:
+                is_root = len(parent_map.get(node_id, [])) == 0
+                has_uncertainty = node_id in uncertainty_node_ids
+                # Skip warning if every option intervenes on this node
+                # (intervention value overrides the base, so base=0.0 is never used)
+                all_options_intervene = all(
+                    node_id in opt.interventions for opt in request.options
+                )
+                if not is_root and not has_uncertainty and not all_options_intervene:
+                    msg = (
+                        f"Node '{node_id}' has no ParameterUncertainty "
+                        f"— defaulted to base=0.0, constraint probability "
+                        f"may be unreliable"
+                    )
+                    inference_warnings.append(msg)
+                    constraint_default_base_critiques.append(
+                        CONSTRAINT_NODE_DEFAULT_BASE.build(
+                            node_id=node_id,
+                            affected_node_ids=[node_id],
+                        )
+                    )
+                    self.logger.warning(
+                        "isl.constraint.default_base",
+                        extra={
+                            "node_id": node_id,
+                            "defaulted_to": 0.0,
+                            "reason": "no_parameter_uncertainty",
+                        },
+                    )
 
         # Run Monte Carlo simulation
         (
@@ -710,6 +753,9 @@ class RobustnessAnalyzerV2:
                 )
             )
 
+        # Add constraint default-base critiques (also surfaced via inference_warnings)
+        critiques.extend(constraint_default_base_critiques)
+
         # Compute sensitivity if requested
         sensitivity = []
         if "sensitivity" in request.analysis_types:
@@ -760,6 +806,7 @@ class RobustnessAnalyzerV2:
                 tie_rate=tie_rate,
             ),
             critiques=critiques,
+            inference_warnings=inference_warnings,
         )
 
         self.logger.info(
