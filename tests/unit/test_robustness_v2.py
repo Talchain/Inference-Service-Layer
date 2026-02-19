@@ -5084,6 +5084,7 @@ class TestCILPassthroughFields:
             kind="factor",
             label="Marketing Spend",
             category="market",
+            factor_type="continuous",
             observed_state=ObservedState(
                 value=100000.0,
                 baseline=75000.0,
@@ -5100,6 +5101,8 @@ class TestCILPassthroughFields:
 
         # ISL-5: category preserved
         assert node.category == "market"
+        # Node-level factor_type preserved
+        assert node.factor_type == "continuous"
 
         # ISL-6: all ObservedState passthrough fields preserved
         obs = node.observed_state
@@ -5122,6 +5125,7 @@ class TestCILPassthroughFields:
         # Serialisation round-trip
         dumped = node.model_dump()
         assert dumped["category"] == "market"
+        assert dumped["factor_type"] == "continuous"
         assert dumped["observed_state"]["raw_value"] == 100.0
         assert dumped["observed_state"]["cap"] == 200.0
         assert dumped["observed_state"]["extractionType"] == "explicit"
@@ -5135,6 +5139,7 @@ class TestCILPassthroughFields:
         """New fields default to None — backward compatible."""
         node = NodeV2(id="revenue", kind="outcome", label="Revenue")
         assert node.category is None
+        assert node.factor_type is None
 
         obs = ObservedState(value=42.0)
         assert obs.raw_value is None
@@ -5213,6 +5218,7 @@ class TestCILPassthroughFields:
             "kind": "factor",
             "label": "Sales Volume",
             "category": "commercial",
+            "factor_type": "discrete",
             "observed_state": {
                 "value": 1500.0,
                 "raw_value": 15.0,
@@ -5224,11 +5230,13 @@ class TestCILPassthroughFields:
         }
         node = NodeV2.model_validate(data)
         assert node.category == "commercial"
+        assert node.factor_type == "discrete"
         assert node.observed_state.extractionType == "inferred"
 
         # Round-trip: dump → re-validate
         rebuilt = NodeV2.model_validate(node.model_dump())
         assert rebuilt.category == "commercial"
+        assert rebuilt.factor_type == "discrete"
         assert rebuilt.observed_state.raw_value == 15.0
         assert rebuilt.observed_state.cap == 100.0
         assert rebuilt.observed_state.extractionType == "inferred"
@@ -5253,3 +5261,79 @@ class TestCILPassthroughFields:
         """uncertainty_drivers must be List[str], not arbitrary objects."""
         with pytest.raises(Exception):
             ObservedState(value=42.0, uncertainty_drivers=[{"nested": "dict"}])
+
+    def test_all_passthrough_fields_survive_full_request(self):
+        """End-to-end: node with category, factor_type, and enriched observed_state
+        survives request parsing — fields not silently dropped by extra='ignore'.
+
+        Previously these would be stripped because they were undeclared.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="fac_churn",
+                    kind="factor",
+                    label="Customer Churn",
+                    category="observable",
+                    factor_type="market",
+                    observed_state=ObservedState(
+                        value=0.5,
+                        raw_value=50000.0,
+                        cap=100000.0,
+                        unit="£",
+                        extractionType="explicit",
+                        factor_type="market",
+                        uncertainty_drivers=["data_quality"],
+                    ),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "fac_churn", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=-0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="baseline",
+                    label="Baseline",
+                    interventions={"fac_churn": 0.3},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        # Verify node-level fields survived parsing
+        node = request.graph.nodes[0]
+        assert node.category == "observable"
+        assert node.factor_type == "market"
+
+        # Verify observed_state-level fields survived parsing
+        obs = node.observed_state
+        assert obs.raw_value == 50000.0
+        assert obs.cap == 100000.0
+        assert obs.unit == "£"
+        assert obs.extractionType == "explicit"
+        assert obs.factor_type == "market"
+        assert obs.uncertainty_drivers == ["data_quality"]
+
+        # Verify serialisation preserves all fields (for downstream consumers)
+        dumped = request.model_dump()
+        node_data = dumped["graph"]["nodes"][0]
+        assert node_data["category"] == "observable"
+        assert node_data["factor_type"] == "market"
+        obs_data = node_data["observed_state"]
+        assert obs_data["raw_value"] == 50000.0
+        assert obs_data["cap"] == 100000.0
+        assert obs_data["unit"] == "£"
+        assert obs_data["extractionType"] == "explicit"
+        assert obs_data["factor_type"] == "market"
+        assert obs_data["uncertainty_drivers"] == ["data_quality"]
