@@ -730,6 +730,122 @@ class TestDualUncertaintySampler:
         assert "a->b" in rates
         assert 0.65 < rates["a->b"] < 0.75
 
+    def test_edge_strength_clamped_high_mean_high_variance(self):
+        """B5.27: Sampled strengths must be bounded to [-1, 1] (positive tail)."""
+        edges = [
+            EdgeV2(
+                **{"from": "a", "to": "b"},
+                exists_probability=1.0,
+                strength=StrengthDistribution(mean=0.8, std=0.3),
+            )
+        ]
+        rng = SeededRNG(42)
+        sampler = DualUncertaintySampler(edges, rng)
+
+        configs = sampler.sample_n_configurations(10000)
+        strengths = [c[("a", "b")] for c in configs]
+
+        assert all(-1.0 <= s <= 1.0 for s in strengths), (
+            f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
+        )
+
+    def test_edge_strength_clamped_negative_tail(self):
+        """B5.27: Sampled strengths must be bounded to [-1, 1] (negative tail)."""
+        edges = [
+            EdgeV2(
+                **{"from": "a", "to": "b"},
+                exists_probability=1.0,
+                strength=StrengthDistribution(mean=-0.9, std=0.5),
+            )
+        ]
+        rng = SeededRNG(42)
+        sampler = DualUncertaintySampler(edges, rng)
+
+        configs = sampler.sample_n_configurations(10000)
+        strengths = [c[("a", "b")] for c in configs]
+
+        assert all(-1.0 <= s <= 1.0 for s in strengths), (
+            f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
+        )
+
+    def test_edge_strength_clamp_preserves_low_variance(self):
+        """B5.27: Clamping should not materially alter well-centred distributions."""
+        edges = [
+            EdgeV2(
+                **{"from": "a", "to": "b"},
+                exists_probability=1.0,
+                strength=StrengthDistribution(mean=0.0, std=0.1),
+            )
+        ]
+        rng = SeededRNG(42)
+        sampler = DualUncertaintySampler(edges, rng)
+
+        configs = sampler.sample_n_configurations(10000)
+        strengths = [c[("a", "b")] for c in configs]
+
+        assert all(-1.0 <= s <= 1.0 for s in strengths)
+        assert abs(np.mean(strengths)) < 0.02
+        assert abs(np.std(strengths) - 0.1) < 0.02
+
+    def test_edge_strength_clamp_behavioural_consistency(self):
+        """B5.27: Full analysis respects bounds — extreme edge clamped to 1.0."""
+        # mean=1.5, std=0.002 (minimum valid std) means every sample ≈1.5
+        # without clamping, but should behave as 1.0 with clamping
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.5, std=0.002),
+                )
+            ],
+        )
+        options = [
+            InterventionOption(
+                id="opt_a", label="Option A", interventions={"input": 1.0}
+            ),
+            InterventionOption(
+                id="opt_b", label="Option B", interventions={"input": 0.5}
+            ),
+        ]
+        request = RobustnessRequestV2(
+            request_id="b527-clamp-test",
+            graph=graph,
+            options=options,
+            goal_node_id="output",
+            n_samples=500,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With clamping: strength ≈ 1.0 (clamped from 1.5)
+        # outcome_opt_a = input(1.0) * 1.0 = 1.0
+        # outcome_opt_b = input(0.5) * 1.0 = 0.5
+        # Without clamping: strength ≈ 1.5
+        # outcome_opt_a = 1.0 * 1.5 = 1.5
+        # outcome_opt_b = 0.5 * 1.5 = 0.75
+        opt_a_result = next(r for r in response.results if r.option_id == "opt_a")
+        opt_b_result = next(r for r in response.results if r.option_id == "opt_b")
+
+        # Auto-scaled noise adds N(0, std(samples)) to outcome nodes.
+        # With std≈0.002 the pre-noise samples are nearly constant at 1.0,
+        # so noise std ≈ 0 and means stay very close to the clamped value.
+        # Allow ±0.15 for stochastic noise on top of the clamped value.
+        assert opt_a_result.outcome_distribution.mean == pytest.approx(1.0, abs=0.15), (
+            f"opt_a: expected mean ≈ 1.0 (clamped) but got "
+            f"{opt_a_result.outcome_distribution.mean:.4f}"
+        )
+        assert opt_b_result.outcome_distribution.mean == pytest.approx(0.5, abs=0.15), (
+            f"opt_b: expected mean ≈ 0.5 (clamped) but got "
+            f"{opt_b_result.outcome_distribution.mean:.4f}"
+        )
+
 
 # =============================================================================
 # SCM Evaluator Tests
@@ -3368,6 +3484,9 @@ class TestGoalThresholdProbability:
 
     def test_goal_threshold_with_multiple_options(self):
         """Test probability_of_goal computed correctly for each option independently."""
+        # Updated: edge clamping fix B5.27 — strengths now bounded to [-1, 1] in main MC loop
+        # Previous test used mean=2.0 (out of schema bounds); replaced with mean=1.0
+        # and adjusted intervention values to maintain clear separation around threshold.
         graph = GraphV2(
             nodes=[
                 NodeV2(id="investment", kind="factor", label="Investment", observed_state=ObservedState(value=0.0)),
@@ -3377,7 +3496,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "investment", "to": "revenue"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=2.0, std=0.01),  # 2x multiplier
+                    strength=StrengthDistribution(mean=1.0, std=0.01),  # 1x multiplier (within bounds)
                 )
             ],
         )
@@ -3387,12 +3506,12 @@ class TestGoalThresholdProbability:
             graph=graph,
             options=[
                 InterventionOption(id="low", label="Low Investment", interventions={"investment": 50.0}),
-                InterventionOption(id="high", label="High Investment", interventions={"investment": 150.0}),
+                InterventionOption(id="high", label="High Investment", interventions={"investment": 250.0}),
             ],
             goal_node_id="revenue",
             n_samples=100,
             seed=42,
-            goal_threshold=200.0,  # Between low (100) and high (300) expected outcomes
+            goal_threshold=150.0,  # Between low (~50) and high (~250) expected outcomes
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3401,8 +3520,8 @@ class TestGoalThresholdProbability:
         low_result = next(r for r in response.results if r.option_id == "low")
         high_result = next(r for r in response.results if r.option_id == "high")
 
-        # Low: outcome ~100, threshold 200 -> should rarely meet
-        # High: outcome ~300, threshold 200 -> should always meet
+        # Low: outcome ~50, threshold 150 -> should rarely meet
+        # High: outcome ~250, threshold 150 -> should always meet
         assert low_result.probability_of_goal < 0.1  # Near 0
         assert high_result.probability_of_goal > 0.99  # Near 1.0
 

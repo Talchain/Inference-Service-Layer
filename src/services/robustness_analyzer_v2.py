@@ -170,6 +170,11 @@ class DualUncertaintySampler:
             if self.rng.bernoulli(edge.exists_probability):
                 # Parametric uncertainty: what's the effect size?
                 strength = self.rng.normal(edge.strength.mean, edge.strength.std)
+                # Clip to schema bounds [-1, 1] for consistency with marginal analysis.
+                # This is a clipped normal, not a true truncated normal — it shifts
+                # effective mean and reduces variance at distribution tails. Acceptable
+                # for PoC; truncated normal sampling is a post-pilot refinement.
+                strength = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
                 config[edge_key] = strength
                 self._existence_counts[edge_key] += 1
             else:
@@ -1281,13 +1286,15 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # Force this edge's existence
                 if exists:
-                    config[edge_key] = rng.normal(edge.strength.mean, edge.strength.std)
+                    strength = rng.normal(edge.strength.mean, edge.strength.std)
+                    config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
                 else:
                     config[edge_key] = 0.0
             else:
                 # Sample normally
                 if rng.bernoulli(edge.exists_probability):
-                    config[edge_key] = rng.normal(edge.strength.mean, edge.strength.std)
+                    strength = rng.normal(edge.strength.mean, edge.strength.std)
+                    config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
                 else:
                     config[edge_key] = 0.0
 
@@ -1315,13 +1322,15 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # TARGET EDGE: Force to exist and apply shifted mean
                 # This isolates magnitude sensitivity from existence sensitivity
-                config[edge_key] = rng.normal(
+                strength = rng.normal(
                     edge.strength.mean + shift, edge.strength.std
                 )
+                config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
             else:
                 # OTHER EDGES: Sample normally (both existence and strength)
                 if rng.bernoulli(edge.exists_probability):
-                    config[edge_key] = rng.normal(edge.strength.mean, edge.strength.std)
+                    strength = rng.normal(edge.strength.mean, edge.strength.std)
+                    config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
                 else:
                     config[edge_key] = 0.0
 
