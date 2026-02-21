@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator
 
+from .robustness_v2 import GraphV2, InterventionOption
 from .shared import DAGStructure, Distribution, DistributionType, GraphV1, StructuralModel
 
 
@@ -3407,3 +3408,37 @@ class IdentifiabilityFromDAGRequest(BaseModel):
             }
         }
     }
+
+
+# ============================================================================
+# V2 Identifiability Request (3B-prep)
+# ============================================================================
+
+
+class IdentifiabilityV2Option(BaseModel):
+    """Option stub for V2 identifiability — only id + interventions needed."""
+
+    id: str = Field(..., description="Option identifier")
+    interventions: Dict[str, Any] = Field(
+        ..., description="Mapping of factor node IDs to intervention values"
+    )
+
+
+class IdentifiabilityV2Request(BaseModel):
+    """
+    V2 identifiability analysis request.
+
+    Accepts a V2 graph (with optional bidirected edges), a list of options
+    (to extract treatment factor nodes), and the outcome node.
+
+    Treatment expansion: the endpoint deduplicates intervention keys across
+    all options and assesses identifiability for each (treatment, outcome) pair.
+    """
+
+    graph: GraphV2 = Field(..., description="V2 causal graph (may include bidirected edges)")
+    options: List[IdentifiabilityV2Option] = Field(
+        ...,
+        min_length=1,
+        description="Decision options — intervention keys are treatment factors",
+    )
+    outcome_node_id: str = Field(..., description="Goal / outcome node ID")

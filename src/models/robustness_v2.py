@@ -289,6 +289,11 @@ class EdgeV2(BaseModel):
         description="Human-readable edge description",
         max_length=500
     )
+    edge_type: Optional[Literal["directed", "bidirected"]] = Field(
+        None,
+        description="Edge directionality. 'directed' (default when absent) = causal edge. "
+        "'bidirected' = unmeasured confounder between two nodes (used by identifiability analysis)."
+    )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.

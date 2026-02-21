@@ -4938,3 +4938,37 @@ class IdentifiabilityEnhancedResponse(BaseModel):
         None,
         description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
     )
+
+
+# ============================================================================
+# V2 Identifiability Response (3B-prep)
+# ============================================================================
+
+
+class IdentifiabilityV2PairResult(BaseModel):
+    """Identifiability result for a single (treatment, outcome) pair."""
+
+    treatment_node_id: str = Field(..., description="Treatment / factor node ID")
+    outcome_node_id: str = Field(..., description="Outcome / goal node ID")
+    identifiable: bool = Field(..., description="Whether the causal effect is identifiable")
+    method: Optional[str] = Field(
+        None,
+        description="Identification method (backdoor, frontdoor, do_calculus, non_identifiable)",
+    )
+    adjustment_set: Optional[List[str]] = Field(
+        None, description="Variables to condition on (for backdoor/frontdoor)"
+    )
+    estimand: Optional[str] = Field(
+        None, description="Symbolic estimand expression from Y₀ (when available)"
+    )
+
+
+class IdentifiabilityV2Response(BaseModel):
+    """Response for /v2/identifiability endpoint."""
+
+    pairs: List[IdentifiabilityV2PairResult] = Field(
+        ..., description="Per-pair identifiability results"
+    )
+    all_identifiable: bool = Field(
+        ..., description="True if every (treatment, outcome) pair is identifiable"
+    )
