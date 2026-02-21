@@ -586,6 +586,9 @@ class RobustnessAnalyzerV2:
     def __init__(self):
         """Initialize analyzer."""
         self.logger = logger
+        # Test-only override: set to an int to fix bootstrap count and skip
+        # adaptive timing. None = use adaptive budget (production default).
+        self._n_bootstrap_override: Optional[int] = None
 
     def analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
         """
@@ -1597,6 +1600,20 @@ class RobustnessAnalyzerV2:
             s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
         }
 
+        # --- Bootstrap stability analysis (3C) ---
+        # Measures stability of attribution under model and sampling uncertainty:
+        # how consistently each factor ranks as important when we resample edge
+        # configurations. This is NOT "confidence in the causal relationship"
+        # (which requires observational/experimental data we don't have).
+        primary_elasticities = {s["node_id"]: s["elasticity"] for s in sensitivities}
+        # sensitivities is already sorted by |elasticity| desc, so index+1 = importance_rank
+        primary_ranks = {s["node_id"]: i + 1 for i, s in enumerate(sensitivities)}
+        bootstrap_stability = self._compute_bootstrap_stability(
+            request, baseline_mean, ref_option, evaluator, rng,
+            primary_elasticities, primary_ranks,
+            n_bootstrap_override=self._n_bootstrap_override,
+        )
+
         # Convert to results with ranks
         results = []
         for i, s in enumerate(sensitivities):
@@ -1607,9 +1624,12 @@ class RobustnessAnalyzerV2:
                 # This overrides ZERO_OUTCOME_DIFF since disconnection is the root cause
                 zero_reason = ZeroSensitivityReason.DISCONNECTED
 
+            node_id = s["node_id"]
+            bs = bootstrap_stability.get(node_id, {})
+
             results.append(
                 FactorSensitivityResult(
-                    node_id=s["node_id"],
+                    node_id=node_id,
                     node_label=s["node_label"],
                     elasticity=s["elasticity"],
                     elasticity_display=s.get("elasticity_display"),
@@ -1620,6 +1640,10 @@ class RobustnessAnalyzerV2:
                     baseline_near_zero=s.get("baseline_near_zero"),
                     influence_score=s["influence_score"],
                     influence_rank=influence_rank_map[s["node_id"]],
+                    elasticity_std=bs.get("elasticity_std"),
+                    attribution_stability=bs.get("attribution_stability"),
+                    rank_flip_rate=bs.get("rank_flip_rate"),
+                    stability_method=bs.get("stability_method"),
                 )
             )
 
@@ -1636,6 +1660,265 @@ class RobustnessAnalyzerV2:
                 f"Decision is highly sensitive to {node_label} value - "
                 "consider narrowing uncertainty or gathering more data"
             )
+
+    def _compute_bootstrap_stability(
+        self,
+        request: RobustnessRequestV2,
+        baseline_mean: float,
+        ref_option: InterventionOption,
+        evaluator: SCMEvaluatorV2,
+        rng: SeededRNG,
+        primary_elasticities: Dict[str, float],
+        primary_ranks: Dict[str, int],
+        n_bootstrap_override: Optional[int] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Compute bootstrap stability metrics for factor sensitivity (3C).
+
+        Measures stability of attribution under model and sampling uncertainty:
+        how consistently each factor ranks as important when we resample edge
+        configurations. This is NOT "confidence in the causal relationship"
+        (which requires observational/experimental data we don't have).
+
+        Adaptive budget (when n_bootstrap_override is None):
+        - Start at N_BOOTSTRAP=10. If wall-clock < 100ms, increase to 20.
+        - If > 200ms at 10, keep 10 and log budget_exceeded.
+        - Jackknife fallback is not implemented: the current sensitivity code
+          uses deterministic mean-edge-config evaluation (not per-MC-sample
+          elasticities), so delete-d jackknife cannot recompute elasticity
+          without re-running the full MC. Bootstrap at 10 iterations is
+          sub-millisecond per iteration, making the fallback unnecessary.
+
+        Args:
+            request: The robustness request (graph, parameter_uncertainties, etc.)
+            baseline_mean: Mean outcome from the primary MC run
+            ref_option: Reference option for evaluation
+            evaluator: SCM evaluator
+            rng: Primary RNG (bootstrap seeds derived from rng.seed)
+            primary_elasticities: Dict[node_id -> elasticity] from deterministic computation
+            primary_ranks: Dict[node_id -> importance_rank] from the main sensitivity run
+            n_bootstrap_override: If set, skip adaptive budget and run exactly this many
+                iterations. Used by tests to ensure timing-independent determinism.
+
+        Returns:
+            Dict[node_id -> {elasticity_std, attribution_stability, rank_flip_rate, stability_method}]
+        """
+        if not request.parameter_uncertainties:
+            return {}
+
+        primary_seed = rng.seed
+        budget_exceeded = False
+        t0 = time.time()
+
+        if n_bootstrap_override is not None:
+            # Fixed count — skip adaptive budget (used by tests)
+            bootstrap_elasticities = self._run_bootstrap_iterations(
+                request, baseline_mean, ref_option, evaluator,
+                primary_seed, n_bootstrap_override,
+            )
+            n_bootstrap = n_bootstrap_override
+        else:
+            # --- Phase 1: run 10 bootstrap iterations ---
+            n_bootstrap_initial = 10
+            bootstrap_elasticities = self._run_bootstrap_iterations(
+                request, baseline_mean, ref_option, evaluator,
+                primary_seed, n_bootstrap_initial,
+            )
+            t1 = time.time()
+            elapsed_ms = (t1 - t0) * 1000
+
+            # --- Phase 2: adaptive budget ---
+            n_bootstrap = n_bootstrap_initial
+            if elapsed_ms < 100:
+                # Budget allows 20 runs; add 10 more
+                extra = self._run_bootstrap_iterations(
+                    request, baseline_mean, ref_option, evaluator,
+                    primary_seed + n_bootstrap_initial, 10,
+                )
+                # Merge: append elasticities for each node
+                for node_id in bootstrap_elasticities:
+                    bootstrap_elasticities[node_id].extend(extra.get(node_id, []))
+                n_bootstrap = 20
+            elif elapsed_ms > 200:
+                budget_exceeded = True
+                self.logger.info(
+                    "factor_sensitivity_bootstrap_budget_exceeded",
+                    extra={
+                        "elapsed_ms": round(elapsed_ms, 1),
+                        "n_bootstrap": n_bootstrap_initial,
+                        "budget_exceeded": True,
+                    },
+                )
+
+        stability_method = f"bootstrap_{n_bootstrap}"
+
+        # --- Phase 3: compute stability metrics ---
+        # Collect per-bootstrap rank arrays for rank_flip_rate
+        n_factors = len(bootstrap_elasticities)
+        node_ids = list(bootstrap_elasticities.keys())
+
+        # Build per-bootstrap-run elasticity matrix: [run_index][factor_index]
+        n_runs = n_bootstrap
+        # bootstrap_elasticities[node_id] is a list of length n_runs
+        elasticity_matrix = []
+        for run_idx in range(n_runs):
+            run_elasticities = {}
+            for nid in node_ids:
+                vals = bootstrap_elasticities[nid]
+                run_elasticities[nid] = vals[run_idx] if run_idx < len(vals) else 0.0
+            elasticity_matrix.append(run_elasticities)
+
+        # Compute per-bootstrap importance ranks (by |elasticity|, descending)
+        per_run_ranks: Dict[str, List[int]] = {nid: [] for nid in node_ids}
+        for run_elasticities in elasticity_matrix:
+            sorted_ids = sorted(
+                node_ids, key=lambda nid: abs(run_elasticities[nid]), reverse=True
+            )
+            for rank_idx, nid in enumerate(sorted_ids):
+                per_run_ranks[nid].append(rank_idx + 1)
+
+        result: Dict[str, Dict[str, Any]] = {}
+        for nid in node_ids:
+            elasticities = np.array(bootstrap_elasticities[nid])
+            e_std = float(np.std(elasticities, ddof=1)) if len(elasticities) > 1 else 0.0
+
+            # Use primary (deterministic) elasticity for the negligible check,
+            # not the bootstrap mean — the primary value is the reported number.
+            primary_e = primary_elasticities.get(nid, 0.0)
+
+            # Attribution stability from coefficient of variation
+            if abs(primary_e) < 1e-6:
+                attribution_stability = "negligible"
+            else:
+                cv = e_std / abs(primary_e)
+                if cv < 0.1:
+                    attribution_stability = "high"
+                elif cv < 0.3:
+                    attribution_stability = "moderate"
+                else:
+                    attribution_stability = "low"
+
+            # Rank flip rate: fraction of runs where rank shifts by >= 2
+            # compared to the reported primary importance_rank (the rank users see).
+            base_rank = primary_ranks.get(nid, 1)
+            ranks = per_run_ranks[nid]
+            flips = sum(1 for r in ranks if abs(r - base_rank) >= 2)
+            rank_flip_rate = flips / len(ranks) if ranks else 0.0
+
+            result[nid] = {
+                "elasticity_std": round(e_std, 8),
+                "attribution_stability": attribution_stability,
+                "rank_flip_rate": round(rank_flip_rate, 4),
+                "stability_method": stability_method,
+            }
+
+        self.logger.info(
+            "factor_sensitivity_bootstrap_complete",
+            extra={
+                "n_bootstrap": n_bootstrap,
+                "stability_method": stability_method,
+                "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                "budget_exceeded": budget_exceeded,
+                "n_factors": n_factors,
+            },
+        )
+
+        return result
+
+    def _run_bootstrap_iterations(
+        self,
+        request: RobustnessRequestV2,
+        baseline_mean: float,
+        ref_option: InterventionOption,
+        evaluator: SCMEvaluatorV2,
+        seed_offset: int,
+        n_iterations: int,
+    ) -> Dict[str, List[float]]:
+        """
+        Run N bootstrap iterations of factor sensitivity with resampled edge configs.
+
+        Each iteration:
+        1. Create a new RNG from (seed_offset + iteration_index)
+        2. Sample a fresh edge configuration via DualUncertaintySampler
+        3. Compute elasticity for each factor using that edge config
+
+        Args:
+            request: Robustness request
+            baseline_mean: Baseline outcome mean from primary MC
+            ref_option: Reference option
+            evaluator: SCM evaluator
+            seed_offset: Base seed for this batch of iterations
+            n_iterations: Number of iterations to run
+
+        Returns:
+            Dict[node_id -> List[elasticity_values]] across iterations
+        """
+        node_map = {n.id: n for n in request.graph.nodes}
+        result: Dict[str, List[float]] = {
+            u.node_id: [] for u in request.parameter_uncertainties
+            if node_map.get(u.node_id)
+        }
+
+        for i in range(n_iterations):
+            # Deterministic seed derived from primary seed + bootstrap index
+            boot_rng = SeededRNG(seed_offset + i)
+            boot_sampler = DualUncertaintySampler(request.graph.edges, boot_rng)
+            edge_config = boot_sampler.sample_edge_configuration()
+
+            for uncertainty in request.parameter_uncertainties:
+                node = node_map.get(uncertainty.node_id)
+                if not node:
+                    continue
+
+                observed_value = None
+                if node.observed_state and node.observed_state.value is not None:
+                    observed_value = node.observed_state.value
+                mean_value = observed_value if observed_value is not None else 0.0
+
+                if uncertainty.distribution == "normal":
+                    delta = uncertainty.std or 0.0
+                elif uncertainty.distribution == "uniform":
+                    range_min = uncertainty.range_min or 0.0
+                    range_max = uncertainty.range_max or 0.0
+                    delta = (range_max - range_min) * 0.1
+                else:
+                    delta = 0.0
+
+                if delta == 0.0:
+                    result[uncertainty.node_id].append(0.0)
+                    continue
+
+                # Evaluate with this bootstrap's edge config
+                factor_values_high = {uncertainty.node_id: mean_value + delta}
+                outcome_high = evaluator.evaluate(
+                    edge_strengths=edge_config,
+                    interventions=ref_option.interventions,
+                    goal_node=request.goal_node_id,
+                    factor_values=factor_values_high,
+                )
+
+                factor_values_low = {uncertainty.node_id: mean_value - delta}
+                outcome_low = evaluator.evaluate(
+                    edge_strengths=edge_config,
+                    interventions=ref_option.interventions,
+                    goal_node=request.goal_node_id,
+                    factor_values=factor_values_low,
+                )
+
+                outcome_diff = outcome_high - outcome_low
+                baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
+                factor_denom = max(abs(mean_value), FACTOR_SENSITIVITY_VALUE_EPSILON)
+                pct_outcome_change = outcome_diff / baseline_denom
+                pct_factor_change = (2 * delta) / factor_denom
+                elasticity = (
+                    pct_outcome_change / pct_factor_change
+                    if abs(pct_factor_change) > 1e-10
+                    else 0.0
+                )
+
+                result[uncertainty.node_id].append(elasticity)
+
+        return result
 
     def _compute_structural_influence(
         self,

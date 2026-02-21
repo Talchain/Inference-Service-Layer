@@ -664,6 +664,11 @@ async def _analyze_robustness_v2_enhanced(
                     # Structural influence from graph path analysis
                     influence_score=fs.influence_score,
                     influence_rank=fs.influence_rank,
+                    # Bootstrap uncertainty (3C)
+                    elasticity_std=fs.elasticity_std,
+                    attribution_stability=fs.attribution_stability,
+                    rank_flip_rate=fs.rank_flip_rate,
+                    stability_method=fs.stability_method,
                     # confidence omitted - V1 analyzer doesn't compute per-factor confidence
                 )
                 for fs in v1_response.factor_sensitivity

@@ -459,6 +459,23 @@ class FactorSensitivityV2(BaseModel):
     influence_rank: Optional[int] = Field(
         None, ge=1, description="Rank by influence_score (1 = highest)"
     )
+    # Bootstrap uncertainty fields (3C — factor sensitivity confidence)
+    elasticity_std: Optional[float] = Field(
+        None, ge=0,
+        description="Std dev of elasticity across bootstrap runs"
+    )
+    attribution_stability: Optional[Literal["high", "moderate", "low", "negligible"]] = Field(
+        None,
+        description="Categorical stability: 'high', 'moderate', 'low', or 'negligible'"
+    )
+    rank_flip_rate: Optional[float] = Field(
+        None, ge=0, le=1,
+        description="Fraction of bootstrap runs where rank shifts by >= 2 positions"
+    )
+    stability_method: Optional[str] = Field(
+        None,
+        description="Method used: 'bootstrap_20' or 'bootstrap_10'"
+    )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.

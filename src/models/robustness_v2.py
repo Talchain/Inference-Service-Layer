@@ -942,6 +942,30 @@ class FactorSensitivityResult(BaseModel):
         ge=1,
         description="Rank by influence_score (1 = highest influence)"
     )
+    # Bootstrap uncertainty fields (3C — factor sensitivity confidence)
+    elasticity_std: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Std dev of elasticity across bootstrap/jackknife runs. "
+                    "Measures stability of attribution under model and sampling uncertainty, "
+                    "NOT confidence in the causal relationship (which requires data we don't have)."
+    )
+    attribution_stability: Optional[Literal["high", "moderate", "low", "negligible"]] = Field(
+        None,
+        description="Categorical stability: 'high' (CV<0.1), 'moderate' (CV<0.3), "
+                    "'low' (CV>=0.3), or 'negligible' (|elasticity|<1e-6)"
+    )
+    rank_flip_rate: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of bootstrap runs where this factor's importance rank "
+                    "shifts by >= 2 positions"
+    )
+    stability_method: Optional[str] = Field(
+        None,
+        description="Method used: 'bootstrap_20' or 'bootstrap_10'"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -954,7 +978,11 @@ class FactorSensitivityResult(BaseModel):
                 "observed_value": 50000.0,
                 "interpretation": "Decision is moderately sensitive to marketing_spend value",
                 "influence_score": 0.85,
-                "influence_rank": 1
+                "influence_rank": 1,
+                "elasticity_std": 0.04,
+                "attribution_stability": "high",
+                "rank_flip_rate": 0.05,
+                "stability_method": "bootstrap_20"
             }
         }
     }

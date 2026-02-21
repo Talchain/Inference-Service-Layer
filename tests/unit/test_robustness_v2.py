@@ -5456,3 +5456,274 @@ class TestCILPassthroughFields:
         assert obs_data["extractionType"] == "explicit"
         assert obs_data["factor_type"] == "market"
         assert obs_data["uncertainty_drivers"] == ["data_quality"]
+
+
+# =============================================================================
+# Bootstrap Stability Tests (3C — factor sensitivity confidence)
+# =============================================================================
+
+
+class TestBootstrapStability:
+    """Tests for bootstrap uncertainty estimation on factor sensitivity (3C).
+
+    All tests pin N_BOOTSTRAP=10 via analyzer._n_bootstrap_override to prevent
+    wall-clock timing noise from causing non-deterministic test behaviour.
+    The adaptive budget logic is for production only.
+    """
+
+    # Fixed bootstrap count for all tests — prevents timing-dependent nondeterminism.
+    N_BOOTSTRAP_TEST = 10
+
+    def _make_two_factor_graph(self):
+        """Graph with one high-variance edge and one low-variance edge.
+
+        high_impact --[mean=0.8, std=0.3]--> goal
+        low_impact  --[mean=0.8, std=0.05]--> goal
+        """
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="high_impact", kind="factor", label="High Impact",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="low_impact", kind="factor", label="Low Impact",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "high_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.3),
+                ),
+                EdgeV2(
+                    **{"from": "low_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.05),
+                ),
+            ],
+        )
+        uncertainties = [
+            ParameterUncertainty(node_id="high_impact", distribution="normal", std=0.1),
+            ParameterUncertainty(node_id="low_impact", distribution="normal", std=0.1),
+        ]
+        return graph, uncertainties
+
+    def _make_analyzer(self):
+        """Create analyzer with fixed bootstrap count for deterministic tests."""
+        analyzer = RobustnessAnalyzerV2()
+        analyzer._n_bootstrap_override = self.N_BOOTSTRAP_TEST
+        return analyzer
+
+    def _analyze_two_factor(self, seed=42):
+        """Run analysis on the two-factor graph and return the response."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph, uncertainties = self._make_two_factor_graph()
+        request = RobustnessRequestV2(
+            request_id="bootstrap-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=200,
+            seed=seed,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=uncertainties,
+        )
+        analyzer = self._make_analyzer()
+        return analyzer.analyze(request)
+
+    def test_relative_stability_difference(self):
+        """Factor connected via high-variance edge has HIGHER elasticity_std
+        than factor connected via low-variance edge."""
+        response = self._analyze_two_factor()
+
+        high = next(fs for fs in response.factor_sensitivity if fs.node_id == "high_impact")
+        low = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
+
+        assert high.elasticity_std is not None
+        assert low.elasticity_std is not None
+        assert high.elasticity_std > low.elasticity_std
+
+    def test_rank_flip_rate_reflects_instability(self):
+        """High-variance factor has higher or equal rank_flip_rate than low-variance factor."""
+        response = self._analyze_two_factor()
+
+        high = next(fs for fs in response.factor_sensitivity if fs.node_id == "high_impact")
+        low = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
+
+        assert high.rank_flip_rate is not None
+        assert low.rank_flip_rate is not None
+        assert high.rank_flip_rate >= low.rank_flip_rate
+
+    def test_negligible_impact_handling(self):
+        """Factor with near-zero elasticity gets attribution_stability='negligible'."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="negligible", kind="factor", label="Negligible",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "negligible", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.0, std=0.01),
+                ),
+            ],
+        )
+        request = RobustnessRequestV2(
+            request_id="negligible-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="negligible", distribution="normal", std=0.01),
+            ],
+        )
+        analyzer = self._make_analyzer()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        assert fs.attribution_stability == "negligible"
+
+    def test_stability_levels_non_brittle(self):
+        """Very low variance → 'high' or 'moderate'; very high variance → 'low'."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        # Low-variance scenario: edge std=0.002 → very stable elasticity
+        graph_stable = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.002),
+                ),
+            ],
+        )
+        request_stable = RobustnessRequestV2(
+            request_id="stable-test",
+            graph=graph_stable,
+            options=[InterventionOption(id="opt1", label="Opt 1", interventions={})],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+        analyzer = self._make_analyzer()
+        resp_stable = analyzer.analyze(request_stable)
+        fs_stable = resp_stable.factor_sensitivity[0]
+        assert fs_stable.attribution_stability in ("high", "moderate")
+
+        # High-variance scenario: edge std=0.45 + exists_probability=0.5 → unstable
+        graph_unstable = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=0.5,
+                    strength=StrengthDistribution(mean=0.3, std=0.45),
+                ),
+            ],
+        )
+        request_unstable = RobustnessRequestV2(
+            request_id="unstable-test",
+            graph=graph_unstable,
+            options=[InterventionOption(id="opt1", label="Opt 1", interventions={})],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+        resp_unstable = analyzer.analyze(request_unstable)
+        fs_unstable = resp_unstable.factor_sensitivity[0]
+        assert fs_unstable.attribution_stability == "low"
+
+    def test_determinism(self):
+        """Same graph + same seed → identical bootstrap results across runs."""
+        resp1 = self._analyze_two_factor(seed=123)
+        resp2 = self._analyze_two_factor(seed=123)
+
+        for fs1, fs2 in zip(resp1.factor_sensitivity, resp2.factor_sensitivity):
+            assert fs1.node_id == fs2.node_id
+            assert fs1.elasticity_std == fs2.elasticity_std
+            assert fs1.attribution_stability == fs2.attribution_stability
+            assert fs1.rank_flip_rate == fs2.rank_flip_rate
+
+    def test_backward_compatibility(self):
+        """New fields are additive — existing fields unchanged."""
+        response = self._analyze_two_factor()
+
+        for fs in response.factor_sensitivity:
+            # Existing fields still present
+            assert fs.node_id is not None
+            assert fs.elasticity is not None
+            assert fs.importance_rank is not None
+            assert fs.interpretation is not None
+            # New fields present
+            assert fs.elasticity_std is not None
+            assert fs.attribution_stability is not None
+            assert fs.rank_flip_rate is not None
+            assert fs.stability_method is not None
+
+    def test_stability_method_recorded(self):
+        """stability_method field is present and matches the pinned bootstrap count."""
+        response = self._analyze_two_factor()
+
+        for fs in response.factor_sensitivity:
+            assert fs.stability_method is not None
+            assert fs.stability_method == f"bootstrap_{self.N_BOOTSTRAP_TEST}"
+
+    def test_new_fields_in_model_dump(self):
+        """New bootstrap fields appear in JSON serialization."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        # Added: factor sensitivity confidence 3C — bootstrap uncertainty fields
+        result = FactorSensitivityResult(
+            node_id="test_factor",
+            node_label="Test Factor",
+            elasticity=0.5,
+            elasticity_display=0.5,
+            importance_rank=1,
+            observed_value=1.0,
+            interpretation="Test interpretation",
+            elasticity_std=0.04,
+            attribution_stability="high",
+            rank_flip_rate=0.05,
+            stability_method="bootstrap_20",
+        )
+
+        dumped = result.model_dump()
+        assert "elasticity_std" in dumped
+        assert "attribution_stability" in dumped
+        assert "rank_flip_rate" in dumped
+        assert "stability_method" in dumped
+        assert dumped["elasticity_std"] == 0.04
+        assert dumped["attribution_stability"] == "high"
+        assert dumped["rank_flip_rate"] == 0.05
+        assert dumped["stability_method"] == "bootstrap_20"
