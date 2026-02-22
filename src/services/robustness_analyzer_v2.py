@@ -40,6 +40,7 @@ from src.models.robustness_v2 import (
     RobustnessResponseV2,
     RobustnessResult,
     SensitivityResult,
+    StabilityThresholdsResponse,
 )
 from src.models.response_v2 import ZeroSensitivityReason
 from src.constants import (
@@ -57,6 +58,10 @@ from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SeededRNG, compute_seed_from_graph
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
+from src.config.stability_thresholds import (
+    STABILITY_THRESHOLDS,
+    classify_attribution_stability,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -795,6 +800,21 @@ class RobustnessAnalyzerV2:
         recommended_option_id = max(option_wins, key=option_wins.get)
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
+        # Include stability thresholds when bootstrap stability was computed
+        has_bootstrap = any(
+            fs.attribution_stability is not None for fs in factor_sensitivity
+        )
+        stability_thresholds = (
+            StabilityThresholdsResponse(
+                high_moderate_boundary=STABILITY_THRESHOLDS.high_moderate_boundary,
+                moderate_low_boundary=STABILITY_THRESHOLDS.moderate_low_boundary,
+                version=STABILITY_THRESHOLDS.version,
+                provisional=STABILITY_THRESHOLDS.provisional,
+            )
+            if has_bootstrap
+            else None
+        )
+
         response = RobustnessResponseV2(
             request_id=request_id,
             results=results,
@@ -815,6 +835,7 @@ class RobustnessAnalyzerV2:
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
+            stability_thresholds=stability_thresholds,
         )
 
         self.logger.info(
@@ -1787,16 +1808,10 @@ class RobustnessAnalyzerV2:
             primary_e = primary_elasticities.get(nid, 0.0)
 
             # Attribution stability from coefficient of variation
-            if abs(primary_e) < 1e-6:
-                attribution_stability = "negligible"
-            else:
-                cv = e_std / abs(primary_e)
-                if cv < 0.1:
-                    attribution_stability = "high"
-                elif cv < 0.3:
-                    attribution_stability = "moderate"
-                else:
-                    attribution_stability = "low"
+            # Thresholds are configurable via STABILITY_THRESHOLDS (provisional)
+            attribution_stability = classify_attribution_stability(
+                primary_e, e_std, STABILITY_THRESHOLDS
+            )
 
             # Rank flip rate: fraction of runs where rank shifts by >= 2
             # compared to the reported primary importance_rank (the rank users see).

@@ -1144,6 +1144,30 @@ class ResponseMetadataV2(BaseModel):
     )
 
 
+class StabilityThresholdsResponse(BaseModel):
+    """Threshold metadata for attribution_stability classification.
+
+    Provisional — pending scientific review. NOT included in response_hash.
+    """
+
+    high_moderate_boundary: float = Field(
+        ...,
+        description="CV boundary: CV ≤ this → 'high' stability"
+    )
+    moderate_low_boundary: float = Field(
+        ...,
+        description="CV boundary: CV ≤ this → 'moderate'; above → 'low'"
+    )
+    version: str = Field(
+        ...,
+        description="Threshold configuration version"
+    )
+    provisional: bool = Field(
+        ...,
+        description="True indicates thresholds are operational defaults pending review"
+    )
+
+
 class RobustnessResponseV2(BaseModel):
     """V2.2 robustness analysis response."""
 
@@ -1203,6 +1227,13 @@ class RobustnessResponseV2(BaseModel):
     inference_warnings: List[str] = Field(
         default_factory=list,
         description="Warnings about inference conditions that may affect result reliability"
+    )
+
+    # Stability threshold metadata (3C-thresholds)
+    stability_thresholds: Optional[StabilityThresholdsResponse] = Field(
+        None,
+        description="Thresholds used for attribution_stability classification. "
+        "Provisional — pending scientific review. NOT included in response_hash.",
     )
 
     model_config = {
