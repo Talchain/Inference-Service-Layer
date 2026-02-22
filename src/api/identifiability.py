@@ -24,6 +24,8 @@ from src.models.requests import (
     IdentifiabilityV2Request,
 )
 from src.models.responses import (
+    ConfoundingPairResponse,
+    ConfoundingSensitivityResponse,
     IdentifiabilityInfo,
     IdentifiabilityResponse,
     IdentifiabilitySuggestionResponse,
@@ -31,6 +33,9 @@ from src.models.responses import (
     IdentifiabilityV2Response,
     IdentificationMethodEnum,
     RecommendationStatusEnum,
+)
+from src.services.confounding_sensitivity import (
+    analyze_confounding_sensitivity,
 )
 from src.models.shared import ConfidenceLevel
 from src.services.identifiability_analyzer import (
@@ -415,18 +420,76 @@ async def analyze_identifiability_v2(
 
         all_identifiable = all(p.identifiable for p in pairs)
 
+        # --- confounding sensitivity for non-identifiable pairs ---
+        confounding_response: Optional[ConfoundingSensitivityResponse] = None
+        if not all_identifiable:
+            # Extract bidirected pairs from graph
+            bidirected_pairs = []
+            seen_pairs: set = set()
+            for edge in request.graph.edges:
+                if edge.edge_type == "bidirected":
+                    canonical = tuple(sorted([edge.from_, edge.to]))
+                    if canonical not in seen_pairs:
+                        seen_pairs.add(canonical)
+                        bidirected_pairs.append(canonical)
+
+            if bidirected_pairs:
+                # Convert options to dicts for the sensitivity analyzer
+                option_dicts = [
+                    {"id": opt.id, "label": opt.id, "interventions": opt.interventions}
+                    for opt in request.options
+                ]
+
+                sensitivity_result = analyze_confounding_sensitivity(
+                    graph=request.graph,
+                    options=option_dicts,
+                    goal_node_id=request.outcome_node_id,
+                    bidirected_pairs=bidirected_pairs,
+                    seed=42,
+                    n_samples=1000,
+                )
+
+                confounding_response = ConfoundingSensitivityResponse(
+                    pairs=[
+                        ConfoundingPairResponse(
+                            node_a=p.node_a,
+                            node_b=p.node_b,
+                            flip_threshold_raw=p.flip_threshold_raw,
+                            flip_threshold_relative=p.flip_threshold_relative,
+                            baseline_winner=p.baseline_winner,
+                            flipped_winner=p.flipped_winner,
+                            interpretation=p.interpretation,
+                        )
+                        for p in sensitivity_result.pairs
+                    ],
+                    overall_robust=sensitivity_result.overall_robust,
+                    median_edge_strength=sensitivity_result.median_edge_strength,
+                )
+
+                logger.info(
+                    "confounding_sensitivity_completed",
+                    extra={
+                        "request_id": request_id,
+                        "n_bidirected_pairs": len(bidirected_pairs),
+                        "overall_robust": sensitivity_result.overall_robust,
+                        "latency_ms": sensitivity_result.latency_ms,
+                    },
+                )
+
         logger.info(
             "identifiability_v2_analysis_completed",
             extra={
                 "request_id": request_id,
                 "n_pairs": len(pairs),
                 "all_identifiable": all_identifiable,
+                "has_confounding_sensitivity": confounding_response is not None,
             },
         )
 
         return IdentifiabilityV2Response(
             pairs=pairs,
             all_identifiable=all_identifiable,
+            confounding_sensitivity=confounding_response,
         )
 
     except HTTPException:
