@@ -678,6 +678,7 @@ async def _analyze_robustness_v2_enhanced(
             options=option_results,
             robustness=robustness_result,
             factor_sensitivity=factor_sensitivity,
+            stability_thresholds=v1_response.stability_thresholds,  # 3C
         )
 
         # Update diagnostics with sampling info

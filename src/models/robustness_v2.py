@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
-from src.models.response_v2 import CritiqueV2, ZeroSensitivityReason
+from src.models.response_v2 import CritiqueV2, StabilityThresholdsResponse, ZeroSensitivityReason
 
 
 # =============================================================================
@@ -1141,30 +1141,6 @@ class ResponseMetadataV2(BaseModel):
         ge=0,
         le=1,
         description="Fraction of samples with tied outcomes (tie_count / n_samples)"
-    )
-
-
-class StabilityThresholdsResponse(BaseModel):
-    """Threshold metadata for attribution_stability classification.
-
-    Provisional — pending scientific review. NOT included in response_hash.
-    """
-
-    high_moderate_boundary: float = Field(
-        ...,
-        description="CV boundary: CV ≤ this → 'high' stability"
-    )
-    moderate_low_boundary: float = Field(
-        ...,
-        description="CV boundary: CV ≤ this → 'moderate'; above → 'low'"
-    )
-    version: str = Field(
-        ...,
-        description="Threshold configuration version"
-    )
-    provisional: bool = Field(
-        ...,
-        description="True indicates thresholds are operational defaults pending review"
     )
 
 

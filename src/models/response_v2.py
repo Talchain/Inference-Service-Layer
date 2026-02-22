@@ -483,6 +483,35 @@ class FactorSensitivityV2(BaseModel):
 
 
 # =============================================================================
+# Stability Thresholds (3C)
+# =============================================================================
+
+
+class StabilityThresholdsResponse(BaseModel):
+    """Threshold metadata for attribution_stability classification.
+
+    Provisional — pending scientific review. NOT included in response_hash.
+    """
+
+    high_moderate_boundary: float = Field(
+        ...,
+        description="CV boundary: CV ≤ this → 'high' stability"
+    )
+    moderate_low_boundary: float = Field(
+        ...,
+        description="CV boundary: CV ≤ this → 'moderate'; above → 'low'"
+    )
+    version: str = Field(
+        ...,
+        description="Threshold configuration version"
+    )
+    provisional: bool = Field(
+        ...,
+        description="True indicates thresholds are operational defaults pending review"
+    )
+
+
+# =============================================================================
 # Main V2 Response
 # =============================================================================
 
@@ -546,6 +575,13 @@ class ISLResponseV2(BaseModel):
     )
     factor_sensitivity: Optional[List[FactorSensitivityV2]] = Field(
         None, description="Factor sensitivity results"
+    )
+
+    # Stability threshold metadata (3C-thresholds)
+    stability_thresholds: Optional[StabilityThresholdsResponse] = Field(
+        None,
+        description="Thresholds used for attribution_stability classification. "
+        "Provisional — pending scientific review. NOT included in response_hash.",
     )
 
     # Correlation
