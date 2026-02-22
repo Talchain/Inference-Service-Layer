@@ -29,6 +29,7 @@ from src.services.sbc_validator import (
     SBCResult,
     _build_frozen_graph,
     _compute_ground_truth,
+    _edge_key,
     _sample_true_world,
     run_sbc_validation,
 )
@@ -241,7 +242,7 @@ class TestFrozenParameterCorrectness:
         graph = _make_graph()
 
         # Force all edges to not exist
-        all_keys = [f"{e.from_}->{e.to}" for e in graph.edges]
+        all_keys = [_edge_key(i, e) for i, e in enumerate(graph.edges)]
         true_strengths = {k: 0.5 for k in all_keys}
         true_existence = {k: False for k in all_keys}
 

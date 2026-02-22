@@ -113,6 +113,11 @@ _PIT_ALPHA = 0.05  # chi-squared significance level
 # ---------------------------------------------------------------------------
 
 
+def _edge_key(idx: int, edge: EdgeV2) -> str:
+    """Unique key for an edge, using index to distinguish parallel edges."""
+    return f"{idx}:{edge.from_}->{edge.to}"
+
+
 def _build_frozen_graph(
     graph: GraphV2,
     true_strengths: Dict[str, float],
@@ -127,19 +132,19 @@ def _build_frozen_graph(
 
     Args:
         graph: Original graph with uncertainty.
-        true_strengths: edge_key ("from->to") → sampled true strength.
-        true_existence: edge_key ("from->to") → whether edge exists in this world.
+        true_strengths: edge_key ("idx:from->to") → sampled true strength.
+        true_existence: edge_key ("idx:from->to") → whether edge exists in this world.
 
     Returns:
         New GraphV2 with frozen parameters.
     """
     frozen_edges = []
-    for edge in graph.edges:
-        edge_key = f"{edge.from_}->{edge.to}"
-        exists = true_existence[edge_key]
+    for idx, edge in enumerate(graph.edges):
+        key = _edge_key(idx, edge)
+        exists = true_existence[key]
 
         frozen_strength = StrengthDistribution.model_construct(
-            mean=true_strengths[edge_key] if exists else 0.0,
+            mean=true_strengths[key] if exists else 0.0,
             std=0.0,
         )
         frozen_edge = EdgeV2.model_construct(
@@ -169,15 +174,15 @@ def _sample_true_world(
     - strength: Normal(mean, std) clipped to [-1, 1]
 
     Returns:
-        (true_strengths, true_existence) dictionaries keyed by "from->to".
+        (true_strengths, true_existence) dictionaries keyed by "idx:from->to".
     """
     true_strengths: Dict[str, float] = {}
     true_existence: Dict[str, bool] = {}
 
-    for edge in graph.edges:
-        edge_key = f"{edge.from_}->{edge.to}"
+    for idx, edge in enumerate(graph.edges):
+        key = _edge_key(idx, edge)
         exists = rng.random() < edge.exists_probability
-        true_existence[edge_key] = exists
+        true_existence[key] = exists
         if exists:
             strength = float(np.clip(
                 rng.normal(edge.strength.mean, edge.strength.std),
@@ -185,7 +190,7 @@ def _sample_true_world(
             ))
         else:
             strength = 0.0
-        true_strengths[edge_key] = strength
+        true_strengths[key] = strength
 
     return true_strengths, true_existence
 

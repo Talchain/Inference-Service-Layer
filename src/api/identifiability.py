@@ -423,15 +423,19 @@ async def analyze_identifiability_v2(
         # --- confounding sensitivity for non-identifiable pairs ---
         confounding_response: Optional[ConfoundingSensitivityResponse] = None
         if not all_identifiable:
-            # Extract bidirected pairs from graph
-            bidirected_pairs = []
-            seen_pairs: set = set()
-            for edge in request.graph.edges:
-                if edge.edge_type == "bidirected":
-                    canonical = tuple(sorted([edge.from_, edge.to]))
-                    if canonical not in seen_pairs:
-                        seen_pairs.add(canonical)
-                        bidirected_pairs.append(canonical)
+            # Collect treatment nodes that are non-identifiable
+            non_id_treatments = {
+                p.treatment_node_id for p in pairs if not p.identifiable
+            }
+
+            # Extract bidirected pairs, filtered to those involving
+            # non-identifiable treatment nodes (not all bidirected pairs).
+            from src.services.confounding_sensitivity import _extract_bidirected_pairs
+            all_bidirected = _extract_bidirected_pairs(request.graph)
+            bidirected_pairs = [
+                (a, b) for a, b in all_bidirected
+                if a in non_id_treatments or b in non_id_treatments
+            ]
 
             if bidirected_pairs:
                 # Convert options to dicts for the sensitivity analyzer
@@ -445,8 +449,8 @@ async def analyze_identifiability_v2(
                     options=option_dicts,
                     goal_node_id=request.outcome_node_id,
                     bidirected_pairs=bidirected_pairs,
-                    seed=42,
-                    n_samples=1000,
+                    seed=request.seed,
+                    n_samples=request.n_samples,
                 )
 
                 confounding_response = ConfoundingSensitivityResponse(

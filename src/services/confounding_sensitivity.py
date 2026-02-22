@@ -152,13 +152,15 @@ def _build_intervention_options(
     result = []
     for opt in options:
         interventions = opt.get("interventions", {})
-        # Coerce values to float for RobustnessAnalyzerV2
         float_interventions = {}
         for k, v in interventions.items():
             try:
                 float_interventions[k] = float(v)
             except (TypeError, ValueError):
-                float_interventions[k] = 0.0
+                raise ValueError(
+                    f"Option {opt['id']!r}: intervention value for {k!r} "
+                    f"is not numeric: {v!r}"
+                )
         result.append(
             InterventionOption(
                 id=opt["id"],

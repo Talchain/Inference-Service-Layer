@@ -3442,3 +3442,13 @@ class IdentifiabilityV2Request(BaseModel):
         description="Decision options — intervention keys are treatment factors",
     )
     outcome_node_id: str = Field(..., description="Goal / outcome node ID")
+    seed: Optional[int] = Field(
+        default=42,
+        description="RNG seed for confounding sensitivity (default: 42)",
+    )
+    n_samples: Optional[int] = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="MC samples for confounding sensitivity (default: 1000)",
+    )
