@@ -709,3 +709,95 @@ class TestCILF3Unified422Format:
         # Should have Olumi format
         assert "code" in data, "Non-robustness endpoint should use Olumi format"
         assert "analysis_status" not in data
+
+
+class TestStabilityThresholdsEnvelope:
+    """Regression test for 3C: stability_thresholds field in ISLResponseV2 envelope."""
+
+    def test_stability_thresholds_present_with_bootstrap(self, client):
+        """When parameter_uncertainties triggers bootstrap, stability_thresholds appears in response."""
+        request_with_bootstrap = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1"},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.6, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor1": 0.3}},
+                {"id": "opt2", "label": "Option 2", "interventions": {"factor1": 0.7}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+            "parameter_uncertainties": [
+                {"node_id": "factor1", "distribution": "normal", "std": 0.1}
+            ],
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_with_bootstrap,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        # Verify stability_thresholds field is present at top level
+        assert "stability_thresholds" in data, "Missing 'stability_thresholds' field in ISLResponseV2 envelope"
+
+        # Verify it has the expected structure
+        thresholds = data["stability_thresholds"]
+        assert "high_moderate_boundary" in thresholds, "Missing 'high_moderate_boundary'"
+        assert "moderate_low_boundary" in thresholds, "Missing 'moderate_low_boundary'"
+        assert "version" in thresholds, "Missing 'version'"
+        assert "provisional" in thresholds, "Missing 'provisional'"
+        assert thresholds["provisional"] is True, "Expected provisional=True"
+
+    def test_stability_thresholds_absent_without_bootstrap(self, client):
+        """Without parameter_uncertainties, stability_thresholds is excluded (exclude_none=True)."""
+        request_without_bootstrap = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1"},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.6, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor1": 0.3}},
+                {"id": "opt2", "label": "Option 2", "interventions": {"factor1": 0.7}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+            # No parameter_uncertainties
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_without_bootstrap,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        # Verify stability_thresholds is NOT present (exclude_none=True in serialization)
+        assert "stability_thresholds" not in data, "stability_thresholds should be excluded when bootstrap not active"
