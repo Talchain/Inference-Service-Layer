@@ -29,6 +29,7 @@ from src.models.response_v2 import (
     OptionResultV2,
     RequestEchoV2,
     RobustnessResultV2,
+    StabilityThresholdsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -114,7 +115,7 @@ class ResponseBuilder:
         options: List[OptionResultV2],
         robustness: Optional[RobustnessResultV2] = None,
         factor_sensitivity: Optional[List[FactorSensitivityV2]] = None,
-        stability_thresholds=None,  # 3C: Optional[StabilityThresholdsResponse]
+        stability_thresholds: Optional[StabilityThresholdsResponse] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
