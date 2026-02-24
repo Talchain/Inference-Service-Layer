@@ -138,13 +138,19 @@ def compute_factor_confidence(
 ) -> float | None:
     """Compute per-factor confidence from bootstrap stability metrics.
 
+    NOTE: This confidence value is a stability-derived heuristic, not a
+    calibrated probability. It reflects how stable the sensitivity ranking
+    is across bootstrap resamples. Values are provisional pending scientific
+    calibration from pilot data (Neil gate 1).
+
     Confidence is derived from:
     1. Categorical stability signal (attribution_stability: high/moderate/low/negligible)
     2. Coefficient of variation refinement (when available)
 
     The categorical signal (70% weight) reflects rank consistency across bootstrap
-    resamples. The CV signal (30% weight) reflects magnitude consistency. Both are
-    informative but rank stability is more directly interpretable for users.
+    resamples. The CV signal (30% weight) reflects magnitude consistency using a
+    smooth mapping ``cv_score = 1 / (1 + CV)`` that is monotonically decreasing,
+    always in (0, 1], and never collapses to zero even for large CV values.
 
     Args:
         attribution_stability: Categorical stability from bootstrap
@@ -159,7 +165,7 @@ def compute_factor_confidence(
         >>> compute_factor_confidence("high", 0.5, None)
         0.9
         >>> compute_factor_confidence("moderate", 0.5, 0.1)  # With CV refinement
-        0.66  # 0.7 * 0.6 + 0.3 * (1 - 0.1/0.5) = 0.42 + 0.24
+        0.6694  # 0.7 * 0.6 + 0.3 * (1 / (1 + 0.2)) = 0.42 + 0.25
         >>> compute_factor_confidence(None, 0.5, None)
         None
     """
@@ -172,10 +178,14 @@ def compute_factor_confidence(
     )
 
     # Step 2: CV refinement (when available and elasticity is non-negligible)
+    # Uses smooth mapping: cv_score = 1 / (1 + CV)
+    # - Monotonically decreasing: low CV (stable) → high score
+    # - Always in (0, 1]: never collapses to zero for large CV
+    # - CV=0 → 1.0, CV=0.5 → 0.67, CV=1.0 → 0.5, CV=2.0 → 0.33
     cv_score = None
     if elasticity_std is not None and abs(elasticity) > CONFIDENCE_CV_ELASTICITY_FLOOR:
         cv = elasticity_std / abs(elasticity)
-        cv_score = max(0.0, min(1.0, 1.0 - cv))
+        cv_score = 1.0 / (1.0 + cv)
 
     # Step 3: Blend
     if cv_score is not None:
