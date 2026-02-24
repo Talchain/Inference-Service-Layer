@@ -908,16 +908,13 @@ class TestFactorConfidence:
         assert response.status_code == 200, f"Request failed: {response.text}"
         data = response.json()
 
-        # Without parameter_uncertainties, factor_sensitivity is empty or absent
+        # Without parameter_uncertainties, factor_sensitivity is empty
+        # (no uncertainties → no elasticity computation → no factors returned)
         factors = data.get("factor_sensitivity", [])
-        if len(factors) > 0:
-            # If any factors are present, confidence should be omitted
-            # (exclude_none=True serialization means None values are dropped)
-            for factor in factors:
-                assert "confidence" not in factor, (
-                    f"Expected 'confidence' to be omitted (exclude_none=True) for factor "
-                    f"{factor.get('node_id')}, but got: {factor.get('confidence')}"
-                )
+        assert len(factors) == 0, (
+            f"Expected empty factor_sensitivity without parameter_uncertainties, "
+            f"got {len(factors)} factors"
+        )
 
         # Also verify that stability_thresholds is absent (no bootstrap ran)
         assert "stability_thresholds" not in data, (

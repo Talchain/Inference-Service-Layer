@@ -528,6 +528,7 @@ class TestNearTieScenario:
             ],
         )
         analyzer = RobustnessAnalyzerV2()
+        analyzer._n_bootstrap_override = 10  # Pin for determinism (match TestBootstrapStability)
         response = analyzer.analyze(request)
 
         assert response.factor_sensitivity is not None
