@@ -801,3 +801,242 @@ class TestStabilityThresholdsEnvelope:
 
         # Verify stability_thresholds is NOT present (exclude_none=True in serialization)
         assert "stability_thresholds" not in data, "stability_thresholds should be excluded when bootstrap not active"
+
+
+# ==============================================================================
+# Track S: Factor Confidence Integration Tests
+# ==============================================================================
+
+
+class TestFactorConfidence:
+    """Integration tests for factor sensitivity confidence (Track S)."""
+
+    def test_confidence_populated_when_bootstrap_active(self, client):
+        """When bootstrap runs, confidence field is populated (not None)."""
+        request_with_bootstrap = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1", "observed_state": {"value": 0.5}},
+                    {"id": "factor2", "kind": "factor", "label": "Factor 2", "observed_state": {"value": 0.3}},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.8, "std": 0.1},
+                    },
+                    {
+                        "from": "factor2",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.5, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor2": 0.5}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+            "analysis_types": ["sensitivity"],
+            "parameter_uncertainties": [
+                {"node_id": "factor1", "distribution": "normal", "std": 0.1},
+            ],
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_with_bootstrap,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        # Verify factor_sensitivity is present
+        assert "factor_sensitivity" in data, "Missing 'factor_sensitivity'"
+        assert len(data["factor_sensitivity"]) > 0, "Expected at least one factor"
+
+        # Verify confidence is populated (not None)
+        for factor in data["factor_sensitivity"]:
+            assert "confidence" in factor, f"Missing 'confidence' field for factor {factor.get('node_id')}"
+            confidence = factor["confidence"]
+            assert confidence is not None, f"confidence is None for factor {factor.get('node_id')}"
+            assert isinstance(confidence, (int, float)), f"confidence not numeric: {confidence}"
+            assert 0.0 <= confidence <= 1.0, f"confidence out of bounds: {confidence}"
+
+    def test_confidence_none_without_bootstrap(self, client):
+        """Without parameter_uncertainties, confidence is None."""
+        request_without_bootstrap = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1"},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.6, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor1": 0.3}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+            # No parameter_uncertainties → no bootstrap → confidence=None
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_without_bootstrap,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        # Note: With no parameter_uncertainties, factor_sensitivity may be empty
+        # If it exists, confidence should be None (or the field omitted via exclude_none)
+        if "factor_sensitivity" in data and len(data["factor_sensitivity"]) > 0:
+            for factor in data["factor_sensitivity"]:
+                # confidence may be None or omitted (exclude_none=True in serialization)
+                confidence = factor.get("confidence")
+                assert confidence is None, f"Expected confidence=None without bootstrap, got {confidence}"
+
+    def test_confidence_varies_across_factors(self, client):
+        """Factors with different stability characteristics have different confidence values."""
+        # Create a graph where factors have different influence strengths
+        # This should lead to different bootstrap stability → different confidence
+        request_multi_factor = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Strong Factor", "observed_state": {"value": 0.5}},
+                    {"id": "factor2", "kind": "factor", "label": "Weak Factor", "observed_state": {"value": 0.3}},
+                    {"id": "factor3", "kind": "factor", "label": "Intervention Factor", "observed_state": {"value": 0.2}},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.8, "std": 0.05},  # Strong, low variance
+                    },
+                    {
+                        "from": "factor2",
+                        "to": "goal",
+                        "exists_probability": 0.5,
+                        "strength": {"mean": 0.2, "std": 0.3},  # Weak, high variance
+                    },
+                    {
+                        "from": "factor3",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.5, "std": 0.1},
+                    },
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor3": 0.5}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+            "analysis_types": ["sensitivity"],
+            "parameter_uncertainties": [
+                {"node_id": "factor1", "distribution": "normal", "std": 0.05},
+                {"node_id": "factor2", "distribution": "normal", "std": 0.1},
+            ],
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_multi_factor,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        assert "factor_sensitivity" in data, "Missing 'factor_sensitivity'"
+        factors = data["factor_sensitivity"]
+        assert len(factors) == 2, f"Expected 2 factors, got {len(factors)}"
+
+        # Extract confidence values
+        confidences = [f["confidence"] for f in factors]
+        assert all(c is not None for c in confidences), "Some confidence values are None"
+
+        # Verify they are different (not all identical)
+        unique_confidences = set(confidences)
+        assert len(unique_confidences) > 1, f"All confidence values are identical: {confidences}"
+
+    def test_confidence_determinism(self, client):
+        """Same request with same seed → same confidence values."""
+        request_determinism = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1", "observed_state": {"value": 0.5}},
+                    {"id": "factor2", "kind": "factor", "label": "Factor 2", "observed_state": {"value": 0.3}},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.8, "std": 0.1},
+                    },
+                    {
+                        "from": "factor2",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.5, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor2": 0.5}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 12345,  # Fixed seed
+            "n_samples": 100,
+            "analysis_types": ["sensitivity"],
+            "parameter_uncertainties": [
+                {"node_id": "factor1", "distribution": "normal", "std": 0.1},
+            ],
+        }
+
+        # Run twice with same seed
+        response1 = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_determinism,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        response2 = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_determinism,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response1.status_code == 200, f"Request 1 failed: {response1.text}"
+        assert response2.status_code == 200, f"Request 2 failed: {response2.text}"
+
+        data1 = response1.json()
+        data2 = response2.json()
+
+        factors1 = data1["factor_sensitivity"]
+        factors2 = data2["factor_sensitivity"]
+
+        # Extract confidence values
+        confidences1 = [f["confidence"] for f in factors1]
+        confidences2 = [f["confidence"] for f in factors2]
+
+        assert confidences1 == confidences2, f"Confidence not deterministic: {confidences1} != {confidences2}"

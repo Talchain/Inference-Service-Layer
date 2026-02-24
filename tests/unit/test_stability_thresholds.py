@@ -17,6 +17,7 @@ import pytest
 from src.config.stability_thresholds import (
     StabilityThresholds,
     classify_attribution_stability,
+    compute_factor_confidence,
     load_stability_thresholds,
     STABILITY_THRESHOLDS,
 )
@@ -340,3 +341,120 @@ class TestClassifyEdgeCases:
         assert STABILITY_THRESHOLDS.negligible_elasticity_floor == 1e-6
         assert STABILITY_THRESHOLDS.provisional is True
         assert STABILITY_THRESHOLDS.version == "v1.0-operational-defaults"
+
+
+# ==========================================================================
+# Track S: Factor Confidence Computation
+# ==========================================================================
+
+
+class TestComputeFactorConfidence:
+    """Tests for compute_factor_confidence() (Track S)."""
+
+    def test_high_stability_no_cv_data(self):
+        """attribution_stability='high', no CV data → 0.9"""
+        result = compute_factor_confidence("high", 0.5, None)
+        assert result == 0.9
+
+    def test_moderate_stability_no_cv_data(self):
+        """attribution_stability='moderate', no CV data → 0.6"""
+        result = compute_factor_confidence("moderate", 0.5, None)
+        assert result == 0.6
+
+    def test_low_stability_no_cv_data(self):
+        """attribution_stability='low', no CV data → 0.3"""
+        result = compute_factor_confidence("low", 0.5, None)
+        assert result == 0.3
+
+    def test_negligible_stability_no_cv_data(self):
+        """attribution_stability='negligible', no CV data → 0.1"""
+        result = compute_factor_confidence("negligible", 0.05, None)
+        assert result == 0.1
+
+    def test_none_stability_returns_none(self):
+        """attribution_stability=None → None (no bootstrap data)"""
+        result = compute_factor_confidence(None, 0.5, None)
+        assert result is None
+
+    def test_high_stability_with_cv_refinement(self):
+        """attribution_stability='high' with CV data → blended value"""
+        # elasticity=0.5, elasticity_std=0.1 → CV=0.2, cv_score=0.8
+        # confidence = 0.7 * 0.9 + 0.3 * 0.8 = 0.63 + 0.24 = 0.87
+        result = compute_factor_confidence("high", 0.5, 0.1)
+        assert result == 0.87
+
+    def test_moderate_stability_with_cv_refinement(self):
+        """attribution_stability='moderate' with CV data → blended value"""
+        # elasticity=0.5, elasticity_std=0.15 → CV=0.3, cv_score=0.7
+        # confidence = 0.7 * 0.6 + 0.3 * 0.7 = 0.42 + 0.21 = 0.63
+        result = compute_factor_confidence("moderate", 0.5, 0.15)
+        assert result == 0.63
+
+    def test_near_zero_elasticity_skips_cv(self):
+        """Near-zero elasticity → CV computation skipped, category score only"""
+        # elasticity=1e-7 < CONFIDENCE_CV_ELASTICITY_FLOOR, elasticity_std=0.1
+        # CV would be huge, but we skip it → use category score only
+        result = compute_factor_confidence("high", 1e-7, 0.1)
+        assert result == 0.9  # Category score only, no CV refinement
+
+    def test_zero_elasticity_skips_cv(self):
+        """Exactly zero elasticity → CV computation skipped"""
+        result = compute_factor_confidence("low", 0.0, 0.05)
+        assert result == 0.3  # Category score only
+
+    def test_negative_elasticity_uses_abs(self):
+        """Negative elasticity → |elasticity| used for CV computation"""
+        # elasticity=-0.5, elasticity_std=0.1 → CV=0.1/0.5=0.2, cv_score=0.8
+        # confidence = 0.7 * 0.9 + 0.3 * 0.8 = 0.87
+        result = compute_factor_confidence("high", -0.5, 0.1)
+        assert result == 0.87
+
+    def test_cv_score_clamped_to_zero(self):
+        """Very high CV (>1) → cv_score clamped to 0"""
+        # elasticity=0.1, elasticity_std=0.5 → CV=5.0, cv_score=max(0, 1-5)=0
+        # confidence = 0.7 * 0.6 + 0.3 * 0.0 = 0.42
+        result = compute_factor_confidence("moderate", 0.1, 0.5)
+        assert result == 0.42
+
+    def test_cv_score_clamped_to_one(self):
+        """Negative CV (shouldn't happen, but test clamping) → cv_score clamped to 1"""
+        # This tests the max(0.0, ...) in cv_score computation
+        # elasticity=0.5, elasticity_std=0.0 → CV=0, cv_score=1.0
+        # confidence = 0.7 * 0.9 + 0.3 * 1.0 = 0.63 + 0.3 = 0.93
+        result = compute_factor_confidence("high", 0.5, 0.0)
+        assert result == 0.93
+
+    def test_confidence_bounds(self):
+        """All computed confidence values are in [0, 1]"""
+        test_cases = [
+            ("high", 0.5, None),
+            ("moderate", 0.5, 0.1),
+            ("low", 0.1, 0.5),
+            ("negligible", 0.001, 0.0001),
+        ]
+        for stability, elasticity, std in test_cases:
+            result = compute_factor_confidence(stability, elasticity, std)
+            assert result is not None
+            assert 0.0 <= result <= 1.0, f"Out of bounds: {result} for {stability}, {elasticity}, {std}"
+
+    def test_confidence_rounded_to_4dp(self):
+        """Confidence values are rounded to 4 decimal places"""
+        # Test case that would produce many decimal places
+        # elasticity=0.333, elasticity_std=0.111 → CV≈0.333, cv_score≈0.667
+        # confidence ≈ 0.7 * 0.6 + 0.3 * 0.667 = 0.42 + 0.2001 ≈ 0.62
+        result = compute_factor_confidence("moderate", 0.333, 0.111)
+        # The actual value will be ~0.62 due to floating point math
+        assert result == 0.62
+        # Verify it's actually rounded (check number of decimal places)
+        assert len(str(result).split('.')[-1]) <= 4
+
+    def test_unrecognized_stability_uses_default(self):
+        """Unrecognised attribution_stability value → default 0.5"""
+        result = compute_factor_confidence("unknown_category", 0.5, None)
+        assert result == 0.5
+
+    def test_determinism(self):
+        """Same inputs → same outputs"""
+        result1 = compute_factor_confidence("moderate", 0.5, 0.1)
+        result2 = compute_factor_confidence("moderate", 0.5, 0.1)
+        assert result1 == result2

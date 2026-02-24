@@ -48,6 +48,7 @@ from src.models.robustness_v2 import (
 )
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.config.stability_thresholds import compute_factor_confidence
 from src.utils.business_metrics import track_robustness_analysis
 from src.utils.response_builder import (
     ResponseBuilder,
@@ -669,7 +670,12 @@ async def _analyze_robustness_v2_enhanced(
                     attribution_stability=fs.attribution_stability,
                     rank_flip_rate=fs.rank_flip_rate,
                     stability_method=fs.stability_method,
-                    # confidence omitted - V1 analyzer doesn't compute per-factor confidence
+                    # Confidence (Track S) - derived from bootstrap stability metrics
+                    confidence=compute_factor_confidence(
+                        fs.attribution_stability,
+                        fs.elasticity,
+                        fs.elasticity_std,
+                    ),
                 )
                 for fs in v1_response.factor_sensitivity
             ]

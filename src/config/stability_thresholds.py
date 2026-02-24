@@ -107,3 +107,81 @@ def classify_attribution_stability(
 # Module-level singleton — loaded once at import time.
 # Tests can monkeypatch or re-call load_stability_thresholds() with env vars.
 STABILITY_THRESHOLDS = load_stability_thresholds()
+
+
+# --- Factor Confidence Computation (Track S) ---
+
+# Provisional stability-to-confidence mapping.
+# Pending scientific calibration from pilot data (Neil gate 1).
+# These values are NOT research-validated — they are operational defaults.
+# provisional: true
+STABILITY_CONFIDENCE_MAP = {
+    "high": 0.9,
+    "moderate": 0.6,
+    "low": 0.3,
+    "negligible": 0.1,
+}
+STABILITY_CONFIDENCE_DEFAULT = 0.5  # When attribution_stability is unrecognised
+
+# Blend weights: category signal vs CV signal
+CONFIDENCE_CATEGORY_WEIGHT = 0.7
+CONFIDENCE_CV_WEIGHT = 0.3
+
+# Minimum absolute elasticity for CV computation to be meaningful
+CONFIDENCE_CV_ELASTICITY_FLOOR = 1e-6
+
+
+def compute_factor_confidence(
+    attribution_stability: str | None,
+    elasticity: float,
+    elasticity_std: float | None,
+) -> float | None:
+    """Compute per-factor confidence from bootstrap stability metrics.
+
+    Confidence is derived from:
+    1. Categorical stability signal (attribution_stability: high/moderate/low/negligible)
+    2. Coefficient of variation refinement (when available)
+
+    The categorical signal (70% weight) reflects rank consistency across bootstrap
+    resamples. The CV signal (30% weight) reflects magnitude consistency. Both are
+    informative but rank stability is more directly interpretable for users.
+
+    Args:
+        attribution_stability: Categorical stability from bootstrap
+            ("high", "moderate", "low", "negligible", or None)
+        elasticity: Primary (deterministic) elasticity value
+        elasticity_std: Standard deviation of bootstrap elasticities (optional)
+
+    Returns:
+        Confidence in [0, 1], or None if no bootstrap data available.
+
+    Examples:
+        >>> compute_factor_confidence("high", 0.5, None)
+        0.9
+        >>> compute_factor_confidence("moderate", 0.5, 0.1)  # With CV refinement
+        0.54  # 0.7 * 0.6 + 0.3 * 0.8
+        >>> compute_factor_confidence(None, 0.5, None)
+        None
+    """
+    if attribution_stability is None:
+        return None
+
+    # Step 1: Category score
+    category_score = STABILITY_CONFIDENCE_MAP.get(
+        attribution_stability, STABILITY_CONFIDENCE_DEFAULT
+    )
+
+    # Step 2: CV refinement (when available and elasticity is non-negligible)
+    cv_score = None
+    if elasticity_std is not None and abs(elasticity) > CONFIDENCE_CV_ELASTICITY_FLOOR:
+        cv = elasticity_std / abs(elasticity)
+        cv_score = max(0.0, min(1.0, 1.0 - cv))
+
+    # Step 3: Blend
+    if cv_score is not None:
+        confidence = CONFIDENCE_CATEGORY_WEIGHT * category_score + CONFIDENCE_CV_WEIGHT * cv_score
+    else:
+        confidence = category_score
+
+    # Step 4: Clamp and round
+    return round(max(0.0, min(1.0, confidence)), 4)
