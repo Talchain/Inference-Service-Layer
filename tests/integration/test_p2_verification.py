@@ -868,8 +868,12 @@ class TestFactorConfidence:
             assert isinstance(confidence, (int, float)), f"confidence not numeric: {confidence}"
             assert 0.0 <= confidence <= 1.0, f"confidence out of bounds: {confidence}"
 
-    def test_confidence_none_without_bootstrap(self, client):
-        """Without parameter_uncertainties, confidence is None."""
+    def test_confidence_absent_without_bootstrap(self, client):
+        """Without parameter_uncertainties, confidence is omitted (exclude_none=True).
+
+        Response uses exclude_none=True (robustness.py:719), so confidence=None
+        should result in the 'confidence' key being absent from JSON entirely.
+        """
         request_without_bootstrap = {
             "graph": {
                 "nodes": [
@@ -887,11 +891,12 @@ class TestFactorConfidence:
             },
             "options": [
                 {"id": "opt1", "label": "Option 1", "interventions": {"factor1": 0.3}},
+                {"id": "opt2", "label": "Option 2", "interventions": {"factor1": 0.7}},
             ],
             "goal_node_id": "goal",
             "seed": 42,
             "n_samples": 100,
-            # No parameter_uncertainties → no bootstrap → confidence=None
+            # No parameter_uncertainties → no bootstrap → no confidence
         }
 
         response = client.post(
@@ -903,13 +908,21 @@ class TestFactorConfidence:
         assert response.status_code == 200, f"Request failed: {response.text}"
         data = response.json()
 
-        # Note: With no parameter_uncertainties, factor_sensitivity may be empty
-        # If it exists, confidence should be None (or the field omitted via exclude_none)
-        if "factor_sensitivity" in data and len(data["factor_sensitivity"]) > 0:
-            for factor in data["factor_sensitivity"]:
-                # confidence may be None or omitted (exclude_none=True in serialization)
-                confidence = factor.get("confidence")
-                assert confidence is None, f"Expected confidence=None without bootstrap, got {confidence}"
+        # Without parameter_uncertainties, factor_sensitivity is empty or absent
+        factors = data.get("factor_sensitivity", [])
+        if len(factors) > 0:
+            # If any factors are present, confidence should be omitted
+            # (exclude_none=True serialization means None values are dropped)
+            for factor in factors:
+                assert "confidence" not in factor, (
+                    f"Expected 'confidence' to be omitted (exclude_none=True) for factor "
+                    f"{factor.get('node_id')}, but got: {factor.get('confidence')}"
+                )
+
+        # Also verify that stability_thresholds is absent (no bootstrap ran)
+        assert "stability_thresholds" not in data, (
+            "stability_thresholds should be absent without bootstrap"
+        )
 
     def test_confidence_varies_across_factors(self, client):
         """Factors with different stability characteristics have different confidence values."""

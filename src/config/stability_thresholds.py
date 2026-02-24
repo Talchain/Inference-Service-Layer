@@ -159,7 +159,7 @@ def compute_factor_confidence(
         >>> compute_factor_confidence("high", 0.5, None)
         0.9
         >>> compute_factor_confidence("moderate", 0.5, 0.1)  # With CV refinement
-        0.54  # 0.7 * 0.6 + 0.3 * 0.8
+        0.66  # 0.7 * 0.6 + 0.3 * (1 - 0.1/0.5) = 0.42 + 0.24
         >>> compute_factor_confidence(None, 0.5, None)
         None
     """

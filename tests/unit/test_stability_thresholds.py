@@ -458,3 +458,109 @@ class TestComputeFactorConfidence:
         result1 = compute_factor_confidence("moderate", 0.5, 0.1)
         result2 = compute_factor_confidence("moderate", 0.5, 0.1)
         assert result1 == result2
+
+
+class TestNearTieScenario:
+    """Near-tie scenario: two factors with similar sensitivity.
+
+    When two factors have near-identical elasticity, bootstrap rank flips are
+    expected, producing lower attribution_stability for both. Confidence should
+    reflect this — likely "moderate" or "low" — telling the user "we can't
+    confidently distinguish which factor matters more."
+    """
+
+    def test_near_tie_factors_produce_lower_confidence(self):
+        """Two near-tied factors → both get moderate/low stability → lower confidence."""
+        from src.models.robustness_v2 import (
+            EdgeV2,
+            GraphV2,
+            InterventionOption,
+            NodeV2,
+            ObservedState,
+            ParameterUncertainty,
+            RobustnessRequestV2,
+            StrengthDistribution,
+        )
+        from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+
+        # Two factors with nearly identical edge strengths → near-tied sensitivity
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor_a", kind="factor", label="Factor A",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="factor_b", kind="factor", label="Factor B",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="intervention", kind="factor", label="Intervention"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor_a", "to": "goal"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=0.5, std=0.15),  # High variance
+                ),
+                EdgeV2(
+                    **{"from": "factor_b", "to": "goal"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=0.5, std=0.15),  # Same — near-tie
+                ),
+                EdgeV2(
+                    **{"from": "intervention", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.3, std=0.05),
+                ),
+            ],
+        )
+        request = RobustnessRequestV2(
+            request_id="near-tie-confidence-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1",
+                                   interventions={"intervention": 0.5}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor_a", distribution="normal", std=0.1),
+                ParameterUncertainty(node_id="factor_b", distribution="normal", std=0.1),
+            ],
+        )
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert response.factor_sensitivity is not None
+        assert len(response.factor_sensitivity) == 2
+
+        # Both factors should have bootstrap stability computed
+        for fs in response.factor_sensitivity:
+            assert fs.attribution_stability is not None, (
+                f"Factor {fs.node_id} missing attribution_stability"
+            )
+
+        # Near-tied factors with high edge variance should experience rank flips,
+        # producing moderate or low stability (not consistently "high")
+        stabilities = {fs.node_id: fs.attribution_stability
+                       for fs in response.factor_sensitivity}
+
+        # At least one should NOT be "high" — rank flips are expected
+        assert not all(s == "high" for s in stabilities.values()), (
+            f"Both near-tied factors got 'high' stability — rank flips expected: {stabilities}"
+        )
+
+        # Now compute confidence for both and verify it reflects the instability
+        confidences = {}
+        for fs in response.factor_sensitivity:
+            conf = compute_factor_confidence(
+                fs.attribution_stability, fs.elasticity, fs.elasticity_std
+            )
+            assert conf is not None
+            assert 0.0 <= conf <= 1.0
+            confidences[fs.node_id] = conf
+
+        # Neither factor should have high confidence (0.9) since rank-unstable
+        for node_id, conf in confidences.items():
+            assert conf < 0.9, (
+                f"Factor {node_id} has confidence {conf} despite near-tie instability"
+            )
