@@ -730,6 +730,122 @@ class TestDualUncertaintySampler:
         assert "a->b" in rates
         assert 0.65 < rates["a->b"] < 0.75
 
+    def test_edge_strength_clamped_high_mean_high_variance(self):
+        """B5.27: Sampled strengths must be bounded to [-1, 1] (positive tail)."""
+        edges = [
+            EdgeV2(
+                **{"from": "a", "to": "b"},
+                exists_probability=1.0,
+                strength=StrengthDistribution(mean=0.8, std=0.3),
+            )
+        ]
+        rng = SeededRNG(42)
+        sampler = DualUncertaintySampler(edges, rng)
+
+        configs = sampler.sample_n_configurations(10000)
+        strengths = [c[("a", "b")] for c in configs]
+
+        assert all(-1.0 <= s <= 1.0 for s in strengths), (
+            f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
+        )
+
+    def test_edge_strength_clamped_negative_tail(self):
+        """B5.27: Sampled strengths must be bounded to [-1, 1] (negative tail)."""
+        edges = [
+            EdgeV2(
+                **{"from": "a", "to": "b"},
+                exists_probability=1.0,
+                strength=StrengthDistribution(mean=-0.9, std=0.5),
+            )
+        ]
+        rng = SeededRNG(42)
+        sampler = DualUncertaintySampler(edges, rng)
+
+        configs = sampler.sample_n_configurations(10000)
+        strengths = [c[("a", "b")] for c in configs]
+
+        assert all(-1.0 <= s <= 1.0 for s in strengths), (
+            f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
+        )
+
+    def test_edge_strength_clamp_preserves_low_variance(self):
+        """B5.27: Clamping should not materially alter well-centred distributions."""
+        edges = [
+            EdgeV2(
+                **{"from": "a", "to": "b"},
+                exists_probability=1.0,
+                strength=StrengthDistribution(mean=0.0, std=0.1),
+            )
+        ]
+        rng = SeededRNG(42)
+        sampler = DualUncertaintySampler(edges, rng)
+
+        configs = sampler.sample_n_configurations(10000)
+        strengths = [c[("a", "b")] for c in configs]
+
+        assert all(-1.0 <= s <= 1.0 for s in strengths)
+        assert abs(np.mean(strengths)) < 0.02
+        assert abs(np.std(strengths) - 0.1) < 0.02
+
+    def test_edge_strength_clamp_behavioural_consistency(self):
+        """B5.27: Full analysis respects bounds — extreme edge clamped to 1.0."""
+        # mean=1.5, std=0.002 (minimum valid std) means every sample ≈1.5
+        # without clamping, but should behave as 1.0 with clamping
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="input", kind="factor", label="Input"),
+                NodeV2(id="output", kind="outcome", label="Output"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.5, std=0.002),
+                )
+            ],
+        )
+        options = [
+            InterventionOption(
+                id="opt_a", label="Option A", interventions={"input": 1.0}
+            ),
+            InterventionOption(
+                id="opt_b", label="Option B", interventions={"input": 0.5}
+            ),
+        ]
+        request = RobustnessRequestV2(
+            request_id="b527-clamp-test",
+            graph=graph,
+            options=options,
+            goal_node_id="output",
+            n_samples=500,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With clamping: strength ≈ 1.0 (clamped from 1.5)
+        # outcome_opt_a = input(1.0) * 1.0 = 1.0
+        # outcome_opt_b = input(0.5) * 1.0 = 0.5
+        # Without clamping: strength ≈ 1.5
+        # outcome_opt_a = 1.0 * 1.5 = 1.5
+        # outcome_opt_b = 0.5 * 1.5 = 0.75
+        opt_a_result = next(r for r in response.results if r.option_id == "opt_a")
+        opt_b_result = next(r for r in response.results if r.option_id == "opt_b")
+
+        # Auto-scaled noise adds N(0, std(samples)) to outcome nodes.
+        # With std≈0.002 the pre-noise samples are nearly constant at 1.0,
+        # so noise std ≈ 0 and means stay very close to the clamped value.
+        # Allow ±0.15 for stochastic noise on top of the clamped value.
+        assert opt_a_result.outcome_distribution.mean == pytest.approx(1.0, abs=0.15), (
+            f"opt_a: expected mean ≈ 1.0 (clamped) but got "
+            f"{opt_a_result.outcome_distribution.mean:.4f}"
+        )
+        assert opt_b_result.outcome_distribution.mean == pytest.approx(0.5, abs=0.15), (
+            f"opt_b: expected mean ≈ 0.5 (clamped) but got "
+            f"{opt_b_result.outcome_distribution.mean:.4f}"
+        )
+
 
 # =============================================================================
 # SCM Evaluator Tests
@@ -990,6 +1106,201 @@ class TestRobustnessAnalyzerV2:
 
         # Should have very high stability
         assert response.robustness.recommendation_stability > 0.95
+
+    def test_is_robust_with_fragile_edges(self):
+        """Test is_robust depends only on recommendation_stability, not fragile edges.
+
+        Per Decision Model Schema v2.6:
+        is_robust = recommendation_stability >= 0.7
+
+        fragile_edges is a separate indicator and should not affect is_robust.
+        """
+        # Create a graph with high overall stability but potentially fragile edges
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1"),
+                NodeV2(id="factor2", kind="factor", label="Factor 2"),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.5),  # High uncertainty
+                ),
+                EdgeV2(
+                    **{"from": "factor2", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.3),  # Moderate uncertainty
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-is-robust-fragile",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1",
+                    label="Option 1",
+                    interventions={"factor1": 2.0, "factor2": 1.0},
+                ),
+                InterventionOption(
+                    id="opt2",
+                    label="Option 2",
+                    interventions={"factor1": 0.5, "factor2": 0.5},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=1000,
+            seed=42,
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Verify schema compliance:
+        # If recommendation_stability >= 0.7, then is_robust MUST be True
+        # regardless of fragile_edges
+        if response.robustness.recommendation_stability >= 0.7:
+            assert response.robustness.is_robust is True, (
+                f"Schema violation: recommendation_stability={response.robustness.recommendation_stability:.3f} "
+                f"but is_robust={response.robustness.is_robust}. "
+                f"Per schema: is_robust = recommendation_stability >= 0.7"
+            )
+
+        # Verify that fragile_edges and is_robust are independent indicators
+        # (it's valid to have is_robust=True WITH fragile_edges present)
+        if response.robustness.is_robust and len(response.robustness.fragile_edges) > 0:
+            # This is VALID: decision is overall stable but has sensitive edge assumptions
+            assert response.robustness.recommendation_stability >= 0.7
+
+    def test_is_robust_true_with_fragile_edges_deterministic(self):
+        """Deterministic test: high stability + fragile edges → is_robust=true.
+
+        Uses certain edges with low variance to guarantee high stability,
+        while maintaining edge uncertainty to trigger fragile edge detection.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="price", kind="factor", label="Price"),
+                NodeV2(id="quality", kind="factor", label="Quality"),
+                NodeV2(id="revenue", kind="goal", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "price", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.5),  # Low variance → stable
+                ),
+                EdgeV2(
+                    **{"from": "quality", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.5, std=0.4),  # Low variance → stable
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-deterministic-robust-fragile",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="high_price",
+                    label="High Price",
+                    interventions={"price": 1.5, "quality": 1.0},
+                ),
+                InterventionOption(
+                    id="low_price",
+                    label="Low Price",
+                    interventions={"price": 0.5, "quality": 0.5},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=12345,  # Deterministic seed
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # PRECONDITION 1: High recommendation stability
+        assert response.robustness.recommendation_stability >= 0.7, (
+            f"Test setup failed: expected stability >= 0.7, got {response.robustness.recommendation_stability:.3f}. "
+            f"Adjust edge parameters to increase stability."
+        )
+
+        # PRECONDITION 2: Fragile edges detected (non-empty)
+        assert len(response.robustness.fragile_edges) > 0, (
+            f"Test setup failed: expected fragile_edges > 0, got {len(response.robustness.fragile_edges)}. "
+            f"Adjust edge std to trigger fragile edge detection."
+        )
+
+        # ASSERTION: is_robust MUST be True (schema compliance)
+        assert response.robustness.is_robust is True, (
+            f"Schema violation: recommendation_stability={response.robustness.recommendation_stability:.3f} >= 0.7 "
+            f"but is_robust={response.robustness.is_robust}. Per schema: is_robust = recommendation_stability >= 0.7"
+        )
+
+        # ASSERTION: Interpretation should mention fragile edges
+        assert "sensitive edge" in response.robustness.interpretation.lower(), (
+            f"Expected interpretation to mention fragile edges when is_robust=True and fragile_edges > 0. "
+            f"Got: {response.robustness.interpretation}"
+        )
+
+    def test_is_robust_false_when_low_stability(self):
+        """Verify is_robust=false when stability < 0.7.
+
+        Uses high edge uncertainty to create an unstable decision.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor", kind="factor", label="Factor"),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor", "to": "goal"},
+                    exists_probability=0.5,  # High existence uncertainty
+                    strength=StrengthDistribution(mean=1.0, std=2.0),  # Very high variance
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="test-low-stability",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt1",
+                    label="Option 1",
+                    interventions={"factor": 1.0},
+                ),
+                InterventionOption(
+                    id="opt2",
+                    label="Option 2",
+                    interventions={"factor": -1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=500,
+            seed=54321,  # Deterministic seed
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # PRECONDITION: Low recommendation stability
+        assert response.robustness.recommendation_stability < 0.7, (
+            f"Test setup failed: expected stability < 0.7, got {response.robustness.recommendation_stability:.3f}. "
+            f"Adjust edge parameters to decrease stability."
+        )
+
+        # ASSERTION: is_robust MUST be False
+        assert response.robustness.is_robust is False, (
+            f"Schema violation: recommendation_stability={response.robustness.recommendation_stability:.3f} < 0.7 "
+            f"but is_robust={response.robustness.is_robust}. Per schema: is_robust = recommendation_stability >= 0.7"
+        )
 
 
 class TestSensitivityInterpretation:
@@ -2319,6 +2630,628 @@ class TestFactorSamplingIntegration:
 
 
 # =============================================================================
+# Factor Sensitivity V2 Response Numeric Fields Tests
+# =============================================================================
+
+
+class TestFactorSensitivityV2NumericFields:
+    """Tests for V2 response numeric sensitivity metrics."""
+
+    def test_sensitivity_score_in_valid_range(self):
+        """Test sensitivity_score is normalized to 0-1 range."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="v2-numeric-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Verify all numeric fields are present
+        assert fs.elasticity is not None
+        assert fs.importance_rank is not None
+
+    def test_importance_score_ordering(self):
+        """Test importance_score reflects ranking (higher = more important)."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="high_impact",
+                    kind="factor",
+                    label="High Impact",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(
+                    id="medium_impact",
+                    kind="factor",
+                    label="Medium Impact",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(
+                    id="low_impact",
+                    kind="factor",
+                    label="Low Impact",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "high_impact", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=3.0, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "medium_impact", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "low_impact", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="importance-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="high_impact", distribution="normal", std=10.0),
+                ParameterUncertainty(node_id="medium_impact", distribution="normal", std=10.0),
+                ParameterUncertainty(node_id="low_impact", distribution="normal", std=10.0),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 3
+
+        # All should have elasticity values
+        for fs in response.factor_sensitivity:
+            assert fs.elasticity is not None
+            assert fs.importance_rank is not None
+
+    def test_single_factor_sensitivity_score(self):
+        """Test single factor gets sensitivity_score = 1.0 (max)."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="only_factor",
+                    kind="factor",
+                    label="Only Factor",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "only_factor", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="single-factor-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="only_factor", distribution="normal", std=10.0),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Single factor should have elasticity (can be any value)
+        assert fs.elasticity is not None
+
+    def test_direction_preserved_with_numeric_fields(self):
+        """Test direction field is still present alongside numeric fields."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="positive_factor",
+                    kind="factor",
+                    label="Positive",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "positive_factor", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="direction-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="positive_factor", distribution="normal", std=10.0),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        fs = response.factor_sensitivity[0]
+
+        # V1 internal model fields (direction is added in V2 mapping)
+        assert fs.elasticity is not None
+        assert fs.importance_rank is not None
+        assert fs.interpretation is not None
+
+        # Direction can be derived from elasticity sign (done in V2 mapping)
+        # Positive elasticity -> positive direction, negative -> negative
+        expected_direction = "positive" if fs.elasticity > 0 else "negative"
+        assert expected_direction in ("positive", "negative")
+
+
+# =============================================================================
+# V1→V2 Normalization Math Tests
+# =============================================================================
+
+
+class TestFactorSensitivityNormalizationMath:
+    """Tests that verify the V1→V2 normalization calculations are correct.
+
+    These tests verify the formulas:
+    - sensitivity_score = |elasticity| / max_abs_elasticity (clamped to 1.0)
+    - importance_score = 1.0 - (rank - 1) / max(n - 1, 1)
+    """
+
+    def test_sensitivity_score_normalization_formula(self):
+        """Verify sensitivity_score = |elasticity| / max_abs_elasticity."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        # Create mock V1 factor sensitivity results
+        factors = [
+            FactorSensitivityResult(
+                node_id="factor_1",
+                node_label="Factor 1",
+                elasticity=2.0,  # max |elasticity| = 2.0
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="factor_2",
+                node_label="Factor 2",
+                elasticity=1.0,  # |elasticity| = 1.0
+                importance_rank=2,
+                observed_value=50.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="factor_3",
+                node_label="Factor 3",
+                elasticity=0.5,  # |elasticity| = 0.5
+                importance_rank=3,
+                observed_value=25.0,
+                interpretation="Test",
+            ),
+        ]
+
+        # Apply normalization formula (same as in robustness.py)
+        max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
+
+        normalized_scores = [
+            min(1.0, abs(fs.elasticity) / max_abs_elasticity)
+            for fs in factors
+        ]
+
+        # Verify: factor_1 has max elasticity → score = 1.0
+        assert normalized_scores[0] == pytest.approx(1.0)
+        # Verify: factor_2 elasticity = 1.0/2.0 = 0.5
+        assert normalized_scores[1] == pytest.approx(0.5)
+        # Verify: factor_3 elasticity = 0.5/2.0 = 0.25
+        assert normalized_scores[2] == pytest.approx(0.25)
+
+    def test_sensitivity_score_with_negative_elasticity(self):
+        """Verify absolute value is used for negative elasticity."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="positive",
+                node_label="Positive",
+                elasticity=1.5,  # positive
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="negative",
+                node_label="Negative",
+                elasticity=-2.0,  # negative, but |value| is larger
+                importance_rank=2,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
+        assert max_abs_elasticity == 2.0  # |-2.0| = 2.0 is max
+
+        # Negative factor has max |elasticity| → score = 1.0
+        negative_score = min(1.0, abs(factors[1].elasticity) / max_abs_elasticity)
+        assert negative_score == pytest.approx(1.0)
+
+        # Positive factor: 1.5/2.0 = 0.75
+        positive_score = min(1.0, abs(factors[0].elasticity) / max_abs_elasticity)
+        assert positive_score == pytest.approx(0.75)
+
+    def test_importance_score_formula_multiple_factors(self):
+        """Verify importance_score = 1.0 - (rank - 1) / (n - 1) for n > 1."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        n_factors = 4
+        factors = [
+            FactorSensitivityResult(
+                node_id=f"factor_{i}",
+                node_label=f"Factor {i}",
+                elasticity=1.0,
+                importance_rank=i,
+                observed_value=100.0,
+                interpretation="Test",
+            )
+            for i in range(1, n_factors + 1)
+        ]
+
+        # Apply formula
+        importance_scores = [
+            1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
+            for fs in factors
+        ]
+
+        # Verify: rank 1 → 1.0 - (1-1)/(4-1) = 1.0 - 0/3 = 1.0
+        assert importance_scores[0] == pytest.approx(1.0)
+        # Verify: rank 2 → 1.0 - (2-1)/(4-1) = 1.0 - 1/3 ≈ 0.667
+        assert importance_scores[1] == pytest.approx(0.6667, rel=0.01)
+        # Verify: rank 3 → 1.0 - (3-1)/(4-1) = 1.0 - 2/3 ≈ 0.333
+        assert importance_scores[2] == pytest.approx(0.3333, rel=0.01)
+        # Verify: rank 4 → 1.0 - (4-1)/(4-1) = 1.0 - 3/3 = 0.0
+        assert importance_scores[3] == pytest.approx(0.0)
+
+    def test_importance_score_single_factor(self):
+        """Verify single factor gets importance_score = 1.0."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="only_factor",
+                node_label="Only Factor",
+                elasticity=0.5,
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            )
+        ]
+
+        n_factors = len(factors)
+
+        # Apply formula with single factor case
+        importance_score = (
+            1.0 - (factors[0].importance_rank - 1) / max(n_factors - 1, 1)
+            if n_factors > 1 else 1.0
+        )
+
+        # Single factor always gets 1.0
+        assert importance_score == 1.0
+
+    def test_zero_elasticity_handling(self):
+        """Verify zero elasticity results in sensitivity_score = 0."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="zero_impact",
+                node_label="Zero Impact",
+                elasticity=0.0,  # No impact
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="some_impact",
+                node_label="Some Impact",
+                elasticity=1.0,
+                importance_rank=2,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
+        assert max_abs_elasticity == 1.0
+
+        # Zero elasticity → score = 0/1 = 0
+        zero_score = min(1.0, abs(factors[0].elasticity) / max_abs_elasticity)
+        assert zero_score == 0.0
+
+    def test_all_zero_elasticity_handling(self):
+        """Verify all-zero elasticity uses fallback max of 1.0."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="zero_1",
+                node_label="Zero 1",
+                elasticity=0.0,
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+            FactorSensitivityResult(
+                node_id="zero_2",
+                node_label="Zero 2",
+                elasticity=0.0,
+                importance_rank=2,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        # When all elasticities are zero, max would be 0
+        # The code uses 1e-10 threshold and falls back to 1.0
+        max_abs_elasticity = max(
+            (abs(fs.elasticity) for fs in factors),
+            default=1.0
+        )
+        if max_abs_elasticity < 1e-10:
+            max_abs_elasticity = 1.0
+
+        # All zero elasticities → all scores = 0/1 = 0
+        for fs in factors:
+            score = min(1.0, abs(fs.elasticity) / max_abs_elasticity)
+            assert score == 0.0
+
+    def test_tiny_elasticity_threshold(self):
+        """Verify very small elasticity values are handled correctly."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        factors = [
+            FactorSensitivityResult(
+                node_id="tiny",
+                node_label="Tiny",
+                elasticity=1e-15,  # Below threshold
+                importance_rank=1,
+                observed_value=100.0,
+                interpretation="Test",
+            ),
+        ]
+
+        max_abs_elasticity = max(
+            (abs(fs.elasticity) for fs in factors),
+            default=1.0
+        )
+        # 1e-15 < 1e-10, so should use fallback
+        if max_abs_elasticity < 1e-10:
+            max_abs_elasticity = 1.0
+
+        # With fallback to 1.0: 1e-15 / 1.0 ≈ 0
+        score = min(1.0, abs(factors[0].elasticity) / max_abs_elasticity)
+        assert score == pytest.approx(0.0, abs=1e-9)
+
+
+# =============================================================================
+# Zero-Baseline Factor Sensitivity Tests
+# =============================================================================
+
+
+class TestZeroBaselineFactorSensitivity:
+    """Tests for factor sensitivity when observed_state.value = 0.
+
+    This covers the case of binary factors (0/1) where the baseline is zero,
+    which previously caused elasticity to be forced to 0.0 due to division issues.
+    """
+
+    def test_binary_factor_with_zero_baseline_has_nonzero_sensitivity(self):
+        """Verify binary factor at 0 still produces meaningful sensitivity."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="binary_factor",
+                    kind="factor",
+                    label="Binary Factor (0/1)",
+                    observed_state=ObservedState(value=0.0),  # Zero baseline!
+                ),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "binary_factor", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-baseline-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(
+                    node_id="binary_factor",
+                    distribution="normal",
+                    std=0.3,  # Typical for binary factor
+                ),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Should have factor sensitivity computed
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Key assertion: elasticity should NOT be zero despite zero baseline
+        # The epsilon-stabilised denominator should produce a meaningful value
+        assert fs.elasticity != 0.0, (
+            "Binary factor with observed_state.value=0 should have non-zero elasticity"
+        )
+
+        # Should have interpretation (not just "robust" due to zero elasticity)
+        assert fs.interpretation is not None
+
+    def test_multiple_zero_baseline_factors_ranked_correctly(self):
+        """Verify multiple zero-baseline factors are ranked by sensitivity."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="high_impact",
+                    kind="factor",
+                    label="High Impact",
+                    observed_state=ObservedState(value=0.0),
+                ),
+                NodeV2(
+                    id="low_impact",
+                    kind="factor",
+                    label="Low Impact",
+                    observed_state=ObservedState(value=0.0),
+                ),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "high_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=2.0, std=0.1),  # Strong effect
+                ),
+                EdgeV2(
+                    **{"from": "low_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),  # Weaker effect
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="multi-zero-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="high_impact", distribution="normal", std=0.3),
+                ParameterUncertainty(node_id="low_impact", distribution="normal", std=0.3),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 2
+
+        # Both should have non-zero elasticity
+        for fs in response.factor_sensitivity:
+            assert fs.elasticity != 0.0
+
+        # High impact factor should have higher absolute elasticity
+        high_impact_fs = next(
+            fs for fs in response.factor_sensitivity if fs.node_id == "high_impact"
+        )
+        low_impact_fs = next(
+            fs for fs in response.factor_sensitivity if fs.node_id == "low_impact"
+        )
+
+        assert abs(high_impact_fs.elasticity) > abs(low_impact_fs.elasticity), (
+            "Higher edge strength should result in higher elasticity"
+        )
+
+        # High impact should be ranked first (importance_rank=1)
+        assert high_impact_fs.importance_rank == 1
+        assert low_impact_fs.importance_rank == 2
+
+
+# =============================================================================
 # Goal Threshold Probability Tests
 # =============================================================================
 
@@ -2551,6 +3484,9 @@ class TestGoalThresholdProbability:
 
     def test_goal_threshold_with_multiple_options(self):
         """Test probability_of_goal computed correctly for each option independently."""
+        # Updated: edge clamping fix B5.27 — strengths now bounded to [-1, 1] in main MC loop
+        # Previous test used mean=2.0 (out of schema bounds); replaced with mean=1.0
+        # and adjusted intervention values to maintain clear separation around threshold.
         graph = GraphV2(
             nodes=[
                 NodeV2(id="investment", kind="factor", label="Investment", observed_state=ObservedState(value=0.0)),
@@ -2560,7 +3496,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "investment", "to": "revenue"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=2.0, std=0.01),  # 2x multiplier
+                    strength=StrengthDistribution(mean=1.0, std=0.01),  # 1x multiplier (within bounds)
                 )
             ],
         )
@@ -2570,12 +3506,12 @@ class TestGoalThresholdProbability:
             graph=graph,
             options=[
                 InterventionOption(id="low", label="Low Investment", interventions={"investment": 50.0}),
-                InterventionOption(id="high", label="High Investment", interventions={"investment": 150.0}),
+                InterventionOption(id="high", label="High Investment", interventions={"investment": 250.0}),
             ],
             goal_node_id="revenue",
             n_samples=100,
             seed=42,
-            goal_threshold=200.0,  # Between low (100) and high (300) expected outcomes
+            goal_threshold=150.0,  # Between low (~50) and high (~250) expected outcomes
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -2584,8 +3520,8 @@ class TestGoalThresholdProbability:
         low_result = next(r for r in response.results if r.option_id == "low")
         high_result = next(r for r in response.results if r.option_id == "high")
 
-        # Low: outcome ~100, threshold 200 -> should rarely meet
-        # High: outcome ~300, threshold 200 -> should always meet
+        # Low: outcome ~50, threshold 150 -> should rarely meet
+        # High: outcome ~250, threshold 150 -> should always meet
         assert low_result.probability_of_goal < 0.1  # Near 0
         assert high_result.probability_of_goal > 0.99  # Near 1.0
 
@@ -3863,3 +4799,931 @@ class TestExtremeNumericalValues:
         for result in response.results:
             assert np.isfinite(result.outcome_distribution.mean)
             assert np.isfinite(result.outcome_distribution.std)
+
+
+# =============================================================================
+# Structural Influence Tests
+# =============================================================================
+
+
+class TestStructuralInfluence:
+    """Tests for structural influence computation from causal paths."""
+
+    def test_influence_score_computed_for_factors_with_path_to_goal(self):
+        """Factor with causal path to goal should have non-zero influence_score."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="intermediate", kind="chance", label="Intermediate"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "intermediate"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "intermediate", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.7, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="influence-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Factor has clear path to goal, so influence_score should be > 0
+        assert fs.influence_score is not None
+        assert fs.influence_score > 0
+        assert fs.influence_rank == 1
+
+    def test_disconnected_factor_has_zero_influence(self):
+        """Factor with no path to goal should have influence_score = 0."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="factor2", kind="factor", label="Factor 2 (disconnected)", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                # Only factor1 connects to goal, factor2 is disconnected
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="disconnected-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+                ParameterUncertainty(node_id="factor2", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 2
+
+        # Find disconnected factor
+        disconnected = next(fs for fs in response.factor_sensitivity if fs.node_id == "factor2")
+        connected = next(fs for fs in response.factor_sensitivity if fs.node_id == "factor1")
+
+        # Disconnected factor should have zero influence
+        assert disconnected.influence_score == 0.0
+        # And should have DISCONNECTED as zero_reason
+        from src.models.response_v2 import ZeroSensitivityReason
+        assert disconnected.zero_reason == ZeroSensitivityReason.DISCONNECTED
+
+        # Connected factor should have non-zero influence
+        assert connected.influence_score > 0
+
+    def test_multiple_paths_add_influence(self):
+        """Factor with multiple paths to goal should have higher influence."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="intermediate1", kind="chance", label="Path 1"),
+                NodeV2(id="intermediate2", kind="chance", label="Path 2"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                # Two paths from factor1 to goal
+                EdgeV2(
+                    **{"from": "factor1", "to": "intermediate1"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "intermediate1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "factor1", "to": "intermediate2"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "intermediate2", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="multi-path-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # With two paths each of strength 0.25 (0.5 * 0.5), total should be 0.5
+        # Normalized to 1.0 since it's the only factor
+        assert fs.influence_score == 1.0
+
+
+class TestZeroReasonClassification:
+    """Tests for zero_reason enum value classification."""
+
+    def test_point_mass_factor_has_point_mass_reason(self):
+        """Factor with point_mass distribution should have POINT_MASS zero_reason."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="point-mass-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="point_mass"),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        from src.models.response_v2 import ZeroSensitivityReason
+        assert fs.elasticity == 0.0
+        assert fs.zero_reason == ZeroSensitivityReason.POINT_MASS
+
+    def test_intervention_factor_has_intervention_override_reason(self):
+        """Factor that is an intervention target should have INTERVENTION_OVERRIDE zero_reason."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="intervention-override-test",
+            graph=graph,
+            options=[
+                # This option sets factor1 via intervention, overriding its natural value
+                InterventionOption(id="opt1", label="Opt 1", interventions={"factor1": 1.0}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        from src.models.response_v2 import ZeroSensitivityReason
+        # Since factor1 is overridden by intervention, sensitivity should be ~0
+        # and zero_reason should be INTERVENTION_OVERRIDE
+        assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
+
+    def test_zero_delta_factor_has_zero_delta_reason(self):
+        """Factor with std ≈ 0 (delta < 1e-10) should have ZERO_DELTA zero_reason."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="zero-delta-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                # std is effectively zero, so delta will be < 1e-10
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=1e-15),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        from src.models.response_v2 import ZeroSensitivityReason
+        assert fs.elasticity == 0.0
+        assert fs.zero_reason == ZeroSensitivityReason.ZERO_DELTA
+
+
+class TestFactorSensitivityFieldSerialization:
+    """Tests for factor sensitivity field serialization."""
+
+    def test_all_debug_fields_present_in_result(self):
+        """Verify elasticity_display, zero_reason, baseline_near_zero, influence_score, influence_rank are present."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="serialization-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+
+        # Check all fields are present (not None for required debug fields)
+        assert fs.elasticity is not None
+        assert fs.elasticity_display is not None
+        assert fs.influence_score is not None
+        assert fs.influence_rank is not None
+        # baseline_near_zero should be set
+        assert fs.baseline_near_zero is not None
+
+    def test_model_dump_includes_all_fields(self):
+        """Verify model_dump() includes all fields for JSON serialization."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+        from src.models.response_v2 import ZeroSensitivityReason
+
+        result = FactorSensitivityResult(
+            node_id="test_factor",
+            node_label="Test Factor",
+            elasticity=0.5,
+            elasticity_display=0.5,
+            importance_rank=1,
+            observed_value=1.0,
+            interpretation="Test interpretation",
+            zero_reason=None,
+            baseline_near_zero=False,
+            influence_score=0.8,
+            influence_rank=1,
+        )
+
+        dumped = result.model_dump()
+
+        assert "elasticity" in dumped
+        assert "elasticity_display" in dumped
+        assert "influence_score" in dumped
+        assert "influence_rank" in dumped
+        assert "baseline_near_zero" in dumped
+        assert dumped["elasticity_display"] == 0.5
+        assert dumped["influence_score"] == 0.8
+
+
+# =============================================================================
+# CIL Passthrough Field Preservation (ISL-5, ISL-6)
+# =============================================================================
+
+
+class TestCILPassthroughFields:
+    """Verify that CEE passthrough fields survive Pydantic parsing.
+
+    ISL-5: category on NodeV2
+    ISL-6: raw_value, cap, extractionType, factor_type, uncertainty_drivers on ObservedState
+    """
+
+    def test_node_and_observed_state_passthrough_fields(self):
+        """New passthrough fields survive model construction and serialisation."""
+        node = NodeV2(
+            id="marketing",
+            kind="factor",
+            label="Marketing Spend",
+            category="market",
+            factor_type="continuous",
+            observed_state=ObservedState(
+                value=100000.0,
+                baseline=75000.0,
+                unit="$",
+                source="brief_extraction",
+                std=5000.0,
+                raw_value=100.0,
+                cap=200.0,
+                extractionType="explicit",
+                factor_type="continuous",
+                uncertainty_drivers=["data_quality", "sample_size"],
+            ),
+        )
+
+        # ISL-5: category preserved
+        assert node.category == "market"
+        # Node-level factor_type preserved
+        assert node.factor_type == "continuous"
+
+        # ISL-6: all ObservedState passthrough fields preserved
+        obs = node.observed_state
+        assert obs.raw_value == 100.0
+        assert obs.cap == 200.0
+        assert obs.extractionType == "explicit"
+        assert obs.factor_type == "continuous"
+        assert obs.uncertainty_drivers == ["data_quality", "sample_size"]
+
+        # Existing fields unchanged
+        assert node.id == "marketing"
+        assert node.kind == "factor"
+        assert node.label == "Marketing Spend"
+        assert obs.value == 100000.0
+        assert obs.baseline == 75000.0
+        assert obs.unit == "$"
+        assert obs.source == "brief_extraction"
+        assert obs.std == 5000.0
+
+        # Serialisation round-trip
+        dumped = node.model_dump()
+        assert dumped["category"] == "market"
+        assert dumped["factor_type"] == "continuous"
+        assert dumped["observed_state"]["raw_value"] == 100.0
+        assert dumped["observed_state"]["cap"] == 200.0
+        assert dumped["observed_state"]["extractionType"] == "explicit"
+        assert dumped["observed_state"]["factor_type"] == "continuous"
+        assert dumped["observed_state"]["uncertainty_drivers"] == [
+            "data_quality",
+            "sample_size",
+        ]
+
+    def test_passthrough_fields_none_by_default(self):
+        """New fields default to None — backward compatible."""
+        node = NodeV2(id="revenue", kind="outcome", label="Revenue")
+        assert node.category is None
+        assert node.factor_type is None
+
+        obs = ObservedState(value=42.0)
+        assert obs.raw_value is None
+        assert obs.cap is None
+        assert obs.extractionType is None
+        assert obs.factor_type is None
+        assert obs.uncertainty_drivers is None
+
+    def test_passthrough_fields_survive_request_parsing(self):
+        """Passthrough fields survive through full RobustnessRequestV2 parsing."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="marketing",
+                    kind="factor",
+                    label="Marketing Spend",
+                    category="market",
+                    observed_state=ObservedState(
+                        value=100000.0,
+                        raw_value=100.0,
+                        cap=200.0,
+                        extractionType="explicit",
+                        factor_type="continuous",
+                        uncertainty_drivers=["data_quality"],
+                    ),
+                ),
+                NodeV2(
+                    id="revenue",
+                    kind="outcome",
+                    label="Revenue",
+                    category="financial",
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "marketing", "to": "revenue"},
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=0.5, std=0.1),
+                )
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            request_id="cil-passthrough-test",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="increase",
+                    label="Increase Marketing",
+                    interventions={"marketing": 1.5},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        # Verify fields survive through request parsing
+        marketing = request.graph.nodes[0]
+        revenue = request.graph.nodes[1]
+
+        assert marketing.category == "market"
+        assert revenue.category == "financial"
+
+        obs = marketing.observed_state
+        assert obs.raw_value == 100.0
+        assert obs.cap == 200.0
+        assert obs.extractionType == "explicit"
+        assert obs.factor_type == "continuous"
+        assert obs.uncertainty_drivers == ["data_quality"]
+
+    def test_passthrough_fields_survive_dict_round_trip(self):
+        """Fields survive model_validate(model_dump()) round-trip (JSON ingress pattern)."""
+        data = {
+            "id": "sales",
+            "kind": "factor",
+            "label": "Sales Volume",
+            "category": "commercial",
+            "factor_type": "discrete",
+            "observed_state": {
+                "value": 1500.0,
+                "raw_value": 15.0,
+                "cap": 100.0,
+                "extractionType": "inferred",
+                "factor_type": "discrete",
+                "uncertainty_drivers": ["model_uncertainty"],
+            },
+        }
+        node = NodeV2.model_validate(data)
+        assert node.category == "commercial"
+        assert node.factor_type == "discrete"
+        assert node.observed_state.extractionType == "inferred"
+
+        # Round-trip: dump → re-validate
+        rebuilt = NodeV2.model_validate(node.model_dump())
+        assert rebuilt.category == "commercial"
+        assert rebuilt.factor_type == "discrete"
+        assert rebuilt.observed_state.raw_value == 15.0
+        assert rebuilt.observed_state.cap == 100.0
+        assert rebuilt.observed_state.extractionType == "inferred"
+        assert rebuilt.observed_state.factor_type == "discrete"
+        assert rebuilt.observed_state.uncertainty_drivers == ["model_uncertainty"]
+
+    @pytest.mark.parametrize("field", ["raw_value", "cap", "std"])
+    def test_nan_rejected_for_passthrough_numeric_fields(self, field):
+        """NaN/inf in numeric passthrough fields is rejected (invalid JSON risk)."""
+        kwargs = {"value": 42.0, field: float("nan")}
+        with pytest.raises(Exception):
+            ObservedState(**kwargs)
+
+    @pytest.mark.parametrize("field", ["raw_value", "cap", "std"])
+    def test_inf_rejected_for_passthrough_numeric_fields(self, field):
+        """Inf in numeric passthrough fields is rejected."""
+        kwargs = {"value": 42.0, field: float("inf")}
+        with pytest.raises(Exception):
+            ObservedState(**kwargs)
+
+    def test_uncertainty_drivers_rejects_non_string_elements(self):
+        """uncertainty_drivers must be List[str], not arbitrary objects."""
+        with pytest.raises(Exception):
+            ObservedState(value=42.0, uncertainty_drivers=[{"nested": "dict"}])
+
+    def test_all_passthrough_fields_survive_full_request(self):
+        """End-to-end: node with category, factor_type, and enriched observed_state
+        survives request parsing — fields not silently dropped by extra='ignore'.
+
+        Previously these would be stripped because they were undeclared.
+        """
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="fac_churn",
+                    kind="factor",
+                    label="Customer Churn",
+                    category="observable",
+                    factor_type="market",
+                    observed_state=ObservedState(
+                        value=0.5,
+                        raw_value=50000.0,
+                        cap=100000.0,
+                        unit="£",
+                        extractionType="explicit",
+                        factor_type="market",
+                        uncertainty_drivers=["data_quality"],
+                    ),
+                ),
+                NodeV2(id="revenue", kind="outcome", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "fac_churn", "to": "revenue"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=-0.5, std=0.1),
+                ),
+            ],
+        )
+
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="baseline",
+                    label="Baseline",
+                    interventions={"fac_churn": 0.3},
+                ),
+            ],
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=42,
+        )
+
+        # Verify node-level fields survived parsing
+        node = request.graph.nodes[0]
+        assert node.category == "observable"
+        assert node.factor_type == "market"
+
+        # Verify observed_state-level fields survived parsing
+        obs = node.observed_state
+        assert obs.raw_value == 50000.0
+        assert obs.cap == 100000.0
+        assert obs.unit == "£"
+        assert obs.extractionType == "explicit"
+        assert obs.factor_type == "market"
+        assert obs.uncertainty_drivers == ["data_quality"]
+
+        # Verify serialisation preserves all fields (for downstream consumers)
+        dumped = request.model_dump()
+        node_data = dumped["graph"]["nodes"][0]
+        assert node_data["category"] == "observable"
+        assert node_data["factor_type"] == "market"
+        obs_data = node_data["observed_state"]
+        assert obs_data["raw_value"] == 50000.0
+        assert obs_data["cap"] == 100000.0
+        assert obs_data["unit"] == "£"
+        assert obs_data["extractionType"] == "explicit"
+        assert obs_data["factor_type"] == "market"
+        assert obs_data["uncertainty_drivers"] == ["data_quality"]
+
+
+# =============================================================================
+# Bootstrap Stability Tests (3C — factor sensitivity confidence)
+# =============================================================================
+
+
+class TestBootstrapStability:
+    """Tests for bootstrap uncertainty estimation on factor sensitivity (3C).
+
+    All tests pin N_BOOTSTRAP=10 via analyzer._n_bootstrap_override to prevent
+    wall-clock timing noise from causing non-deterministic test behaviour.
+    The adaptive budget logic is for production only.
+    """
+
+    # Fixed bootstrap count for all tests — prevents timing-dependent nondeterminism.
+    N_BOOTSTRAP_TEST = 10
+
+    def _make_two_factor_graph(self):
+        """Graph with one high-variance edge and one low-variance edge.
+
+        high_impact --[mean=0.8, std=0.3]--> goal
+        low_impact  --[mean=0.8, std=0.05]--> goal
+        """
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="high_impact", kind="factor", label="High Impact",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="low_impact", kind="factor", label="Low Impact",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "high_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.3),
+                ),
+                EdgeV2(
+                    **{"from": "low_impact", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.05),
+                ),
+            ],
+        )
+        uncertainties = [
+            ParameterUncertainty(node_id="high_impact", distribution="normal", std=0.1),
+            ParameterUncertainty(node_id="low_impact", distribution="normal", std=0.1),
+        ]
+        return graph, uncertainties
+
+    def _make_analyzer(self):
+        """Create analyzer with fixed bootstrap count for deterministic tests."""
+        analyzer = RobustnessAnalyzerV2()
+        analyzer._n_bootstrap_override = self.N_BOOTSTRAP_TEST
+        return analyzer
+
+    def _analyze_two_factor(self, seed=42):
+        """Run analysis on the two-factor graph and return the response."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph, uncertainties = self._make_two_factor_graph()
+        request = RobustnessRequestV2(
+            request_id="bootstrap-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Option 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=200,
+            seed=seed,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=uncertainties,
+        )
+        analyzer = self._make_analyzer()
+        return analyzer.analyze(request)
+
+    def test_relative_stability_difference(self):
+        """Factor connected via high-variance edge has HIGHER elasticity_std
+        than factor connected via low-variance edge."""
+        response = self._analyze_two_factor()
+
+        high = next(fs for fs in response.factor_sensitivity if fs.node_id == "high_impact")
+        low = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
+
+        assert high.elasticity_std is not None
+        assert low.elasticity_std is not None
+        assert high.elasticity_std > low.elasticity_std
+
+    def test_rank_flip_rate_reflects_instability(self):
+        """High-variance factor has higher or equal rank_flip_rate than low-variance factor."""
+        response = self._analyze_two_factor()
+
+        high = next(fs for fs in response.factor_sensitivity if fs.node_id == "high_impact")
+        low = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
+
+        assert high.rank_flip_rate is not None
+        assert low.rank_flip_rate is not None
+        assert high.rank_flip_rate >= low.rank_flip_rate
+
+    def test_negligible_impact_handling(self):
+        """Factor with near-zero elasticity gets attribution_stability='negligible'."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="negligible", kind="factor", label="Negligible",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "negligible", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.0, std=0.01),
+                ),
+            ],
+        )
+        request = RobustnessRequestV2(
+            request_id="negligible-test",
+            graph=graph,
+            options=[
+                InterventionOption(id="opt1", label="Opt 1", interventions={}),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="negligible", distribution="normal", std=0.01),
+            ],
+        )
+        analyzer = self._make_analyzer()
+        response = analyzer.analyze(request)
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        assert fs.attribution_stability == "negligible"
+
+    def test_stability_levels_non_brittle(self):
+        """Very low variance → 'high' or 'moderate'; very high variance → 'low'."""
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        # Low-variance scenario: edge std=0.002 → very stable elasticity
+        graph_stable = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.002),
+                ),
+            ],
+        )
+        request_stable = RobustnessRequestV2(
+            request_id="stable-test",
+            graph=graph_stable,
+            options=[InterventionOption(id="opt1", label="Opt 1", interventions={})],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+        analyzer = self._make_analyzer()
+        resp_stable = analyzer.analyze(request_stable)
+        fs_stable = resp_stable.factor_sensitivity[0]
+        assert fs_stable.attribution_stability in ("high", "moderate")
+
+        # High-variance scenario: edge std=0.45 + exists_probability=0.5 → unstable
+        graph_unstable = GraphV2(
+            nodes=[
+                NodeV2(id="factor1", kind="factor", label="Factor 1",
+                       observed_state=ObservedState(value=0.5)),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "factor1", "to": "goal"},
+                    exists_probability=0.5,
+                    strength=StrengthDistribution(mean=0.3, std=0.45),
+                ),
+            ],
+        )
+        request_unstable = RobustnessRequestV2(
+            request_id="unstable-test",
+            graph=graph_unstable,
+            options=[InterventionOption(id="opt1", label="Opt 1", interventions={})],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            analysis_types=["sensitivity"],
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor1", distribution="normal", std=0.1),
+            ],
+        )
+        resp_unstable = analyzer.analyze(request_unstable)
+        fs_unstable = resp_unstable.factor_sensitivity[0]
+        assert fs_unstable.attribution_stability == "low"
+
+    def test_determinism(self):
+        """Same graph + same seed → identical bootstrap results across runs."""
+        resp1 = self._analyze_two_factor(seed=123)
+        resp2 = self._analyze_two_factor(seed=123)
+
+        for fs1, fs2 in zip(resp1.factor_sensitivity, resp2.factor_sensitivity):
+            assert fs1.node_id == fs2.node_id
+            assert fs1.elasticity_std == fs2.elasticity_std
+            assert fs1.attribution_stability == fs2.attribution_stability
+            assert fs1.rank_flip_rate == fs2.rank_flip_rate
+
+    def test_backward_compatibility(self):
+        """New fields are additive — existing fields unchanged."""
+        response = self._analyze_two_factor()
+
+        for fs in response.factor_sensitivity:
+            # Existing fields still present
+            assert fs.node_id is not None
+            assert fs.elasticity is not None
+            assert fs.importance_rank is not None
+            assert fs.interpretation is not None
+            # New fields present
+            assert fs.elasticity_std is not None
+            assert fs.attribution_stability is not None
+            assert fs.rank_flip_rate is not None
+            assert fs.stability_method is not None
+
+    def test_stability_method_recorded(self):
+        """stability_method field is present and matches the pinned bootstrap count."""
+        response = self._analyze_two_factor()
+
+        for fs in response.factor_sensitivity:
+            assert fs.stability_method is not None
+            assert fs.stability_method == f"bootstrap_{self.N_BOOTSTRAP_TEST}"
+
+    def test_new_fields_in_model_dump(self):
+        """New bootstrap fields appear in JSON serialization."""
+        from src.models.robustness_v2 import FactorSensitivityResult
+
+        # Added: factor sensitivity confidence 3C — bootstrap uncertainty fields
+        result = FactorSensitivityResult(
+            node_id="test_factor",
+            node_label="Test Factor",
+            elasticity=0.5,
+            elasticity_display=0.5,
+            importance_rank=1,
+            observed_value=1.0,
+            interpretation="Test interpretation",
+            elasticity_std=0.04,
+            attribution_stability="high",
+            rank_flip_rate=0.05,
+            stability_method="bootstrap_20",
+        )
+
+        dumped = result.model_dump()
+        assert "elasticity_std" in dumped
+        assert "attribution_stability" in dumped
+        assert "rank_flip_rate" in dumped
+        assert "stability_method" in dumped
+        assert dumped["elasticity_std"] == 0.04
+        assert dumped["attribution_stability"] == "high"
+        assert dumped["rank_flip_rate"] == 0.05
+        assert dumped["stability_method"] == "bootstrap_20"

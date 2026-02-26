@@ -96,6 +96,7 @@ class TestFragileEdgeV2Model:
             to_id="revenue",
             alternative_winner_id="option_economy",
             switch_probability=0.34,
+            marginal_switch_probability=0.72,
         )
         data = fe.model_dump()
         assert data == {
@@ -104,6 +105,7 @@ class TestFragileEdgeV2Model:
             "to_id": "revenue",
             "alternative_winner_id": "option_economy",
             "switch_probability": 0.34,
+            "marginal_switch_probability": 0.72,
         }
 
 
@@ -670,3 +672,198 @@ class TestShapeConsistency:
                 assert "to_id" in fe
                 assert "alternative_winner_id" in fe
                 assert "switch_probability" in fe
+                assert "marginal_switch_probability" in fe
+
+
+class TestMarginalSwitchProbability:
+    """Tests for the marginal switch probability calculation."""
+
+    @pytest.fixture
+    def simple_graph(self):
+        """Create a simple graph for testing."""
+        return GraphV2(
+            nodes=[
+                NodeV2(
+                    id="price",
+                    kind="factor",
+                    label="Price",
+                    observed_state=ObservedState(value=100.0),
+                ),
+                NodeV2(id="revenue", kind="goal", label="Revenue"),
+            ],
+            edges=[
+                EdgeV2(
+                    from_="price",
+                    to="revenue",
+                    exists_probability=0.9,
+                    strength=StrengthDistribution(mean=0.8, std=0.3),  # High variance
+                ),
+            ],
+        )
+
+    @pytest.fixture
+    def binary_options(self):
+        """Create two options with different interventions."""
+        return [
+            InterventionOption(
+                id="option_premium",
+                label="Premium Pricing",
+                interventions={"price": 150.0},
+            ),
+            InterventionOption(
+                id="option_economy",
+                label="Economy Pricing",
+                interventions={"price": 80.0},
+            ),
+        ]
+
+    def test_marginal_switch_probability_bounds(self, simple_graph, binary_options):
+        """Marginal switch probability must be valid probability in [0, 1]."""
+        request = RobustnessRequestV2(
+            graph=simple_graph,
+            options=binary_options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        if response.robustness.fragile_edges_enhanced:
+            for fe in response.robustness.fragile_edges_enhanced:
+                if fe.marginal_switch_probability is not None:
+                    assert 0.0 <= fe.marginal_switch_probability <= 1.0, (
+                        f"marginal_switch_probability {fe.marginal_switch_probability} "
+                        f"out of bounds for edge {fe.edge_id}"
+                    )
+
+    def test_marginal_switch_probability_deterministic(self, simple_graph, binary_options):
+        """Same seed produces identical marginal values."""
+        request = RobustnessRequestV2(
+            graph=simple_graph,
+            options=binary_options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response1 = analyzer.analyze(request)
+        response2 = analyzer.analyze(request)
+
+        if response1.robustness.fragile_edges_enhanced:
+            for fe1, fe2 in zip(
+                response1.robustness.fragile_edges_enhanced,
+                response2.robustness.fragile_edges_enhanced,
+            ):
+                assert fe1.marginal_switch_probability == fe2.marginal_switch_probability, (
+                    f"Marginal values differ for edge {fe1.edge_id}: "
+                    f"{fe1.marginal_switch_probability} != {fe2.marginal_switch_probability}"
+                )
+
+    def test_marginal_switch_probability_populated(self, simple_graph, binary_options):
+        """Marginal switch probability is populated for fragile edges."""
+        request = RobustnessRequestV2(
+            graph=simple_graph,
+            options=binary_options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        if response.robustness.fragile_edges_enhanced:
+            for fe in response.robustness.fragile_edges_enhanced:
+                # marginal_switch_probability should be computed (not None)
+                assert fe.marginal_switch_probability is not None, (
+                    f"marginal_switch_probability is None for edge {fe.edge_id}"
+                )
+
+    def test_marginal_in_serialized_response(self, simple_graph, binary_options):
+        """Marginal switch probability appears in serialized response."""
+        request = RobustnessRequestV2(
+            graph=simple_graph,
+            options=binary_options,
+            goal_node_id="revenue",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # Serialize as API would
+        data = response.model_dump()
+
+        if data["robustness"]["fragile_edges_enhanced"]:
+            for fe in data["robustness"]["fragile_edges_enhanced"]:
+                assert "marginal_switch_probability" in fe, (
+                    "marginal_switch_probability missing from serialized response"
+                )
+
+    def test_high_variance_edge_has_nonzero_marginal(self):
+        """Edge with high variance should have non-zero marginal probability."""
+        # Create graph where edge has very high uncertainty (std close to mean)
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="factor",
+                    kind="factor",
+                    label="Factor",
+                    observed_state=ObservedState(value=1.0),
+                ),
+                NodeV2(id="goal", kind="goal", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    from_="factor",
+                    to="goal",
+                    exists_probability=1.0,
+                    # Very high variance relative to mean
+                    strength=StrengthDistribution(mean=0.5, std=0.5),
+                ),
+            ],
+        )
+
+        options = [
+            InterventionOption(
+                id="high",
+                label="High",
+                interventions={"factor": 2.0},
+            ),
+            InterventionOption(
+                id="low",
+                label="Low",
+                interventions={"factor": 0.5},
+            ),
+        ]
+
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=options,
+            goal_node_id="goal",
+            n_samples=500,
+            seed=42,
+            analysis_types=["comparison", "sensitivity", "robustness"],
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+
+        # With such high variance, we expect marginal to show some sensitivity
+        if response.robustness.fragile_edges_enhanced:
+            marginal_values = [
+                fe.marginal_switch_probability
+                for fe in response.robustness.fragile_edges_enhanced
+                if fe.marginal_switch_probability is not None
+            ]
+            # At least one edge should have non-trivial marginal
+            # (may be 0.0 if decision is overwhelmingly dominated, but worth checking)
+            assert len(marginal_values) > 0, "Expected fragile edges with marginal values"

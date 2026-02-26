@@ -12,6 +12,7 @@ P2 Brief Alignment:
 
 import hashlib
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -28,6 +29,7 @@ from src.models.response_v2 import (
     OptionResultV2,
     RequestEchoV2,
     RobustnessResultV2,
+    StabilityThresholdsResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +96,7 @@ class ResponseBuilder:
         self.options: Optional[List[OptionResultV2]] = None
         self.robustness: Optional[RobustnessResultV2] = None
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
+        self.stability_thresholds = None  # 3C: stability thresholds metadata
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -112,11 +115,13 @@ class ResponseBuilder:
         options: List[OptionResultV2],
         robustness: Optional[RobustnessResultV2] = None,
         factor_sensitivity: Optional[List[FactorSensitivityV2]] = None,
+        stability_thresholds: Optional[StabilityThresholdsResponse] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
         self.robustness = robustness
         self.factor_sensitivity = factor_sensitivity
+        self.stability_thresholds = stability_thresholds
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -183,9 +188,13 @@ class ResponseBuilder:
         # P2-ISL-1: Generate timestamp
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+        # Get build commit hash from environment (Render sets RENDER_GIT_COMMIT)
+        build_commit = os.environ.get("RENDER_GIT_COMMIT", "dev")[:7]
+
         return ISLResponseV2(
             endpoint_version="analyze/v2",
             engine_version=engine_version,
+            build=build_commit,
             timestamp=timestamp,
             analysis_status=analysis_status,
             robustness_status=robustness_status,
@@ -197,6 +206,7 @@ class ResponseBuilder:
             options=self.options,
             robustness=self.robustness,
             factor_sensitivity=self.factor_sensitivity,
+            stability_thresholds=self.stability_thresholds,  # 3C
             request_id=self.request_id,
             processing_time_ms=processing_time,
             seed_used=self.seed_used,

@@ -12,11 +12,28 @@ P2 Brief Alignment:
 """
 
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from src.constants import RESPONSE_SCHEMA_VERSION_V2
+
+
+class ZeroSensitivityReason(str, Enum):
+    """
+    Explains why a sensitivity score is zero (debug-only field).
+
+    Used to distinguish between:
+    - Legitimate zero sensitivity (factor truly has no impact)
+    - Computational artifacts (near-zero values, intervention overrides)
+    """
+    ZERO_OUTCOME_DIFF = "zero_outcome_diff"      # Perturbation doesn't affect outcome
+    ZERO_DELTA = "zero_delta"                    # std/delta too small to perturb
+    INTERVENTION_OVERRIDE = "intervention_override"  # Intervention dominates factor
+    DISCONNECTED = "disconnected"                # No causal path to goal
+    BASELINE_NORMALISED = "baseline_normalised"  # Epsilon denom applied, still zero
+    POINT_MASS = "point_mass"                    # Distribution has no uncertainty
 
 
 # =============================================================================
@@ -40,6 +57,9 @@ class RequestEchoV2(BaseModel):
     include_diagnostics: bool = Field(
         ..., description="Whether diagnostics were requested"
     )
+
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -71,6 +91,9 @@ class CritiqueV2(BaseModel):
         None, description="Actionable suggestion to resolve the issue"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Diagnostics (optional detailed information)
@@ -100,6 +123,9 @@ class OptionDiagnosticV2(BaseModel):
         default_factory=list, description="Option-specific warnings"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 class DiagnosticsV2(BaseModel):
     """Diagnostic information (only included when requested)."""
@@ -126,6 +152,9 @@ class DiagnosticsV2(BaseModel):
         ..., description="Threshold used for strength.mean"
     )
 
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Outcome Distribution
@@ -137,9 +166,11 @@ class OutcomeDistributionV2(BaseModel):
 
     mean: float = Field(..., description="Mean outcome value")
     std: float = Field(..., description="Standard deviation")
-    p10: float = Field(..., description="10th percentile")
-    p50: float = Field(..., description="50th percentile (median)")
-    p90: float = Field(..., description="90th percentile")
+    # CIL 0.2: Optional — null when true percentiles cannot be computed
+    # (no samples or all non-finite). See code review C3.
+    p10: Optional[float] = Field(None, description="10th percentile (null when unavailable)")
+    p50: Optional[float] = Field(None, description="50th percentile / median (null when unavailable)")
+    p90: Optional[float] = Field(None, description="90th percentile (null when unavailable)")
     n_samples: int = Field(..., description="Total samples")
     n_valid_samples: int = Field(
         ..., description="Samples without NaN/Inf"
@@ -147,6 +178,16 @@ class OutcomeDistributionV2(BaseModel):
     validity_ratio: float = Field(
         ..., description="n_valid_samples / n_samples"
     )
+    # CIL 0.2: provenance marker for percentile values
+    percentiles_source: Literal["samples", "unavailable"] = Field(
+        default="samples",
+        description="'samples' when p10/p50/p90 computed from actual MC samples; "
+        "'unavailable' when no valid samples exist (p10/p50/p90 will be null)"
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -172,12 +213,20 @@ class OptionResultV2(BaseModel):
         le=1,
         description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
     )
+    constraint_analysis: Optional["ConstraintAnalysisV2"] = Field(
+        None,
+        description="Multi-constraint analysis results. Only present when goal_constraints is provided in request."
+    )
     status: Literal["computed", "partial", "failed"] = Field(
         ..., description="Option-specific status"
     )
     status_reason: Optional[str] = Field(
         None, description="Reason for non-computed status"
     )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -193,6 +242,87 @@ class SensitiveFactorV2(BaseModel):
     effect_on_ranking: Literal["none", "minor", "moderate", "major"] = Field(
         ..., description="Effect on option ranking"
     )
+
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
+
+# =============================================================================
+# Constraint Analysis (Multi-Constraint Goal Analysis)
+# =============================================================================
+
+
+class ConstraintResultV2(BaseModel):
+    """Result for a single goal constraint."""
+
+    node_id: str = Field(..., description="Node ID the constraint applies to")
+    operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
+    threshold: float = Field(..., description="Threshold value")
+    label: Optional[str] = Field(None, description="Human-readable label for coaching")
+    prob_satisfied: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Probability that this constraint is satisfied (count / n_samples)"
+    )
+    failure_margin_median: Optional[float] = Field(
+        None,
+        description="Median distance from threshold when constraint fails (positive = failing by this amount)"
+    )
+    near_miss_fraction: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of failures within 10% of threshold (near-misses)"
+    )
+    binding: Optional[bool] = Field(
+        None,
+        description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
+    )
+
+    @computed_field
+    @property
+    def value(self) -> float:
+        """Contract-aligned alias for threshold (v2.7 input field name).
+
+        Mirrors `threshold` so the JSON output includes both field names,
+        letting PLoT consume either without translation.
+        """
+        return self.threshold
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
+
+class ConstraintAnalysisV2(BaseModel):
+    """Multi-constraint analysis results for an option.
+
+    Note: Constraint probabilities are computed from raw Monte Carlo samples
+    (before auto-scaled noise is applied to outcome nodes). This may cause
+    slight differences compared to probability_of_goal which uses noised samples.
+    """
+
+    constraints: List[ConstraintResultV2] = Field(
+        ..., description="Per-constraint probability results"
+    )
+    joint_probability: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="P(all constraints satisfied simultaneously)"
+    )
+    conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
+        None,
+        description="Pairwise conditional probabilities: P(C_j | C_i). "
+        "Format: {constraint_i_idx: {constraint_j_idx: P(C_j | C_i)}}. "
+        "When P(C_i)=0, entries for that constraint are omitted (undefined). "
+        "Indices correspond to order in goal_constraints array."
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -222,6 +352,17 @@ class FragileEdgeV2(BaseModel):
         description="Proportion of MC samples where alternative wins when edge is weak. "
         "0.0 if same option wins (stable), null only if no data available.",
     )
+    marginal_switch_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Probability of decision flip when ONLY this edge varies "
+        "(all other edges held at baseline). Isolates individual edge contribution.",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
 
 
 # =============================================================================
@@ -262,6 +403,10 @@ class RobustnessResultV2(BaseModel):
         None, ge=0, le=1, description="P(same recommendation across samples) (V1 compat)"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
 
 # =============================================================================
 # Factor Sensitivity
@@ -273,7 +418,18 @@ class FactorSensitivityV2(BaseModel):
 
     node_id: str = Field(..., description="Factor node ID")
     label: Optional[str] = Field(None, description="Human-readable node label")
-    sensitivity_score: float = Field(..., description="Sensitivity score")
+    sensitivity_score: float = Field(
+        ..., ge=0, le=1, description="Normalized sensitivity score (0-1, higher = more sensitive)"
+    )
+    importance_score: Optional[float] = Field(
+        None, ge=0, le=1, description="Relative importance (0-1, higher = more important)"
+    )
+    elasticity: Optional[float] = Field(
+        None, description="Raw elasticity: % change in outcome per % change in factor"
+    )
+    elasticity_display: Optional[float] = Field(
+        None, description="UI-safe elasticity clamped to [-100, 100]"
+    )
     direction: Literal["positive", "negative"] = Field(
         ..., description="Direction of effect"
     )
@@ -288,6 +444,70 @@ class FactorSensitivityV2(BaseModel):
     )
     interpretation: Optional[str] = Field(
         None, description="Human-readable explanation of sensitivity"
+    )
+    # Debug fields (always serialised for debugging)
+    zero_reason: Optional[ZeroSensitivityReason] = Field(
+        None, description="Debug: explains why sensitivity is zero (when elasticity ≈ 0)"
+    )
+    baseline_near_zero: Optional[bool] = Field(
+        None, description="Debug: True if epsilon denominator was applied"
+    )
+    # Structural influence fields
+    influence_score: Optional[float] = Field(
+        None, ge=0, le=1, description="Structural influence from causal path strengths (0-1)"
+    )
+    influence_rank: Optional[int] = Field(
+        None, ge=1, description="Rank by influence_score (1 = highest)"
+    )
+    # Bootstrap uncertainty fields (3C — factor sensitivity confidence)
+    elasticity_std: Optional[float] = Field(
+        None, ge=0,
+        description="Std dev of elasticity across bootstrap runs"
+    )
+    attribution_stability: Optional[Literal["high", "moderate", "low", "negligible"]] = Field(
+        None,
+        description="Categorical stability: 'high', 'moderate', 'low', or 'negligible'"
+    )
+    rank_flip_rate: Optional[float] = Field(
+        None, ge=0, le=1,
+        description="Fraction of bootstrap runs where rank shifts by >= 2 positions"
+    )
+    stability_method: Optional[str] = Field(
+        None,
+        description="Method used: 'bootstrap_20' or 'bootstrap_10'"
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
+
+# =============================================================================
+# Stability Thresholds (3C)
+# =============================================================================
+
+
+class StabilityThresholdsResponse(BaseModel):
+    """Threshold metadata for attribution_stability classification.
+
+    Provisional — pending scientific review. NOT included in response_hash.
+    """
+
+    high_moderate_boundary: float = Field(
+        ...,
+        description="CV boundary: CV ≤ this → 'high' stability"
+    )
+    moderate_low_boundary: float = Field(
+        ...,
+        description="CV boundary: CV ≤ this → 'moderate'; above → 'low'"
+    )
+    version: str = Field(
+        ...,
+        description="Threshold configuration version"
+    )
+    provisional: bool = Field(
+        ...,
+        description="True indicates thresholds are operational defaults pending review"
     )
 
 
@@ -307,6 +527,9 @@ class ISLResponseV2(BaseModel):
     )
     endpoint_version: str = Field(..., description="Endpoint version, e.g., 'analyze/v2'")
     engine_version: str = Field(..., description="ISL engine version")
+    build: Optional[str] = Field(
+        None, description="Git commit hash (7 chars) for build verification"
+    )
 
     # P2-ISL-1: Timestamp in ISO 8601 format
     timestamp: str = Field(
@@ -354,6 +577,13 @@ class ISLResponseV2(BaseModel):
         None, description="Factor sensitivity results"
     )
 
+    # Stability threshold metadata (3C-thresholds)
+    stability_thresholds: Optional[StabilityThresholdsResponse] = Field(
+        None,
+        description="Thresholds used for attribution_stability classification. "
+        "Provisional — pending scientific review. NOT included in response_hash.",
+    )
+
     # Correlation
     request_id: str = Field(..., description="Request ID for correlation")
     processing_time_ms: int = Field(..., description="Processing time in milliseconds")
@@ -363,7 +593,10 @@ class ISLResponseV2(BaseModel):
         None, description="RNG seed used for deterministic reproduction"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "populate_by_name": True,  # Allow both 'version' and 'response_schema_version'
         "json_schema_extra": {
             "example": {
@@ -441,7 +674,9 @@ class ISLV2Error422(BaseModel):
         None, description="Request ID for correlation (echoed if available)"
     )
 
+    # CIL: explicit extra='ignore' — consistent with all other V2 models.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "analysis_status": "blocked",

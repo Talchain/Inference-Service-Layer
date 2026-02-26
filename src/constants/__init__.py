@@ -74,3 +74,19 @@ BASELINE_EPSILON = 1e-8
 # Values below this threshold are considered effectively zero variance
 # (accounts for floating point precision in numerical computations)
 ZERO_VARIANCE_TOLERANCE = 1e-10
+
+
+# =============================================================================
+# Factor Sensitivity Elasticity Calculation
+# =============================================================================
+
+# Epsilon values for stabilising elasticity computation when baseline or
+# factor values are near zero (e.g., binary factors 0/1).
+# These prevent division-by-zero while preserving meaningful sensitivity values.
+# Note: Values tuned for typical factor scales; may need calibration.
+FACTOR_SENSITIVITY_BASELINE_EPSILON = 0.01  # Min denominator for baseline_mean
+FACTOR_SENSITIVITY_VALUE_EPSILON = 0.01  # Min denominator for factor mean_value
+
+# Maximum elasticity magnitude for presentation (prevents extreme UX values)
+# Elasticity beyond this is clamped to ±ELASTICITY_CLAMP_MAX
+ELASTICITY_CLAMP_MAX = 100.0

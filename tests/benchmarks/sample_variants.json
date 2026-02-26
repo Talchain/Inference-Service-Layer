@@ -1,0 +1,47 @@
+{
+  "options": [
+    {"id": "low_price", "label": "Low price", "interventions": {"price": 0.3}},
+    {"id": "high_price", "label": "High price", "interventions": {"price": 0.7}}
+  ],
+  "goal_node_id": "revenue",
+  "seed": 42,
+  "n_samples": 200,
+  "graphs": [
+    {
+      "nodes": [
+        {"id": "price", "kind": "factor", "label": "Price"},
+        {"id": "demand", "kind": "chance", "label": "Demand"},
+        {"id": "revenue", "kind": "outcome", "label": "Revenue"}
+      ],
+      "edges": [
+        {"from": "price", "to": "demand", "exists_probability": 0.95, "strength": {"mean": -0.4, "std": 0.1}},
+        {"from": "demand", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.8, "std": 0.05}},
+        {"from": "price", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.5, "std": 0.1}}
+      ]
+    },
+    {
+      "nodes": [
+        {"id": "price", "kind": "factor", "label": "Price"},
+        {"id": "demand", "kind": "chance", "label": "Demand"},
+        {"id": "revenue", "kind": "outcome", "label": "Revenue"}
+      ],
+      "edges": [
+        {"from": "price", "to": "demand", "exists_probability": 0.95, "strength": {"mean": -0.35, "std": 0.12}},
+        {"from": "demand", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.75, "std": 0.06}},
+        {"from": "price", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.55, "std": 0.08}}
+      ]
+    },
+    {
+      "nodes": [
+        {"id": "price", "kind": "factor", "label": "Price"},
+        {"id": "demand", "kind": "chance", "label": "Demand"},
+        {"id": "revenue", "kind": "outcome", "label": "Revenue"}
+      ],
+      "edges": [
+        {"from": "price", "to": "demand", "exists_probability": 0.95, "strength": {"mean": -0.45, "std": 0.11}},
+        {"from": "demand", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.85, "std": 0.04}},
+        {"from": "price", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.45, "std": 0.12}}
+      ]
+    }
+  ]
+}

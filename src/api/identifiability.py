@@ -18,13 +18,24 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 
 from src.models.isl_metadata import MetadataBuilder
-from src.models.requests import IdentifiabilityFromDAGRequest, IdentifiabilityRequest
+from src.models.requests import (
+    IdentifiabilityFromDAGRequest,
+    IdentifiabilityRequest,
+    IdentifiabilityV2Request,
+)
 from src.models.responses import (
+    ConfoundingPairResponse,
+    ConfoundingSensitivityResponse,
     IdentifiabilityInfo,
     IdentifiabilityResponse,
     IdentifiabilitySuggestionResponse,
+    IdentifiabilityV2PairResult,
+    IdentifiabilityV2Response,
     IdentificationMethodEnum,
     RecommendationStatusEnum,
+)
+from src.services.confounding_sensitivity import (
+    analyze_confounding_sensitivity,
 )
 from src.models.shared import ConfidenceLevel
 from src.services.identifiability_analyzer import (
@@ -305,4 +316,195 @@ async def analyze_identifiability_from_dag(
         raise HTTPException(
             status_code=500,
             detail="Failed to perform identifiability analysis. Check logs for details.",
+        )
+
+
+# ============================================================================
+# V2 Identifiability Endpoint (3B-prep)
+# ============================================================================
+
+
+@router.post(
+    "/v2/identifiability",
+    response_model=IdentifiabilityV2Response,
+    summary="Analyze causal identifiability from V2 graph (with bidirected edge support)",
+    description="""
+    V2 identifiability analysis.  Accepts a V2 graph (which may contain
+    ``edge_type: 'bidirected'`` edges representing unmeasured confounders)
+    and a list of options whose intervention keys define the treatment factors.
+
+    **Treatment expansion:** For each option the treatment nodes are the keys
+    in ``interventions``.  Multiple options may share treatment factors —
+    they are deduplicated before analysis.
+
+    **Bidirected edges:** When ``edge_type`` is ``'bidirected'``, the edge is
+    wired to Y₀'s ``NxMixedGraph.add_undirected_edge()`` representing an
+    unmeasured confounder.  Y₀ will correctly determine identifiability
+    despite the confounding.
+
+    **Returns:** Per-(treatment, outcome) pair results plus an aggregate
+    ``all_identifiable`` flag.
+    """,
+    responses={
+        200: {"description": "Identifiability analysis completed"},
+        400: {"description": "Invalid input"},
+        500: {"description": "Internal computation error"},
+    },
+)
+async def analyze_identifiability_v2(
+    request: IdentifiabilityV2Request,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+) -> IdentifiabilityV2Response:
+    """Analyze identifiability for V2 graphs with bidirected edge support."""
+    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
+
+    try:
+        # --- deduplicate treatment factors across options ---
+        treatment_node_ids: set = set()
+        for option in request.options:
+            treatment_node_ids.update(option.interventions.keys())
+
+        if not treatment_node_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No treatment factors found in options (empty interventions).",
+            )
+
+        # Validate outcome exists in graph
+        graph_node_ids = {n.id for n in request.graph.nodes}
+        if request.outcome_node_id not in graph_node_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"outcome_node_id '{request.outcome_node_id}' not found in graph nodes.",
+            )
+
+        # Validate treatment nodes exist in graph
+        missing_treatments = treatment_node_ids - graph_node_ids
+        if missing_treatments:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Treatment node(s) not found in graph: {sorted(missing_treatments)}",
+            )
+
+        logger.info(
+            "identifiability_v2_analysis_request",
+            extra={
+                "request_id": request_id,
+                "num_nodes": len(request.graph.nodes),
+                "num_edges": len(request.graph.edges),
+                "treatment_nodes": sorted(treatment_node_ids),
+                "outcome_node_id": request.outcome_node_id,
+            },
+        )
+
+        # --- run analysis per (treatment, outcome) pair ---
+        pairs: list = []
+        for treatment_id in sorted(treatment_node_ids):
+            result = identifiability_analyzer.analyze_v2(
+                graph_v2=request.graph,
+                treatment_node_id=treatment_id,
+                outcome_node_id=request.outcome_node_id,
+            )
+            pairs.append(
+                IdentifiabilityV2PairResult(
+                    treatment_node_id=treatment_id,
+                    outcome_node_id=request.outcome_node_id,
+                    identifiable=result.identifiable,
+                    method=result.method.value if result.method else None,
+                    adjustment_set=result.adjustment_set,
+                    # estimand left None until Y₀ symbolic result is threaded
+                    # through IdentifiabilityResult (requires analyzer change).
+                    estimand=None,
+                )
+            )
+
+        all_identifiable = all(p.identifiable for p in pairs)
+
+        # --- confounding sensitivity for non-identifiable pairs ---
+        confounding_response: Optional[ConfoundingSensitivityResponse] = None
+        if not all_identifiable:
+            # Collect treatment nodes that are non-identifiable
+            non_id_treatments = {
+                p.treatment_node_id for p in pairs if not p.identifiable
+            }
+
+            # Extract bidirected pairs, filtered to those involving
+            # non-identifiable treatment nodes (not all bidirected pairs).
+            from src.services.confounding_sensitivity import _extract_bidirected_pairs
+            all_bidirected = _extract_bidirected_pairs(request.graph)
+            bidirected_pairs = [
+                (a, b) for a, b in all_bidirected
+                if a in non_id_treatments or b in non_id_treatments
+            ]
+
+            if bidirected_pairs:
+                # Convert options to dicts for the sensitivity analyzer
+                option_dicts = [
+                    {"id": opt.id, "label": opt.id, "interventions": opt.interventions}
+                    for opt in request.options
+                ]
+
+                sensitivity_result = analyze_confounding_sensitivity(
+                    graph=request.graph,
+                    options=option_dicts,
+                    goal_node_id=request.outcome_node_id,
+                    bidirected_pairs=bidirected_pairs,
+                    seed=request.seed,
+                    n_samples=request.n_samples,
+                )
+
+                confounding_response = ConfoundingSensitivityResponse(
+                    pairs=[
+                        ConfoundingPairResponse(
+                            node_a=p.node_a,
+                            node_b=p.node_b,
+                            flip_threshold_raw=p.flip_threshold_raw,
+                            flip_threshold_relative=p.flip_threshold_relative,
+                            baseline_winner=p.baseline_winner,
+                            flipped_winner=p.flipped_winner,
+                            interpretation=p.interpretation,
+                        )
+                        for p in sensitivity_result.pairs
+                    ],
+                    overall_robust=sensitivity_result.overall_robust,
+                    median_edge_strength=sensitivity_result.median_edge_strength,
+                )
+
+                logger.info(
+                    "confounding_sensitivity_completed",
+                    extra={
+                        "request_id": request_id,
+                        "n_bidirected_pairs": len(bidirected_pairs),
+                        "overall_robust": sensitivity_result.overall_robust,
+                        "latency_ms": sensitivity_result.latency_ms,
+                    },
+                )
+
+        logger.info(
+            "identifiability_v2_analysis_completed",
+            extra={
+                "request_id": request_id,
+                "n_pairs": len(pairs),
+                "all_identifiable": all_identifiable,
+                "has_confounding_sensitivity": confounding_response is not None,
+            },
+        )
+
+        return IdentifiabilityV2Response(
+            pairs=pairs,
+            all_identifiable=all_identifiable,
+            confounding_sensitivity=confounding_response,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "identifiability_v2_analysis_error",
+            extra={"request_id": request_id, "error": str(e)},
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to perform V2 identifiability analysis. Check logs for details.",
         )

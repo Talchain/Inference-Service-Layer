@@ -2766,6 +2766,94 @@
         "title": "ConformalResponse",
         "type": "object"
       },
+      "ConstraintAnalysis": {
+        "description": "Internal multi-constraint analysis results for an option.",
+        "properties": {
+          "conditional_probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pairwise conditional probabilities: P(C_j | C_i)",
+            "title": "Conditional Probabilities"
+          },
+          "constraints": {
+            "description": "Per-constraint probability results",
+            "items": {
+              "$ref": "#/components/schemas/ConstraintResult"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
+          "joint_probability": {
+            "description": "P(all constraints satisfied simultaneously)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Joint Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "constraints",
+          "joint_probability"
+        ],
+        "title": "ConstraintAnalysis",
+        "type": "object"
+      },
+      "ConstraintAnalysisV2": {
+        "description": "Multi-constraint analysis results for an option.\n\nNote: Constraint probabilities are computed from raw Monte Carlo samples\n(before auto-scaled noise is applied to outcome nodes). This may cause\nslight differences compared to probability_of_goal which uses noised samples.",
+        "properties": {
+          "conditional_probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "number"
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pairwise conditional probabilities: P(C_j | C_i). Format: {constraint_i_idx: {constraint_j_idx: P(C_j | C_i)}}. When P(C_i)=0, entries for that constraint are omitted (undefined). Indices correspond to order in goal_constraints array.",
+            "title": "Conditional Probabilities"
+          },
+          "constraints": {
+            "description": "Per-constraint probability results",
+            "items": {
+              "$ref": "#/components/schemas/ConstraintResultV2"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
+          "joint_probability": {
+            "description": "P(all constraints satisfied simultaneously)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Joint Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "constraints",
+          "joint_probability"
+        ],
+        "title": "ConstraintAnalysisV2",
+        "type": "object"
+      },
       "ConstraintNode": {
         "description": "A constraint node in the decision graph.",
         "example": {
@@ -2862,6 +2950,184 @@
         ],
         "title": "ConstraintRelation",
         "type": "string"
+      },
+      "ConstraintResult": {
+        "description": "Internal result for a single goal constraint.",
+        "properties": {
+          "binding": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True if constraint is borderline (prob_satisfied \u2208 [0.4, 0.6])",
+            "title": "Binding"
+          },
+          "failure_margin_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median distance from threshold when constraint fails",
+            "title": "Failure Margin Median"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable label for coaching",
+            "title": "Label"
+          },
+          "near_miss_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fraction of failures within 10% of threshold",
+            "title": "Near Miss Fraction"
+          },
+          "node_id": {
+            "description": "Node ID the constraint applies to",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "description": "Comparison operator",
+            "enum": [
+              ">=",
+              "<="
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "prob_satisfied": {
+            "description": "Probability that this constraint is satisfied",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Prob Satisfied",
+            "type": "number"
+          },
+          "threshold": {
+            "description": "Threshold value",
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "threshold",
+          "prob_satisfied"
+        ],
+        "title": "ConstraintResult",
+        "type": "object"
+      },
+      "ConstraintResultV2": {
+        "description": "Result for a single goal constraint.",
+        "properties": {
+          "binding": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True if constraint is borderline (prob_satisfied \u2208 [0.4, 0.6])",
+            "title": "Binding"
+          },
+          "failure_margin_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median distance from threshold when constraint fails (positive = failing by this amount)",
+            "title": "Failure Margin Median"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable label for coaching",
+            "title": "Label"
+          },
+          "near_miss_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fraction of failures within 10% of threshold (near-misses)",
+            "title": "Near Miss Fraction"
+          },
+          "node_id": {
+            "description": "Node ID the constraint applies to",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "description": "Comparison operator",
+            "enum": [
+              ">=",
+              "<="
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "prob_satisfied": {
+            "description": "Probability that this constraint is satisfied (count / n_samples)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Prob Satisfied",
+            "type": "number"
+          },
+          "threshold": {
+            "description": "Threshold value",
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "threshold",
+          "prob_satisfied"
+        ],
+        "title": "ConstraintResultV2",
+        "type": "object"
       },
       "ConstraintType": {
         "description": "Types of constraints supported.",
@@ -6143,23 +6409,77 @@
         "description": "Sensitivity to a factor node's value (Phase 2A Part 2).",
         "example": {
           "elasticity": 0.32,
+          "elasticity_display": 0.32,
           "importance_rank": 2,
+          "influence_rank": 1,
+          "influence_score": 0.85,
           "interpretation": "Decision is moderately sensitive to marketing_spend value",
           "node_id": "marketing_spend",
           "node_label": "Marketing Spend",
           "observed_value": 50000.0
         },
         "properties": {
+          "baseline_near_zero": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Debug: True if epsilon denominator was applied due to near-zero baseline",
+            "title": "Baseline Near Zero"
+          },
           "elasticity": {
-            "description": "% change in outcome per % change in factor value",
+            "description": "% change in outcome per % change in factor value (raw, unclamped)",
             "title": "Elasticity",
             "type": "number"
+          },
+          "elasticity_display": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UI-safe elasticity clamped to [-100, 100] (debug/display only)",
+            "title": "Elasticity Display"
           },
           "importance_rank": {
             "description": "Rank by importance (1 = most important)",
             "minimum": 1.0,
             "title": "Importance Rank",
             "type": "integer"
+          },
+          "influence_rank": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rank by influence_score (1 = highest influence)",
+            "title": "Influence Rank"
+          },
+          "influence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structural influence from causal path strengths (0-1, normalized)",
+            "title": "Influence Score"
           },
           "interpretation": {
             "description": "Human-readable explanation",
@@ -6194,6 +6514,17 @@
             ],
             "description": "Observed value from node's observed_state",
             "title": "Observed Value"
+          },
+          "zero_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ZeroSensitivityReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Debug: explains why sensitivity is zero (only present when elasticity \u2248 0)"
           }
         },
         "required": [
@@ -6208,6 +6539,18 @@
       "FactorSensitivityV2": {
         "description": "Factor sensitivity for drivers analysis.",
         "properties": {
+          "baseline_near_zero": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Debug: True if epsilon denominator was applied",
+            "title": "Baseline Near Zero"
+          },
           "confidence": {
             "anyOf": [
               {
@@ -6231,6 +6574,30 @@
             "title": "Direction",
             "type": "string"
           },
+          "elasticity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw elasticity: % change in outcome per % change in factor",
+            "title": "Elasticity"
+          },
+          "elasticity_display": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UI-safe elasticity clamped to [-100, 100]",
+            "title": "Elasticity Display"
+          },
           "importance_rank": {
             "anyOf": [
               {
@@ -6243,6 +6610,47 @@
             ],
             "description": "Rank by importance (1 = most important)",
             "title": "Importance Rank"
+          },
+          "importance_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Relative importance (0-1, higher = more important)",
+            "title": "Importance Score"
+          },
+          "influence_rank": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rank by influence_score (1 = highest)",
+            "title": "Influence Rank"
+          },
+          "influence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structural influence from causal path strengths (0-1)",
+            "title": "Influence Score"
           },
           "interpretation": {
             "anyOf": [
@@ -6286,9 +6694,22 @@
             "title": "Observed Value"
           },
           "sensitivity_score": {
-            "description": "Sensitivity score",
+            "description": "Normalized sensitivity score (0-1, higher = more sensitive)",
+            "maximum": 1.0,
+            "minimum": 0.0,
             "title": "Sensitivity Score",
             "type": "number"
+          },
+          "zero_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ZeroSensitivityReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Debug: explains why sensitivity is zero (when elasticity \u2248 0)"
           }
         },
         "required": [
@@ -6542,6 +6963,20 @@
             "title": "From Id",
             "type": "string"
           },
+          "marginal_switch_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Probability of decision flip when ONLY this edge varies (all other edges held at baseline). Isolates individual edge contribution.",
+            "title": "Marginal Switch Probability"
+          },
           "switch_probability": {
             "anyOf": [
               {
@@ -6595,6 +7030,20 @@
             "title": "From Id",
             "type": "string"
           },
+          "marginal_switch_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Probability of decision flip when ONLY this edge varies (all other edges held at baseline). Isolates individual edge contribution.",
+            "title": "Marginal Switch Probability"
+          },
           "switch_probability": {
             "anyOf": [
               {
@@ -6621,6 +7070,57 @@
           "to_id"
         ],
         "title": "FragileEdgeV2",
+        "type": "object"
+      },
+      "GoalConstraint": {
+        "description": "A constraint on a goal/outcome node for multi-constraint analysis.\n\nAllows specifying success criteria like \"revenue >= 100k\" or \"cost <= 50k\".\nMultiple constraints can be specified to compute joint probabilities.",
+        "example": {
+          "label": "Revenue target",
+          "node_id": "revenue",
+          "operator": ">=",
+          "value": 100000.0
+        },
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')",
+            "title": "Label"
+          },
+          "node_id": {
+            "description": "ID of the node this constraint applies to (must exist in graph)",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operator": {
+            "description": "Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold",
+            "enum": [
+              ">=",
+              "<="
+            ],
+            "title": "Operator",
+            "type": "string"
+          },
+          "value": {
+            "description": "Threshold value for the constraint (v2.7 contract field name)",
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "operator",
+          "value"
+        ],
+        "title": "GoalConstraint",
         "type": "object"
       },
       "GoalSpecification": {
@@ -7193,6 +7693,18 @@
             ],
             "title": "Analysis Status",
             "type": "string"
+          },
+          "build": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Git commit hash (7 chars) for build verification",
+            "title": "Build"
           },
           "critiques": {
             "description": "Structured critiques",
@@ -9012,6 +9524,7 @@
         "example": {
           "baseline": 49.0,
           "source": "brief_extraction",
+          "std": 5.0,
           "unit": "\u00a3k",
           "value": 59.0
         },
@@ -9040,6 +9553,18 @@
             ],
             "description": "Data provenance (e.g., 'brief_extraction', 'user_input', 'computed')",
             "title": "Source"
+          },
+          "std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Standard deviation / uncertainty of the observed value",
+            "title": "Std"
           },
           "unit": {
             "anyOf": [
@@ -9769,6 +10294,17 @@
           "win_probability": 0.65
         },
         "properties": {
+          "constraint_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multi-constraint analysis results. Only present when goal_constraints is provided."
+          },
           "option_id": {
             "description": "Option identifier",
             "title": "Option Id",
@@ -9815,6 +10351,17 @@
       "OptionResultV2": {
         "description": "Analysis result for a single option.",
         "properties": {
+          "constraint_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintAnalysisV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multi-constraint analysis results. Only present when goal_constraints is provided in request."
+          },
           "id": {
             "description": "Option identifier",
             "title": "Id",
@@ -10025,19 +10572,50 @@
             "type": "integer"
           },
           "p10": {
-            "description": "10th percentile",
-            "title": "P10",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "10th percentile (null when unavailable)",
+            "title": "P10"
           },
           "p50": {
-            "description": "50th percentile (median)",
-            "title": "P50",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "50th percentile / median (null when unavailable)",
+            "title": "P50"
           },
           "p90": {
-            "description": "90th percentile",
-            "title": "P90",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "90th percentile (null when unavailable)",
+            "title": "P90"
+          },
+          "percentiles_source": {
+            "default": "samples",
+            "description": "'samples' when p10/p50/p90 computed from actual MC samples; 'unavailable' when no valid samples exist (p10/p50/p90 will be null)",
+            "enum": [
+              "samples",
+              "unavailable"
+            ],
+            "title": "Percentiles Source",
+            "type": "string"
           },
           "std": {
             "description": "Standard deviation",
@@ -10053,9 +10631,6 @@
         "required": [
           "mean",
           "std",
-          "p10",
-          "p50",
-          "p90",
           "n_samples",
           "n_valid_samples",
           "validity_ratio"
@@ -12740,6 +13315,21 @@
             "title": "Confidence Level",
             "type": "number"
           },
+          "goal_constraints": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GoalConstraint"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multiple goal constraints for joint probability analysis. When provided, computes per-constraint probabilities, joint probability, and conditional probabilities. Requires nodes to exist in graph.",
+            "title": "Goal Constraints"
+          },
           "goal_node_id": {
             "description": "Target outcome node to optimize",
             "title": "Goal Node Id",
@@ -12815,10 +13405,13 @@
                 "type": "integer"
               },
               {
+                "type": "string"
+              },
+              {
                 "type": "null"
               }
             ],
-            "description": "Random seed for reproducibility; if None, computed from graph",
+            "description": "Random seed for reproducibility; if None, computed from graph. Accepts int or string. Numeric strings are converted via int(); non-numeric strings are hashed deterministically.",
             "title": "Seed"
           }
         },
@@ -17854,6 +18447,19 @@
         ],
         "title": "ValueOfInformation",
         "type": "object"
+      },
+      "ZeroSensitivityReason": {
+        "description": "Explains why a sensitivity score is zero (debug-only field).\n\nUsed to distinguish between:\n- Legitimate zero sensitivity (factor truly has no impact)\n- Computational artifacts (near-zero values, intervention overrides)",
+        "enum": [
+          "zero_outcome_diff",
+          "zero_delta",
+          "intervention_override",
+          "disconnected",
+          "baseline_normalised",
+          "point_mass"
+        ],
+        "title": "ZeroSensitivityReason",
+        "type": "string"
       },
       "src__api__batch__BatchCounterfactualRequest": {
         "description": "Batch counterfactual analysis request.",

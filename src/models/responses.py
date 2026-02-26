@@ -4938,3 +4938,76 @@ class IdentifiabilityEnhancedResponse(BaseModel):
         None,
         description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
     )
+
+
+# ============================================================================
+# V2 Identifiability Response (3B-prep)
+# ============================================================================
+
+
+class IdentifiabilityV2PairResult(BaseModel):
+    """Identifiability result for a single (treatment, outcome) pair."""
+
+    treatment_node_id: str = Field(..., description="Treatment / factor node ID")
+    outcome_node_id: str = Field(..., description="Outcome / goal node ID")
+    identifiable: bool = Field(..., description="Whether the causal effect is identifiable")
+    method: Optional[str] = Field(
+        None,
+        description="Identification method (backdoor, frontdoor, do_calculus, non_identifiable)",
+    )
+    adjustment_set: Optional[List[str]] = Field(
+        None, description="Variables to condition on (for backdoor/frontdoor)"
+    )
+    estimand: Optional[str] = Field(
+        None, description="Symbolic estimand expression from Y₀ (when available)"
+    )
+
+
+class ConfoundingPairResponse(BaseModel):
+    """Sensitivity result for a single bidirected (confounded) pair."""
+
+    node_a: str = Field(..., description="First node in bidirected pair")
+    node_b: str = Field(..., description="Second node in bidirected pair")
+    flip_threshold_raw: Optional[float] = Field(
+        None, description="Absolute edge strength at which recommendation flips"
+    )
+    flip_threshold_relative: Optional[float] = Field(
+        None, description="Multiple of median edge strength (interpretable threshold)"
+    )
+    baseline_winner: str = Field(..., description="Recommended option at confounder_strength=0")
+    flipped_winner: Optional[str] = Field(
+        None, description="Recommended option after flip, if any"
+    )
+    interpretation: str = Field(
+        ..., description="Human-readable interpretation (provisional)"
+    )
+
+
+class ConfoundingSensitivityResponse(BaseModel):
+    """Aggregate confounding sensitivity result."""
+
+    pairs: List[ConfoundingPairResponse] = Field(
+        ..., description="Per-bidirected-pair sensitivity results"
+    )
+    overall_robust: bool = Field(
+        ..., description="True if no pair flips at any confounder strength"
+    )
+    median_edge_strength: float = Field(
+        ..., description="Graph-level reference: median |edge strength|"
+    )
+
+
+class IdentifiabilityV2Response(BaseModel):
+    """Response for /v2/identifiability endpoint."""
+
+    pairs: List[IdentifiabilityV2PairResult] = Field(
+        ..., description="Per-pair identifiability results"
+    )
+    all_identifiable: bool = Field(
+        ..., description="True if every (treatment, outcome) pair is identifiable"
+    )
+    confounding_sensitivity: Optional[ConfoundingSensitivityResponse] = Field(
+        None,
+        description="Confounding sensitivity analysis (present when non-identifiable pairs exist). "
+        "Provisional — pending scientific review.",
+    )

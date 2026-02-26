@@ -29,6 +29,8 @@ from src.constants import (
 )
 from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
+    ConstraintAnalysisV2,
+    ConstraintResultV2,
     DiagnosticsV2,
     FactorSensitivityV2,
     FragileEdgeV2,
@@ -46,6 +48,7 @@ from src.models.robustness_v2 import (
 )
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.config.stability_thresholds import compute_factor_confidence
 from src.utils.business_metrics import track_robustness_analysis
 from src.utils.response_builder import (
     ResponseBuilder,
@@ -466,6 +469,9 @@ async def _analyze_robustness_v2_enhanced(
         # Run analysis
         v1_response = robustness_analyzer_v2.analyze(request)
 
+        # Task 3: Build option label lookup for propagation to V2 response
+        option_label_map = {opt.id: opt.label for opt in request.options}
+
         # Convert V1 response to V2 option results
         option_results = []
         for result in v1_response.results:
@@ -493,22 +499,79 @@ async def _analyze_robustness_v2_enhanced(
             validity_ratio = n_valid / n_total if n_total > 0 else 0.0
             status = determine_option_status(n_valid, n_total)
 
+            # Convert constraint_analysis if present
+            constraint_analysis_v2 = None
+            if result.constraint_analysis:
+                ca = result.constraint_analysis
+                constraint_analysis_v2 = ConstraintAnalysisV2(
+                    constraints=[
+                        ConstraintResultV2(
+                            node_id=c.node_id,
+                            operator=c.operator,
+                            threshold=c.threshold,
+                            label=c.label,
+                            prob_satisfied=c.prob_satisfied,
+                            failure_margin_median=c.failure_margin_median,
+                            near_miss_fraction=c.near_miss_fraction,
+                            binding=c.binding,
+                        )
+                        for c in ca.constraints
+                    ],
+                    joint_probability=ca.joint_probability,
+                    conditional_probabilities=ca.conditional_probabilities,
+                )
+
+            # Task 2: Compute actual p10/p50/p90 from the *cleaned* samples
+            # (same array used for n_valid_samples and critiques above) instead
+            # of aliasing ci_lower (2.5th) → p10 and ci_upper (97.5th) → p90.
+            # This fixes the percentile semantic drift where a 95% CI was
+            # mislabelled as an 80% interval, and ensures percentiles reflect
+            # the same sample set as validity metrics.
+            #
+            # CIL 0.2: return null when true percentiles unavailable, not
+            #          mislabelled CI bounds. See code review C3.
+            if dist.samples is not None and len(dist.samples) > 0:
+                # Use cleaned_samples (from validate_mc_samples above) filtered
+                # to finite values — identical population to n_valid_samples.
+                finite_cleaned = cleaned_samples[np.isfinite(cleaned_samples)]
+                if len(finite_cleaned) > 0:
+                    # Task 4: single np.percentile call for efficiency
+                    p10_val, p50_val, p90_val = (
+                        float(v) for v in np.percentile(finite_cleaned, [10, 50, 90])
+                    )
+                    percentiles_source = "samples"
+                else:
+                    # All samples non-finite — cannot compute true percentiles
+                    p10_val = None
+                    p50_val = None
+                    p90_val = None
+                    percentiles_source = "unavailable"
+            else:
+                # No raw samples available — cannot compute true percentiles
+                p10_val = None
+                p50_val = None
+                p90_val = None
+                percentiles_source = "unavailable"
+
             option_results.append(
                 OptionResultV2(
                     id=result.option_id,
-                    label=None,  # V1 doesn't include label in results
+                    # Task 3: Propagate option label from request to response
+                    label=option_label_map.get(result.option_id),
                     outcome=OutcomeDistributionV2(
                         mean=dist.mean,
                         std=dist.std,
-                        p10=dist.ci_lower,  # Use CI as approximation
-                        p50=dist.median,
-                        p90=dist.ci_upper,
+                        p10=p10_val,
+                        p50=p50_val,
+                        p90=p90_val,
                         n_samples=n_total,
                         n_valid_samples=n_valid,
                         validity_ratio=validity_ratio,
+                        percentiles_source=percentiles_source,
                     ),
                     win_probability=result.win_probability,
                     probability_of_goal=result.probability_of_goal,
+                    constraint_analysis=constraint_analysis_v2,
                     status=status,
                     status_reason=(
                         "Numerical issues in sampling"
@@ -547,6 +610,7 @@ async def _analyze_robustness_v2_enhanced(
                         to_id=fe.to_id,
                         alternative_winner_id=fe.alternative_winner_id,
                         switch_probability=fe.switch_probability,
+                        marginal_switch_probability=fe.marginal_switch_probability,
                     )
                     for fe in v1_response.robustness.fragile_edges_enhanced
                 ]
@@ -564,19 +628,54 @@ async def _analyze_robustness_v2_enhanced(
                 recommendation_stability=v1_response.robustness.recommendation_stability,
             )
 
-        # Convert factor sensitivity
+        # Convert factor sensitivity with normalized scores
         factor_sensitivity = None
         if v1_response.factor_sensitivity:
+            # Compute max absolute elasticity for normalization
+            max_abs_elasticity = max(
+                (abs(fs.elasticity) for fs in v1_response.factor_sensitivity),
+                default=1.0
+            )
+            # Avoid division by zero
+            if max_abs_elasticity < 1e-10:
+                max_abs_elasticity = 1.0
+
+            n_factors = len(v1_response.factor_sensitivity)
+
             factor_sensitivity = [
                 FactorSensitivityV2(
                     node_id=fs.node_id,
                     label=fs.node_label,
-                    sensitivity_score=fs.elasticity,
+                    # Normalize to 0-1: relative to max sensitivity in this analysis
+                    sensitivity_score=min(1.0, abs(fs.elasticity) / max_abs_elasticity),
+                    # importance_score: 1.0 for rank 1, decreasing linearly
+                    importance_score=(
+                        1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
+                        if n_factors > 1 else 1.0
+                    ),
+                    elasticity=fs.elasticity,  # Preserve raw elasticity
+                    elasticity_display=fs.elasticity_display,  # Clamped for UI
                     direction="positive" if fs.elasticity > 0 else "negative",
                     importance_rank=fs.importance_rank,
                     observed_value=fs.observed_value,
                     interpretation=fs.interpretation,
-                    # confidence omitted - V1 analyzer doesn't compute per-factor confidence
+                    # Debug fields (always included)
+                    zero_reason=fs.zero_reason,
+                    baseline_near_zero=fs.baseline_near_zero,
+                    # Structural influence from graph path analysis
+                    influence_score=fs.influence_score,
+                    influence_rank=fs.influence_rank,
+                    # Bootstrap uncertainty (3C)
+                    elasticity_std=fs.elasticity_std,
+                    attribution_stability=fs.attribution_stability,
+                    rank_flip_rate=fs.rank_flip_rate,
+                    stability_method=fs.stability_method,
+                    # Confidence (Track S) - derived from bootstrap stability metrics
+                    confidence=compute_factor_confidence(
+                        fs.attribution_stability,
+                        fs.elasticity,
+                        fs.elasticity_std,
+                    ),
                 )
                 for fs in v1_response.factor_sensitivity
             ]
@@ -585,6 +684,7 @@ async def _analyze_robustness_v2_enhanced(
             options=option_results,
             robustness=robustness_result,
             factor_sensitivity=factor_sensitivity,
+            stability_thresholds=v1_response.stability_thresholds,  # 3C
         )
 
         # Update diagnostics with sampling info

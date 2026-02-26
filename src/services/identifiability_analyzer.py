@@ -17,9 +17,12 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import networkx as nx
+
+if TYPE_CHECKING:
+    from src.models.robustness_v2 import GraphV2
 from y0.algorithm.identify import identify_outcomes
 from y0.dsl import Variable
 from y0.graph import NxMixedGraph
@@ -740,3 +743,111 @@ class IdentifiabilityAnalyzer:
     def clear_cache(self) -> None:
         """Clear the identifiability cache."""
         self._cache.clear()
+
+    # ------------------------------------------------------------------
+    # V2 graph support (3B-prep)
+    # ------------------------------------------------------------------
+
+    def analyze_v2(
+        self,
+        graph_v2: "GraphV2",
+        treatment_node_id: str,
+        outcome_node_id: str,
+    ) -> IdentifiabilityResult:
+        """Analyze identifiability from a V2 graph.
+
+        Translates V2→NetworkX+NxMixedGraph, then runs the same Y₀
+        pipeline as :meth:`analyze`.  Bidirected edges
+        (``edge_type='bidirected'``) are wired to
+        ``NxMixedGraph.add_undirected_edge``.
+
+        V2 fields intentionally dropped (irrelevant to identifiability):
+            exists_probability — MC sampling weight
+            strength.std       — MC sampling variance
+            strength.mean      — identifiability depends on structure, not parameters
+            label              — presentation metadata
+
+        Args:
+            graph_v2: GraphV2 instance (may contain bidirected edges).
+            treatment_node_id: Treatment / factor node ID.
+            outcome_node_id: Outcome / goal node ID.
+
+        Returns:
+            IdentifiabilityResult (same shape as V1 analysis).
+        """
+        # --- build NetworkX DiGraph (directed edges only, for path checks) ---
+        nx_graph = nx.DiGraph()
+        for node in graph_v2.nodes:
+            nx_graph.add_node(node.id, kind=node.kind, label=node.label)
+
+        # --- collect bidirected pairs (canonicalised to avoid dupes) ---
+        bidirected_pairs: set = set()  # set of (min_id, max_id)
+
+        for edge in graph_v2.edges:
+            if edge.edge_type == "bidirected":
+                pair = tuple(sorted([edge.from_, edge.to]))
+                bidirected_pairs.add(pair)
+            else:
+                # directed (default when edge_type is None or 'directed')
+                nx_graph.add_edge(edge.from_, edge.to)
+
+        # Validate nodes exist
+        if treatment_node_id not in nx_graph:
+            return self._create_no_nodes_result(None, outcome_node_id)
+        if outcome_node_id not in nx_graph:
+            return self._create_no_nodes_result(treatment_node_id, None)
+
+        # Cache key includes bidirected pairs
+        nodes_sorted = sorted(nx_graph.nodes())
+        edges_sorted = sorted(nx_graph.edges())
+        bi_sorted = sorted(bidirected_pairs)
+        topo_str = (
+            f"{nodes_sorted}|{edges_sorted}|{bi_sorted}"
+            f"|{treatment_node_id}|{outcome_node_id}"
+        )
+        cache_key = hashlib.sha256(topo_str.encode()).hexdigest()[:16]
+
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Check causal path (directed only)
+        if not nx.has_path(nx_graph, treatment_node_id, outcome_node_id):
+            result = self._create_no_path_result(
+                treatment_node_id, outcome_node_id, nx_graph
+            )
+            self._cache.put(cache_key, result)
+            return result
+
+        # --- build Y₀ mixed graph ---
+        y0_graph = NxMixedGraph()
+        for node in nx_graph.nodes():
+            y0_graph.add_node(Variable(node))
+        for from_node, to_node in nx_graph.edges():
+            y0_graph.add_directed_edge(Variable(from_node), Variable(to_node))
+        for u, v in bidirected_pairs:
+            y0_graph.add_undirected_edge(Variable(u), Variable(v))
+
+        # --- identify ---
+        try:
+            y0_result = identify_outcomes(
+                graph=y0_graph,
+                treatments={Variable(treatment_node_id)},
+                outcomes={Variable(outcome_node_id)},
+            )
+            if y0_result:
+                result = self._create_identifiable_result(
+                    treatment_node_id, outcome_node_id, nx_graph, y0_result
+                )
+            else:
+                result = self._create_non_identifiable_result(
+                    treatment_node_id, outcome_node_id, nx_graph
+                )
+        except Exception as e:
+            logger.warning(f"y0_v2_identification_failed: {e}")
+            result = self._fallback_analysis(
+                treatment_node_id, outcome_node_id, nx_graph
+            )
+
+        self._cache.put(cache_key, result)
+        return result

@@ -56,6 +56,10 @@ logs/
 # Docker
 .dockerignore
 
+# Claude Code
+.claude/*
+!.claude/settings.json
+
 # mypy
 .mypy_cache/
 .dmypy.json

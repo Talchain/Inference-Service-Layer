@@ -7,14 +7,16 @@ uncertainty (effect magnitude) for proper robustness analysis.
 
 from __future__ import annotations
 
+import hashlib
 import math
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
-from src.models.response_v2 import CritiqueV2
+# Import from response_v2 (no circular import since response_v2 doesn't import this module)
+from src.models.response_v2 import CritiqueV2, StabilityThresholdsResponse, ZeroSensitivityReason
 
 
 # =============================================================================
@@ -37,6 +39,10 @@ class SensitivityType(str, Enum):
     """Types of sensitivity analysis."""
     EXISTENCE = "existence"
     MAGNITUDE = "magnitude"
+
+
+# ZeroSensitivityReason is defined in response_v2.py to avoid circular imports
+# Import it from there: from src.models.response_v2 import ZeroSensitivityReason
 
 
 # =============================================================================
@@ -62,7 +68,10 @@ class StrengthDistribution(BaseModel):
         description="Standard deviation of effect size (must be > 0.001)"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "mean": 0.5,
@@ -101,6 +110,33 @@ class ObservedState(BaseModel):
         max_length=100,
         description="Data provenance (e.g., 'brief_extraction', 'user_input', 'computed')"
     )
+    # CIL 0.2: declared std per v2.6 canonical schema (PLoT sends this field)
+    std: Optional[float] = Field(
+        None,
+        description="Standard deviation / uncertainty of the observed value"
+    )
+    # CIL: passthrough fields from CEE — ISL preserves these for downstream consumers (ISL-6)
+    raw_value: Optional[float] = Field(
+        None,
+        description="Original pre-normalised value from CEE"
+    )
+    cap: Optional[float] = Field(
+        None,
+        description="Upper bound for normalisation range from CEE"
+    )
+    extractionType: Optional[str] = Field(
+        None,
+        description="How the value was extracted (e.g., 'explicit', 'inferred'). "
+                    "camelCase matches CEE output — do not rename."
+    )
+    factor_type: Optional[str] = Field(
+        None,
+        description="Factor classification from CEE"
+    )
+    uncertainty_drivers: Optional[List[str]] = Field(
+        None,
+        description="List of uncertainty sources for this factor from CEE"
+    )
 
     @field_validator("value")
     @classmethod
@@ -118,13 +154,24 @@ class ObservedState(BaseModel):
             raise ValueError("baseline must be finite (not NaN or infinity)")
         return v
 
+    @field_validator("std", "raw_value", "cap")
+    @classmethod
+    def optional_floats_must_be_finite(cls, v: Optional[float]) -> Optional[float]:
+        """Validate that optional numeric fields, if provided, are finite."""
+        if v is not None and not math.isfinite(v):
+            raise ValueError("value must be finite (not NaN or infinity)")
+        return v
+
+    # CIL 0.2: accept unknown fields per cross-service contract
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "value": 59.0,
                 "baseline": 49.0,
                 "unit": "£k",
-                "source": "brief_extraction"
+                "source": "brief_extraction",
+                "std": 5.0
             }
         }
     }
@@ -195,7 +242,9 @@ class ParameterUncertainty(BaseModel):
             )
         return self
 
+    # CIL 0.2: accept unknown fields per cross-service contract
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "node_id": "marketing_spend",
@@ -240,8 +289,16 @@ class EdgeV2(BaseModel):
         description="Human-readable edge description",
         max_length=500
     )
+    edge_type: Optional[Literal["directed", "bidirected"]] = Field(
+        None,
+        description="Edge directionality. 'directed' (default when absent) = causal edge. "
+        "'bidirected' = unmeasured confounder between two nodes (used by identifiability analysis)."
+    )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "from": "marketing",
@@ -286,14 +343,33 @@ class NodeV2(BaseModel):
         description="Node intercept term (constant added to structural equation). "
                     "Represents the baseline value when all parent contributions are zero."
     )
+    # CIL: preserve CEE node categorisation for downstream consumers (ISL-5)
+    category: Optional[str] = Field(
+        None,
+        description="Node category from CEE (e.g., 'market', 'operational'). "
+                    "Passthrough only — not used by ISL computation."
+    )
+    # CIL: node-level factor type from CEE. Also present on ObservedState for
+    # backward compat — PLoT may send at either or both levels. ISL preserves
+    # both; no precedence rule (neither is used by ISL computation).
+    factor_type: Optional[str] = Field(
+        None,
+        description="Factor classification from CEE (e.g., 'market', 'operational'). "
+                    "Passthrough only — not used by ISL computation."
+    )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "id": "revenue",
                 "kind": "outcome",
                 "label": "Total Revenue",
                 "intercept": 0.0,
+                "category": "financial",
+                "factor_type": "market",
                 "observed_state": {
                     "value": 59.0,
                     "baseline": 49.0,
@@ -363,7 +439,10 @@ class GraphV2(BaseModel):
                 raise ValueError(f"Self-loop detected on node: {edge.from_}")
         return v
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "nodes": [
@@ -400,12 +479,78 @@ class InterventionOption(BaseModel):
         description="node_id -> intervention value mapping"
     )
 
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "id": "low_price",
                 "label": "Keep price at $49",
                 "interventions": {"price": 0.49}
+            }
+        }
+    }
+
+
+class GoalConstraint(BaseModel):
+    """
+    A constraint on a goal/outcome node for multi-constraint analysis.
+
+    Allows specifying success criteria like "revenue >= 100k" or "cost <= 50k".
+    Multiple constraints can be specified to compute joint probabilities.
+    """
+
+    node_id: str = Field(
+        ...,
+        pattern=r"^[a-z0-9_:-]+$",
+        description="ID of the node this constraint applies to (must exist in graph)"
+    )
+    operator: Literal[">=", "<="] = Field(
+        ...,
+        description="Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold"
+    )
+    value: float = Field(
+        ...,
+        description="Threshold value for the constraint (v2.7 contract field name)"
+    )
+    label: Optional[str] = Field(
+        None,
+        max_length=200,
+        description="Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_threshold(cls, values: Any) -> Any:
+        """Accept legacy 'threshold' field and map it to 'value' for backward compat."""
+        if isinstance(values, dict) and "value" not in values and "threshold" in values:
+            values["value"] = values.pop("threshold")
+        return values
+
+    @property
+    def threshold(self) -> float:
+        """Alias so internal computation can still reference constraint.threshold."""
+        return self.value
+
+    @field_validator("value")
+    @classmethod
+    def validate_value_finite(cls, v: float) -> float:
+        """Reject NaN and infinite values for value."""
+        if not math.isfinite(v):
+            raise ValueError("value must be a finite number, not NaN or infinite")
+        return v
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {
+        "extra": "ignore",
+        "json_schema_extra": {
+            "example": {
+                "node_id": "revenue",
+                "operator": ">=",
+                "value": 100000.0,
+                "label": "Revenue target"
             }
         }
     }
@@ -448,10 +593,33 @@ class RobustnessRequestV2(BaseModel):
         le=10000,
         description="Number of Monte Carlo samples"
     )
-    seed: Optional[int] = Field(
+    # Task 4: Accept str | int | None for cross-service compatibility.
+    # CEE/UI/PLoT may send seed as string; normalised to int internally.
+    seed: Optional[Union[int, str]] = Field(
         default=None,
-        description="Random seed for reproducibility; if None, computed from graph"
+        description="Random seed for reproducibility; if None, computed from graph. "
+        "Accepts int or string. Numeric strings are converted via int(); "
+        "non-numeric strings are hashed deterministically."
     )
+
+    @field_validator("seed", mode="before")
+    @classmethod
+    def normalise_seed_to_int(cls, v):
+        """Normalise seed to int: numeric strings → int, non-numeric → deterministic hash."""
+        if v is None:
+            return v
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                # Stable deterministic hash for non-numeric strings (e.g. "my_seed").
+                # Uses SHA-256 instead of Python's hash() which is randomized
+                # per process (PEP 456) and would break cross-service determinism.
+                return int(hashlib.sha256(v.encode("utf-8")).hexdigest(), 16) % (2**31)
+        # Fallback: try int conversion
+        return int(v)
 
     # Analysis configuration
     analysis_types: List[str] = Field(
@@ -472,12 +640,30 @@ class RobustnessRequestV2(BaseModel):
         "If not provided, factor nodes use observed_state.value as fixed values."
     )
 
-    # Goal threshold configuration
+    # Goal threshold configuration (single constraint, legacy)
     goal_threshold: Optional[float] = Field(
         None,
         description="Success threshold for goal outcome. When provided, "
         "computes probability_of_goal (fraction of samples meeting/exceeding threshold)."
     )
+
+    # Multi-constraint goal analysis (Phase 2)
+    goal_constraints: Optional[List[GoalConstraint]] = Field(
+        None,
+        description="Multiple goal constraints for joint probability analysis. "
+        "When provided, computes per-constraint probabilities, joint probability, "
+        "and conditional probabilities. Requires nodes to exist in graph."
+    )
+
+    @field_validator("options")
+    @classmethod
+    def validate_unique_option_ids(cls, v: List[InterventionOption]) -> List[InterventionOption]:
+        """Validate option IDs are unique (matches GraphV2.validate_unique_node_ids pattern)."""
+        option_ids = [opt.id for opt in v]
+        if len(option_ids) != len(set(option_ids)):
+            duplicates = [oid for oid in option_ids if option_ids.count(oid) > 1]
+            raise ValueError(f"Duplicate option IDs found: {list(set(duplicates))}")
+        return v
 
     @field_validator("goal_threshold")
     @classmethod
@@ -522,7 +708,22 @@ class RobustnessRequestV2(BaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def validate_goal_constraints_reference_nodes(self) -> "RobustnessRequestV2":
+        """Validate all goal_constraints node_ids exist in graph."""
+        if self.goal_constraints:
+            node_ids = {node.id for node in self.graph.nodes}
+            for constraint in self.goal_constraints:
+                if constraint.node_id not in node_ids:
+                    raise ValueError(
+                        f"GoalConstraint references non-existent node: {constraint.node_id}"
+                    )
+        return self
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
+        "extra": "ignore",
         "json_schema_extra": {
             "example": {
                 "request_id": "req-001",
@@ -581,6 +782,44 @@ class OutcomeDistribution(BaseModel):
     }
 
 
+class ConstraintResult(BaseModel):
+    """Internal result for a single goal constraint."""
+
+    node_id: str = Field(..., description="Node ID the constraint applies to")
+    operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
+    threshold: float = Field(..., description="Threshold value")
+    label: Optional[str] = Field(None, description="Human-readable label for coaching")
+    prob_satisfied: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Probability that this constraint is satisfied"
+    )
+    failure_margin_median: Optional[float] = Field(
+        None, description="Median distance from threshold when constraint fails"
+    )
+    near_miss_fraction: Optional[float] = Field(
+        None, ge=0, le=1, description="Fraction of failures within 10% of threshold"
+    )
+    binding: Optional[bool] = Field(
+        None, description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
+    )
+
+
+class ConstraintAnalysis(BaseModel):
+    """Internal multi-constraint analysis results for an option."""
+
+    constraints: List[ConstraintResult] = Field(
+        ..., description="Per-constraint probability results"
+    )
+    joint_probability: float = Field(
+        ..., ge=0, le=1, description="P(all constraints satisfied simultaneously)"
+    )
+    conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
+        None, description="Pairwise conditional probabilities: P(C_j | C_i)"
+    )
+
+
 class OptionResult(BaseModel):
     """Results for a single decision option."""
 
@@ -600,6 +839,10 @@ class OptionResult(BaseModel):
         ge=0,
         le=1,
         description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
+    )
+    constraint_analysis: Optional[ConstraintAnalysis] = Field(
+        None,
+        description="Multi-constraint analysis results. Only present when goal_constraints is provided."
     )
 
     model_config = {
@@ -664,7 +907,11 @@ class FactorSensitivityResult(BaseModel):
     node_label: Optional[str] = Field(None, description="Human-readable node label")
     elasticity: float = Field(
         ...,
-        description="% change in outcome per % change in factor value"
+        description="% change in outcome per % change in factor value (raw, unclamped)"
+    )
+    elasticity_display: Optional[float] = Field(
+        None,
+        description="UI-safe elasticity clamped to [-100, 100] (debug/display only)"
     )
     importance_rank: int = Field(
         ...,
@@ -679,6 +926,51 @@ class FactorSensitivityResult(BaseModel):
         ...,
         description="Human-readable explanation"
     )
+    # Debug-only fields (not part of product contract)
+    zero_reason: Optional[ZeroSensitivityReason] = Field(
+        None,
+        description="Debug: explains why sensitivity is zero (only present when elasticity ≈ 0)"
+    )
+    baseline_near_zero: Optional[bool] = Field(
+        None,
+        description="Debug: True if epsilon denominator was applied due to near-zero baseline"
+    )
+    # Structural influence fields (always computed from graph structure)
+    influence_score: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Structural influence from causal path strengths (0-1, normalized)"
+    )
+    influence_rank: Optional[int] = Field(
+        None,
+        ge=1,
+        description="Rank by influence_score (1 = highest influence)"
+    )
+    # Bootstrap uncertainty fields (3C — factor sensitivity confidence)
+    elasticity_std: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Std dev of elasticity across bootstrap/jackknife runs. "
+                    "Measures stability of attribution under model and sampling uncertainty, "
+                    "NOT confidence in the causal relationship (which requires data we don't have)."
+    )
+    attribution_stability: Optional[Literal["high", "moderate", "low", "negligible"]] = Field(
+        None,
+        description="Categorical stability: 'high' (CV<0.1), 'moderate' (CV<0.3), "
+                    "'low' (CV>=0.3), or 'negligible' (|elasticity|<1e-6)"
+    )
+    rank_flip_rate: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of bootstrap runs where this factor's importance rank "
+                    "shifts by >= 2 positions"
+    )
+    stability_method: Optional[str] = Field(
+        None,
+        description="Method used: 'bootstrap_20' or 'bootstrap_10'"
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -686,9 +978,16 @@ class FactorSensitivityResult(BaseModel):
                 "node_id": "marketing_spend",
                 "node_label": "Marketing Spend",
                 "elasticity": 0.32,
+                "elasticity_display": 0.32,
                 "importance_rank": 2,
                 "observed_value": 50000.0,
-                "interpretation": "Decision is moderately sensitive to marketing_spend value"
+                "interpretation": "Decision is moderately sensitive to marketing_spend value",
+                "influence_score": 0.85,
+                "influence_rank": 1,
+                "elasticity_std": 0.04,
+                "attribution_stability": "high",
+                "rank_flip_rate": 0.05,
+                "stability_method": "bootstrap_20"
             }
         }
     }
@@ -715,6 +1014,13 @@ class FragileEdgeEnhanced(BaseModel):
         le=1,
         description="Probability of alternative winner in weak-edge scenarios. "
         "0.0 if same option wins (stable), null only if no data available.",
+    )
+    marginal_switch_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Probability of decision flip when ONLY this edge varies "
+        "(all other edges held at baseline). Isolates individual edge contribution.",
     )
 
 
@@ -893,6 +1199,19 @@ class RobustnessResponseV2(BaseModel):
         description="Analysis critiques and warnings"
     )
 
+    # Inference warnings (e.g. constraint nodes defaulting to base=0.0)
+    inference_warnings: List[str] = Field(
+        default_factory=list,
+        description="Warnings about inference conditions that may affect result reliability"
+    )
+
+    # Stability threshold metadata (3C-thresholds)
+    stability_thresholds: Optional[StabilityThresholdsResponse] = Field(
+        None,
+        description="Thresholds used for attribution_stability classification. "
+        "Provisional — pending scientific review. NOT included in response_hash.",
+    )
+
     model_config = {
         "populate_by_name": True,
         "json_schema_extra": {
@@ -933,7 +1252,8 @@ class RobustnessResponseV2(BaseModel):
                     "tie_count": 0,
                     "tie_rate": 0.0
                 },
-                "critiques": []
+                "critiques": [],
+                "inference_warnings": []
             }
         }
     }
