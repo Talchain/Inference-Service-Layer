@@ -12,20 +12,28 @@ import math
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 import re
 
 from src.constants import DEFAULT_EXISTS_PROBABILITY
+
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
-from src.models.response_v2 import CritiqueV2, StabilityThresholdsResponse, ZeroSensitivityReason
+from src.models.response_v2 import (
+    CritiqueV2,
+    InferenceWarning,
+    StabilityThresholdsResponse,
+    ZeroSensitivityReason,
+)
 
 
 # =============================================================================
 # Enums
 # =============================================================================
 
+
 class NodeKindV2(str, Enum):
     """Node types in v2 causal graphs."""
+
     FACTOR = "factor"
     DECISION = "decision"
     CHANCE = "chance"
@@ -38,6 +46,7 @@ class NodeKindV2(str, Enum):
 
 class SensitivityType(str, Enum):
     """Types of sensitivity analysis."""
+
     EXISTENCE = "existence"
     MAGNITUDE = "magnitude"
 
@@ -50,6 +59,7 @@ class SensitivityType(str, Enum):
 # Core V2 Schema Components
 # =============================================================================
 
+
 class StrengthDistribution(BaseModel):
     """
     Parametric uncertainty over edge effect magnitude.
@@ -57,29 +67,63 @@ class StrengthDistribution(BaseModel):
     Represents a Normal distribution over the causal effect strength.
     Positive mean = positive causal effect (increase in cause -> increase in effect)
     Negative mean = negative causal effect (increase in cause -> decrease in effect)
+
+    Validation:
+    - mean is clamped to [-1.0, 1.0] at parse time.  The original value is
+      stored in _pre_clamp_mean so that EdgeV2 can emit an InferenceWarning
+      with the correct edge identity.
+    - NaN or Inf values for mean or std are rejected with a ValidationError —
+      they cannot be clamped to a meaningful range.
     """
 
     mean: float = Field(
         ...,
-        description="Expected effect size (SIGNED: negative = negative effect)"
+        description="Expected effect size (SIGNED: negative = negative effect), clamped to [-1, 1]",
     )
     std: float = Field(
-        ...,
-        gt=0.001,
-        description="Standard deviation of effect size (must be > 0.001)"
+        ..., gt=0.001, description="Standard deviation of effect size (must be > 0.001)"
     )
+
+    # Private: records the original mean before clamping (None if no clamp occurred).
+    # Checked by EdgeV2.model_validator to emit the STRENGTH_MEAN_CLAMPED InferenceWarning.
+    _pre_clamp_mean: Optional[float] = PrivateAttr(default=None)
+
+    @field_validator("mean", mode="before")
+    @classmethod
+    def validate_mean(cls, v: Any) -> float:
+        """Reject NaN/Inf; clamp to [-1.0, 1.0]."""
+        if not isinstance(v, (int, float)):
+            raise ValueError(f"mean must be a number, got {type(v).__name__}")
+        v = float(v)
+        if not math.isfinite(v):
+            raise ValueError(f"mean must be a finite number (no NaN or Inf), got {v}")
+        return v  # actual clamp happens in model_validator after all fields are set
+
+    @field_validator("std", mode="before")
+    @classmethod
+    def validate_std(cls, v: Any) -> float:
+        """Reject NaN/Inf for std."""
+        if not isinstance(v, (int, float)):
+            raise ValueError(f"std must be a number, got {type(v).__name__}")
+        v = float(v)
+        if not math.isfinite(v):
+            raise ValueError(f"std must be a finite number (no NaN or Inf), got {v}")
+        return v
+
+    @model_validator(mode="after")
+    def clamp_mean(self) -> "StrengthDistribution":
+        """Clamp mean to [-1.0, 1.0] and record the original if clamped."""
+        original = self.mean
+        clamped = max(-1.0, min(1.0, original))
+        if clamped != original:
+            # Store original so EdgeV2 can emit InferenceWarning with edge identity
+            object.__setattr__(self, "_pre_clamp_mean", original)
+            object.__setattr__(self, "mean", clamped)
+        return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
-    model_config = {
-        "extra": "ignore",
-        "json_schema_extra": {
-            "example": {
-                "mean": 0.5,
-                "std": 0.1
-            }
-        }
-    }
+    model_config = {"extra": "ignore", "json_schema_extra": {"example": {"mean": 0.5, "std": 0.1}}}
 
 
 class ObservedState(BaseModel):
@@ -94,49 +138,34 @@ class ObservedState(BaseModel):
     """
 
     value: float = Field(
-        ...,
-        description="Current observed value in user units (e.g., 59 for £59k revenue)"
+        ..., description="Current observed value in user units (e.g., 59 for £59k revenue)"
     )
     baseline: Optional[float] = Field(
-        None,
-        description="Reference/baseline value for comparison (e.g., 49 for £49k baseline)"
+        None, description="Reference/baseline value for comparison (e.g., 49 for £49k baseline)"
     )
     unit: Optional[str] = Field(
-        None,
-        max_length=50,
-        description="Display unit (e.g., '£', '%', 'users', 'k')"
+        None, max_length=50, description="Display unit (e.g., '£', '%', 'users', 'k')"
     )
     source: Optional[str] = Field(
         None,
         max_length=100,
-        description="Data provenance (e.g., 'brief_extraction', 'user_input', 'computed')"
+        description="Data provenance (e.g., 'brief_extraction', 'user_input', 'computed')",
     )
     # CIL 0.2: declared std per v2.6 canonical schema (PLoT sends this field)
     std: Optional[float] = Field(
-        None,
-        description="Standard deviation / uncertainty of the observed value"
+        None, description="Standard deviation / uncertainty of the observed value"
     )
     # CIL: passthrough fields from CEE — ISL preserves these for downstream consumers (ISL-6)
-    raw_value: Optional[float] = Field(
-        None,
-        description="Original pre-normalised value from CEE"
-    )
-    cap: Optional[float] = Field(
-        None,
-        description="Upper bound for normalisation range from CEE"
-    )
+    raw_value: Optional[float] = Field(None, description="Original pre-normalised value from CEE")
+    cap: Optional[float] = Field(None, description="Upper bound for normalisation range from CEE")
     extractionType: Optional[str] = Field(
         None,
         description="How the value was extracted (e.g., 'explicit', 'inferred'). "
-                    "camelCase matches CEE output — do not rename."
+        "camelCase matches CEE output — do not rename.",
     )
-    factor_type: Optional[str] = Field(
-        None,
-        description="Factor classification from CEE"
-    )
+    factor_type: Optional[str] = Field(None, description="Factor classification from CEE")
     uncertainty_drivers: Optional[List[str]] = Field(
-        None,
-        description="List of uncertainty sources for this factor from CEE"
+        None, description="List of uncertainty sources for this factor from CEE"
     )
 
     @field_validator("value")
@@ -172,9 +201,9 @@ class ObservedState(BaseModel):
                 "baseline": 49.0,
                 "unit": "£k",
                 "source": "brief_extraction",
-                "std": 5.0
+                "std": 5.0,
             }
-        }
+        },
     }
 
 
@@ -194,26 +223,17 @@ class ParameterUncertainty(BaseModel):
     node_id: str = Field(
         ...,
         pattern=r"^[a-z0-9_:-]+$",
-        description="ID of the factor node this uncertainty applies to"
+        description="ID of the factor node this uncertainty applies to",
     )
     distribution: str = Field(
-        default="normal",
-        description="Distribution family: 'normal', 'uniform', 'point_mass'"
+        default="normal", description="Distribution family: 'normal', 'uniform', 'point_mass'"
     )
     std: Optional[float] = Field(
-        None,
-        ge=0,
-        description="Standard deviation for Normal sampling around observed_state.value"
+        None, ge=0, description="Standard deviation for Normal sampling around observed_state.value"
     )
     # For uniform distribution
-    range_min: Optional[float] = Field(
-        None,
-        description="Minimum value for uniform distribution"
-    )
-    range_max: Optional[float] = Field(
-        None,
-        description="Maximum value for uniform distribution"
-    )
+    range_min: Optional[float] = Field(None, description="Minimum value for uniform distribution")
+    range_max: Optional[float] = Field(None, description="Maximum value for uniform distribution")
 
     @model_validator(mode="after")
     def validate_distribution_params(self) -> "ParameterUncertainty":
@@ -247,12 +267,8 @@ class ParameterUncertainty(BaseModel):
     model_config = {
         "extra": "ignore",
         "json_schema_extra": {
-            "example": {
-                "node_id": "marketing_spend",
-                "distribution": "normal",
-                "std": 2.5
-            }
-        }
+            "example": {"node_id": "marketing_spend", "distribution": "normal", "std": 2.5}
+        },
     }
 
 
@@ -264,37 +280,42 @@ class EdgeV2(BaseModel):
     parametric uncertainty (how strong is the effect?).
     """
 
-    from_: str = Field(
-        ...,
-        alias="from",
-        pattern=r"^[a-z0-9_:-]+$",
-        description="Source node ID"
-    )
-    to: str = Field(
-        ...,
-        pattern=r"^[a-z0-9_:-]+$",
-        description="Target node ID"
-    )
+    from_: str = Field(..., alias="from", pattern=r"^[a-z0-9_:-]+$", description="Source node ID")
+    to: str = Field(..., pattern=r"^[a-z0-9_:-]+$", description="Target node ID")
     exists_probability: float = Field(
         default=DEFAULT_EXISTS_PROBABILITY,
         ge=0,
         le=1,
-        description="P(edge exists) - structural uncertainty. Defaults to 0.8 when not provided."
+        description="P(edge exists) - structural uncertainty. Defaults to 0.8 when not provided.",
     )
     strength: StrengthDistribution = Field(
-        ...,
-        description="Effect magnitude distribution - parametric uncertainty"
+        ..., description="Effect magnitude distribution - parametric uncertainty"
     )
     label: Optional[str] = Field(
-        None,
-        description="Human-readable edge description",
-        max_length=500
+        None, description="Human-readable edge description", max_length=500
     )
     edge_type: Optional[Literal["directed", "bidirected"]] = Field(
         None,
         description="Edge directionality. 'directed' (default when absent) = causal edge. "
-        "'bidirected' = unmeasured confounder between two nodes (used by identifiability analysis)."
+        "'bidirected' = unmeasured confounder between two nodes (used by identifiability analysis).",
     )
+
+    # Private: populated by model_validator when strength.mean was clamped.
+    # Callers (GraphV2 or the analyzer) must collect these to build inference_warnings.
+    _strength_clamp_warning: Optional[InferenceWarning] = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def emit_strength_clamp_warning(self) -> "EdgeV2":
+        """Record an InferenceWarning if strength.mean was clamped during parsing."""
+        pre_clamp = self.strength._pre_clamp_mean
+        if pre_clamp is not None:
+            warning = InferenceWarning(
+                code="STRENGTH_MEAN_CLAMPED",
+                field=f"edges[{self.from_}\u2192{self.to}].strength.mean",
+                detail={"original": pre_clamp, "clamped": self.strength.mean},
+            )
+            object.__setattr__(self, "_strength_clamp_warning", warning)
+        return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -306,49 +327,34 @@ class EdgeV2(BaseModel):
                 "to": "demand",
                 "exists_probability": 0.9,
                 "strength": {"mean": 0.6, "std": 0.15},
-                "label": "Marketing increases demand"
+                "label": "Marketing increases demand",
             }
         },
-        "populate_by_name": True
+        "populate_by_name": True,
     }
 
 
 class NodeV2(BaseModel):
     """Node in the v2 causal graph."""
 
-    id: str = Field(
-        ...,
-        pattern=r"^[a-z0-9_:-]+$",
-        description="Unique node identifier"
-    )
-    kind: str = Field(
-        ...,
-        description="Node type (factor, decision, chance, outcome, etc.)"
-    )
-    label: str = Field(
-        ...,
-        description="Human-readable node name",
-        max_length=500
-    )
-    body: Optional[str] = Field(
-        None,
-        description="Detailed description",
-        max_length=5000
-    )
+    id: str = Field(..., pattern=r"^[a-z0-9_:-]+$", description="Unique node identifier")
+    kind: str = Field(..., description="Node type (factor, decision, chance, outcome, etc.)")
+    label: str = Field(..., description="Human-readable node name", max_length=500)
+    body: Optional[str] = Field(None, description="Detailed description", max_length=5000)
     observed_state: Optional[ObservedState] = Field(
         None,
-        description="Observed state for quantitative factor nodes (value, baseline, unit, source)"
+        description="Observed state for quantitative factor nodes (value, baseline, unit, source)",
     )
     intercept: float = Field(
         default=0.0,
         description="Node intercept term (constant added to structural equation). "
-                    "Represents the baseline value when all parent contributions are zero."
+        "Represents the baseline value when all parent contributions are zero.",
     )
     # CIL: preserve CEE node categorisation for downstream consumers (ISL-5)
     category: Optional[str] = Field(
         None,
         description="Node category from CEE (e.g., 'market', 'operational'). "
-                    "Passthrough only — not used by ISL computation."
+        "Passthrough only — not used by ISL computation.",
     )
     # CIL: node-level factor type from CEE. Also present on ObservedState for
     # backward compat — PLoT may send at either or both levels. ISL preserves
@@ -356,7 +362,7 @@ class NodeV2(BaseModel):
     factor_type: Optional[str] = Field(
         None,
         description="Factor classification from CEE (e.g., 'market', 'operational'). "
-                    "Passthrough only — not used by ISL computation."
+        "Passthrough only — not used by ISL computation.",
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -371,13 +377,9 @@ class NodeV2(BaseModel):
                 "intercept": 0.0,
                 "category": "financial",
                 "factor_type": "market",
-                "observed_state": {
-                    "value": 59.0,
-                    "baseline": 49.0,
-                    "unit": "£k"
-                }
+                "observed_state": {"value": 59.0, "baseline": 49.0, "unit": "£k"},
             }
-        }
+        },
     }
 
 
@@ -391,15 +393,10 @@ class GraphV2(BaseModel):
     """
 
     nodes: List[NodeV2] = Field(
-        ...,
-        min_length=1,
-        max_length=100,
-        description="List of graph nodes"
+        ..., min_length=1, max_length=100, description="List of graph nodes"
     )
     edges: List[EdgeV2] = Field(
-        ...,
-        max_length=300,
-        description="List of directed edges with dual uncertainty"
+        ..., max_length=300, description="List of directed edges with dual uncertainty"
     )
 
     @field_validator("nodes")
@@ -414,21 +411,15 @@ class GraphV2(BaseModel):
 
     @field_validator("edges")
     @classmethod
-    def validate_edges_reference_nodes(
-        cls, v: List[EdgeV2], info
-    ) -> List[EdgeV2]:
+    def validate_edges_reference_nodes(cls, v: List[EdgeV2], info) -> List[EdgeV2]:
         """Validate edges reference existing nodes."""
         if "nodes" in info.data:
             node_ids = {node.id for node in info.data["nodes"]}
             for edge in v:
                 if edge.from_ not in node_ids:
-                    raise ValueError(
-                        f"Edge references non-existent source node: {edge.from_}"
-                    )
+                    raise ValueError(f"Edge references non-existent source node: {edge.from_}")
                 if edge.to not in node_ids:
-                    raise ValueError(
-                        f"Edge references non-existent target node: {edge.to}"
-                    )
+                    raise ValueError(f"Edge references non-existent target node: {edge.to}")
         return v
 
     @field_validator("edges")
@@ -440,6 +431,21 @@ class GraphV2(BaseModel):
                 raise ValueError(f"Self-loop detected on node: {edge.from_}")
         return v
 
+    def collect_parse_warnings(self) -> List[InferenceWarning]:
+        """
+        Return all InferenceWarnings generated during graph parsing.
+
+        Currently collects STRENGTH_MEAN_CLAMPED warnings from edges whose
+        strength.mean was clamped to [-1, 1] during model construction.
+        Call this after constructing the graph to retrieve warnings that must
+        be forwarded to the response's inference_warnings field.
+        """
+        warnings: List[InferenceWarning] = []
+        for edge in self.edges:
+            if edge._strength_clamp_warning is not None:
+                warnings.append(edge._strength_clamp_warning)
+        return warnings
+
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {
@@ -448,36 +454,28 @@ class GraphV2(BaseModel):
             "example": {
                 "nodes": [
                     {"id": "price", "kind": "decision", "label": "Price"},
-                    {"id": "revenue", "kind": "outcome", "label": "Revenue"}
+                    {"id": "revenue", "kind": "outcome", "label": "Revenue"},
                 ],
                 "edges": [
                     {
                         "from": "price",
                         "to": "revenue",
                         "exists_probability": 0.95,
-                        "strength": {"mean": 0.5, "std": 0.1}
+                        "strength": {"mean": 0.5, "std": 0.1},
                     }
-                ]
+                ],
             }
-        }
+        },
     }
 
 
 class InterventionOption(BaseModel):
     """A decision option with its interventions."""
 
-    id: str = Field(
-        ...,
-        description="Unique option identifier"
-    )
-    label: str = Field(
-        ...,
-        description="Human-readable option name",
-        max_length=500
-    )
+    id: str = Field(..., description="Unique option identifier")
+    label: str = Field(..., description="Human-readable option name", max_length=500)
     interventions: Dict[str, float] = Field(
-        ...,
-        description="node_id -> intervention value mapping"
+        ..., description="node_id -> intervention value mapping"
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -488,9 +486,9 @@ class InterventionOption(BaseModel):
             "example": {
                 "id": "low_price",
                 "label": "Keep price at $49",
-                "interventions": {"price": 0.49}
+                "interventions": {"price": 0.49},
             }
-        }
+        },
     }
 
 
@@ -505,20 +503,19 @@ class GoalConstraint(BaseModel):
     node_id: str = Field(
         ...,
         pattern=r"^[a-z0-9_:-]+$",
-        description="ID of the node this constraint applies to (must exist in graph)"
+        description="ID of the node this constraint applies to (must exist in graph)",
     )
     operator: Literal[">=", "<="] = Field(
         ...,
-        description="Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold"
+        description="Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold",
     )
     value: float = Field(
-        ...,
-        description="Threshold value for the constraint (v2.7 contract field name)"
+        ..., description="Threshold value for the constraint (v2.7 contract field name)"
     )
     label: Optional[str] = Field(
         None,
         max_length=200,
-        description="Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')"
+        description="Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')",
     )
 
     @model_validator(mode="before")
@@ -551,15 +548,16 @@ class GoalConstraint(BaseModel):
                 "node_id": "revenue",
                 "operator": ">=",
                 "value": 100000.0,
-                "label": "Revenue target"
+                "label": "Revenue target",
             }
-        }
+        },
     }
 
 
 # =============================================================================
 # Request Schema
 # =============================================================================
+
 
 class RobustnessRequestV2(BaseModel):
     """
@@ -570,29 +568,17 @@ class RobustnessRequestV2(BaseModel):
     """
 
     request_id: Optional[str] = Field(
-        None,
-        description="Optional request ID for tracing. Generated if not provided."
+        None, description="Optional request ID for tracing. Generated if not provided."
     )
-    graph: GraphV2 = Field(
-        ...,
-        description="Causal graph with dual uncertainty edges"
-    )
+    graph: GraphV2 = Field(..., description="Causal graph with dual uncertainty edges")
     options: List[InterventionOption] = Field(
-        ...,
-        min_length=1,
-        description="Decision options to compare"
+        ..., min_length=1, description="Decision options to compare"
     )
-    goal_node_id: str = Field(
-        ...,
-        description="Target outcome node to optimize"
-    )
+    goal_node_id: str = Field(..., description="Target outcome node to optimize")
 
     # Sampling configuration
     n_samples: int = Field(
-        default=1000,
-        ge=100,
-        le=10000,
-        description="Number of Monte Carlo samples"
+        default=1000, ge=100, le=10000, description="Number of Monte Carlo samples"
     )
     # Task 4: Accept str | int | None for cross-service compatibility.
     # CEE/UI/PLoT may send seed as string; normalised to int internally.
@@ -600,7 +586,7 @@ class RobustnessRequestV2(BaseModel):
         default=None,
         description="Random seed for reproducibility; if None, computed from graph. "
         "Accepts int or string. Numeric strings are converted via int(); "
-        "non-numeric strings are hashed deterministically."
+        "non-numeric strings are hashed deterministically.",
     )
 
     @field_validator("seed", mode="before")
@@ -625,27 +611,24 @@ class RobustnessRequestV2(BaseModel):
     # Analysis configuration
     analysis_types: List[str] = Field(
         default=["comparison", "sensitivity", "robustness"],
-        description="Types of analysis to perform"
+        description="Types of analysis to perform",
     )
     confidence_level: float = Field(
-        default=0.95,
-        ge=0.5,
-        le=0.99,
-        description="Confidence level for intervals"
+        default=0.95, ge=0.5, le=0.99, description="Confidence level for intervals"
     )
 
     # Factor uncertainty configuration (Phase 2A Part 2)
     parameter_uncertainties: Optional[List[ParameterUncertainty]] = Field(
         None,
         description="Uncertainty specifications for factor node values. "
-        "If not provided, factor nodes use observed_state.value as fixed values."
+        "If not provided, factor nodes use observed_state.value as fixed values.",
     )
 
     # Goal threshold configuration (single constraint, legacy)
     goal_threshold: Optional[float] = Field(
         None,
         description="Success threshold for goal outcome. When provided, "
-        "computes probability_of_goal (fraction of samples meeting/exceeding threshold)."
+        "computes probability_of_goal (fraction of samples meeting/exceeding threshold).",
     )
 
     # Multi-constraint goal analysis (Phase 2)
@@ -653,7 +636,7 @@ class RobustnessRequestV2(BaseModel):
         None,
         description="Multiple goal constraints for joint probability analysis. "
         "When provided, computes per-constraint probabilities, joint probability, "
-        "and conditional probabilities. Requires nodes to exist in graph."
+        "and conditional probabilities. Requires nodes to exist in graph.",
     )
 
     @field_validator("options")
@@ -671,6 +654,7 @@ class RobustnessRequestV2(BaseModel):
     def validate_goal_threshold_finite(cls, v: Optional[float]) -> Optional[float]:
         """Reject NaN and infinite values for goal_threshold."""
         import math
+
         if v is not None and (math.isnan(v) or math.isinf(v)):
             raise ValueError("goal_threshold must be a finite number, not NaN or infinite")
         return v
@@ -731,31 +715,32 @@ class RobustnessRequestV2(BaseModel):
                 "graph": {
                     "nodes": [
                         {"id": "price", "kind": "decision", "label": "Price"},
-                        {"id": "revenue", "kind": "outcome", "label": "Revenue"}
+                        {"id": "revenue", "kind": "outcome", "label": "Revenue"},
                     ],
                     "edges": [
                         {
                             "from": "price",
                             "to": "revenue",
                             "exists_probability": 0.9,
-                            "strength": {"mean": -0.5, "std": 0.15}
+                            "strength": {"mean": -0.5, "std": 0.15},
                         }
-                    ]
+                    ],
                 },
                 "options": [
                     {"id": "low", "label": "Low price", "interventions": {"price": 0.3}},
-                    {"id": "high", "label": "High price", "interventions": {"price": 0.7}}
+                    {"id": "high", "label": "High price", "interventions": {"price": 0.7}},
                 ],
                 "goal_node_id": "revenue",
-                "n_samples": 1000
+                "n_samples": 1000,
             }
-        }
+        },
     }
 
 
 # =============================================================================
 # Response Schema
 # =============================================================================
+
 
 class OutcomeDistribution(BaseModel):
     """Distribution of outcomes from Monte Carlo sampling."""
@@ -765,10 +750,7 @@ class OutcomeDistribution(BaseModel):
     median: float = Field(..., description="Median outcome value")
     ci_lower: float = Field(..., description="Lower bound of confidence interval")
     ci_upper: float = Field(..., description="Upper bound of confidence interval")
-    samples: Optional[List[float]] = Field(
-        None,
-        description="Raw samples if requested"
-    )
+    samples: Optional[List[float]] = Field(None, description="Raw samples if requested")
 
     model_config = {
         "json_schema_extra": {
@@ -777,7 +759,7 @@ class OutcomeDistribution(BaseModel):
                 "std": 5000.0,
                 "median": 49500.0,
                 "ci_lower": 40000.0,
-                "ci_upper": 60000.0
+                "ci_upper": 60000.0,
             }
         }
     }
@@ -791,10 +773,7 @@ class ConstraintResult(BaseModel):
     threshold: float = Field(..., description="Threshold value")
     label: Optional[str] = Field(None, description="Human-readable label for coaching")
     prob_satisfied: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="Probability that this constraint is satisfied"
+        ..., ge=0, le=1, description="Probability that this constraint is satisfied"
     )
     failure_margin_median: Optional[float] = Field(
         None, description="Median distance from threshold when constraint fails"
@@ -825,25 +804,17 @@ class OptionResult(BaseModel):
     """Results for a single decision option."""
 
     option_id: str = Field(..., description="Option identifier")
-    outcome_distribution: OutcomeDistribution = Field(
-        ...,
-        description="Distribution of outcomes"
-    )
-    win_probability: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="P(this option is best)"
-    )
+    outcome_distribution: OutcomeDistribution = Field(..., description="Distribution of outcomes")
+    win_probability: float = Field(..., ge=0, le=1, description="P(this option is best)")
     probability_of_goal: Optional[float] = Field(
         None,
         ge=0,
         le=1,
-        description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
+        description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
     )
     constraint_analysis: Optional[ConstraintAnalysis] = Field(
         None,
-        description="Multi-constraint analysis results. Only present when goal_constraints is provided."
+        description="Multi-constraint analysis results. Only present when goal_constraints is provided.",
     )
 
     model_config = {
@@ -855,10 +826,10 @@ class OptionResult(BaseModel):
                     "std": 5000.0,
                     "median": 49500.0,
                     "ci_lower": 40000.0,
-                    "ci_upper": 60000.0
+                    "ci_upper": 60000.0,
                 },
                 "win_probability": 0.65,
-                "probability_of_goal": 0.72
+                "probability_of_goal": 0.72,
             }
         }
     }
@@ -869,23 +840,10 @@ class SensitivityResult(BaseModel):
 
     edge_from: str = Field(..., description="Source node of edge")
     edge_to: str = Field(..., description="Target node of edge")
-    sensitivity_type: str = Field(
-        ...,
-        description="Type: 'existence' or 'magnitude'"
-    )
-    elasticity: float = Field(
-        ...,
-        description="% change in outcome per % change in parameter"
-    )
-    importance_rank: int = Field(
-        ...,
-        ge=1,
-        description="Rank by importance (1 = most important)"
-    )
-    interpretation: str = Field(
-        ...,
-        description="Human-readable explanation"
-    )
+    sensitivity_type: str = Field(..., description="Type: 'existence' or 'magnitude'")
+    elasticity: float = Field(..., description="% change in outcome per % change in parameter")
+    importance_rank: int = Field(..., ge=1, description="Rank by importance (1 = most important)")
+    interpretation: str = Field(..., description="Human-readable explanation")
 
     model_config = {
         "json_schema_extra": {
@@ -895,7 +853,7 @@ class SensitivityResult(BaseModel):
                 "sensitivity_type": "existence",
                 "elasticity": 0.45,
                 "importance_rank": 1,
-                "interpretation": "Decision is moderately sensitive to marketing->demand existence"
+                "interpretation": "Decision is moderately sensitive to marketing->demand existence",
             }
         }
     }
@@ -907,70 +865,56 @@ class FactorSensitivityResult(BaseModel):
     node_id: str = Field(..., description="Factor node ID")
     node_label: Optional[str] = Field(None, description="Human-readable node label")
     elasticity: float = Field(
-        ...,
-        description="% change in outcome per % change in factor value (raw, unclamped)"
+        ..., description="% change in outcome per % change in factor value (raw, unclamped)"
     )
     elasticity_display: Optional[float] = Field(
-        None,
-        description="UI-safe elasticity clamped to [-100, 100] (debug/display only)"
+        None, description="UI-safe elasticity clamped to [-100, 100] (debug/display only)"
     )
-    importance_rank: int = Field(
-        ...,
-        ge=1,
-        description="Rank by importance (1 = most important)"
-    )
+    importance_rank: int = Field(..., ge=1, description="Rank by importance (1 = most important)")
     observed_value: Optional[float] = Field(
-        None,
-        description="Observed value from node's observed_state"
+        None, description="Observed value from node's observed_state"
     )
-    interpretation: str = Field(
-        ...,
-        description="Human-readable explanation"
-    )
+    interpretation: str = Field(..., description="Human-readable explanation")
     # Debug-only fields (not part of product contract)
     zero_reason: Optional[ZeroSensitivityReason] = Field(
         None,
-        description="Debug: explains why sensitivity is zero (only present when elasticity ≈ 0)"
+        description="Debug: explains why sensitivity is zero (only present when elasticity ≈ 0)",
     )
     baseline_near_zero: Optional[bool] = Field(
-        None,
-        description="Debug: True if epsilon denominator was applied due to near-zero baseline"
+        None, description="Debug: True if epsilon denominator was applied due to near-zero baseline"
     )
     # Structural influence fields (always computed from graph structure)
     influence_score: Optional[float] = Field(
         None,
         ge=0,
         le=1,
-        description="Structural influence from causal path strengths (0-1, normalized)"
+        description="Structural influence from causal path strengths (0-1, normalized)",
     )
     influence_rank: Optional[int] = Field(
-        None,
-        ge=1,
-        description="Rank by influence_score (1 = highest influence)"
+        None, ge=1, description="Rank by influence_score (1 = highest influence)"
     )
     # Bootstrap uncertainty fields (3C — factor sensitivity confidence)
     elasticity_std: Optional[float] = Field(
         None,
         ge=0,
         description="Std dev of elasticity across bootstrap/jackknife runs. "
-                    "Measures stability of attribution under model and sampling uncertainty, "
-                    "NOT confidence in the causal relationship (which requires data we don't have)."
+        "Measures stability of attribution under model and sampling uncertainty, "
+        "NOT confidence in the causal relationship (which requires data we don't have).",
     )
     attribution_stability: Optional[Literal["high", "moderate", "low", "negligible"]] = Field(
         None,
         description="Categorical stability: 'high' (CV<0.1), 'moderate' (CV<0.3), "
-                    "'low' (CV>=0.3), or 'negligible' (|elasticity|<1e-6)"
+        "'low' (CV>=0.3), or 'negligible' (|elasticity|<1e-6)",
     )
     rank_flip_rate: Optional[float] = Field(
         None,
         ge=0,
         le=1,
         description="Fraction of bootstrap runs where this factor's importance rank "
-                    "shifts by >= 2 positions"
+        "shifts by >= 2 positions",
     )
     stability_method: Optional[str] = Field(
-        None,
-        description="Method used: 'bootstrap_20' or 'bootstrap_10'"
+        None, description="Method used: 'bootstrap_20' or 'bootstrap_10'"
     )
 
     model_config = {
@@ -988,7 +932,7 @@ class FactorSensitivityResult(BaseModel):
                 "elasticity_std": 0.04,
                 "attribution_stability": "high",
                 "rank_flip_rate": 0.05,
-                "stability_method": "bootstrap_20"
+                "stability_method": "bootstrap_20",
             }
         }
     }
@@ -1028,38 +972,21 @@ class FragileEdgeEnhanced(BaseModel):
 class RobustnessResult(BaseModel):
     """Overall robustness assessment."""
 
-    is_robust: bool = Field(
-        ...,
-        description="Whether recommendation is robust"
-    )
-    confidence: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="Confidence in robustness assessment"
-    )
+    is_robust: bool = Field(..., description="Whether recommendation is robust")
+    confidence: float = Field(..., ge=0, le=1, description="Confidence in robustness assessment")
     fragile_edges: List[str] = Field(
-        default_factory=list,
-        description="Edges that could flip the decision (format: 'from->to')"
+        default_factory=list, description="Edges that could flip the decision (format: 'from->to')"
     )
     fragile_edges_enhanced: Optional[List[FragileEdgeEnhanced]] = Field(
-        default=None,
-        description="Enhanced fragile edge data with alternative winner analysis"
+        default=None, description="Enhanced fragile edge data with alternative winner analysis"
     )
     robust_edges: List[str] = Field(
-        default_factory=list,
-        description="Edges that don't significantly affect decision"
+        default_factory=list, description="Edges that don't significantly affect decision"
     )
     recommendation_stability: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="P(same recommendation across samples)"
+        ..., ge=0, le=1, description="P(same recommendation across samples)"
     )
-    interpretation: str = Field(
-        ...,
-        description="Human-readable robustness summary"
-    )
+    interpretation: str = Field(..., description="Human-readable robustness summary")
 
     model_config = {
         "json_schema_extra": {
@@ -1069,7 +996,7 @@ class RobustnessResult(BaseModel):
                 "fragile_edges": ["marketing->demand"],
                 "robust_edges": ["price->revenue"],
                 "recommendation_stability": 0.88,
-                "interpretation": "Recommendation is robust with 92% confidence"
+                "interpretation": "Recommendation is robust with 92% confidence",
             }
         }
     }
@@ -1078,132 +1005,80 @@ class RobustnessResult(BaseModel):
 class ClampMetrics(BaseModel):
     """Tracks out-of-bounds sampling for diagnostics."""
 
-    total_node_samples: int = Field(
-        ...,
-        description="Total node value samples"
-    )
-    clamped_samples: int = Field(
-        ...,
-        description="Samples that were clamped to bounds"
-    )
-    clamp_rate: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="Fraction of samples clamped"
-    )
+    total_node_samples: int = Field(..., description="Total node value samples")
+    clamped_samples: int = Field(..., description="Samples that were clamped to bounds")
+    clamp_rate: float = Field(..., ge=0, le=1, description="Fraction of samples clamped")
     nodes_with_high_clamp_rate: List[str] = Field(
-        default_factory=list,
-        description="Nodes with >10% clamp rate"
+        default_factory=list, description="Nodes with >10% clamp rate"
     )
 
 
 class ResponseMetadataV2(BaseModel):
     """Execution metadata for v2 responses."""
 
-    schema_version: str = Field(
-        default="2.2",
-        description="Schema version"
-    )
-    isl_version: str = Field(
-        ...,
-        description="ISL service version"
-    )
-    n_samples_used: int = Field(
-        ...,
-        description="Actual samples used"
-    )
-    seed_used: int = Field(
-        ...,
-        description="Random seed used"
-    )
-    execution_time_ms: int = Field(
-        ...,
-        description="Execution time in milliseconds"
-    )
+    schema_version: str = Field(default="2.2", description="Schema version")
+    isl_version: str = Field(..., description="ISL service version")
+    n_samples_used: int = Field(..., description="Actual samples used")
+    seed_used: int = Field(..., description="Random seed used")
+    execution_time_ms: int = Field(..., description="Execution time in milliseconds")
     edge_existence_rates: Dict[str, float] = Field(
         default_factory=dict,
-        description="Actual sampling rates per edge (format: 'from->to': rate)"
+        description="Actual sampling rates per edge (format: 'from->to': rate)",
     )
     clamp_metrics: Optional[ClampMetrics] = Field(
-        None,
-        description="Out-of-bounds sampling metrics"
+        None, description="Out-of-bounds sampling metrics"
     )
-    config_fingerprint: str = Field(
-        ...,
-        description="Hash of determinism-critical config"
-    )
+    config_fingerprint: str = Field(..., description="Hash of determinism-critical config")
     tie_count: Optional[int] = Field(
-        None,
-        description="Number of Monte Carlo samples with tied outcomes"
+        None, description="Number of Monte Carlo samples with tied outcomes"
     )
     tie_rate: Optional[float] = Field(
         None,
         ge=0,
         le=1,
-        description="Fraction of samples with tied outcomes (tie_count / n_samples)"
+        description="Fraction of samples with tied outcomes (tie_count / n_samples)",
     )
 
 
 class RobustnessResponseV2(BaseModel):
     """V2.2 robustness analysis response."""
 
-    request_id: str = Field(
-        ...,
-        description="Request identifier for tracing"
-    )
+    request_id: str = Field(..., description="Request identifier for tracing")
 
     # Core results
-    results: List[OptionResult] = Field(
-        ...,
-        description="Results for each decision option"
-    )
-    recommended_option_id: str = Field(
-        ...,
-        description="ID of recommended option"
-    )
+    results: List[OptionResult] = Field(..., description="Results for each decision option")
+    recommended_option_id: str = Field(..., description="ID of recommended option")
     recommendation_confidence: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="Confidence in recommendation"
+        ..., ge=0, le=1, description="Confidence in recommendation"
     )
 
     # Sensitivity analysis
     sensitivity: List[SensitivityResult] = Field(
-        default_factory=list,
-        description="Sensitivity results per edge"
+        default_factory=list, description="Sensitivity results per edge"
     )
 
     # Factor sensitivity analysis (Phase 2A Part 2)
     factor_sensitivity: List[FactorSensitivityResult] = Field(
-        default_factory=list,
-        description="Sensitivity results per factor node value"
+        default_factory=list, description="Sensitivity results per factor node value"
     )
 
     # Robustness analysis
-    robustness: RobustnessResult = Field(
-        ...,
-        description="Overall robustness assessment"
-    )
+    robustness: RobustnessResult = Field(..., description="Overall robustness assessment")
 
     # Metadata
-    metadata: ResponseMetadataV2 = Field(
-        ...,
-        description="Execution metadata",
-        alias="_metadata"
-    )
+    metadata: ResponseMetadataV2 = Field(..., description="Execution metadata", alias="_metadata")
 
     # Analysis critiques (warnings about degenerate options, high tie rates, etc.)
     critiques: List[CritiqueV2] = Field(
-        default_factory=list,
-        description="Analysis critiques and warnings"
+        default_factory=list, description="Analysis critiques and warnings"
     )
 
-    # Inference warnings (e.g. constraint nodes defaulting to base=0.0)
-    inference_warnings: List[str] = Field(
+    # Inference warnings (e.g. constraint nodes defaulting to base=0.0).
+    # Contract: always present as a list — [] when empty, never absent.
+    # This field survives exclude_none=True because it has a non-None default.
+    inference_warnings: List[InferenceWarning] = Field(
         default_factory=list,
-        description="Warnings about inference conditions that may affect result reliability"
+        description="Structured warnings about inference conditions that may affect result reliability",
     )
 
     # Stability threshold metadata (3C-thresholds)
@@ -1226,9 +1101,9 @@ class RobustnessResponseV2(BaseModel):
                             "std": 5000.0,
                             "median": 49500.0,
                             "ci_lower": 40000.0,
-                            "ci_upper": 60000.0
+                            "ci_upper": 60000.0,
                         },
-                        "win_probability": 0.65
+                        "win_probability": 0.65,
                     }
                 ],
                 "recommended_option_id": "opt1",
@@ -1240,7 +1115,7 @@ class RobustnessResponseV2(BaseModel):
                     "fragile_edges": [],
                     "robust_edges": [],
                     "recommendation_stability": 0.88,
-                    "interpretation": "Robust recommendation"
+                    "interpretation": "Robust recommendation",
                 },
                 "_metadata": {
                     "schema_version": "2.2",
@@ -1251,18 +1126,19 @@ class RobustnessResponseV2(BaseModel):
                     "edge_existence_rates": {},
                     "config_fingerprint": "abc123",
                     "tie_count": 0,
-                    "tie_rate": 0.0
+                    "tie_rate": 0.0,
                 },
                 "critiques": [],
-                "inference_warnings": []
+                "inference_warnings": [],
             }
-        }
+        },
     }
 
 
 # =============================================================================
 # Schema Detection
 # =============================================================================
+
 
 def detect_schema_version(request: Dict[str, Any]) -> str:
     """
@@ -1283,6 +1159,5 @@ def detect_schema_version(request: Dict[str, Any]) -> str:
         return "v1"
     else:
         raise ValueError(
-            "Unknown request schema - must contain 'graph'+'options' (v2) "
-            "or 'causal_model' (v1)"
+            "Unknown request schema - must contain 'graph'+'options' (v2) " "or 'causal_model' (v1)"
         )

@@ -856,10 +856,12 @@ class TestInferenceWarningsDefaultBase:
             if r.levelname == "WARNING"
         ), "Expected structured warning log for defaulted constraint node"
 
-        # Assert inference_warnings populated on response
+        # Assert inference_warnings populated on response (InferenceWarning objects)
         assert len(response.inference_warnings) == 1
-        assert "fac_churn" in response.inference_warnings[0]
-        assert "base=0.0" in response.inference_warnings[0]
+        w = response.inference_warnings[0]
+        assert w.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        assert "fac_churn" in w.field or "fac_churn" in str(w.detail)
+        assert w.detail.get("defaulted_to") == 0.0
 
         # Assert CritiqueV2 also emitted (visible in V2 response path)
         constraint_critiques = [
@@ -1018,9 +1020,9 @@ class TestInferenceWarningsDefaultBase:
         with caplog.at_level("WARNING"):
             response = analyzer.analyze(request)
 
-        # Both non-root nodes should trigger warnings
+        # Both non-root nodes should trigger warnings (InferenceWarning objects)
         assert len(response.inference_warnings) == 2
-        warned_nodes = {w.split("'")[1] for w in response.inference_warnings}
+        warned_nodes = {w.detail.get("node_id") for w in response.inference_warnings}
         assert warned_nodes == {"fac_churn", "fac_nps"}
 
         # Both should have corresponding critiques

@@ -14,6 +14,7 @@ Response versioning:
 
 import logging
 import math
+import os
 import uuid
 from typing import Any, Dict, Optional, Union
 
@@ -65,6 +66,43 @@ from src.validation.request_validator import RequestValidator
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Request complexity guard (DoS protection)
+# ---------------------------------------------------------------------------
+# Complexity score = n_samples × n_nodes × n_edges.
+# This is a conservative heuristic using the three dominant cost factors.
+# Parameter uncertainty count and robustness passes are second-order effects
+# at PoC scale and are not included in the formula.
+#
+# Calibration:
+#   Typical pilot graph (5 nodes, 8 edges, 1000 samples)   = 40K  — well within limit
+#   Upper PoC bound   (12 nodes, 100 edges, 5000 samples)  = 6M   — within limit
+#   Schema max        (100 nodes, 300 edges, 10000 samples) = 300M — blocked
+#
+# Override via ISL_MAX_COMPUTE_COMPLEXITY env var (integer).
+_DEFAULT_MAX_COMPLEXITY = 10_000_000
+
+
+def _get_max_complexity() -> int:
+    """Read complexity limit from env, falling back to default."""
+    val = os.environ.get("ISL_MAX_COMPUTE_COMPLEXITY")
+    if val is not None:
+        try:
+            return int(val)
+        except ValueError:
+            logger.warning(
+                "ISL_MAX_COMPUTE_COMPLEXITY env var is not a valid integer (%s), using default %d",
+                val,
+                _DEFAULT_MAX_COMPLEXITY,
+            )
+    return _DEFAULT_MAX_COMPLEXITY
+
+
+def compute_complexity_score(n_samples: int, n_nodes: int, n_edges: int) -> int:
+    """Compute a heuristic complexity score for a robustness request."""
+    return n_samples * n_nodes * n_edges
+
 
 # Initialize services
 robustness_analyzer = RobustnessAnalyzer()
@@ -282,9 +320,7 @@ async def analyze_robustness_v2(
         return await _analyze_robustness_v2_legacy(request, request_id)
 
     # V2 response format with validation and structured output
-    return await _analyze_robustness_v2_enhanced(
-        request, request_id, include_diagnostics
-    )
+    return await _analyze_robustness_v2_enhanced(request, request_id, include_diagnostics)
 
 
 async def _analyze_robustness_v2_legacy(
@@ -293,10 +329,42 @@ async def _analyze_robustness_v2_legacy(
 ) -> RobustnessResponseV2:
     """Legacy V1 response handler (backward compatible)."""
     try:
+        # Complexity guard — reject oversized requests early (DoS protection)
+        n_nodes = len(request.graph.nodes)
+        n_edges = len(request.graph.edges)
+        complexity = compute_complexity_score(request.n_samples, n_nodes, n_edges)
+        max_complexity = _get_max_complexity()
+        logger.info(
+            "robustness_v2_complexity",
+            extra={
+                "request_id": request_id,
+                "complexity_score": complexity,
+                "limit": max_complexity,
+                "n_samples": request.n_samples,
+                "n_nodes": n_nodes,
+                "n_edges": n_edges,
+            },
+        )
+        if complexity > max_complexity:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "detail": "Request complexity exceeds limit",
+                    "complexity_score": complexity,
+                    "limit": max_complexity,
+                    "suggestion": (
+                        f"Reduce n_samples (currently {request.n_samples}), "
+                        f"node count (currently {n_nodes}), "
+                        f"or edge count (currently {n_edges})"
+                    ),
+                },
+            )
+
         # Enhanced logging for parameter uncertainty debugging
         param_uncertainties = request.parameter_uncertainties or []
         nodes_with_observed_state = sum(
-            1 for n in request.graph.nodes
+            1
+            for n in request.graph.nodes
             if n.observed_state is not None and n.observed_state.value is not None
         )
 
@@ -386,11 +454,41 @@ async def _analyze_robustness_v2_enhanced(
         request.seed if request.seed is not None else compute_seed_from_graph(request.graph)
     )
     seed_str = str(effective_seed)
-    builder = ResponseBuilder(
-        request_id=request_id, request_echo=request_echo, seed_used=seed_str
-    )
+    builder = ResponseBuilder(request_id=request_id, request_echo=request_echo, seed_used=seed_str)
 
     try:
+        # Complexity guard — reject oversized requests early (DoS protection)
+        n_nodes = len(request.graph.nodes)
+        n_edges = len(request.graph.edges)
+        complexity = compute_complexity_score(request.n_samples, n_nodes, n_edges)
+        max_complexity = _get_max_complexity()
+        logger.info(
+            "robustness_v2_complexity",
+            extra={
+                "request_id": request_id,
+                "complexity_score": complexity,
+                "limit": max_complexity,
+                "n_samples": request.n_samples,
+                "n_nodes": n_nodes,
+                "n_edges": n_edges,
+            },
+        )
+        if complexity > max_complexity:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": "Request complexity exceeds limit",
+                    "complexity_score": complexity,
+                    "limit": max_complexity,
+                    "suggestion": (
+                        f"Reduce n_samples (currently {request.n_samples}), "
+                        f"node count (currently {n_nodes}), "
+                        f"or edge count (currently {n_edges})"
+                    ),
+                },
+                headers={"X-Request-Id": request_id},
+            )
+
         # Convert request to dict for validation
         graph_dict = {
             "nodes": [n.model_dump() for n in request.graph.nodes],
@@ -574,9 +672,7 @@ async def _analyze_robustness_v2_enhanced(
                     constraint_analysis=constraint_analysis_v2,
                     status=status,
                     status_reason=(
-                        "Numerical issues in sampling"
-                        if status != "computed"
-                        else None
+                        "Numerical issues in sampling" if status != "computed" else None
                     ),
                 )
             )
@@ -590,6 +686,10 @@ async def _analyze_robustness_v2_enhanced(
         # (e.g., DEGENERATE_OPTION_ZERO_VARIANCE, HIGH_TIE_RATE)
         if v1_response.critiques:
             builder.add_critiques(v1_response.critiques)
+
+        # Propagate inference warnings (e.g., STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE)
+        if v1_response.inference_warnings:
+            builder.set_inference_warnings(v1_response.inference_warnings)
 
         # Convert robustness result (include V1 fields for backward compatibility)
         robustness_result = None
@@ -633,8 +733,7 @@ async def _analyze_robustness_v2_enhanced(
         if v1_response.factor_sensitivity:
             # Compute max absolute elasticity for normalization
             max_abs_elasticity = max(
-                (abs(fs.elasticity) for fs in v1_response.factor_sensitivity),
-                default=1.0
+                (abs(fs.elasticity) for fs in v1_response.factor_sensitivity), default=1.0
             )
             # Avoid division by zero
             if max_abs_elasticity < 1e-10:
@@ -651,7 +750,8 @@ async def _analyze_robustness_v2_enhanced(
                     # importance_score: 1.0 for rank 1, decreasing linearly
                     importance_score=(
                         1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
-                        if n_factors > 1 else 1.0
+                        if n_factors > 1
+                        else 1.0
                     ),
                     elasticity=fs.elasticity,  # Preserve raw elasticity
                     elasticity_display=fs.elasticity_display,  # Clamped for UI
@@ -713,10 +813,20 @@ async def _analyze_robustness_v2_enhanced(
 
         # Return 200 with response (P2-ISL-2: Add tracing headers)
         response = builder.build()
+        # exclude_none=True: suppresses fields set to None (e.g. probability_of_goal when
+        # goal_constraints are absent).  List fields with default_factory=list survive
+        # exclude_none because they are [] not None:
+        #   - inference_warnings: always a list ([] when empty), propagated from analyzer
+        #   - critiques: always a list, never None
+        # Sentinel fields (percentiles_source, robustness.confidence) must be set in the
+        # response model before reaching here so they are never lost by exclude_none.
+        response_dict = response.model_dump(by_alias=True, exclude_none=True)
+        # Safety net: guarantee inference_warnings is always present even if model changes
+        if "inference_warnings" not in response_dict:
+            response_dict["inference_warnings"] = []
         return JSONResponse(
             status_code=200,
-            # Use by_alias for 'version' field, exclude_none for optional fields like probability_of_goal
-            content=response.model_dump(by_alias=True, exclude_none=True),
+            content=response_dict,
             headers={
                 "X-Request-Id": request_id,
                 "X-Processing-Time-Ms": str(response.processing_time_ms),
@@ -726,9 +836,13 @@ async def _analyze_robustness_v2_enhanced(
     except Exception as e:
         logger.exception(f"Analysis failed for request {request_id}: {e}")
         response = builder.build_error_response(e)
+        error_dict = response.model_dump(by_alias=True, exclude_none=True)
+        # Safety net: guarantee inference_warnings is always present in error responses too
+        if "inference_warnings" not in error_dict:
+            error_dict["inference_warnings"] = []
         return JSONResponse(
             status_code=500,
-            content=response.model_dump(by_alias=True, exclude_none=True),
+            content=error_dict,
             headers={
                 "X-Request-Id": request_id,
                 "X-Processing-Time-Ms": str(response.processing_time_ms),
@@ -795,9 +909,7 @@ async def analyze_robustness_unified(
         if schema_version == "v2":
             # Validate and process v2 request
             validated_request = RobustnessRequestV2(**request)
-            validated_request.request_id = (
-                validated_request.request_id or request_id
-            )
+            validated_request.request_id = validated_request.request_id or request_id
             return await analyze_robustness_v2(
                 validated_request,
                 x_request_id=request_id,
@@ -827,7 +939,9 @@ async def analyze_robustness_unified(
                 "error_count": len(errors),
                 "errors": errors,
                 "has_parameter_uncertainties": "parameter_uncertainties" in request,
-                "parameter_uncertainties_type": type(request.get("parameter_uncertainties")).__name__,
+                "parameter_uncertainties_type": type(
+                    request.get("parameter_uncertainties")
+                ).__name__,
             },
         )
         raise HTTPException(status_code=422, detail=errors)

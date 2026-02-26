@@ -15,7 +15,7 @@ import hashlib
 import logging
 import time
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,6 +30,7 @@ from src.models.robustness_v2 import (
     FragileEdgeEnhanced,
     GoalConstraint,
     GraphV2,
+    InferenceWarning,
     InterventionOption,
     NodeV2,
     OptionResult,
@@ -78,9 +79,7 @@ MARGINAL_K_SAMPLES = 100
 
 def filter_inference_graph(graph: GraphV2) -> GraphV2:
     """Filter out non-inference nodes and incident edges as a safety net."""
-    filtered_nodes = [
-        node for node in graph.nodes if node.kind.lower() not in NON_INFERENCE_KINDS
-    ]
+    filtered_nodes = [node for node in graph.nodes if node.kind.lower() not in NON_INFERENCE_KINDS]
     removed_nodes = len(graph.nodes) - len(filtered_nodes)
 
     if removed_nodes == 0:
@@ -88,14 +87,10 @@ def filter_inference_graph(graph: GraphV2) -> GraphV2:
 
     kept_node_ids = {node.id for node in filtered_nodes}
     filtered_edges = [
-        edge
-        for edge in graph.edges
-        if edge.from_ in kept_node_ids and edge.to in kept_node_ids
+        edge for edge in graph.edges if edge.from_ in kept_node_ids and edge.to in kept_node_ids
     ]
     removed_edges = len(graph.edges) - len(filtered_edges)
-    removed_node_ids = [
-        node.id for node in graph.nodes if node.kind.lower() in NON_INFERENCE_KINDS
-    ]
+    removed_node_ids = [node.id for node in graph.nodes if node.kind.lower() in NON_INFERENCE_KINDS]
 
     logger.warning(
         "robustness_v2_filtered_non_inference_nodes",
@@ -131,6 +126,7 @@ class FragileEdge:
 # =============================================================================
 # Dual Uncertainty Sampler
 # =============================================================================
+
 
 class DualUncertaintySampler:
     """
@@ -188,9 +184,7 @@ class DualUncertaintySampler:
 
         return config
 
-    def sample_n_configurations(
-        self, n: int
-    ) -> List[Dict[Tuple[str, str], float]]:
+    def sample_n_configurations(self, n: int) -> List[Dict[Tuple[str, str], float]]:
         """
         Sample n independent edge configurations.
 
@@ -223,6 +217,7 @@ class DualUncertaintySampler:
 # =============================================================================
 # Factor Sampler (Phase 2A Part 2)
 # =============================================================================
+
 
 class FactorSampler:
     """
@@ -343,15 +338,13 @@ class FactorSampler:
         if self._sample_count == 0:
             return {}
 
-        return {
-            node_id: total / self._sample_count
-            for node_id, total in self._value_sums.items()
-        }
+        return {node_id: total / self._sample_count for node_id, total in self._value_sums.items()}
 
 
 # =============================================================================
 # SCM Evaluator
 # =============================================================================
+
 
 class SCMEvaluatorV2:
     """
@@ -400,12 +393,12 @@ class SCMEvaluatorV2:
             adj[edge.from_].append(edge.to)
             in_degree[edge.to] += 1
 
-        # Kahn's algorithm
-        queue = [nid for nid, deg in in_degree.items() if deg == 0]
+        # Kahn's algorithm — use deque for O(1) popleft (list.pop(0) is O(n))
+        queue: deque = deque(nid for nid, deg in in_degree.items() if deg == 0)
         order = []
 
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             order.append(node)
 
             for child in adj[node]:
@@ -414,7 +407,14 @@ class SCMEvaluatorV2:
                     queue.append(child)
 
         if len(order) != len(self.graph.nodes):
-            # Graph has cycles - return arbitrary order
+            # Defence-in-depth: this branch should NEVER execute in production.
+            # Cycles are blocked upstream by RequestValidator.validate() which
+            # calls detect_graph_cycle() and returns a blocker critique, preventing
+            # analysis entirely.  This fallback exists purely as a safety net in
+            # case the validator is bypassed (e.g. direct internal calls or future
+            # refactors that skip validation).
+            # If this warning fires in production, investigate why RequestValidator
+            # did not catch the cycle before analysis reached this point.
             logger.warning("Graph has cycles, using arbitrary node order")
             return [n.id for n in self.graph.nodes]
 
@@ -474,7 +474,12 @@ class SCMEvaluatorV2:
                 else:
                     # Check for observed_state.value on root nodes
                     is_root = len(self._parents.get(node_id, [])) == 0
-                    if is_root and node and node.observed_state and node.observed_state.value is not None:
+                    if (
+                        is_root
+                        and node
+                        and node.observed_state
+                        and node.observed_state.value is not None
+                    ):
                         base = node.observed_state.value
                     else:
                         base = 0.0
@@ -488,7 +493,7 @@ class SCMEvaluatorV2:
                     parents_contribution += parent_value * strength
 
                 # Get node intercept (default 0.0 if not set)
-                intercept = getattr(node, 'intercept', 0.0) if node else 0.0
+                intercept = getattr(node, "intercept", 0.0) if node else 0.0
 
                 node_values[node_id] = base + intercept + parents_contribution
 
@@ -541,7 +546,12 @@ class SCMEvaluatorV2:
                     base = base_values[node_id]
                 else:
                     is_root = len(self._parents.get(node_id, [])) == 0
-                    if is_root and node and node.observed_state and node.observed_state.value is not None:
+                    if (
+                        is_root
+                        and node
+                        and node.observed_state
+                        and node.observed_state.value is not None
+                    ):
                         base = node.observed_state.value
                     else:
                         base = 0.0
@@ -555,7 +565,7 @@ class SCMEvaluatorV2:
                     parents_contribution += parent_value * strength
 
                 # Get node intercept (default 0.0 if not set)
-                intercept = getattr(node, 'intercept', 0.0) if node else 0.0
+                intercept = getattr(node, "intercept", 0.0) if node else 0.0
 
                 node_values[node_id] = base + intercept + parents_contribution
 
@@ -566,6 +576,7 @@ class SCMEvaluatorV2:
 # =============================================================================
 # Robustness Analyzer V2
 # =============================================================================
+
 
 class RobustnessAnalyzerV2:
     """
@@ -626,7 +637,8 @@ class RobustnessAnalyzerV2:
             # Post-filter validation: warn if intervention nodes were filtered
             for option in request.options:
                 missing_interventions = [
-                    node_id for node_id in option.interventions.keys()
+                    node_id
+                    for node_id in option.interventions.keys()
                     if node_id not in filtered_node_ids
                 ]
                 if missing_interventions:
@@ -667,37 +679,44 @@ class RobustnessAnalyzerV2:
         # Determine constraint target nodes for multi-constraint analysis
         constraint_target_nodes: Optional[List[str]] = None
         if request.goal_constraints:
-            constraint_target_nodes = sorted(set(
-                gc.node_id for gc in request.goal_constraints
-            ))
+            constraint_target_nodes = sorted(set(gc.node_id for gc in request.goal_constraints))
+
+        # Collect parse-time warnings (e.g. STRENGTH_MEAN_CLAMPED) from graph construction.
+        # These are generated during Pydantic model validation of EdgeV2.strength.mean.
+        inference_warnings: List[InferenceWarning] = request.graph.collect_parse_warnings()
 
         # Detect constraint target nodes that will silently default to base=0.0
         # (non-root nodes without ParameterUncertainty, not fully covered by
         # interventions across all options)
-        inference_warnings: List[str] = []
         constraint_default_base_critiques: List[CritiqueV2] = []
         if constraint_target_nodes:
             parent_map: dict[str, list[str]] = defaultdict(list)
             for edge in request.graph.edges:
                 parent_map[edge.to].append(edge.from_)
-            uncertainty_node_ids = set(
-                u.node_id for u in (request.parameter_uncertainties or [])
-            )
+            uncertainty_node_ids = set(u.node_id for u in (request.parameter_uncertainties or []))
             for node_id in constraint_target_nodes:
                 is_root = len(parent_map.get(node_id, [])) == 0
                 has_uncertainty = node_id in uncertainty_node_ids
                 # Skip warning if every option intervenes on this node
                 # (intervention value overrides the base, so base=0.0 is never used)
-                all_options_intervene = all(
-                    node_id in opt.interventions for opt in request.options
-                )
+                all_options_intervene = all(node_id in opt.interventions for opt in request.options)
                 if not is_root and not has_uncertainty and not all_options_intervene:
-                    msg = (
-                        f"Node '{node_id}' has no ParameterUncertainty "
-                        f"— defaulted to base=0.0, constraint probability "
-                        f"may be unreliable"
+                    inference_warnings.append(
+                        InferenceWarning(
+                            code="CONSTRAINT_NODE_DEFAULT_BASE",
+                            field=f"nodes[{node_id}].base",
+                            detail={
+                                "node_id": node_id,
+                                "defaulted_to": 0.0,
+                                "reason": "no_parameter_uncertainty",
+                                "message": (
+                                    f"Node '{node_id}' has no ParameterUncertainty "
+                                    f"— defaulted to base=0.0, constraint probability "
+                                    f"may be unreliable"
+                                ),
+                            },
+                        )
                     )
-                    inference_warnings.append(msg)
                     constraint_default_base_critiques.append(
                         CONSTRAINT_NODE_DEFAULT_BASE.build(
                             node_id=node_id,
@@ -801,9 +820,7 @@ class RobustnessAnalyzerV2:
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
         # Include stability thresholds when bootstrap stability was computed
-        has_bootstrap = any(
-            fs.attribution_stability is not None for fs in factor_sensitivity
-        )
+        has_bootstrap = any(fs.attribution_stability is not None for fs in factor_sensitivity)
         stability_thresholds = (
             StabilityThresholdsResponse(
                 high_moderate_boundary=STABILITY_THRESHOLDS.high_moderate_boundary,
@@ -888,9 +905,7 @@ class RobustnessAnalyzerV2:
         Note: option_wins uses float to support split-tie handling where ties are
         divided equally among tied options.
         """
-        option_outcomes: Dict[str, List[float]] = {
-            opt.id: [] for opt in request.options
-        }
+        option_outcomes: Dict[str, List[float]] = {opt.id: [] for opt in request.options}
         option_wins: Dict[str, float] = {opt.id: 0.0 for opt in request.options}
         winner_per_sample: List[str] = []
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
@@ -955,13 +970,24 @@ class RobustnessAnalyzerV2:
                 split_value = 1.0 / len(winners)
                 for winner in winners:
                     option_wins[winner] += split_value
-                # For winner_per_sample, use first winner (for backward compat in alternative winner analysis)
-                winner_per_sample.append(winners[0])
+                # Use deterministic random tie-breaking via the existing sampler RNG.
+                # This preserves full determinism (same seed = same tie-break result)
+                # while eliminating insertion-order bias that arises from always
+                # picking winners[0].  We reuse sampler.rng so the RNG stream
+                # remains a single deterministic sequence — no new sub-seed needed.
+                winner_per_sample.append(str(sampler.rng.choice(winners)))
 
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
 
-        return option_outcomes, option_wins, winner_per_sample, edge_configs_per_sample, tie_count, constraint_node_values
+        return (
+            option_outcomes,
+            option_wins,
+            winner_per_sample,
+            edge_configs_per_sample,
+            tie_count,
+            constraint_node_values,
+        )
 
     def _apply_auto_scaled_noise(
         self,
@@ -998,8 +1024,8 @@ class RobustnessAnalyzerV2:
             return option_outcomes
 
         # Only apply noise to outcome and risk nodes
-        node_kind = getattr(goal_node, 'kind', '').lower()
-        if node_kind not in ('outcome', 'risk'):
+        node_kind = getattr(goal_node, "kind", "").lower()
+        if node_kind not in ("outcome", "risk"):
             return option_outcomes
 
         # Apply noise to each option's samples
@@ -1014,7 +1040,18 @@ class RobustnessAnalyzerV2:
             if outcome_std <= 0:
                 continue
 
-            # Add noise ~ N(0, outcome_std) to each sample
+            # Deliberate modelling choice (Neil Bramley heuristic):
+            # Add noise ~ N(0, outcome_std) to each sample.
+            # Mathematical effect: var(X + N) = var(X) + var(N) ≈ 2·var(X) when
+            # var(N) = var(X), so the p10/p90 spread is approximately √2 wider than
+            # the purely model-driven distribution.
+            # Rationale: the noise term represents unexplained variance not captured
+            # by the structural causal model (measurement error, omitted variables, etc.).
+            # This makes the outcome intervals more conservative (wider) which is the
+            # correct direction under uncertainty.
+            # WARNING: Changing this constant factor affects ALL downstream percentile
+            # and confidence computations.  Any change requires re-validation of the
+            # full calibration suite.
             noise = np.array([rng.normal(0, outcome_std) for _ in range(len(samples))])
             option_outcomes[option_id] = (samples_array + noise).tolist()
 
@@ -1143,29 +1180,29 @@ class RobustnessAnalyzerV2:
             existence_sens = self._compute_existence_sensitivity(
                 request, edge, baseline_mean, rng, evaluator
             )
-            sensitivities.append({
-                "edge_from": edge.from_,
-                "edge_to": edge.to,
-                "sensitivity_type": "existence",
-                "elasticity": existence_sens,
-                "interpretation": self._interpret_existence_sensitivity(
-                    edge, existence_sens
-                ),
-            })
+            sensitivities.append(
+                {
+                    "edge_from": edge.from_,
+                    "edge_to": edge.to,
+                    "sensitivity_type": "existence",
+                    "elasticity": existence_sens,
+                    "interpretation": self._interpret_existence_sensitivity(edge, existence_sens),
+                }
+            )
 
             # Magnitude sensitivity
             magnitude_sens = self._compute_magnitude_sensitivity(
                 request, edge, baseline_mean, rng, evaluator
             )
-            sensitivities.append({
-                "edge_from": edge.from_,
-                "edge_to": edge.to,
-                "sensitivity_type": "magnitude",
-                "elasticity": magnitude_sens,
-                "interpretation": self._interpret_magnitude_sensitivity(
-                    edge, magnitude_sens
-                ),
-            })
+            sensitivities.append(
+                {
+                    "edge_from": edge.from_,
+                    "edge_to": edge.to,
+                    "sensitivity_type": "magnitude",
+                    "elasticity": magnitude_sens,
+                    "interpretation": self._interpret_magnitude_sensitivity(edge, magnitude_sens),
+                }
+            )
 
         # Rank by absolute elasticity
         sensitivities.sort(key=lambda x: abs(x["elasticity"]), reverse=True)
@@ -1346,9 +1383,7 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # TARGET EDGE: Force to exist and apply shifted mean
                 # This isolates magnitude sensitivity from existence sensitivity
-                strength = rng.normal(
-                    edge.strength.mean + shift, edge.strength.std
-                )
+                strength = rng.normal(edge.strength.mean + shift, edge.strength.std)
                 config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
             else:
                 # OTHER EDGES: Sample normally (both existence and strength)
@@ -1433,7 +1468,9 @@ class RobustnessAnalyzerV2:
             "factor_sensitivity_entry",
             extra={
                 "has_parameter_uncertainties": bool(request.parameter_uncertainties),
-                "num_uncertainties": len(request.parameter_uncertainties) if request.parameter_uncertainties else 0,
+                "num_uncertainties": len(request.parameter_uncertainties)
+                if request.parameter_uncertainties
+                else 0,
                 "uncertainties": [
                     {"node_id": u.node_id, "distribution": u.distribution, "std": u.std}
                     for u in (request.parameter_uncertainties or [])
@@ -1469,8 +1506,7 @@ class RobustnessAnalyzerV2:
         # Sample mean edge configuration for sensitivity analysis
         # (isolate factor sensitivity from edge uncertainty)
         mean_edge_config = {
-            (e.from_, e.to): e.strength.mean * e.exists_probability
-            for e in request.graph.edges
+            (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
         }
 
         for uncertainty in request.parameter_uncertainties:
@@ -1498,16 +1534,18 @@ class RobustnessAnalyzerV2:
 
             if delta == 0.0:
                 # No uncertainty to measure
-                sensitivities.append({
-                    "node_id": uncertainty.node_id,
-                    "node_label": node.label,
-                    "elasticity": 0.0,
-                    "elasticity_display": 0.0,
-                    "observed_value": observed_value,
-                    "interpretation": f"Factor {node.label} has no uncertainty (point mass)",
-                    "zero_reason": ZeroSensitivityReason.POINT_MASS,
-                    "baseline_near_zero": False,
-                })
+                sensitivities.append(
+                    {
+                        "node_id": uncertainty.node_id,
+                        "node_label": node.label,
+                        "elasticity": 0.0,
+                        "elasticity_display": 0.0,
+                        "observed_value": observed_value,
+                        "interpretation": f"Factor {node.label} has no uncertainty (point mass)",
+                        "zero_reason": ZeroSensitivityReason.POINT_MASS,
+                        "baseline_near_zero": False,
+                    }
+                )
                 continue
 
             # Evaluate with high and low values (single evaluation - deterministic given fixed inputs)
@@ -1539,7 +1577,9 @@ class RobustnessAnalyzerV2:
             pct_outcome_change = outcome_diff / baseline_denom
             pct_factor_change = (2 * delta) / factor_denom
             # Raw elasticity is canonical (unclamped) for determinism
-            elasticity = pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            elasticity = (
+                pct_outcome_change / pct_factor_change if abs(pct_factor_change) > 1e-10 else 0.0
+            )
             # Display elasticity is clamped for UI safety
             elasticity_display = max(-ELASTICITY_CLAMP_MAX, min(ELASTICITY_CLAMP_MAX, elasticity))
 
@@ -1587,18 +1627,18 @@ class RobustnessAnalyzerV2:
                 },
             )
 
-            sensitivities.append({
-                "node_id": uncertainty.node_id,
-                "node_label": node.label,
-                "elasticity": elasticity,
-                "elasticity_display": elasticity_display,
-                "observed_value": observed_value,
-                "interpretation": self._interpret_factor_sensitivity(
-                    node.label, elasticity
-                ),
-                "zero_reason": zero_reason,
-                "baseline_near_zero": baseline_near_zero,
-            })
+            sensitivities.append(
+                {
+                    "node_id": uncertainty.node_id,
+                    "node_label": node.label,
+                    "elasticity": elasticity,
+                    "elasticity_display": elasticity_display,
+                    "observed_value": observed_value,
+                    "interpretation": self._interpret_factor_sensitivity(node.label, elasticity),
+                    "zero_reason": zero_reason,
+                    "baseline_near_zero": baseline_near_zero,
+                }
+            )
 
         # Compute structural influence for all factors
         factor_node_ids = [s["node_id"] for s in sensitivities]
@@ -1617,9 +1657,7 @@ class RobustnessAnalyzerV2:
         sorted_by_influence = sorted(
             sensitivities, key=lambda x: x["influence_score"], reverse=True
         )
-        influence_rank_map = {
-            s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
-        }
+        influence_rank_map = {s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)}
 
         # --- Bootstrap stability analysis (3C) ---
         # Measures stability of attribution under model and sampling uncertainty:
@@ -1630,8 +1668,13 @@ class RobustnessAnalyzerV2:
         # sensitivities is already sorted by |elasticity| desc, so index+1 = importance_rank
         primary_ranks = {s["node_id"]: i + 1 for i, s in enumerate(sensitivities)}
         bootstrap_stability = self._compute_bootstrap_stability(
-            request, baseline_mean, ref_option, evaluator, rng,
-            primary_elasticities, primary_ranks,
+            request,
+            baseline_mean,
+            ref_option,
+            evaluator,
+            rng,
+            primary_elasticities,
+            primary_ranks,
             n_bootstrap_override=self._n_bootstrap_override,
         )
 
@@ -1734,16 +1777,24 @@ class RobustnessAnalyzerV2:
         if n_bootstrap_override is not None:
             # Fixed count — skip adaptive budget (used by tests)
             bootstrap_elasticities = self._run_bootstrap_iterations(
-                request, baseline_mean, ref_option, evaluator,
-                primary_seed, n_bootstrap_override,
+                request,
+                baseline_mean,
+                ref_option,
+                evaluator,
+                primary_seed,
+                n_bootstrap_override,
             )
             n_bootstrap = n_bootstrap_override
         else:
             # --- Phase 1: run 10 bootstrap iterations ---
             n_bootstrap_initial = 10
             bootstrap_elasticities = self._run_bootstrap_iterations(
-                request, baseline_mean, ref_option, evaluator,
-                primary_seed, n_bootstrap_initial,
+                request,
+                baseline_mean,
+                ref_option,
+                evaluator,
+                primary_seed,
+                n_bootstrap_initial,
             )
             t1 = time.time()
             elapsed_ms = (t1 - t0) * 1000
@@ -1753,8 +1804,12 @@ class RobustnessAnalyzerV2:
             if elapsed_ms < 100:
                 # Budget allows 20 runs; add 10 more
                 extra = self._run_bootstrap_iterations(
-                    request, baseline_mean, ref_option, evaluator,
-                    primary_seed + n_bootstrap_initial, 10,
+                    request,
+                    baseline_mean,
+                    ref_option,
+                    evaluator,
+                    primary_seed + n_bootstrap_initial,
+                    10,
                 )
                 # Merge: append elasticities for each node
                 for node_id in bootstrap_elasticities:
@@ -1792,9 +1847,7 @@ class RobustnessAnalyzerV2:
         # Compute per-bootstrap importance ranks (by |elasticity|, descending)
         per_run_ranks: Dict[str, List[int]] = {nid: [] for nid in node_ids}
         for run_elasticities in elasticity_matrix:
-            sorted_ids = sorted(
-                node_ids, key=lambda nid: abs(run_elasticities[nid]), reverse=True
-            )
+            sorted_ids = sorted(node_ids, key=lambda nid: abs(run_elasticities[nid]), reverse=True)
             for rank_idx, nid in enumerate(sorted_ids):
                 per_run_ranks[nid].append(rank_idx + 1)
 
@@ -1870,8 +1923,7 @@ class RobustnessAnalyzerV2:
         """
         node_map = {n.id: n for n in request.graph.nodes}
         result: Dict[str, List[float]] = {
-            u.node_id: [] for u in request.parameter_uncertainties
-            if node_map.get(u.node_id)
+            u.node_id: [] for u in request.parameter_uncertainties if node_map.get(u.node_id)
         }
 
         for i in range(n_iterations):
@@ -2010,10 +2062,7 @@ class RobustnessAnalyzerV2:
             # All factors have zero influence
             return {node_id: 0.0 for node_id in factor_node_ids}
 
-        return {
-            node_id: raw_influences[node_id] / max_influence
-            for node_id in factor_node_ids
-        }
+        return {node_id: raw_influences[node_id] / max_influence for node_id in factor_node_ids}
 
     def _compute_robustness(
         self,
@@ -2148,9 +2197,7 @@ class RobustnessAnalyzerV2:
         """
         # Check if marginal calculation is possible
         can_compute_marginal = (
-            request is not None
-            and evaluator is not None
-            and global_seed is not None
+            request is not None and evaluator is not None and global_seed is not None
         )
 
         results = []
@@ -2171,20 +2218,20 @@ class RobustnessAnalyzerV2:
                 )
 
             # Collect edge strengths across all samples
-            strengths = [
-                config.get(edge_key, 0.0) for config in edge_configs_per_sample
-            ]
+            strengths = [config.get(edge_key, 0.0) for config in edge_configs_per_sample]
 
             if not strengths:
                 # No data for this edge (joint sampling unavailable)
-                results.append(FragileEdgeEnhanced(
-                    edge_id=edge_id,
-                    from_id=from_id,
-                    to_id=to_id,
-                    alternative_winner_id=None,
-                    switch_probability=None,
-                    marginal_switch_probability=marginal_prob,
-                ))
+                results.append(
+                    FragileEdgeEnhanced(
+                        edge_id=edge_id,
+                        from_id=from_id,
+                        to_id=to_id,
+                        alternative_winner_id=None,
+                        switch_probability=None,
+                        marginal_switch_probability=marginal_prob,
+                    )
+                )
                 continue
 
             # Find bottom 25% threshold (weak edge samples)
@@ -2192,19 +2239,19 @@ class RobustnessAnalyzerV2:
             weak_threshold = np.percentile(strength_array, 25)
 
             # Get samples where edge is weak
-            weak_sample_indices = [
-                i for i, s in enumerate(strengths) if s <= weak_threshold
-            ]
+            weak_sample_indices = [i for i, s in enumerate(strengths) if s <= weak_threshold]
 
             if not weak_sample_indices:
-                results.append(FragileEdgeEnhanced(
-                    edge_id=edge_id,
-                    from_id=from_id,
-                    to_id=to_id,
-                    alternative_winner_id=None,
-                    switch_probability=None,
-                    marginal_switch_probability=marginal_prob,
-                ))
+                results.append(
+                    FragileEdgeEnhanced(
+                        edge_id=edge_id,
+                        from_id=from_id,
+                        to_id=to_id,
+                        alternative_winner_id=None,
+                        switch_probability=None,
+                        marginal_switch_probability=marginal_prob,
+                    )
+                )
                 continue
 
             # Count winner distribution in weak-edge samples
@@ -2228,8 +2275,7 @@ class RobustnessAnalyzerV2:
                 # Same option wins most often, but we want to show the risk
                 # Find the best alternative (second most frequent) and its probability
                 alternatives = {
-                    opt: count for opt, count in weak_winner_counts.items()
-                    if opt != overall_winner
+                    opt: count for opt, count in weak_winner_counts.items() if opt != overall_winner
                 }
                 if alternatives:
                     # There's at least one alternative winner in weak scenarios
@@ -2241,14 +2287,16 @@ class RobustnessAnalyzerV2:
                     alternative_winner_id = None
                     switch_probability = 0.0
 
-            results.append(FragileEdgeEnhanced(
-                edge_id=edge_id,
-                from_id=from_id,
-                to_id=to_id,
-                alternative_winner_id=alternative_winner_id,
-                switch_probability=switch_probability,
-                marginal_switch_probability=marginal_prob,
-            ))
+            results.append(
+                FragileEdgeEnhanced(
+                    edge_id=edge_id,
+                    from_id=from_id,
+                    to_id=to_id,
+                    alternative_winner_id=alternative_winner_id,
+                    switch_probability=switch_probability,
+                    marginal_switch_probability=marginal_prob,
+                )
+            )
 
         return results
 
@@ -2292,10 +2340,7 @@ class RobustnessAnalyzerV2:
         rng = np.random.default_rng(edge_seed)
 
         # Get target edge's parameters
-        edge = next(
-            (e for e in request.graph.edges if (e.from_, e.to) == edge_key),
-            None
-        )
+        edge = next((e for e in request.graph.edges if (e.from_, e.to) == edge_key), None)
         if edge is None:
             self.logger.warning(
                 "marginal_switch_edge_not_found",
@@ -2306,8 +2351,7 @@ class RobustnessAnalyzerV2:
         # Build baseline config: all edges at expected value (mean * exists_probability)
         # This is consistent with how existence is a sampling gate in the rest of the system
         baseline_config = {
-            (e.from_, e.to): e.strength.mean * e.exists_probability
-            for e in request.graph.edges
+            (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
         }
 
         # Compute baseline winner under this config (not overall_winner from MC)
@@ -2335,9 +2379,7 @@ class RobustnessAnalyzerV2:
             else:
                 # Sample strength from Normal(mean, std), clamped to schema bounds
                 sampled_strength = rng.normal(edge.strength.mean, edge.strength.std)
-                sampled_strength = np.clip(
-                    sampled_strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX
-                )
+                sampled_strength = np.clip(sampled_strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
 
             # Build counterfactual config: this edge sampled, others at baseline
             counterfactual_config = baseline_config.copy()
@@ -2427,15 +2469,11 @@ class RobustnessAnalyzerV2:
         # Per-constraint probabilities
         per_constraint_probs = {}
         for c_idx, constraint in enumerate(constraints):
-            satisfied_count = sum(
-                1 for sample in satisfaction_matrix if sample[c_idx]
-            )
+            satisfied_count = sum(1 for sample in satisfaction_matrix if sample[c_idx])
             per_constraint_probs[str(c_idx)] = satisfied_count / n_samples
 
         # Joint probability: all constraints satisfied
-        joint_satisfied_count = sum(
-            1 for sample in satisfaction_matrix if all(sample)
-        )
+        joint_satisfied_count = sum(1 for sample in satisfaction_matrix if all(sample))
         joint_probability = joint_satisfied_count / n_samples
 
         return per_constraint_probs, joint_probability, satisfaction_matrix
@@ -2478,8 +2516,7 @@ class RobustnessAnalyzerV2:
                     if i != j:
                         # Count samples where both i and j are satisfied
                         count_ij = sum(
-                            1 for sample in satisfaction_matrix
-                            if sample[i] and sample[j]
+                            1 for sample in satisfaction_matrix if sample[i] and sample[j]
                         )
                         conditional_probs[str(i)][str(j)] = count_ij / count_i
 
@@ -2527,9 +2564,7 @@ class RobustnessAnalyzerV2:
             failure_margins = []
             near_miss_count = 0
 
-            for sample_idx, satisfied in enumerate(
-                sample[c_idx] for sample in satisfaction_matrix
-            ):
+            for sample_idx, satisfied in enumerate(sample[c_idx] for sample in satisfaction_matrix):
                 if not satisfied:
                     value = values[sample_idx]
                     # Compute margin (distance from threshold)
@@ -2549,17 +2584,11 @@ class RobustnessAnalyzerV2:
 
             # Compute diagnostics
             n_failures = len(failure_margins)
-            failure_margin_median = (
-                float(np.median(failure_margins)) if failure_margins else None
-            )
-            near_miss_fraction = (
-                near_miss_count / n_failures if n_failures > 0 else None
-            )
+            failure_margin_median = float(np.median(failure_margins)) if failure_margins else None
+            near_miss_fraction = near_miss_count / n_failures if n_failures > 0 else None
 
             # Compute prob_satisfied for binding determination
-            satisfied_count = sum(
-                1 for sample in satisfaction_matrix if sample[c_idx]
-            )
+            satisfied_count = sum(1 for sample in satisfaction_matrix if sample[c_idx])
             prob_satisfied = satisfied_count / n_samples
             binding = 0.4 <= prob_satisfied <= 0.6
 
@@ -2592,11 +2621,11 @@ class RobustnessAnalyzerV2:
             return None
 
         # T3: Per-constraint and joint probability
-        per_constraint_probs, joint_probability, satisfaction_matrix = (
-            self._compute_constraint_probabilities(
-                constraint_node_values, constraints, option_id
-            )
-        )
+        (
+            per_constraint_probs,
+            joint_probability,
+            satisfaction_matrix,
+        ) = self._compute_constraint_probabilities(constraint_node_values, constraints, option_id)
 
         # T4: Pairwise conditional probabilities
         conditional_probs = self._compute_conditional_probabilities(
@@ -2612,16 +2641,18 @@ class RobustnessAnalyzerV2:
         constraint_results = []
         for c_idx, constraint in enumerate(constraints):
             diag = near_miss_diagnostics.get(c_idx, {})
-            constraint_results.append({
-                "node_id": constraint.node_id,
-                "operator": constraint.operator,
-                "threshold": constraint.threshold,
-                "label": constraint.label,
-                "prob_satisfied": per_constraint_probs.get(str(c_idx), 0.0),
-                "failure_margin_median": diag.get("failure_margin_median"),
-                "near_miss_fraction": diag.get("near_miss_fraction"),
-                "binding": diag.get("binding", False),
-            })
+            constraint_results.append(
+                {
+                    "node_id": constraint.node_id,
+                    "operator": constraint.operator,
+                    "threshold": constraint.threshold,
+                    "label": constraint.label,
+                    "prob_satisfied": per_constraint_probs.get(str(c_idx), 0.0),
+                    "failure_margin_median": diag.get("failure_margin_median"),
+                    "near_miss_fraction": diag.get("near_miss_fraction"),
+                    "binding": diag.get("binding", False),
+                }
+            )
 
         return {
             "constraints": constraint_results,

@@ -3,23 +3,15 @@
 ## Deployment
 
 - Always push to `staging`. Never push to `main` without explicit user confirmation.
-- Run `bash scripts/pre-push-validate.sh` before every push.
-
-### Deployment verification protocol
-
-When asked to deploy or merge to staging:
-
-1. Confirm the target branch is `staging` — never push to `main` without explicit user confirmation
-2. Before committing, run `git status` and `git diff --staged` to verify ONLY intended changes are staged
-3. If there are uncommitted changes from previous sessions, flag them and get user approval before including
-4. Actually execute every git command — do not present commands as a summary without running them
-5. After push, verify it succeeded by checking the output
-
-Never bundle unrelated uncommitted changes into a deployment commit.
+- Run `bash scripts/pre-push-validate.sh` before every push. This script covers branch guard, mypy, pytest, dependency audit, and Python version checks.
+- Before committing, run `git status` and `git diff --staged` to verify ONLY intended changes are staged.
+- If there are uncommitted changes from previous sessions, flag them and get user approval before including.
+- Actually execute every git command — do not present commands as a summary without running them.
+- After push, verify it succeeded by checking the output.
+- Never bundle unrelated uncommitted changes into a deployment commit.
 
 ## Git workflow
 
-- Run `git status` and `git diff --staged` before committing.
 - No simultaneous Claude Code sessions on this repository.
 
 ## Session preamble
@@ -65,8 +57,6 @@ Common multi-layer patterns involving ISL:
 
 ## Code review analysis
 
-- Evaluate feedback independently. Do not change correct code to appease reviewers.
-
 When asked to address code review feedback:
 
 1. Read ALL feedback items first before making any changes
@@ -75,28 +65,21 @@ When asked to address code review feedback:
    - Is it already handled by existing code?
    - Is it incorrect or based on a misunderstanding of the architecture?
 3. State your reasoning for each determination before making changes
-4. Do not make changes just to appease reviewers if the existing code is correct
+4. Do not change correct code to appease reviewers
 5. Group changes by affected file to minimise unnecessary edits
 
 ## Task completion checklist
 
-Before reporting ANY task as complete, run and show the output of all five checks:
+Before reporting ANY task as complete, run `bash scripts/pre-push-validate.sh` and show its output. Additionally verify:
 
 ```bash
-# 1. Correct branch?
-git branch --show-current
-
-# 2. Clean state? (no accidental uncommitted changes)
+# 1. Clean state? (no accidental uncommitted changes)
 git status
 
-# 3. Recent commits match the work just done?
+# 2. Recent commits match the work just done?
 git log --oneline -5
 
-# 4. All tests pass?
-poetry run pytest
-
-# 5. Type checking and linting pass?
-poetry run mypy src/
+# 3. Formatting passes?
 poetry run black --check src/
 ```
 

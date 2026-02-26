@@ -13,11 +13,35 @@ P2 Brief Alignment:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field
 
 from src.constants import RESPONSE_SCHEMA_VERSION_V2
+
+
+class InferenceWarning(BaseModel):
+    """
+    Structured warning emitted during inference.
+
+    Contract: inference_warnings is always present in the response as a list
+    ([] when empty, never absent). This mirrors the PLoT sentinel pattern
+    (repairs_applied: [] when empty, never absent).
+
+    Field path convention: Use edges[{from}→{to}].field.subfield with node IDs,
+    not array indices. Array indices are fragile after reordering.
+    """
+
+    code: str = Field(
+        ..., description="Machine-readable warning code, e.g. 'STRENGTH_MEAN_CLAMPED'"
+    )
+    field: str = Field(
+        ...,
+        description="Stable field path, e.g. 'edges[revenue_growth→market_share].strength.mean'",
+    )
+    detail: Dict[str, Any] = Field(
+        ..., description="Arbitrary context, e.g. {'original': 1000, 'clamped': 1.0}"
+    )
 
 
 class ZeroSensitivityReason(str, Enum):
@@ -28,12 +52,13 @@ class ZeroSensitivityReason(str, Enum):
     - Legitimate zero sensitivity (factor truly has no impact)
     - Computational artifacts (near-zero values, intervention overrides)
     """
-    ZERO_OUTCOME_DIFF = "zero_outcome_diff"      # Perturbation doesn't affect outcome
-    ZERO_DELTA = "zero_delta"                    # std/delta too small to perturb
+
+    ZERO_OUTCOME_DIFF = "zero_outcome_diff"  # Perturbation doesn't affect outcome
+    ZERO_DELTA = "zero_delta"  # std/delta too small to perturb
     INTERVENTION_OVERRIDE = "intervention_override"  # Intervention dominates factor
-    DISCONNECTED = "disconnected"                # No causal path to goal
+    DISCONNECTED = "disconnected"  # No causal path to goal
     BASELINE_NORMALISED = "baseline_normalised"  # Epsilon denom applied, still zero
-    POINT_MASS = "point_mass"                    # Distribution has no uncertainty
+    POINT_MASS = "point_mass"  # Distribution has no uncertainty
 
 
 # =============================================================================
@@ -47,16 +72,10 @@ class RequestEchoV2(BaseModel):
     graph_node_count: int = Field(..., description="Number of nodes in graph")
     graph_edge_count: int = Field(..., description="Number of edges in graph")
     options_count: int = Field(..., description="Number of options provided")
-    goal_node_id_hash: str = Field(
-        ..., description="SHA-256 hash of goal node ID (truncated)"
-    )
+    goal_node_id_hash: str = Field(..., description="SHA-256 hash of goal node ID (truncated)")
     n_samples: int = Field(..., description="Number of samples requested")
-    response_version_requested: int = Field(
-        ..., description="Response version requested"
-    )
-    include_diagnostics: bool = Field(
-        ..., description="Whether diagnostics were requested"
-    )
+    response_version_requested: int = Field(..., description="Response version requested")
+    include_diagnostics: bool = Field(..., description="Whether diagnostics were requested")
 
     # CIL 0.2: consistent extra='ignore' across all response models
     model_config = {"extra": "ignore"}
@@ -71,9 +90,7 @@ class CritiqueV2(BaseModel):
     """Structured critique for UI display."""
 
     id: str = Field(..., description="Unique identifier for this critique")
-    code: str = Field(
-        ..., description="Machine-readable code, e.g., 'NO_PATH_TO_GOAL'"
-    )
+    code: str = Field(..., description="Machine-readable code, e.g., 'NO_PATH_TO_GOAL'")
     severity: Literal["info", "warning", "error", "blocker"] = Field(
         ..., description="Severity level"
     )
@@ -119,9 +136,7 @@ class OptionDiagnosticV2(BaseModel):
     targets_without_effective_path_count: int = Field(
         ..., description="Number of intervention targets without effective path"
     )
-    warnings: List[str] = Field(
-        default_factory=list, description="Option-specific warnings"
-    )
+    warnings: List[str] = Field(default_factory=list, description="Option-specific warnings")
 
     # CIL 0.2: consistent extra='ignore' across all response models
     model_config = {"extra": "ignore"}
@@ -131,16 +146,14 @@ class DiagnosticsV2(BaseModel):
     """Diagnostic information (only included when requested)."""
 
     goal_node_id_hash: str = Field(..., description="Hashed goal node ID")
-    goal_node_found: bool = Field(
-        ..., description="Whether goal node exists in graph"
-    )
+    goal_node_found: bool = Field(..., description="Whether goal node exists in graph")
     option_diagnostics: List[OptionDiagnosticV2] = Field(
         default_factory=list, description="Per-option diagnostics"
     )
     n_samples_requested: int = Field(..., description="Samples requested")
     n_samples_completed: int = Field(..., description="Samples completed")
-    identifiability_status: Literal["identifiable", "not_identifiable", "unknown"] = (
-        Field(..., description="Causal identifiability status")
+    identifiability_status: Literal["identifiable", "not_identifiable", "unknown"] = Field(
+        ..., description="Causal identifiability status"
     )
     identifiability_reason: Optional[str] = Field(
         None, description="Reason for identifiability status"
@@ -148,9 +161,7 @@ class DiagnosticsV2(BaseModel):
     path_exists_probability_threshold: float = Field(
         ..., description="Threshold used for exists_probability"
     )
-    path_strength_threshold: float = Field(
-        ..., description="Threshold used for strength.mean"
-    )
+    path_strength_threshold: float = Field(..., description="Threshold used for strength.mean")
 
     # CIL 0.2: consistent extra='ignore' across all response models
     model_config = {"extra": "ignore"}
@@ -169,20 +180,18 @@ class OutcomeDistributionV2(BaseModel):
     # CIL 0.2: Optional — null when true percentiles cannot be computed
     # (no samples or all non-finite). See code review C3.
     p10: Optional[float] = Field(None, description="10th percentile (null when unavailable)")
-    p50: Optional[float] = Field(None, description="50th percentile / median (null when unavailable)")
+    p50: Optional[float] = Field(
+        None, description="50th percentile / median (null when unavailable)"
+    )
     p90: Optional[float] = Field(None, description="90th percentile (null when unavailable)")
     n_samples: int = Field(..., description="Total samples")
-    n_valid_samples: int = Field(
-        ..., description="Samples without NaN/Inf"
-    )
-    validity_ratio: float = Field(
-        ..., description="n_valid_samples / n_samples"
-    )
+    n_valid_samples: int = Field(..., description="Samples without NaN/Inf")
+    validity_ratio: float = Field(..., description="n_valid_samples / n_samples")
     # CIL 0.2: provenance marker for percentile values
     percentiles_source: Literal["samples", "unavailable"] = Field(
         default="samples",
         description="'samples' when p10/p50/p90 computed from actual MC samples; "
-        "'unavailable' when no valid samples exist (p10/p50/p90 will be null)"
+        "'unavailable' when no valid samples exist (p10/p50/p90 will be null)",
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -205,24 +214,22 @@ class OptionResultV2(BaseModel):
         None,
         ge=0,
         le=1,
-        description="P(this option is best) - fraction of samples where this option had highest outcome"
+        description="P(this option is best) - fraction of samples where this option had highest outcome",
     )
     probability_of_goal: Optional[float] = Field(
         None,
         ge=0,
         le=1,
-        description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request."
+        description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
     )
     constraint_analysis: Optional["ConstraintAnalysisV2"] = Field(
         None,
-        description="Multi-constraint analysis results. Only present when goal_constraints is provided in request."
+        description="Multi-constraint analysis results. Only present when goal_constraints is provided in request.",
     )
     status: Literal["computed", "partial", "failed"] = Field(
         ..., description="Option-specific status"
     )
-    status_reason: Optional[str] = Field(
-        None, description="Reason for non-computed status"
-    )
+    status_reason: Optional[str] = Field(None, description="Reason for non-computed status")
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -263,21 +270,17 @@ class ConstraintResultV2(BaseModel):
         ...,
         ge=0,
         le=1,
-        description="Probability that this constraint is satisfied (count / n_samples)"
+        description="Probability that this constraint is satisfied (count / n_samples)",
     )
     failure_margin_median: Optional[float] = Field(
         None,
-        description="Median distance from threshold when constraint fails (positive = failing by this amount)"
+        description="Median distance from threshold when constraint fails (positive = failing by this amount)",
     )
     near_miss_fraction: Optional[float] = Field(
-        None,
-        ge=0,
-        le=1,
-        description="Fraction of failures within 10% of threshold (near-misses)"
+        None, ge=0, le=1, description="Fraction of failures within 10% of threshold (near-misses)"
     )
     binding: Optional[bool] = Field(
-        None,
-        description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
+        None, description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
     )
 
     @computed_field
@@ -307,17 +310,14 @@ class ConstraintAnalysisV2(BaseModel):
         ..., description="Per-constraint probability results"
     )
     joint_probability: float = Field(
-        ...,
-        ge=0,
-        le=1,
-        description="P(all constraints satisfied simultaneously)"
+        ..., ge=0, le=1, description="P(all constraints satisfied simultaneously)"
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
         None,
         description="Pairwise conditional probabilities: P(C_j | C_i). "
         "Format: {constraint_i_idx: {constraint_j_idx: P(C_j | C_i)}}. "
         "When P(C_i)=0, entries for that constraint are omitted (undefined). "
-        "Indices correspond to order in goal_constraints array."
+        "Indices correspond to order in goal_constraints array.",
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -430,9 +430,7 @@ class FactorSensitivityV2(BaseModel):
     elasticity_display: Optional[float] = Field(
         None, description="UI-safe elasticity clamped to [-100, 100]"
     )
-    direction: Literal["positive", "negative"] = Field(
-        ..., description="Direction of effect"
-    )
+    direction: Literal["positive", "negative"] = Field(..., description="Direction of effect")
     confidence: Optional[float] = Field(
         None, ge=0, le=1, description="Confidence level (omitted when not computed)"
     )
@@ -461,20 +459,19 @@ class FactorSensitivityV2(BaseModel):
     )
     # Bootstrap uncertainty fields (3C — factor sensitivity confidence)
     elasticity_std: Optional[float] = Field(
-        None, ge=0,
-        description="Std dev of elasticity across bootstrap runs"
+        None, ge=0, description="Std dev of elasticity across bootstrap runs"
     )
     attribution_stability: Optional[Literal["high", "moderate", "low", "negligible"]] = Field(
-        None,
-        description="Categorical stability: 'high', 'moderate', 'low', or 'negligible'"
+        None, description="Categorical stability: 'high', 'moderate', 'low', or 'negligible'"
     )
     rank_flip_rate: Optional[float] = Field(
-        None, ge=0, le=1,
-        description="Fraction of bootstrap runs where rank shifts by >= 2 positions"
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of bootstrap runs where rank shifts by >= 2 positions",
     )
     stability_method: Optional[str] = Field(
-        None,
-        description="Method used: 'bootstrap_20' or 'bootstrap_10'"
+        None, description="Method used: 'bootstrap_20' or 'bootstrap_10'"
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -494,20 +491,14 @@ class StabilityThresholdsResponse(BaseModel):
     """
 
     high_moderate_boundary: float = Field(
-        ...,
-        description="CV boundary: CV ≤ this → 'high' stability"
+        ..., description="CV boundary: CV ≤ this → 'high' stability"
     )
     moderate_low_boundary: float = Field(
-        ...,
-        description="CV boundary: CV ≤ this → 'moderate'; above → 'low'"
+        ..., description="CV boundary: CV ≤ this → 'moderate'; above → 'low'"
     )
-    version: str = Field(
-        ...,
-        description="Threshold configuration version"
-    )
+    version: str = Field(..., description="Threshold configuration version")
     provisional: bool = Field(
-        ...,
-        description="True indicates thresholds are operational defaults pending review"
+        ..., description="True indicates thresholds are operational defaults pending review"
     )
 
 
@@ -544,19 +535,15 @@ class ISLResponseV2(BaseModel):
     robustness_status: Literal["computed", "skipped", "unavailable", "error"] = Field(
         ..., description="Robustness analysis status"
     )
-    factor_sensitivity_status: Literal["computed", "skipped", "unavailable", "error"] = (
-        Field(..., description="Factor sensitivity status")
+    factor_sensitivity_status: Literal["computed", "skipped", "unavailable", "error"] = Field(
+        ..., description="Factor sensitivity status"
     )
 
     # Reason for non-computed status (sanitised, no internal details)
-    status_reason: Optional[str] = Field(
-        None, description="Reason for non-computed status"
-    )
+    status_reason: Optional[str] = Field(None, description="Reason for non-computed status")
 
     # Structured critiques (for UI display)
-    critiques: List[CritiqueV2] = Field(
-        default_factory=list, description="Structured critiques"
-    )
+    critiques: List[CritiqueV2] = Field(default_factory=list, description="Structured critiques")
 
     # Request echo (for debugging integration issues)
     request_echo: RequestEchoV2 = Field(..., description="Echo of request parameters")
@@ -567,14 +554,18 @@ class ISLResponseV2(BaseModel):
     )
 
     # Analysis results (only if analysis_status in ["computed", "partial"])
-    options: Optional[List[OptionResultV2]] = Field(
-        None, description="Option results"
-    )
-    robustness: Optional[RobustnessResultV2] = Field(
-        None, description="Robustness assessment"
-    )
+    options: Optional[List[OptionResultV2]] = Field(None, description="Option results")
+    robustness: Optional[RobustnessResultV2] = Field(None, description="Robustness assessment")
     factor_sensitivity: Optional[List[FactorSensitivityV2]] = Field(
         None, description="Factor sensitivity results"
+    )
+
+    # Inference warnings (e.g. STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE).
+    # Contract: always present as a list — [] when empty, never absent.
+    # This field survives exclude_none=True because it has a non-None default.
+    inference_warnings: List[InferenceWarning] = Field(
+        default_factory=list,
+        description="Structured warnings about inference conditions that may affect result reliability",
     )
 
     # Stability threshold metadata (3C-thresholds)
@@ -643,7 +634,7 @@ class ISLResponseV2(BaseModel):
                 "processing_time_ms": 150,
                 "seed_used": "42",
             }
-        }
+        },
     }
 
 
@@ -664,9 +655,7 @@ class ISLV2Error422(BaseModel):
         default="blocked",
         description="Always 'blocked' for 422 responses",
     )
-    status_reason: str = Field(
-        ..., description="Human-readable reason for blocking"
-    )
+    status_reason: str = Field(..., description="Human-readable reason for blocking")
     critiques: List[CritiqueV2] = Field(
         ..., description="Structured critiques explaining the validation failure"
     )
@@ -694,5 +683,5 @@ class ISLV2Error422(BaseModel):
                 ],
                 "request_id": "isl-a1b2c3d4e5f6",
             }
-        }
+        },
     }

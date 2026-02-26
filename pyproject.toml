@@ -90,6 +90,10 @@ python_classes = "Test*"
 python_functions = "test_*"
 addopts = "--cov=src --cov-report=term-missing --cov-report=html --cov-branch --ignore=tests/benchmarks"
 asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (excluded from default CI with -m 'not slow')",
+    "smoke: marks smoke tests (require running server)",
+]
 
 [tool.mypy]
 python_version = "3.11"

@@ -24,6 +24,7 @@ from src.models.response_v2 import (
     CritiqueV2,
     DiagnosticsV2,
     FactorSensitivityV2,
+    InferenceWarning,
     ISLV2Error422,
     ISLResponseV2,
     OptionResultV2,
@@ -92,6 +93,7 @@ class ResponseBuilder:
         self.start_time = time.time()
 
         self.critiques: List[CritiqueV2] = []
+        self.inference_warnings: List[InferenceWarning] = []
         self.diagnostics: Optional[DiagnosticsV2] = None
         self.options: Optional[List[OptionResultV2]] = None
         self.robustness: Optional[RobustnessResultV2] = None
@@ -105,6 +107,10 @@ class ResponseBuilder:
     def add_critiques(self, critiques: List[CritiqueV2]) -> None:
         """Add multiple critiques."""
         self.critiques.extend(critiques)
+
+    def set_inference_warnings(self, warnings: List[InferenceWarning]) -> None:
+        """Set inference warnings from analyzer output."""
+        self.inference_warnings = warnings
 
     def set_diagnostics(self, diagnostics: DiagnosticsV2) -> None:
         """Set diagnostics."""
@@ -201,6 +207,7 @@ class ResponseBuilder:
             factor_sensitivity_status=factor_sensitivity_status,
             status_reason=status_reason,
             critiques=self.critiques,
+            inference_warnings=self.inference_warnings,
             request_echo=self.request_echo,
             diagnostics=self.diagnostics,
             options=self.options,

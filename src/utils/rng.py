@@ -240,32 +240,33 @@ def compute_seed_from_graph(graph: "GraphV2") -> int:
     """
     # Sort nodes by id for deterministic ordering
     sorted_nodes = sorted(
-        [{"id": n.id, "kind": n.kind} for n in graph.nodes],
-        key=lambda x: x["id"]
+        [{"id": n.id, "kind": n.kind} for n in graph.nodes], key=lambda x: x["id"]
     )
 
-    # Sort edges by (from, to) for deterministic ordering
+    # Sort edges by (from, to) for deterministic ordering.
+    # NOTE: edge_type (directed vs bidirected) is intentionally omitted from the
+    # canonical representation.  Rationale: edge_type affects confounding sensitivity
+    # analysis (bidirected edges introduce latent common causes) but does NOT affect
+    # the core MC sampling path used here — the sampler treats all edges uniformly as
+    # directed weighted connections when computing outcome distributions.
+    # If edge_type ever becomes relevant to MC sampling (e.g. bidirected edges sample
+    # from a joint distribution), it MUST be included here to preserve seed stability.
     sorted_edges = sorted(
         [
             {
                 "from": e.from_,
                 "to": e.to,
                 "exists_probability": e.exists_probability,
-                "strength": {
-                    "mean": e.strength.mean,
-                    "std": e.strength.std
-                }
+                "strength": {"mean": e.strength.mean, "std": e.strength.std},
             }
             for e in graph.edges
         ],
-        key=lambda x: (x["from"], x["to"])
+        key=lambda x: (x["from"], x["to"]),
     )
 
     # Create canonical JSON representation
     canonical = json.dumps(
-        {"nodes": sorted_nodes, "edges": sorted_edges},
-        sort_keys=True,
-        ensure_ascii=True
+        {"nodes": sorted_nodes, "edges": sorted_edges}, sort_keys=True, ensure_ascii=True
     )
 
     # Hash and convert to 32-bit unsigned integer
