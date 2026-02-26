@@ -28,7 +28,7 @@ VALID_V2_REQUEST = {
             {
                 "from": "price",
                 "to": "sales",
-                "exists_probability": 0.95,  # Required for V2 schema
+                "exists_probability": 0.95,  # Optional; defaults to 0.8 if omitted
                 "strength": {"mean": -0.8, "std": 0.2},
             }
         ],
@@ -81,6 +81,148 @@ INVALID_REQUEST_422 = {
     "seed": 42,
     "n_samples": 100,
 }
+
+
+class TestExistsProbabilityOptional:
+    """Verify exists_probability is optional with default 0.8 at endpoint level."""
+
+    def test_edge_without_exists_probability_accepted(self, client):
+        """Edge with omitted exists_probability is accepted and defaults to 0.8."""
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "price", "kind": "factor", "label": "Price"},
+                    {"id": "sales", "kind": "goal", "label": "Sales"},
+                ],
+                "edges": [
+                    {
+                        "from": "price",
+                        "to": "sales",
+                        # exists_probability intentionally omitted
+                        "strength": {"mean": -0.8, "std": 0.2},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Raise price", "interventions": {"price": 120}},
+                {"id": "opt2", "label": "Lower price", "interventions": {"price": 80}},
+            ],
+            "goal_node_id": "sales",
+            "seed": 42,
+            "n_samples": 100,
+        }
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+
+    def test_explicit_exists_probability_honored(self, client):
+        """Explicit exists_probability=0.6 is used, not overridden by default."""
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "price", "kind": "factor", "label": "Price"},
+                    {"id": "sales", "kind": "goal", "label": "Sales"},
+                ],
+                "edges": [
+                    {
+                        "from": "price",
+                        "to": "sales",
+                        "exists_probability": 0.6,
+                        "strength": {"mean": -0.8, "std": 0.2},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Raise price", "interventions": {"price": 120}},
+                {"id": "opt2", "label": "Lower price", "interventions": {"price": 80}},
+            ],
+            "goal_node_id": "sales",
+            "seed": 42,
+            "n_samples": 100,
+        }
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200
+
+    def test_boundary_exists_probability_zero_schema_valid(self, client):
+        """exists_probability=0.0 passes schema validation (not rejected as invalid value).
+
+        Note: the endpoint returns 422 because NO_EFFECTIVE_PATH_TO_GOAL is detected
+        (an edge that never exists cannot carry causal influence). This is correct
+        analysis-level validation, not a schema rejection of 0.0.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "price", "kind": "factor", "label": "Price"},
+                    {"id": "sales", "kind": "goal", "label": "Sales"},
+                ],
+                "edges": [
+                    {
+                        "from": "price",
+                        "to": "sales",
+                        "exists_probability": 0.0,
+                        "strength": {"mean": -0.8, "std": 0.2},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Raise price", "interventions": {"price": 120}},
+                {"id": "opt2", "label": "Lower price", "interventions": {"price": 80}},
+            ],
+            "goal_node_id": "sales",
+            "seed": 42,
+            "n_samples": 100,
+        }
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        # 422 from path validation (no effective path), NOT from schema rejection
+        assert response.status_code == 422
+        data = response.json()
+        assert data["analysis_status"] == "blocked"
+        # Verify it's a path issue, not a schema issue
+        assert any("path" in c["code"].lower() for c in data["critiques"])
+
+    def test_boundary_exists_probability_one(self, client):
+        """exists_probability=1.0 is accepted at endpoint level."""
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "price", "kind": "factor", "label": "Price"},
+                    {"id": "sales", "kind": "goal", "label": "Sales"},
+                ],
+                "edges": [
+                    {
+                        "from": "price",
+                        "to": "sales",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": -0.8, "std": 0.2},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Raise price", "interventions": {"price": 120}},
+                {"id": "opt2", "label": "Lower price", "interventions": {"price": 80}},
+            ],
+            "goal_node_id": "sales",
+            "seed": 42,
+            "n_samples": 100,
+        }
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200
 
 
 class TestP2Task1EndpointExists:

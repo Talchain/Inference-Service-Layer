@@ -15,6 +15,7 @@ import logging
 import numpy as np
 import pytest
 
+from src.constants import DEFAULT_EXISTS_PROBABILITY
 from src.models.robustness_v2 import (
     ClampMetrics,
     EdgeV2,
@@ -370,6 +371,23 @@ class TestEdgeV2:
             strength=StrengthDistribution(mean=0.5, std=0.1),
         )
         assert edge_never.exists_probability == 0.0
+
+    def test_exists_probability_defaults_to_canonical(self):
+        """Test edge without exists_probability defaults to DEFAULT_EXISTS_PROBABILITY (0.8)."""
+        edge = EdgeV2(
+            **{"from": "a", "to": "b"},
+            strength=StrengthDistribution(mean=0.5, std=0.1),
+        )
+        assert edge.exists_probability == DEFAULT_EXISTS_PROBABILITY
+
+    def test_explicit_exists_probability_honored(self):
+        """Test explicit exists_probability is used, not overridden by default."""
+        edge = EdgeV2(
+            **{"from": "a", "to": "b"},
+            exists_probability=0.6,
+            strength=StrengthDistribution(mean=0.5, std=0.1),
+        )
+        assert edge.exists_probability == 0.6
 
     def test_invalid_node_id_pattern(self):
         """Test rejection of invalid node ID patterns."""

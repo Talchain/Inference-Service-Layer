@@ -9,6 +9,10 @@ and should align with PLoT's thresholds to prevent semantic divergence.
 # Path Validation Thresholds
 # =============================================================================
 
+# Canonical default for edge existence probability when not specified by the UI.
+# Matches PLoT DEFAULT_EXISTS_PROBABILITY — keep in sync.
+DEFAULT_EXISTS_PROBABILITY = 0.8
+
 # Edge must have meaningful probability to be considered in structural path
 DEFAULT_EXISTS_PROBABILITY_THRESHOLD = 1e-6
 

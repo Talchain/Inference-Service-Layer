@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
+from src.constants import DEFAULT_EXISTS_PROBABILITY
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
 from src.models.response_v2 import CritiqueV2, StabilityThresholdsResponse, ZeroSensitivityReason
 
@@ -275,10 +276,10 @@ class EdgeV2(BaseModel):
         description="Target node ID"
     )
     exists_probability: float = Field(
-        ...,
+        default=DEFAULT_EXISTS_PROBABILITY,
         ge=0,
         le=1,
-        description="P(edge exists) - structural uncertainty"
+        description="P(edge exists) - structural uncertainty. Defaults to 0.8 when not provided."
     )
     strength: StrengthDistribution = Field(
         ...,
