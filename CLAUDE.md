@@ -30,9 +30,48 @@ Report the output. If unexpected uncommitted changes or stash entries exist, fla
 
 Confirm the branch is correct for the task before starting any work.
 
-## Testing
+## Testing — Three-Tier Process
 
-- After code changes, run full test suite before committing. Report pass/fail counts.
+Testing uses a tiered approach to avoid heavy resource usage on the local machine.
+The full suite runs in the pre-push hook and CI — not after every code change.
+
+### Tier 1: Smoke (after every code change)
+
+Run **only** after making changes, before reporting the task as done.
+Targets type checking and changed-file tests — fast and light.
+
+```bash
+poetry run mypy src/                                  # type checking
+poetry run pytest --co -q                             # collect only — verify nothing is broken
+poetry run pytest tests/path/to/changed_test.py -x    # only tests related to changes
+```
+
+If no test files are directly related to the change, `mypy` alone is sufficient.
+Report: "mypy passed. N related tests passed." (or "No related tests for this change.")
+
+### Tier 2: Pre-commit validation
+
+Run before committing. Still lightweight — no full test suite.
+
+```bash
+poetry run mypy src/
+poetry run black --check src/
+```
+
+### Tier 3: Full gate (before pushing to staging only)
+
+Run **only** when the user explicitly says to push to staging.
+The pre-push hook (`scripts/pre-push-validate.sh`) handles this automatically.
+
+```bash
+git push origin staging    # triggers pre-push hook which runs full suite
+```
+
+### Important rules
+
+- **Never run the full pytest suite after every code change** — save it for the pre-push gate.
+- The pre-push hook runs mypy, pytest, and all other checks automatically.
+- CI is the authoritative gate — local testing is a fast feedback loop, not a replacement.
 
 ## Debugging
 
@@ -70,17 +109,15 @@ When asked to address code review feedback:
 
 ## Task completion checklist
 
-Before reporting ANY task as complete, run `bash scripts/pre-push-validate.sh` and show its output. Additionally verify:
+Before reporting ANY task as complete, run the **Tier 1 smoke checks** (not the full suite):
 
 ```bash
-# 1. Clean state? (no accidental uncommitted changes)
-git status
-
-# 2. Recent commits match the work just done?
-git log --oneline -5
-
-# 3. Formatting passes?
-poetry run black --check src/
+git branch --show-current                              # Correct branch?
+git status                                             # Clean state?
+poetry run mypy src/                                   # Type checking passes?
+poetry run pytest tests/path/to/changed_test.py -x     # Related tests pass?
 ```
 
-If any check fails, fix it before reporting completion. Do not report "done" with failing tests or uncommitted changes unless explicitly discussed with the user.
+If mypy or related tests fail, fix before reporting completion.
+Do NOT run the full pytest suite or `pre-push-validate.sh` here — those run in the pre-push
+hook when the user decides to push, and again in CI. See "Testing — Three-Tier Process" above.
