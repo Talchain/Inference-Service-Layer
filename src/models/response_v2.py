@@ -583,6 +583,11 @@ class ISLResponseV2(BaseModel):
     seed_used: Optional[str] = Field(
         None, description="RNG seed used for deterministic reproduction"
     )
+    seed_source: Optional[Literal["client_provided", "server_computed"]] = Field(
+        None,
+        description="Origin of seed_used: 'client_provided' if seed was in the request, "
+        "'server_computed' if ISL derived it from graph structure",
+    )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -633,6 +638,7 @@ class ISLResponseV2(BaseModel):
                 "request_id": "req_abc123",
                 "processing_time_ms": 150,
                 "seed_used": "42",
+                "seed_source": "client_provided",
             }
         },
     }

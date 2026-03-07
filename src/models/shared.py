@@ -383,12 +383,12 @@ class GraphV1(BaseModel):
         ...,
         description="List of graph nodes",
         min_length=1,
-        max_length=100
+        max_length=50
     )
     edges: List[GraphEdgeV1] = Field(
         ...,
         description="List of directed edges",
-        max_length=300
+        max_length=200
     )
 
     @field_validator("nodes")

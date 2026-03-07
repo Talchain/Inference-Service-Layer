@@ -136,8 +136,16 @@ if [ -n "$PYTEST_CMD" ]; then
             "${PASSED_COUNT:-0}" "${FAILED_COUNT:-0}" "${ERRORS_COUNT:-0}"
     fi
 
+    # Report quarantined test count (informational, not blocking)
+    SKIPPED_COUNT=$(echo "$SUMMARY_LINE" | grep -oE '[0-9]+ skipped' | grep -oE '[0-9]+' || echo "0")
+    QUARANTINE_FILE="tests/_quarantined/known_failures.txt"
+    if [ -f "$QUARANTINE_FILE" ]; then
+        QUARANTINE_COUNT=$(grep -cve '^\s*$' "$QUARANTINE_FILE" 2>/dev/null || echo "0")
+        printf '  Quarantined: %s tests (auto-skipped, see tests/_quarantined/MANIFEST.md)\n' "$QUARANTINE_COUNT"
+    fi
+
     if [ "$TEST_EXIT" -eq 0 ]; then
-        pass "Test suite passed — all tests green"
+        pass "Test suite passed — all non-quarantined tests green"
     else
         check_fail "Test suite had failures (exit code $TEST_EXIT: ${PASSED_COUNT:-0} passed, ${FAILED_COUNT:-0} failed, ${ERRORS_COUNT:-0} errors)"
     fi

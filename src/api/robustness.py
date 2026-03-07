@@ -16,7 +16,7 @@ import logging
 import math
 import os
 import uuid
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Literal, Optional, Union
 
 import numpy as np
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 # Calibration:
 #   Typical pilot graph (5 nodes, 8 edges, 1000 samples)   = 40K  — well within limit
 #   Upper PoC bound   (12 nodes, 100 edges, 5000 samples)  = 6M   — within limit
-#   Schema max        (100 nodes, 300 edges, 10000 samples) = 300M — blocked
+#   Schema max        (50 nodes, 200 edges, 10000 samples)  = 100M — blocked
 #
 # Override via ISL_MAX_COMPUTE_COMPLEXITY env var (integer).
 _DEFAULT_MAX_COMPLEXITY = 10_000_000
@@ -450,11 +450,20 @@ async def _analyze_robustness_v2_enhanced(
 
     # P2-ISL-1: Compute effective seed (single source of truth)
     # Must match analyzer's logic: request.seed or compute_seed_from_graph()
+    client_provided_seed = request.seed is not None
     effective_seed = (
-        request.seed if request.seed is not None else compute_seed_from_graph(request.graph)
+        request.seed if client_provided_seed else compute_seed_from_graph(request.graph)
     )
     seed_str = str(effective_seed)
-    builder = ResponseBuilder(request_id=request_id, request_echo=request_echo, seed_used=seed_str)
+    seed_source: Literal["client_provided", "server_computed"] = (
+        "client_provided" if client_provided_seed else "server_computed"
+    )
+    builder = ResponseBuilder(
+        request_id=request_id,
+        request_echo=request_echo,
+        seed_used=seed_str,
+        seed_source=seed_source,
+    )
 
     try:
         # Complexity guard — reject oversized requests early (DoS protection)

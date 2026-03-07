@@ -304,6 +304,9 @@ class EdgeV2(BaseModel):
     # Callers (GraphV2 or the analyzer) must collect these to build inference_warnings.
     _strength_clamp_warning: Optional[InferenceWarning] = PrivateAttr(default=None)
 
+    # Private: populated by model_validator when exists_probability used the default.
+    _exists_probability_default_warning: Optional[InferenceWarning] = PrivateAttr(default=None)
+
     @model_validator(mode="after")
     def emit_strength_clamp_warning(self) -> "EdgeV2":
         """Record an InferenceWarning if strength.mean was clamped during parsing."""
@@ -315,6 +318,22 @@ class EdgeV2(BaseModel):
                 detail={"original": pre_clamp, "clamped": self.strength.mean},
             )
             object.__setattr__(self, "_strength_clamp_warning", warning)
+        return self
+
+    @model_validator(mode="after")
+    def emit_exists_probability_default_warning(self) -> "EdgeV2":
+        """Record an InferenceWarning if exists_probability was not explicitly provided."""
+        if "exists_probability" not in self.model_fields_set:
+            warning = InferenceWarning(
+                code="EXISTS_PROBABILITY_DEFAULT",
+                field=f"edges[{self.from_}\u2192{self.to}].exists_probability",
+                detail={
+                    "edge_from": self.from_,
+                    "edge_to": self.to,
+                    "default_value": DEFAULT_EXISTS_PROBABILITY,
+                },
+            )
+            object.__setattr__(self, "_exists_probability_default_warning", warning)
         return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -393,10 +412,10 @@ class GraphV2(BaseModel):
     """
 
     nodes: List[NodeV2] = Field(
-        ..., min_length=1, max_length=100, description="List of graph nodes"
+        ..., min_length=1, max_length=50, description="List of graph nodes"
     )
     edges: List[EdgeV2] = Field(
-        ..., max_length=300, description="List of directed edges with dual uncertainty"
+        ..., max_length=200, description="List of directed edges with dual uncertainty"
     )
 
     @field_validator("nodes")
@@ -435,8 +454,10 @@ class GraphV2(BaseModel):
         """
         Return all InferenceWarnings generated during graph parsing.
 
-        Currently collects STRENGTH_MEAN_CLAMPED warnings from edges whose
-        strength.mean was clamped to [-1, 1] during model construction.
+        Collects:
+        - STRENGTH_MEAN_CLAMPED: edges whose strength.mean was clamped to [-1, 1]
+        - EXISTS_PROBABILITY_DEFAULT: edges where exists_probability used the 0.8 default
+
         Call this after constructing the graph to retrieve warnings that must
         be forwarded to the response's inference_warnings field.
         """
@@ -444,6 +465,8 @@ class GraphV2(BaseModel):
         for edge in self.edges:
             if edge._strength_clamp_warning is not None:
                 warnings.append(edge._strength_clamp_warning)
+            if edge._exists_probability_default_warning is not None:
+                warnings.append(edge._exists_probability_default_warning)
         return warnings
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -572,7 +595,7 @@ class RobustnessRequestV2(BaseModel):
     )
     graph: GraphV2 = Field(..., description="Causal graph with dual uncertainty edges")
     options: List[InterventionOption] = Field(
-        ..., min_length=1, description="Decision options to compare"
+        ..., min_length=1, max_length=10, description="Decision options to compare"
     )
     goal_node_id: str = Field(..., description="Target outcome node to optimize")
 
@@ -634,6 +657,7 @@ class RobustnessRequestV2(BaseModel):
     # Multi-constraint goal analysis (Phase 2)
     goal_constraints: Optional[List[GoalConstraint]] = Field(
         None,
+        max_length=20,
         description="Multiple goal constraints for joint probability analysis. "
         "When provided, computes per-constraint probabilities, joint probability, "
         "and conditional probabilities. Requires nodes to exist in graph.",
@@ -1037,6 +1061,11 @@ class ResponseMetadataV2(BaseModel):
         ge=0,
         le=1,
         description="Fraction of samples with tied outcomes (tie_count / n_samples)",
+    )
+    seed_hash_version: int = Field(
+        default=2,
+        description="Version of the seed hash algorithm used. "
+        "V1 omits edge_type; V2 includes it.",
     )
 
 

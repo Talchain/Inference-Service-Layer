@@ -9,8 +9,8 @@ from typing import Dict, List, Any, Optional
 from pydantic import validator, Field
 
 
-# Global limits to prevent DoS attacks
-MAX_OPTIONS = 100
+# Global limits to prevent DoS attacks — aligned with platform contract
+MAX_OPTIONS = 10
 MAX_CRITERIA = 10
 MAX_PARAMETERS = 20
 MAX_SWEEP_POINTS = 200
@@ -19,12 +19,12 @@ MAX_SWEEP_POINTS = 200
 class RequestSizeLimits:
     """Centralized request size limits for all ISL endpoints."""
 
-    MAX_OPTIONS = 100
+    MAX_OPTIONS = 10
     MAX_CRITERIA = 10
     MAX_PARAMETERS = 20
     MAX_SWEEP_POINTS = 200
-    MAX_GRAPH_NODES = 100
-    MAX_GRAPH_EDGES = 500
+    MAX_GRAPH_NODES = 50
+    MAX_GRAPH_EDGES = 200
 
 
 def validate_option_count(options: List[Any], context: str = "options") -> None:

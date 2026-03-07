@@ -10,12 +10,19 @@ in inference code. Always use SeededRNG for reproducibility.
 
 import hashlib
 import json
+import os
 from typing import List, Optional, TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     from src.models.robustness_v2 import GraphV2
+
+# Seed hash version controls which fields are included in the graph seed hash.
+# Version 1: original — omits edge_type (backward compat).
+# Version 2: includes edge_type so directed vs bidirected edges produce different seeds.
+# Override via env var SEED_HASH_VERSION for backward compat testing; default is 2.
+SEED_HASH_VERSION: int = int(os.environ.get("SEED_HASH_VERSION", "2"))
 
 
 class SeededRNG:
@@ -216,7 +223,9 @@ class SeededRNG:
         return [SeededRNG(int(s)) for s in seeds]
 
 
-def compute_seed_from_graph(graph: "GraphV2") -> int:
+def compute_seed_from_graph(
+    graph: "GraphV2", *, version: Optional[int] = None
+) -> int:
     """
     Compute deterministic seed from graph structure.
 
@@ -228,6 +237,11 @@ def compute_seed_from_graph(graph: "GraphV2") -> int:
 
     Args:
         graph: GraphV2 instance
+        version: Seed hash version override.  None uses module-level
+            SEED_HASH_VERSION (default 2).
+            - Version 1: omits edge_type (original behaviour).
+            - Version 2: includes edge_type so directed vs bidirected
+              edges produce different seeds.
 
     Returns:
         32-bit unsigned integer seed
@@ -238,31 +252,30 @@ def compute_seed_from_graph(graph: "GraphV2") -> int:
         >>> rng = SeededRNG(seed)
         >>> # Now rng will produce same sequence for same graph
     """
+    effective_version = version if version is not None else SEED_HASH_VERSION
+
     # Sort nodes by id for deterministic ordering
     sorted_nodes = sorted(
         [{"id": n.id, "kind": n.kind} for n in graph.nodes], key=lambda x: x["id"]
     )
 
-    # Sort edges by (from, to) for deterministic ordering.
-    # NOTE: edge_type (directed vs bidirected) is intentionally omitted from the
-    # canonical representation.  Rationale: edge_type affects confounding sensitivity
-    # analysis (bidirected edges introduce latent common causes) but does NOT affect
-    # the core MC sampling path used here — the sampler treats all edges uniformly as
-    # directed weighted connections when computing outcome distributions.
-    # If edge_type ever becomes relevant to MC sampling (e.g. bidirected edges sample
-    # from a joint distribution), it MUST be included here to preserve seed stability.
-    sorted_edges = sorted(
-        [
-            {
-                "from": e.from_,
-                "to": e.to,
-                "exists_probability": e.exists_probability,
-                "strength": {"mean": e.strength.mean, "std": e.strength.std},
-            }
-            for e in graph.edges
-        ],
-        key=lambda x: (x["from"], x["to"]),
-    )
+    # Build per-edge canonical dicts.
+    # Version 1: omits edge_type (backward compat).
+    # Version 2: includes edge_type so directed vs bidirected produce different seeds.
+    edge_dicts = []
+    for e in graph.edges:
+        d = {
+            "from": e.from_,
+            "to": e.to,
+            "exists_probability": e.exists_probability,
+            "strength": {"mean": e.strength.mean, "std": e.strength.std},
+        }
+        if effective_version >= 2:
+            # Include edge_type; default to "directed" when absent for determinism.
+            d["edge_type"] = e.edge_type or "directed"
+        edge_dicts.append(d)
+
+    sorted_edges = sorted(edge_dicts, key=lambda x: (x["from"], x["to"]))
 
     # Create canonical JSON representation
     canonical = json.dumps(

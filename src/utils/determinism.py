@@ -5,17 +5,13 @@ Ensures identical inputs always produce identical outputs by providing
 deterministic hashing and seeding mechanisms.
 
 IMPORTANT: For concurrent request safety, always use make_deterministic()
-which returns a per-request SeededRNG. Do NOT use set_global_seed() in
-production code as it affects global state.
+which returns a per-request SeededRNG.
 """
 
 import hashlib
 import json
 import logging
-import random
 from typing import Any, Dict, Union
-
-import numpy as np
 
 from src.utils.rng import SeededRNG
 
@@ -70,24 +66,6 @@ def seed_from_input(data: Union[Dict[str, Any], list, str]) -> int:
     hash_value = canonical_hash(data)
     # Use first 8 hex digits (32 bits) as seed
     return int(hash_value[:8], 16)
-
-
-def set_global_seed(seed: int) -> None:
-    """
-    Set global random seeds for all libraries.
-
-    DEPRECATED: This function sets global state and is NOT safe for concurrent
-    requests. Use make_deterministic() which returns a per-request SeededRNG.
-
-    Args:
-        seed: Integer seed value
-    """
-    logger.warning(
-        "set_global_seed() is deprecated for production use - "
-        "use make_deterministic() which returns per-request SeededRNG"
-    )
-    random.seed(seed)
-    np.random.seed(seed)
 
 
 def make_deterministic(request_data: Union[Dict[str, Any], list, str]) -> SeededRNG:

@@ -93,6 +93,7 @@ asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (excluded from default CI with -m 'not slow')",
     "smoke: marks smoke tests (require running server)",
+    "quarantined: marks pre-existing failing tests (excluded from default run, tracked in tests/_quarantined/MANIFEST.md)",
 ]
 
 [tool.mypy]

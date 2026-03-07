@@ -28,30 +28,33 @@ from src.models.responses import ErrorCode, ErrorResponse
 from src.utils.ip_extraction import get_client_ip
 from src.utils.tracing import TracingMiddleware, get_trace_id
 
-from .aggregation import router as aggregation_router
-from .analysis import router as analysis_router
-from .batch import router as batch_router
-from .causal import router as causal_router
-from .cee import router as cee_router
-# ARCHIVED: Deliberation deferred to TAE PoC v02
-# from .deliberation import router as deliberation_router
-from .dominance import router as dominance_router
-from .explain import router as explain_router
+# === Active routers (used by PLoT integration) ===
 from .health import router as health_router
 from .metrics import router as metrics_router
-from .phase4 import router as phase4_router
-# ARCHIVED: Preferences deferred to TAE PoC v02
-# from .preferences import router as preferences_router
-from .risk import router as risk_router
 from .robustness import router as robustness_router
-from .teaching import router as teaching_router
-from .team import router as team_router
-from .threshold import router as threshold_router
-from .utility import router as utility_router
-from .validation import router as validation_router
-from .identifiability import router as identifiability_router
-from .decision_robustness import router as decision_robustness_router
-from .outcomes import router as outcomes_router
+
+# === Disabled for pilot — orphaned endpoints not used by PLoT integration ===
+# Rollback: uncomment the relevant imports and include_router() lines to restore.
+# from .aggregation import router as aggregation_router
+# from .analysis import router as analysis_router
+# from .batch import router as batch_router
+# from .causal import router as causal_router
+# from .cee import router as cee_router
+# from .decision_robustness import router as decision_robustness_router
+# from .deliberation import router as deliberation_router
+# from .dominance import router as dominance_router
+# from .explain import router as explain_router
+# from .identifiability import router as identifiability_router
+# from .outcomes import router as outcomes_router
+# from .phase4 import router as phase4_router
+# from .preferences import router as preferences_router
+# from .risk import router as risk_router
+# from .teaching import router as teaching_router
+# from .team import router as team_router
+# from .threshold import router as threshold_router
+# from .utility import router as utility_router
+# from .validation import router as validation_router
+# === End disabled routers ===
 
 # Setup logging
 logger = setup_logging()
@@ -675,110 +678,37 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 
 # Include routers
+# === Active routers ===
 app.include_router(health_router, tags=["Health"])
 app.include_router(metrics_router, tags=["Monitoring"])
-app.include_router(
-    causal_router,
-    prefix=f"{settings.API_V1_PREFIX}/causal",
-    tags=["Causal Inference"],
-)
-app.include_router(
-    batch_router,
-    prefix=f"{settings.API_V1_PREFIX}/batch",
-    tags=["Batch Processing"],
-)
-# ARCHIVED: Preferences endpoint deferred to TAE PoC v02
-# app.include_router(
-#     preferences_router,
-#     prefix=f"{settings.API_V1_PREFIX}/preferences",
-#     tags=["Preference Learning"],
-# )
-app.include_router(
-    teaching_router,
-    prefix=f"{settings.API_V1_PREFIX}/teaching",
-    tags=["Bayesian Teaching"],
-)
-app.include_router(
-    validation_router,
-    prefix=f"{settings.API_V1_PREFIX}/validation",
-    tags=["Advanced Validation"],
-)
-app.include_router(
-    utility_router,
-    prefix=f"{settings.API_V1_PREFIX}/utility",
-    tags=["Utility Functions"],
-)
-app.include_router(
-    team_router,
-    prefix=f"{settings.API_V1_PREFIX}/team",
-    tags=["Team Alignment"],
-)
-app.include_router(
-    analysis_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Sensitivity Analysis"],
-)
-app.include_router(
-    dominance_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Multi-Criteria Analysis"],
-)
-app.include_router(
-    risk_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Multi-Criteria Analysis"],
-)
-app.include_router(
-    threshold_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Multi-Criteria Analysis"],
-)
-app.include_router(
-    aggregation_router,
-    prefix=f"{settings.API_V1_PREFIX}/aggregation",
-    tags=["Multi-Criteria Analysis"],
-)
 app.include_router(
     robustness_router,
     prefix=f"{settings.API_V1_PREFIX}/robustness",
     tags=["FACET Robustness"],
 )
-app.include_router(
-    explain_router,
-    prefix=f"{settings.API_V1_PREFIX}/explain",
-    tags=["Contrastive Explanations"],
-)
-app.include_router(
-    cee_router,
-    prefix=f"{settings.API_V1_PREFIX}",
-    tags=["CEE Enhancement"],
-)
-app.include_router(
-    phase4_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Phase 4: Sequential Decisions"],
-)
-app.include_router(
-    identifiability_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Y₀ Identifiability"],
-)
-app.include_router(
-    decision_robustness_router,
-    prefix=f"{settings.API_V1_PREFIX}/analysis",
-    tags=["Decision Robustness Suite"],
-)
-app.include_router(
-    outcomes_router,
-    prefix=f"{settings.API_V1_PREFIX}/outcomes",
-    tags=["Outcome Logging"],
-)
-# ARCHIVED: Deliberation (Habermas Machine) deferred to TAE PoC v02
-# app.include_router(
-#     deliberation_router,
-#     prefix=f"{settings.API_V1_PREFIX}/deliberation",
-#     tags=["Habermas Machine"],
-# )
+
+# === Disabled for pilot — orphaned endpoints not used by PLoT integration ===
+# Rollback: uncomment the relevant include_router() lines to restore.
+# app.include_router(aggregation_router, prefix=f"{settings.API_V1_PREFIX}/aggregation", tags=["Multi-Criteria Analysis"])
+# app.include_router(analysis_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Sensitivity Analysis"])
+# app.include_router(batch_router, prefix=f"{settings.API_V1_PREFIX}/batch", tags=["Batch Processing"])
+# app.include_router(causal_router, prefix=f"{settings.API_V1_PREFIX}/causal", tags=["Causal Inference"])
+# app.include_router(cee_router, prefix=f"{settings.API_V1_PREFIX}", tags=["CEE Enhancement"])
+# app.include_router(decision_robustness_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Decision Robustness Suite"])
+# app.include_router(deliberation_router, prefix=f"{settings.API_V1_PREFIX}/deliberation", tags=["Habermas Machine"])
+# app.include_router(dominance_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Multi-Criteria Analysis"])
+# app.include_router(explain_router, prefix=f"{settings.API_V1_PREFIX}/explain", tags=["Contrastive Explanations"])
+# app.include_router(identifiability_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Y₀ Identifiability"])
+# app.include_router(outcomes_router, prefix=f"{settings.API_V1_PREFIX}/outcomes", tags=["Outcome Logging"])
+# app.include_router(phase4_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Phase 4: Sequential Decisions"])
+# app.include_router(preferences_router, prefix=f"{settings.API_V1_PREFIX}/preferences", tags=["Preference Learning"])
+# app.include_router(risk_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Multi-Criteria Analysis"])
+# app.include_router(teaching_router, prefix=f"{settings.API_V1_PREFIX}/teaching", tags=["Bayesian Teaching"])
+# app.include_router(team_router, prefix=f"{settings.API_V1_PREFIX}/team", tags=["Team Alignment"])
+# app.include_router(threshold_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Multi-Criteria Analysis"])
+# app.include_router(utility_router, prefix=f"{settings.API_V1_PREFIX}/utility", tags=["Utility Functions"])
+# app.include_router(validation_router, prefix=f"{settings.API_V1_PREFIX}/validation", tags=["Advanced Validation"])
+# === End disabled routers ===
 
 
 if __name__ == "__main__":

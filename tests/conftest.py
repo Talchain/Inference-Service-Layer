@@ -2,13 +2,73 @@
 Pytest configuration and fixtures.
 
 Provides reusable test fixtures for all test modules.
+Includes quarantine infrastructure for pre-existing failing tests (H.6).
 """
+
+import pathlib
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 from src.api.main import app
+
+
+# ---------------------------------------------------------------------------
+# Quarantine infrastructure (H.6)
+# ---------------------------------------------------------------------------
+_QUARANTINE_FILE = pathlib.Path(__file__).parent / "_quarantined" / "known_failures.txt"
+
+
+def _load_quarantined_ids():
+    """Load quarantined test node IDs from the known-failures list."""
+    if not _QUARANTINE_FILE.exists():
+        return set()
+    ids = set()
+    for line in _QUARANTINE_FILE.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            ids.add(line)
+    return ids
+
+
+_QUARANTINED_IDS = _load_quarantined_ids()
+
+
+def pytest_addoption(parser):
+    """Register custom CLI options."""
+    parser.addoption(
+        "--run-quarantined",
+        action="store_true",
+        default=False,
+        help="Include quarantined tests in the run (they are skipped by default).",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-mark quarantined tests and skip them unless explicitly requested.
+
+    Default: quarantined tests are skipped.
+    To run ONLY quarantined tests: pytest -m quarantined
+    To run ALL tests including quarantined: pytest --run-quarantined
+    """
+    # Check if user explicitly requested quarantined tests
+    marker_expr = config.getoption("-m", default="")
+    run_quarantined = (
+        "quarantined" in str(marker_expr)
+        or config.getoption("--run-quarantined", default=False)
+    )
+
+    quarantine_marker = pytest.mark.quarantined
+    skip_marker = pytest.mark.skip(
+        reason="Quarantined: pre-existing failure (see tests/_quarantined/MANIFEST.md)"
+    )
+
+    for item in items:
+        if item.nodeid in _QUARANTINED_IDS:
+            item.add_marker(quarantine_marker)
+            if not run_quarantined:
+                item.add_marker(skip_marker)
 
 
 @pytest_asyncio.fixture

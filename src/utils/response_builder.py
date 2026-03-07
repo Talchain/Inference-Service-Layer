@@ -15,7 +15,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
@@ -78,6 +78,7 @@ class ResponseBuilder:
         request_id: str,
         request_echo: RequestEchoV2,
         seed_used: Optional[str] = None,
+        seed_source: Optional[Literal["client_provided", "server_computed"]] = None,
     ):
         """
         Initialize response builder.
@@ -86,10 +87,12 @@ class ResponseBuilder:
             request_id: Request ID for correlation
             request_echo: Echo of request parameters
             seed_used: RNG seed used for determinism (P2-ISL-1)
+            seed_source: Origin of seed ('client_provided' or 'server_computed')
         """
         self.request_id = request_id
         self.request_echo = request_echo
         self.seed_used = seed_used
+        self.seed_source = seed_source
         self.start_time = time.time()
 
         self.critiques: List[CritiqueV2] = []
@@ -217,6 +220,7 @@ class ResponseBuilder:
             request_id=self.request_id,
             processing_time_ms=processing_time,
             seed_used=self.seed_used,
+            seed_source=self.seed_source,
         )
 
     def build_422_response(self) -> ISLV2Error422:

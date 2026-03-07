@@ -244,7 +244,7 @@ class ContrastiveExplainer:
                     current_state=current_state,
                     model=model,
                     outcome_var=outcome_var,
-                    seed=rng.seed,
+                    seed=seed,
                 )
 
                 if outcome is not None and target_min <= outcome <= target_max:
@@ -314,7 +314,7 @@ class ContrastiveExplainer:
                         target_min=target_min,
                         target_max=target_max,
                         constraints=constraints,
-                        seed=rng.seed,
+                        seed=seed,
                     )
 
                     if best_combo is not None:
@@ -382,7 +382,7 @@ class ContrastiveExplainer:
                     current_state=current_state,
                     model=model,
                     outcome_var=outcome_var,
-                    seed=rng.seed,
+                    seed=seed,
                 )
 
                 if outcome is not None and target_min <= outcome <= target_max:
@@ -468,7 +468,7 @@ class ContrastiveExplainer:
                 current_state=current_state,
                 model=model,
                 outcome_var=outcome_var,
-                seed=rng.seed,
+                seed=seed,
             )
 
             if expected_outcome is None:
@@ -480,7 +480,7 @@ class ContrastiveExplainer:
                 model=model,
                 target_outcome=target_outcome,
                 request_id=request_id,
-                seed=rng.seed,
+                seed=seed,
             )
 
             # Compute feasibility score

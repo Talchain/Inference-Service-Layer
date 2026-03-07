@@ -411,11 +411,11 @@ class TestComputeComplexityScore:
         assert compute_complexity_score(5000, 12, 100) == 6_000_000
 
     def test_schema_max_exceeds_limit(self):
-        """Schema max (100 nodes, 300 edges, 10000 samples) = 300M — exceeds limit."""
+        """Schema max (50 nodes, 200 edges, 10000 samples) = 100M — exceeds limit."""
         from src.api.robustness import compute_complexity_score, _DEFAULT_MAX_COMPLEXITY
 
-        score = compute_complexity_score(10000, 100, 300)
-        assert score == 300_000_000
+        score = compute_complexity_score(10000, 50, 200)
+        assert score == 100_000_000
         assert score > _DEFAULT_MAX_COMPLEXITY
 
     def test_boundary_at_limit(self):
@@ -712,16 +712,16 @@ class TestSchemaLimitsGraph:
     """
 
     def _build_schema_limit_graph(self) -> GraphV2:
-        """Build a graph with 100 nodes and up to 300 edges."""
-        n_nodes = 100
+        """Build a graph at the schema limit (50 nodes, up to 200 edges)."""
+        n_nodes = 50
         nodes = [
             NodeV2(id=f"n{i}", kind="outcome" if i == n_nodes - 1 else "factor", label=f"Node {i}")
             for i in range(n_nodes)
         ]
-        # Build a spanning chain first, then add edges up to 300 total
+        # Build a spanning chain first, then add edges up to 200 total
         edges = []
         seen_pairs = set()
-        # Chain: n0→n1→...→n98→n99
+        # Chain: n0→n1→...→n48→n49
         for i in range(n_nodes - 1):
             key = (f"n{i}", f"n{i+1}")
             seen_pairs.add(key)
@@ -732,8 +732,8 @@ class TestSchemaLimitsGraph:
                     strength=StrengthDistribution(mean=0.1, std=0.05),
                 )
             )
-        # Add cross-edges to reach ~300 (only forward edges to avoid cycles)
-        target = 300
+        # Add cross-edges to reach ~200 (only forward edges to avoid cycles)
+        target = 200
         src = 0
         while len(edges) < target and src < n_nodes - 2:
             tgt = src + 2
@@ -753,7 +753,7 @@ class TestSchemaLimitsGraph:
         return GraphV2(nodes=nodes, edges=edges)
 
     def test_schema_limit_no_crash(self):
-        """100 nodes, 300 edges, 100 samples — must complete without crash."""
+        """50 nodes, 200 edges, 100 samples — must complete without crash."""
         graph = self._build_schema_limit_graph()
         request = RobustnessRequestV2(
             request_id="schema-limit-test",
@@ -762,7 +762,7 @@ class TestSchemaLimitsGraph:
                 InterventionOption(id="opt_a", label="A", interventions={"n0": 0.3}),
                 InterventionOption(id="opt_b", label="B", interventions={"n0": 0.7}),
             ],
-            goal_node_id="n99",
+            goal_node_id="n49",
             n_samples=100,
             seed=42,
         )
@@ -771,7 +771,7 @@ class TestSchemaLimitsGraph:
         assert response is not None
 
     def test_schema_limit_no_nan(self):
-        """100 nodes, 300 edges — all outcome values must be finite."""
+        """50 nodes, 200 edges — all outcome values must be finite."""
         graph = self._build_schema_limit_graph()
         request = RobustnessRequestV2(
             request_id="schema-limit-nan",
@@ -780,7 +780,7 @@ class TestSchemaLimitsGraph:
                 InterventionOption(id="opt_a", label="A", interventions={"n0": 0.3}),
                 InterventionOption(id="opt_b", label="B", interventions={"n0": 0.7}),
             ],
-            goal_node_id="n99",
+            goal_node_id="n49",
             n_samples=100,
             seed=42,
         )
@@ -792,7 +792,7 @@ class TestSchemaLimitsGraph:
             assert math.isfinite(dist.median), f"NaN median for {result.option_id}"
 
     def test_schema_limit_valid_response_shape(self):
-        """100 nodes, 300 edges — response has all required fields."""
+        """50 nodes, 200 edges — response has all required fields."""
         graph = self._build_schema_limit_graph()
         request = RobustnessRequestV2(
             request_id="schema-limit-shape",
@@ -801,7 +801,7 @@ class TestSchemaLimitsGraph:
                 InterventionOption(id="opt_a", label="A", interventions={"n0": 0.3}),
                 InterventionOption(id="opt_b", label="B", interventions={"n0": 0.7}),
             ],
-            goal_node_id="n99",
+            goal_node_id="n49",
             n_samples=100,
             seed=42,
         )

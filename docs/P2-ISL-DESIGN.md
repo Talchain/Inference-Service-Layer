@@ -15,7 +15,7 @@ This document consolidates design decisions made during the P2-ISL workstream, w
 **Solution:**
 - Compute deterministic seed from graph hash when `seed` not provided
 - Use `SeededRNG` class with separate streams for edge/factor/noise sampling
-- Deprecated `set_global_seed()` in favor of `make_deterministic()` for request isolation
+- Removed deprecated `set_global_seed()` — use `make_deterministic()` for request isolation
 
 **Key Code:**
 ```python

@@ -56,7 +56,7 @@ from src.models.critique import (
     HIGH_TIE_RATE,
 )
 from src.models.response_v2 import CritiqueV2
-from src.utils.rng import SeededRNG, compute_seed_from_graph
+from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
 from src.config.stability_thresholds import (
@@ -849,6 +849,7 @@ class RobustnessAnalyzerV2:
                 config_fingerprint=generate_config_fingerprint(),
                 tie_count=tie_count,
                 tie_rate=tie_rate,
+                seed_hash_version=SEED_HASH_VERSION,
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
