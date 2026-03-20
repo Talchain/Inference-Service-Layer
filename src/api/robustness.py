@@ -33,6 +33,7 @@ from src.models.response_v2 import (
     ConstraintAnalysisV2,
     ConstraintResultV2,
     DiagnosticsV2,
+    EdgeEValueV2,
     FactorSensitivityV2,
     FragileEdgeV2,
     ISLResponseV2,
@@ -49,7 +50,10 @@ from src.models.robustness_v2 import (
 )
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
-from src.config.stability_thresholds import compute_factor_confidence
+from src.config.stability_thresholds import (
+    compute_factor_confidence,
+    compute_graph_structural_confidence,
+)
 from src.utils.business_metrics import track_robustness_analysis
 from src.utils.response_builder import (
     ResponseBuilder,
@@ -701,9 +705,13 @@ async def _analyze_robustness_v2_enhanced(
             builder.set_inference_warnings(v1_response.inference_warnings)
 
         # Convert robustness result (include V1 fields for backward compatibility)
+        # Level mapping (implemented scheme, aligned with Decision Model Schema v2.6):
+        #   is_robust (stability >= 0.7) AND confidence > 0.8 → "high"
+        #   is_robust (stability >= 0.7) AND confidence <= 0.8 → "moderate"
+        #   NOT robust AND confidence > 0.5 → "low"
+        #   NOT robust AND confidence <= 0.5 → "very_low"
         robustness_result = None
         if v1_response.robustness:
-            # Map is_robust to level
             if v1_response.robustness.is_robust:
                 level = "high" if v1_response.robustness.confidence > 0.8 else "moderate"
             else:
@@ -724,6 +732,30 @@ async def _analyze_robustness_v2_enhanced(
                     for fe in v1_response.robustness.fragile_edges_enhanced
                 ]
 
+            # Convert E-values if present
+            edge_e_values_v2 = None
+            if v1_response.edge_e_values:
+                edge_e_values_v2 = []
+                for ev in v1_response.edge_e_values:
+                    raw_e_val = ev.get("e_value", float("inf"))
+                    unflippable = (
+                        not isinstance(raw_e_val, (int, float))
+                        or raw_e_val == float("inf")
+                        or raw_e_val > 1e6
+                    )
+                    edge_e_values_v2.append(
+                        EdgeEValueV2(
+                            edge_id=ev["edge_id"],
+                            from_id=ev["from_id"],
+                            to_id=ev["to_id"],
+                            e_value=None if unflippable else round(raw_e_val, 4),
+                            is_unflippable=unflippable,
+                            flip_direction=ev["flip_direction"],
+                            current_mean=ev["current_mean"],
+                            flip_mean=ev["flip_mean"],
+                        )
+                    )
+
             robustness_result = RobustnessResultV2(
                 # V2 fields
                 level=level,
@@ -735,6 +767,11 @@ async def _analyze_robustness_v2_enhanced(
                 fragile_edges_v1=v1_response.robustness.fragile_edges,
                 robust_edges=v1_response.robustness.robust_edges,
                 recommendation_stability=v1_response.robustness.recommendation_stability,
+                # E-value analogue
+                edge_e_values=edge_e_values_v2,
+                # Trust penalty audit trail
+                stability_penalty_factor=v1_response.robustness.stability_penalty_factor,
+                defaulted_root_node_ids=v1_response.robustness.defaulted_root_node_ids,
             )
 
         # Convert factor sensitivity with normalized scores
@@ -750,50 +787,61 @@ async def _analyze_robustness_v2_enhanced(
 
             n_factors = len(v1_response.factor_sensitivity)
 
-            factor_sensitivity = [
-                FactorSensitivityV2(
-                    node_id=fs.node_id,
-                    label=fs.node_label,
-                    # Normalize to 0-1: relative to max sensitivity in this analysis
-                    sensitivity_score=min(1.0, abs(fs.elasticity) / max_abs_elasticity),
-                    # importance_score: 1.0 for rank 1, decreasing linearly
-                    importance_score=(
-                        1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
-                        if n_factors > 1
-                        else 1.0
-                    ),
-                    elasticity=fs.elasticity,  # Preserve raw elasticity
-                    elasticity_display=fs.elasticity_display,  # Clamped for UI
-                    direction="positive" if fs.elasticity > 0 else "negative",
-                    importance_rank=fs.importance_rank,
-                    observed_value=fs.observed_value,
-                    interpretation=fs.interpretation,
-                    # Debug fields (always included)
-                    zero_reason=fs.zero_reason,
-                    baseline_near_zero=fs.baseline_near_zero,
-                    # Structural influence from graph path analysis
-                    influence_score=fs.influence_score,
-                    influence_rank=fs.influence_rank,
-                    # Bootstrap uncertainty (3C)
-                    elasticity_std=fs.elasticity_std,
-                    attribution_stability=fs.attribution_stability,
-                    rank_flip_rate=fs.rank_flip_rate,
-                    stability_method=fs.stability_method,
-                    # Confidence (Track S) - derived from bootstrap stability metrics
-                    confidence=compute_factor_confidence(
-                        fs.attribution_stability,
-                        fs.elasticity,
-                        fs.elasticity_std,
-                    ),
+            factor_sensitivity = []
+            for fs in v1_response.factor_sensitivity:
+                # Confidence: prefer bootstrap-derived, fall back to graph-structural
+                bootstrap_confidence = compute_factor_confidence(
+                    fs.attribution_stability,
+                    fs.elasticity,
+                    fs.elasticity_std,
                 )
-                for fs in v1_response.factor_sensitivity
-            ]
+                if bootstrap_confidence is not None:
+                    confidence_val = bootstrap_confidence
+                    confidence_src = "bootstrap_sampling"
+                else:
+                    confidence_val = compute_graph_structural_confidence(fs.influence_score)
+                    confidence_src = "graph_structural"
+
+                factor_sensitivity.append(
+                    FactorSensitivityV2(
+                        node_id=fs.node_id,
+                        label=fs.node_label,
+                        # Normalize to 0-1: relative to max sensitivity in this analysis
+                        sensitivity_score=min(1.0, abs(fs.elasticity) / max_abs_elasticity),
+                        # importance_score: 1.0 for rank 1, decreasing linearly
+                        importance_score=(
+                            1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
+                            if n_factors > 1
+                            else 1.0
+                        ),
+                        elasticity=fs.elasticity,  # Preserve raw elasticity
+                        elasticity_display=fs.elasticity_display,  # Clamped for UI
+                        direction="positive" if fs.elasticity > 0 else "negative",
+                        confidence=confidence_val,
+                        confidence_source=confidence_src,
+                        importance_rank=fs.importance_rank,
+                        observed_value=fs.observed_value,
+                        interpretation=fs.interpretation,
+                        # Debug fields (always included)
+                        zero_reason=fs.zero_reason,
+                        baseline_near_zero=fs.baseline_near_zero,
+                        # Structural influence from graph path analysis
+                        influence_score=fs.influence_score,
+                        influence_rank=fs.influence_rank,
+                        # Bootstrap uncertainty (3C)
+                        elasticity_std=fs.elasticity_std,
+                        attribution_stability=fs.attribution_stability,
+                        rank_flip_rate=fs.rank_flip_rate,
+                        stability_method=fs.stability_method,
+                    )
+                )
 
         builder.set_results(
             options=option_results,
             robustness=robustness_result,
             factor_sensitivity=factor_sensitivity,
             stability_thresholds=v1_response.stability_thresholds,  # 3C
+            factor_evpi=v1_response.factor_evpi,
         )
 
         # Update diagnostics with sampling info

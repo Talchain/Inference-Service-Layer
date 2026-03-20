@@ -594,7 +594,8 @@ class RobustnessAnalyzerV2:
     - Overall robustness assessment
     """
 
-    # Thresholds for robustness assessment
+    # Thresholds for robustness assessment (Decision Model Schema v2.6)
+    # Level mapping: robust (>= 0.7) + confidence → high/moderate; else → low/very_low
     ROBUST_THRESHOLD = 0.7  # Win probability for "robust" recommendation
     FRAGILE_THRESHOLD = 0.1  # Elasticity threshold for fragile edges
     HIGH_SENSITIVITY_THRESHOLD = 0.2  # Elasticity for "high sensitivity"
@@ -732,6 +733,40 @@ class RobustnessAnalyzerV2:
                         },
                     )
 
+        # Detect root nodes that will silently default to 0.0
+        # A root node needs a warning if it has NO observed_state.value AND NO
+        # ParameterUncertainty entry (which would provide sampling via FactorSampler).
+        defaulted_root_node_ids: List[str] = []
+        uncertainty_node_ids = set(u.node_id for u in (request.parameter_uncertainties or []))
+        parent_map_for_roots: dict[str, list[str]] = defaultdict(list)
+        for edge in request.graph.edges:
+            parent_map_for_roots[edge.to].append(edge.from_)
+        for node in request.graph.nodes:
+            is_root = len(parent_map_for_roots.get(node.id, [])) == 0
+            if not is_root:
+                continue
+            has_observed_value = (
+                node.observed_state is not None and node.observed_state.value is not None
+            )
+            has_uncertainty = node.id in uncertainty_node_ids
+            if not has_observed_value and not has_uncertainty:
+                defaulted_root_node_ids.append(node.id)
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="ROOT_NODE_DEFAULT_VALUE",
+                        field=f"nodes[{node.id}].observed_state.value",
+                        detail={
+                            "node_id": node.id,
+                            "defaulted_to": 0.0,
+                            "message": (
+                                f"No observed value provided for root node '{node.id}'; "
+                                f"defaulted to 0.0. Results for downstream nodes may be "
+                                f"unreliable."
+                            ),
+                        },
+                    )
+                )
+
         # Run Monte Carlo simulation
         (
             option_outcomes,
@@ -750,7 +785,7 @@ class RobustnessAnalyzerV2:
         # Apply auto-scaled noise to outcome/risk nodes (V08 scientific accuracy)
         # Uses separate RNG stream (seed + 2) for determinism
         rng_noise = SeededRNG(seed + 2)
-        option_outcomes = self._apply_auto_scaled_noise(
+        option_outcomes, auto_noise_applied = self._apply_auto_scaled_noise(
             option_outcomes,
             request.goal_node_id,
             request.graph.nodes,
@@ -811,13 +846,27 @@ class RobustnessAnalyzerV2:
             edge_configs_per_sample,
             evaluator,
             seed,
+            n_defaulted_roots=len(defaulted_root_node_ids),
+            defaulted_root_node_ids=defaulted_root_node_ids,
         )
 
-        execution_time = int((time.time() - start_time) * 1000)
+        # Compute E-value analogue per edge if requested
+        edge_e_values = None
+        if request.include_e_values:
+            edge_e_values = self._compute_edge_e_values(request, evaluator)
 
-        # Find recommended option
+        # Find recommended option (needed before EVPI to fix decision policy)
         recommended_option_id = max(option_wins, key=option_wins.get)
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
+
+        # Compute EVPI per factor if requested
+        factor_evpi = None
+        if request.include_voi and factor_sampler.has_uncertainties():
+            factor_evpi = self._compute_evpi(
+                request, sampler, factor_sampler, evaluator, seed, recommended_option_id
+            )
+
+        execution_time = int((time.time() - start_time) * 1000)
 
         # Include stability thresholds when bootstrap stability was computed
         has_bootstrap = any(fs.attribution_stability is not None for fs in factor_sensitivity)
@@ -850,10 +899,16 @@ class RobustnessAnalyzerV2:
                 tie_count=tie_count,
                 tie_rate=tie_rate,
                 seed_hash_version=SEED_HASH_VERSION,
+                auto_noise_applied=auto_noise_applied,
+                n_defaulted_root_nodes=len(defaulted_root_node_ids)
+                if defaulted_root_node_ids
+                else None,
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
             stability_thresholds=stability_thresholds,
+            edge_e_values=edge_e_values,
+            factor_evpi=factor_evpi,
         )
 
         self.logger.info(
@@ -996,9 +1051,28 @@ class RobustnessAnalyzerV2:
         goal_node_id: str,
         graph_nodes: List,
         rng: "SeededRNG",
-    ) -> Dict[str, List[float]]:
+    ) -> Tuple[Dict[str, List[float]], bool]:
         """
         Apply auto-scaled noise to outcome/risk node samples.
+
+        What: Adds independent noise ~ N(0, outcome_std) to each MC sample for
+        outcome and risk nodes, where outcome_std is the standard deviation of
+        the model-driven samples before noise.
+
+        Why: Represents unexplained variance not captured by the structural causal
+        model (measurement error, omitted variables, unmodelled interactions).
+        Without this, the outcome distributions reflect only the uncertainty from
+        edges and factor priors — which underestimates real-world uncertainty.
+
+        Impact: var(X + N) = var(X) + var(N) ≈ 2·var(X) when var(N) = var(X),
+        so p10/p90 spread is approximately √2 wider than the purely model-driven
+        distribution. This affects P(goal), constraint satisfaction probabilities,
+        and robustness assessments.
+
+        Status: PoC heuristic (Neil Bramley). Pending formal review and calibration
+        against pilot outcome data. The noise scale (1× model std) is a deliberate
+        choice — changing it affects ALL downstream percentile and confidence
+        computations and requires re-validation of the calibration suite.
 
         Per Neil Bramley's heuristic: "Match unexplained noise to explained variance"
         - Only outcome and risk nodes receive noise
@@ -1012,7 +1086,7 @@ class RobustnessAnalyzerV2:
             rng: Seeded RNG for determinism
 
         Returns:
-            Modified option_outcomes with noise applied
+            Tuple of (modified option_outcomes, noise_applied flag)
         """
         # Find the goal node and check its kind
         goal_node = None
@@ -1022,14 +1096,15 @@ class RobustnessAnalyzerV2:
                 break
 
         if goal_node is None:
-            return option_outcomes
+            return option_outcomes, False
 
         # Only apply noise to outcome and risk nodes
         node_kind = getattr(goal_node, "kind", "").lower()
         if node_kind not in ("outcome", "risk"):
-            return option_outcomes
+            return option_outcomes, False
 
         # Apply noise to each option's samples
+        any_noise_added = False
         for option_id, samples in option_outcomes.items():
             if not samples:
                 continue
@@ -1037,8 +1112,9 @@ class RobustnessAnalyzerV2:
             samples_array = np.array(samples)
             outcome_std = float(np.std(samples_array))
 
-            # If std = 0, skip noise (no model uncertainty to match)
-            if outcome_std <= 0:
+            # If std ≈ 0, skip noise (no model uncertainty to match).
+            # Tolerance handles floating-point noise from identical intervention values.
+            if outcome_std <= 1e-12:
                 continue
 
             # Deliberate modelling choice (Neil Bramley heuristic):
@@ -1055,8 +1131,9 @@ class RobustnessAnalyzerV2:
             # full calibration suite.
             noise = np.array([rng.normal(0, outcome_std) for _ in range(len(samples))])
             option_outcomes[option_id] = (samples_array + noise).tolist()
+            any_noise_added = True
 
-        return option_outcomes
+        return option_outcomes, any_noise_added
 
     def _compute_option_results(
         self,
@@ -2074,12 +2151,21 @@ class RobustnessAnalyzerV2:
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
         evaluator: SCMEvaluatorV2,
         global_seed: int,
+        n_defaulted_roots: int = 0,
+        defaulted_root_node_ids: Optional[List[str]] = None,
     ) -> RobustnessResult:
         """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
         n_samples = request.n_samples
         most_frequent_winner = max(option_wins, key=option_wins.get)
         recommendation_stability = option_wins[most_frequent_winner] / n_samples
+
+        # Trust downgrade: penalise stability when root nodes defaulted to 0.0,
+        # since the model is running with missing inputs.
+        stability_penalty_factor = None
+        if n_defaulted_roots > 0:
+            stability_penalty_factor = max(0.1, 1.0 - 0.05 * n_defaulted_roots)
+            recommendation_stability *= stability_penalty_factor
 
         # Identify fragile and robust edges (by edge_id string)
         # IMPORTANT: Aggregate sensitivities per edge BEFORE categorization
@@ -2164,7 +2250,329 @@ class RobustnessAnalyzerV2:
             robust_edges=robust_edges,
             recommendation_stability=recommendation_stability,
             interpretation=interpretation,
+            stability_penalty_factor=stability_penalty_factor,
+            defaulted_root_node_ids=defaulted_root_node_ids if defaulted_root_node_ids else None,
         )
+
+    # E-value budget: max wall-clock time for the full E-value sweep
+    E_VALUE_BUDGET_MS = 2000
+    E_VALUE_BISECT_STEPS = 20  # binary search precision: 2^-20 ≈ 1e-6
+
+    def _compute_edge_e_values(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Compute E-value analogue for each edge: minimum strength perturbation to flip winner.
+
+        Uses binary search on strength.mean for each edge while holding all other edges
+        at expected values. Returns None if computation exceeds budget.
+
+        Args:
+            request: The robustness request.
+            evaluator: SCM evaluator instance.
+
+        Returns:
+            List of dicts with e_value info per edge, or None if budget exceeded.
+        """
+        t0 = time.time()
+
+        # Build expected-value baseline config
+        baseline_config = {
+            (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
+        }
+
+        # Determine baseline winner
+        baseline_outcomes = {}
+        for option in request.options:
+            baseline_outcomes[option.id] = evaluator.evaluate(
+                edge_strengths=baseline_config,
+                interventions=option.interventions,
+                goal_node=request.goal_node_id,
+            )
+        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
+        baseline_winner = sorted_baseline[0][0]
+
+        results = []
+        for edge in request.graph.edges:
+            # Budget check per edge
+            elapsed_ms = (time.time() - t0) * 1000
+            if elapsed_ms > self.E_VALUE_BUDGET_MS:
+                self.logger.info(
+                    "e_value_budget_exceeded",
+                    extra={"elapsed_ms": round(elapsed_ms, 1), "edges_completed": len(results)},
+                )
+                return None  # Budget exceeded — omit from response
+
+            edge_key = (edge.from_, edge.to)
+            current_mean = edge.strength.mean
+            ep = edge.exists_probability
+
+            # Try both directions: increase and decrease
+            flip_found = False
+            for direction in ("increase", "decrease"):
+                if direction == "increase":
+                    lo, hi = current_mean, EDGE_STRENGTH_MAX
+                else:
+                    lo, hi = EDGE_STRENGTH_MIN, current_mean
+
+                # Quick check: does the extreme boundary flip the winner?
+                test_config = baseline_config.copy()
+                test_config[edge_key] = hi * ep if direction == "increase" else lo * ep
+                test_outcomes = {}
+                for option in request.options:
+                    test_outcomes[option.id] = evaluator.evaluate(
+                        edge_strengths=test_config,
+                        interventions=option.interventions,
+                        goal_node=request.goal_node_id,
+                    )
+                sorted_test = sorted(test_outcomes.items(), key=lambda x: (-x[1], x[0]))
+                if sorted_test[0][0] == baseline_winner:
+                    continue  # This direction cannot flip — skip
+
+                # Binary search for the flip point
+                for _ in range(self.E_VALUE_BISECT_STEPS):
+                    mid = (lo + hi) / 2
+                    test_config = baseline_config.copy()
+                    test_config[edge_key] = mid * ep
+                    test_outcomes = {}
+                    for option in request.options:
+                        test_outcomes[option.id] = evaluator.evaluate(
+                            edge_strengths=test_config,
+                            interventions=option.interventions,
+                            goal_node=request.goal_node_id,
+                        )
+                    sorted_test = sorted(test_outcomes.items(), key=lambda x: (-x[1], x[0]))
+                    if sorted_test[0][0] != baseline_winner:
+                        # Flip happened — narrow toward current_mean
+                        if direction == "increase":
+                            hi = mid
+                        else:
+                            lo = mid
+                    else:
+                        # No flip — narrow away from current_mean
+                        if direction == "increase":
+                            lo = mid
+                        else:
+                            hi = mid
+
+                flip_mean = hi if direction == "increase" else lo
+
+                # E-value: ratio of perturbation to current value
+                if abs(current_mean) > 1e-10:
+                    e_value = abs(flip_mean / current_mean)
+                else:
+                    # current_mean ≈ 0 — any nonzero flip_mean is infinite leverage
+                    e_value = abs(flip_mean) / 1e-6 if abs(flip_mean) > 1e-10 else 1.0
+
+                e_value = max(1.0, e_value)  # E-value is always >= 1.0
+
+                results.append(
+                    {
+                        "edge_id": f"{edge.from_}->{edge.to}",
+                        "from_id": edge.from_,
+                        "to_id": edge.to,
+                        "e_value": round(e_value, 4),
+                        "flip_direction": direction,
+                        "current_mean": current_mean,
+                        "flip_mean": round(flip_mean, 6),
+                    }
+                )
+                flip_found = True
+                break  # Take first direction that flips
+
+            if not flip_found:
+                # Edge cannot flip the recommendation in either direction
+                results.append(
+                    {
+                        "edge_id": f"{edge.from_}->{edge.to}",
+                        "from_id": edge.from_,
+                        "to_id": edge.to,
+                        "e_value": float("inf"),
+                        "flip_direction": "increase",
+                        "current_mean": current_mean,
+                        "flip_mean": current_mean,
+                    }
+                )
+
+        return results
+
+    def _compute_evpi(
+        self,
+        request: RobustnessRequestV2,
+        sampler: DualUncertaintySampler,
+        factor_sampler: FactorSampler,
+        evaluator: SCMEvaluatorV2,
+        seed: int,
+        recommended_option_id: str,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Compute Expected Value of Perfect Information (EVPI) per factor.
+
+        For each factor with ParameterUncertainty, run MC with that factor's
+        uncertainty removed (fix at mean value) and compare the metric:
+        - P(joint_goal) when goal_constraints exist
+        - P(win) of the recommended option otherwise
+
+        The recommended option is held fixed across all EVPI runs to avoid
+        policy-switch confounding (evaluating different decisions under
+        different information states).
+
+        EVPI = metric_with_perfect_info - metric_with_uncertainty
+
+        Args:
+            request: The robustness request.
+            sampler: Edge configuration sampler.
+            factor_sampler: Factor value sampler.
+            evaluator: SCM evaluator.
+            seed: Global seed for reproducibility.
+            recommended_option_id: Fixed decision policy (from main MC run).
+
+        Returns:
+            List of dicts with EVPI info per factor, or None.
+        """
+        if not request.parameter_uncertainties:
+            return None
+
+        # Budget: cap samples for EVPI to limit latency
+        n_samples = min(request.n_samples, 500)
+        constraint_target_nodes = None
+        if request.goal_constraints:
+            constraint_target_nodes = sorted(set(gc.node_id for gc in request.goal_constraints))
+
+        # Baseline: all uncertainties active
+        baseline_rng_edge = SeededRNG(seed + 100)
+        baseline_rng_factor = SeededRNG(seed + 101)
+        baseline_sampler = DualUncertaintySampler(request.graph.edges, baseline_rng_edge)
+        baseline_factor_sampler = FactorSampler(
+            request.graph.nodes, request.parameter_uncertainties, baseline_rng_factor
+        )
+        baseline_metric = self._compute_evpi_metric(
+            request,
+            baseline_sampler,
+            baseline_factor_sampler,
+            evaluator,
+            n_samples,
+            constraint_target_nodes,
+            recommended_option_id,
+        )
+
+        results = []
+        for uncertainty in request.parameter_uncertainties:
+            # Create modified uncertainty list: remove this factor's uncertainty
+            modified_uncertainties = [
+                u for u in request.parameter_uncertainties if u.node_id != uncertainty.node_id
+            ]
+
+            # Deterministic seed per factor
+            factor_seed_str = f"{seed}:evpi:{uncertainty.node_id}"
+            factor_seed = int(hashlib.sha256(factor_seed_str.encode()).hexdigest()[:8], 16)
+
+            perfect_rng_edge = SeededRNG(factor_seed)
+            perfect_rng_factor = SeededRNG(factor_seed + 1)
+            perfect_sampler = DualUncertaintySampler(request.graph.edges, perfect_rng_edge)
+            perfect_factor_sampler = FactorSampler(
+                request.graph.nodes,
+                modified_uncertainties if modified_uncertainties else None,
+                perfect_rng_factor,
+            )
+
+            perfect_metric = self._compute_evpi_metric(
+                request,
+                perfect_sampler,
+                perfect_factor_sampler,
+                evaluator,
+                n_samples,
+                constraint_target_nodes,
+                recommended_option_id,
+            )
+
+            evpi = perfect_metric - baseline_metric
+
+            results.append(
+                {
+                    "factor_id": uncertainty.node_id,
+                    "evpi": round(evpi, 6),
+                    "evpi_percentage_points": round(evpi * 100, 2),
+                    "current_metric": round(baseline_metric, 6),
+                    "perfect_metric": round(perfect_metric, 6),
+                    "metric_type": "p_joint_goal"
+                    if request.goal_constraints
+                    else "p_win_recommended",
+                    "n_evpi_samples": n_samples,
+                }
+            )
+
+        # Sort by EVPI descending (most valuable information first)
+        results.sort(key=lambda x: x["evpi"], reverse=True)
+        return results
+
+    def _compute_evpi_metric(
+        self,
+        request: RobustnessRequestV2,
+        sampler: DualUncertaintySampler,
+        factor_sampler: FactorSampler,
+        evaluator: SCMEvaluatorV2,
+        n_samples: int,
+        constraint_target_nodes: Optional[List[str]],
+        recommended_option_id: str,
+    ) -> float:
+        """Compute the EVPI metric for a fixed decision policy over n_samples.
+
+        Uses recommended_option_id (from the main MC run) as the fixed policy
+        to avoid policy-switch confounding across EVPI runs.
+        """
+        option_outcomes: Dict[str, List[float]] = {opt.id: [] for opt in request.options}
+        constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None
+        if constraint_target_nodes:
+            constraint_node_values = {
+                opt.id: {nid: [] for nid in constraint_target_nodes} for opt in request.options
+            }
+
+        for _ in range(n_samples):
+            edge_config = sampler.sample_edge_configuration()
+            factor_values = factor_sampler.sample_factor_values()
+
+            for option in request.options:
+                if constraint_target_nodes and constraint_node_values is not None:
+                    all_targets = list(set([request.goal_node_id] + constraint_target_nodes))
+                    node_values = evaluator.evaluate_multi(
+                        edge_strengths=edge_config,
+                        interventions=option.interventions,
+                        target_nodes=all_targets,
+                        factor_values=factor_values,
+                    )
+                    outcome = node_values.get(request.goal_node_id, 0.0)
+                    for nid in constraint_target_nodes:
+                        constraint_node_values[option.id][nid].append(node_values.get(nid, 0.0))
+                else:
+                    outcome = evaluator.evaluate(
+                        edge_strengths=edge_config,
+                        interventions=option.interventions,
+                        goal_node=request.goal_node_id,
+                        factor_values=factor_values,
+                    )
+                option_outcomes[option.id].append(outcome)
+
+        if request.goal_constraints and constraint_node_values is not None:
+            # P(joint_goal) for the fixed recommended option
+            _, joint_prob, _ = self._compute_constraint_probabilities(
+                constraint_node_values,
+                request.goal_constraints,
+                recommended_option_id,
+            )
+            return joint_prob
+        else:
+            # P(win) of the fixed recommended option
+            win_count = sum(
+                1
+                for i in range(n_samples)
+                if max(
+                    option_outcomes.keys(),
+                    key=lambda oid, idx=i: option_outcomes[oid][idx],
+                )
+                == recommended_option_id
+            )
+            return win_count / n_samples
 
     def _compute_alternative_winners(
         self,

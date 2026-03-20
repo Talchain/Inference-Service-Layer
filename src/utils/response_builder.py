@@ -102,6 +102,7 @@ class ResponseBuilder:
         self.robustness: Optional[RobustnessResultV2] = None
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
         self.stability_thresholds = None  # 3C: stability thresholds metadata
+        self.factor_evpi = None  # EVPI per factor (enhancement)
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -125,12 +126,14 @@ class ResponseBuilder:
         robustness: Optional[RobustnessResultV2] = None,
         factor_sensitivity: Optional[List[FactorSensitivityV2]] = None,
         stability_thresholds: Optional[StabilityThresholdsResponse] = None,
+        factor_evpi: Optional[list] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
         self.robustness = robustness
         self.factor_sensitivity = factor_sensitivity
         self.stability_thresholds = stability_thresholds
+        self.factor_evpi = factor_evpi
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -217,6 +220,7 @@ class ResponseBuilder:
             robustness=self.robustness,
             factor_sensitivity=self.factor_sensitivity,
             stability_thresholds=self.stability_thresholds,  # 3C
+            factor_evpi=self.factor_evpi,
             request_id=self.request_id,
             processing_time_ms=processing_time,
             seed_used=self.seed_used,

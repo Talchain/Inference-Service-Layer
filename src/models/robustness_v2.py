@@ -411,9 +411,7 @@ class GraphV2(BaseModel):
     uncertainty (strength distribution).
     """
 
-    nodes: List[NodeV2] = Field(
-        ..., min_length=1, max_length=50, description="List of graph nodes"
-    )
+    nodes: List[NodeV2] = Field(..., min_length=1, max_length=50, description="List of graph nodes")
     edges: List[EdgeV2] = Field(
         ..., max_length=200, description="List of directed edges with dual uncertainty"
     )
@@ -652,6 +650,18 @@ class RobustnessRequestV2(BaseModel):
         None,
         description="Success threshold for goal outcome. When provided, "
         "computes probability_of_goal (fraction of samples meeting/exceeding threshold).",
+    )
+
+    # Enhancement flags
+    include_e_values: bool = Field(
+        default=False,
+        description="Compute E-value analogue per edge (minimum strength perturbation "
+        "to flip recommendation). Gated for performance — adds up to 2s latency.",
+    )
+    include_voi: bool = Field(
+        default=False,
+        description="Compute Expected Value of Perfect Information (EVPI) per factor. "
+        "Requires parameter_uncertainties.",
     )
 
     # Multi-constraint goal analysis (Phase 2)
@@ -1011,6 +1021,16 @@ class RobustnessResult(BaseModel):
         ..., ge=0, le=1, description="P(same recommendation across samples)"
     )
     interpretation: str = Field(..., description="Human-readable robustness summary")
+    # Trust penalty metadata (auditable when root nodes defaulted to 0.0)
+    stability_penalty_factor: Optional[float] = Field(
+        None,
+        description="Multiplicative penalty applied to recommendation_stability "
+        "due to missing root node values. 1.0 = no penalty.",
+    )
+    defaulted_root_node_ids: Optional[List[str]] = Field(
+        None,
+        description="Root node IDs that defaulted to 0.0 (trigger for stability penalty).",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -1067,6 +1087,18 @@ class ResponseMetadataV2(BaseModel):
         description="Version of the seed hash algorithm used. "
         "V1 omits edge_type; V2 includes it.",
     )
+    auto_noise_applied: bool = Field(
+        default=False,
+        description="Whether auto-scaled noise (√2 variance inflation) was applied to "
+        "outcome distributions. Only applies to outcome/risk goal nodes. "
+        "When true, p10/p90 spreads are ~√2 wider than the purely "
+        "model-driven distribution.",
+    )
+    n_defaulted_root_nodes: Optional[int] = Field(
+        None,
+        description="Number of root nodes that defaulted to 0.0 due to missing "
+        "observed_state.value. Non-zero indicates missing model inputs.",
+    )
 
 
 class RobustnessResponseV2(BaseModel):
@@ -1115,6 +1147,20 @@ class RobustnessResponseV2(BaseModel):
         None,
         description="Thresholds used for attribution_stability classification. "
         "Provisional — pending scientific review. NOT included in response_hash.",
+    )
+
+    # E-value results (enhancement — optional, gated by budget and include_e_values flag)
+    edge_e_values: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="E-value analogue per edge: minimum strength perturbation to flip "
+        "recommendation. Only included when computed within time budget.",
+    )
+
+    # EVPI results (enhancement — optional, gated by include_voi flag)
+    factor_evpi: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Expected Value of Perfect Information per factor: how much does "
+        "removing this factor's uncertainty improve P(joint_goal)?",
     )
 
     model_config = {

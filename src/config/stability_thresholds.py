@@ -195,3 +195,29 @@ def compute_factor_confidence(
 
     # Step 4: Clamp and round
     return round(max(0.0, min(1.0, confidence)), 4)
+
+
+# Graph-structural confidence parameters (fallback when bootstrap unavailable)
+GRAPH_STRUCTURAL_CONFIDENCE_SCALE = 0.5
+GRAPH_STRUCTURAL_CONFIDENCE_FLOOR = 0.25
+
+
+def compute_graph_structural_confidence(
+    influence_score: float | None,
+) -> float:
+    """Fallback confidence from graph structure when bootstrap metrics are unavailable.
+
+    Scales influence_score [0, 1] to a confidence range of [0.25, 0.75].
+    This is capped below bootstrap-derived confidence to signal lower certainty.
+
+    Args:
+        influence_score: Structural influence from causal path strengths (0-1).
+
+    Returns:
+        Confidence in [0.25, 0.75].
+    """
+    score = influence_score if influence_score is not None else 0.0
+    return round(
+        GRAPH_STRUCTURAL_CONFIDENCE_FLOOR + score * GRAPH_STRUCTURAL_CONFIDENCE_SCALE,
+        4,
+    )
