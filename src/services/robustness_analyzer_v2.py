@@ -22,7 +22,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from src.models.robustness_v2 import (
+    BucketResult,
     ClampMetrics,
+    ConditionalWinner,
     ConstraintAnalysis,
     ConstraintResult,
     EdgeV2,
@@ -740,6 +742,7 @@ class RobustnessAnalyzerV2:
             edge_configs_per_sample,
             tie_count,
             constraint_node_values,
+            factor_values_per_sample,
         ) = self._run_monte_carlo(
             request, sampler, factor_sampler, evaluator, constraint_target_nodes
         )
@@ -802,6 +805,17 @@ class RobustnessAnalyzerV2:
                 request, option_outcomes, rng_factor, evaluator
             )
 
+        # Compute conditional winners (factor-partitioned win probabilities)
+        conditional_winners = None
+        if factor_sampler.has_uncertainties() and len(request.options) > 1:
+            conditional_winners = self._compute_conditional_winners(
+                factor_values_per_sample,
+                winner_per_sample,
+                option_outcomes,
+                factor_sampler,
+                request,
+            )
+
         # Compute robustness assessment (with alternative winner analysis)
         robustness = self._compute_robustness(
             option_wins,
@@ -853,6 +867,7 @@ class RobustnessAnalyzerV2:
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
+            conditional_winners=conditional_winners,
             stability_thresholds=stability_thresholds,
         )
 
@@ -883,6 +898,7 @@ class RobustnessAnalyzerV2:
         List[Dict[Tuple[str, str], float]],
         int,
         Optional[Dict[str, Dict[str, List[float]]]],
+        List[Dict[str, float]],
     ]:
         """
         Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
@@ -902,6 +918,7 @@ class RobustnessAnalyzerV2:
             - edge_configs_per_sample: Edge configurations per sample
             - tie_count: Number of samples with ties
             - constraint_node_values: Dict[option_id, Dict[node_id, List[value]]] or None
+            - factor_values_per_sample: List of sampled factor value dicts per MC iteration
 
         Note: option_wins uses float to support split-tie handling where ties are
         divided equally among tied options.
@@ -910,6 +927,7 @@ class RobustnessAnalyzerV2:
         option_wins: Dict[str, float] = {opt.id: 0.0 for opt in request.options}
         winner_per_sample: List[str] = []
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
+        factor_values_per_sample: List[Dict[str, float]] = []
         tie_count = 0
 
         # Initialize constraint node values tracking if needed
@@ -926,6 +944,7 @@ class RobustnessAnalyzerV2:
 
             # Sample factor values (parameter uncertainty)
             factor_values = factor_sampler.sample_factor_values()
+            factor_values_per_sample.append(factor_values)
 
             # Evaluate each option
             sample_outcomes = {}
@@ -988,6 +1007,7 @@ class RobustnessAnalyzerV2:
             edge_configs_per_sample,
             tie_count,
             constraint_node_values,
+            factor_values_per_sample,
         )
 
     def _apply_auto_scaled_noise(
@@ -1725,6 +1745,147 @@ class RobustnessAnalyzerV2:
                 f"Decision is highly sensitive to {node_label} value - "
                 "consider narrowing uncertainty or gathering more data"
             )
+
+    def _compute_conditional_winners(
+        self,
+        factor_values_per_sample: List[Dict[str, float]],
+        winner_per_sample: List[str],
+        option_outcomes: Dict[str, List[float]],
+        factor_sampler: "FactorSampler",
+        request: RobustnessRequestV2,
+        min_bucket_size: int = 50,
+    ) -> Optional[List[ConditionalWinner]]:
+        """
+        Compute conditional win probabilities by partitioning MC samples at
+        each factor's median value.
+
+        For each non-point-mass factor, splits samples into low (< median) and
+        high (>= median) buckets and computes win probabilities within each.
+        Reports only factors where the winner flips between buckets.
+
+        Limitation: median split is simplistic. It cannot detect non-monotonic
+        effects, factor interactions, or flips at extreme quantiles.
+
+        Args:
+            factor_values_per_sample: Factor values sampled per MC iteration
+            winner_per_sample: Winning option ID per MC sample
+            option_outcomes: Per-option outcome values (for tie-breaking by mean)
+            factor_sampler: FactorSampler (for _uncertainty_map and _node_map)
+            request: The analysis request (for option labels)
+            min_bucket_size: Minimum samples per bucket (skip if fewer)
+
+        Returns:
+            List of ConditionalWinner where winner_flips is True,
+            or None if no flips found.
+        """
+        if len(request.options) <= 1:
+            return None
+        if not factor_values_per_sample or not factor_sampler.has_uncertainties():
+            return None
+
+        option_labels = {opt.id: (opt.label or opt.id) for opt in request.options}
+        option_means = {opt_id: float(np.mean(vals)) for opt_id, vals in option_outcomes.items()}
+
+        results: List[ConditionalWinner] = []
+
+        for factor_id, uncertainty in factor_sampler._uncertainty_map.items():
+            if uncertainty.distribution == "point_mass":
+                continue
+
+            # Extract factor values across all samples
+            values = np.array([fv.get(factor_id, np.nan) for fv in factor_values_per_sample])
+            if np.any(np.isnan(values)):
+                continue
+
+            median = float(np.median(values))
+
+            # Partition into low/high buckets
+            low_mask = values < median
+            high_mask = ~low_mask
+
+            low_count = int(np.sum(low_mask))
+            high_count = int(np.sum(high_mask))
+
+            if low_count < min_bucket_size or high_count < min_bucket_size:
+                continue
+
+            # Compute bucket winners
+            low_bucket = self._compute_bucket_result(
+                low_mask, winner_per_sample, option_labels, option_means
+            )
+            high_bucket = self._compute_bucket_result(
+                high_mask, winner_per_sample, option_labels, option_means
+            )
+
+            winner_flips = low_bucket.winner_id != high_bucket.winner_id
+
+            if not winner_flips:
+                continue
+
+            # Get node metadata
+            node = factor_sampler._node_map.get(factor_id)
+            factor_label = node.label if node else factor_id
+            split_unit = (
+                node.observed_state.unit
+                if node and node.observed_state and node.observed_state.unit
+                else None
+            )
+
+            results.append(
+                ConditionalWinner(
+                    factor_id=factor_id,
+                    factor_label=factor_label,
+                    split_value=median,
+                    split_unit=split_unit,
+                    low_bucket=low_bucket,
+                    high_bucket=high_bucket,
+                    winner_flips=True,
+                )
+            )
+
+        return results if results else None
+
+    def _compute_bucket_result(
+        self,
+        mask: np.ndarray,
+        winner_per_sample: List[str],
+        option_labels: Dict[str, str],
+        option_means: Dict[str, float],
+    ) -> BucketResult:
+        """Compute win probabilities within a bucket of MC samples."""
+        indices = np.where(mask)[0]
+        bucket_size = len(indices)
+
+        # Count wins per option in this bucket
+        win_counts: Dict[str, int] = {}
+        for idx in indices:
+            winner = winner_per_sample[idx]
+            win_counts[winner] = win_counts.get(winner, 0) + 1
+
+        # Determine bucket winner (ties broken by higher mean outcome)
+        sorted_options = sorted(
+            win_counts.items(),
+            key=lambda x: (x[1], option_means.get(x[0], 0.0)),
+            reverse=True,
+        )
+
+        winner_id = sorted_options[0][0]
+        winner_prob = sorted_options[0][1] / bucket_size
+
+        runner_up_id = None
+        runner_up_prob = None
+        if len(sorted_options) > 1:
+            runner_up_id = sorted_options[1][0]
+            runner_up_prob = sorted_options[1][1] / bucket_size
+
+        return BucketResult(
+            n_samples=bucket_size,
+            winner_id=winner_id,
+            winner_label=option_labels.get(winner_id, winner_id),
+            winner_probability=winner_prob,
+            runner_up_id=runner_up_id,
+            runner_up_probability=runner_up_prob,
+        )
 
     def _compute_bootstrap_stability(
         self,

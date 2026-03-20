@@ -21,6 +21,7 @@ from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
 from src.models.critique import INTERNAL_ERROR
 from src.models.response_v2 import (
+    ConditionalWinnerV2,
     CritiqueV2,
     DiagnosticsV2,
     FactorSensitivityV2,
@@ -102,6 +103,7 @@ class ResponseBuilder:
         self.robustness: Optional[RobustnessResultV2] = None
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
         self.stability_thresholds = None  # 3C: stability thresholds metadata
+        self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -131,6 +133,12 @@ class ResponseBuilder:
         self.robustness = robustness
         self.factor_sensitivity = factor_sensitivity
         self.stability_thresholds = stability_thresholds
+
+    def set_conditional_winners(
+        self, conditional_winners: Optional[List[ConditionalWinnerV2]]
+    ) -> None:
+        """Set conditional winner analysis results."""
+        self.conditional_winners = conditional_winners
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -216,6 +224,7 @@ class ResponseBuilder:
             options=self.options,
             robustness=self.robustness,
             factor_sensitivity=self.factor_sensitivity,
+            conditional_winners=self.conditional_winners,
             stability_thresholds=self.stability_thresholds,  # 3C
             request_id=self.request_id,
             processing_time_ms=processing_time,

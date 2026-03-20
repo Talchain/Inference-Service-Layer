@@ -502,6 +502,33 @@ class StabilityThresholdsResponse(BaseModel):
     )
 
 
+class BucketResultV2(BaseModel):
+    """Win probability results for one side of a factor median split (V2 response)."""
+
+    n_samples: int = Field(..., ge=0)
+    winner_id: str = Field(...)
+    winner_label: str = Field(...)
+    winner_probability: float = Field(..., ge=0, le=1)
+    runner_up_id: Optional[str] = Field(None)
+    runner_up_probability: Optional[float] = Field(None, ge=0, le=1)
+
+    model_config = {"extra": "ignore"}
+
+
+class ConditionalWinnerV2(BaseModel):
+    """Factor-conditional win probability (V2). See ConditionalWinner for limitations."""
+
+    factor_id: str = Field(...)
+    factor_label: str = Field(...)
+    split_value: float = Field(...)
+    split_unit: Optional[str] = Field(None)
+    low_bucket: BucketResultV2 = Field(...)
+    high_bucket: BucketResultV2 = Field(...)
+    winner_flips: bool = Field(...)
+
+    model_config = {"extra": "ignore"}
+
+
 # =============================================================================
 # Main V2 Response
 # =============================================================================
@@ -558,6 +585,10 @@ class ISLResponseV2(BaseModel):
     robustness: Optional[RobustnessResultV2] = Field(None, description="Robustness assessment")
     factor_sensitivity: Optional[List[FactorSensitivityV2]] = Field(
         None, description="Factor sensitivity results"
+    )
+    conditional_winners: Optional[List[ConditionalWinnerV2]] = Field(
+        None,
+        description="Factors where the winning option flips depending on factor value range.",
     )
 
     # Inference warnings (e.g. STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE).

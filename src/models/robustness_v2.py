@@ -411,9 +411,7 @@ class GraphV2(BaseModel):
     uncertainty (strength distribution).
     """
 
-    nodes: List[NodeV2] = Field(
-        ..., min_length=1, max_length=50, description="List of graph nodes"
-    )
+    nodes: List[NodeV2] = Field(..., min_length=1, max_length=50, description="List of graph nodes")
     edges: List[EdgeV2] = Field(
         ..., max_length=200, description="List of directed edges with dual uncertainty"
     )
@@ -1069,6 +1067,46 @@ class ResponseMetadataV2(BaseModel):
     )
 
 
+class BucketResult(BaseModel):
+    """Win probability results for one side of a factor median split."""
+
+    n_samples: int = Field(..., ge=0, description="Number of MC samples in this bucket")
+    winner_id: str = Field(..., description="Option ID with highest win rate in this bucket")
+    winner_label: str = Field(..., description="Human-readable label of the winning option")
+    winner_probability: float = Field(
+        ..., ge=0, le=1, description="Win probability of the bucket winner"
+    )
+    runner_up_id: Optional[str] = Field(None, description="Second-place option ID")
+    runner_up_probability: Optional[float] = Field(
+        None, ge=0, le=1, description="Win probability of runner-up"
+    )
+
+
+class ConditionalWinner(BaseModel):
+    """
+    Conditional win probability analysis for a single factor.
+
+    Splits MC samples at the factor's median value and computes win probabilities
+    in each half. When the winner differs between halves, the decision is sensitive
+    to this factor's value range.
+
+    Limitations:
+    - Median split is simplistic. Does not detect non-monotonic effects or
+      factor interactions.
+    - Flips at extreme quantiles (top/bottom 10%) may be missed by a 50/50 split.
+    """
+
+    factor_id: str = Field(..., description="Node ID of the factor")
+    factor_label: str = Field(..., description="Human-readable label")
+    split_value: float = Field(..., description="Median factor value used as split point")
+    split_unit: Optional[str] = Field(None, description="Unit from observed_state if available")
+    low_bucket: BucketResult = Field(..., description="Results for samples below median")
+    high_bucket: BucketResult = Field(..., description="Results for samples at/above median")
+    winner_flips: bool = Field(
+        ..., description="True if winner differs between low and high buckets"
+    )
+
+
 class RobustnessResponseV2(BaseModel):
     """V2.2 robustness analysis response."""
 
@@ -1108,6 +1146,13 @@ class RobustnessResponseV2(BaseModel):
     inference_warnings: List[InferenceWarning] = Field(
         default_factory=list,
         description="Structured warnings about inference conditions that may affect result reliability",
+    )
+
+    # Conditional winners (factor-partitioned win probabilities)
+    conditional_winners: Optional[List[ConditionalWinner]] = Field(
+        None,
+        description="Factors where the winning option flips depending on factor value range. "
+        "Only present when at least one factor causes a winner flip.",
     )
 
     # Stability threshold metadata (3C-thresholds)
