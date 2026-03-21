@@ -799,7 +799,7 @@ async def _analyze_robustness_v2_enhanced(
         )
 
         # Convert conditional winners (V1 -> V2)
-        if v1_response.conditional_winners:
+        if v1_response.conditional_winners is not None:
             conditional_winners_v2 = [
                 ConditionalWinnerV2(
                     factor_id=cw.factor_id,
