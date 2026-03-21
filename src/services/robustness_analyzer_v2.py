@@ -326,6 +326,14 @@ class FactorSampler:
                 f"Supported: point_mass, normal, uniform"
             )
 
+    def get_uncertainty_map(self) -> Dict[str, "ParameterUncertainty"]:
+        """Return the factor uncertainty specifications keyed by node ID."""
+        return self._uncertainty_map
+
+    def get_node(self, node_id: str) -> Optional[NodeV2]:
+        """Return the node for the given ID, or None if not found."""
+        return self._node_map.get(node_id)
+
     def has_uncertainties(self) -> bool:
         """Check if any factor uncertainties are specified."""
         return len(self._uncertainty_map) > 0
@@ -1848,7 +1856,7 @@ class RobustnessAnalyzerV2:
             factor_values_per_sample: Factor values sampled per MC iteration
             winner_per_sample: Winning option ID per MC sample
             option_outcomes: Per-option outcome values (for tie-breaking by mean)
-            factor_sampler: FactorSampler (for _uncertainty_map and _node_map)
+            factor_sampler: FactorSampler (for uncertainty and node lookups)
             request: The analysis request (for option labels)
             min_bucket_size: Minimum samples per bucket (skip if fewer)
 
@@ -1866,7 +1874,7 @@ class RobustnessAnalyzerV2:
 
         results: List[ConditionalWinner] = []
 
-        for factor_id, uncertainty in factor_sampler._uncertainty_map.items():
+        for factor_id, uncertainty in factor_sampler.get_uncertainty_map().items():
             if uncertainty.distribution == "point_mass":
                 continue
 
@@ -1901,7 +1909,7 @@ class RobustnessAnalyzerV2:
                 continue
 
             # Get node metadata
-            node = factor_sampler._node_map.get(factor_id)
+            node = factor_sampler.get_node(factor_id)
             factor_label = node.label if node else factor_id
             split_unit = (
                 node.observed_state.unit

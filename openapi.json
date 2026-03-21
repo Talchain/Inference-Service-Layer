@@ -1,6 +1,124 @@
 {
   "components": {
     "schemas": {
+      "BucketResult": {
+        "description": "Win probability results for one side of a factor median split.",
+        "properties": {
+          "n_samples": {
+            "description": "Number of MC samples in this bucket",
+            "minimum": 0.0,
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "runner_up_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Second-place option ID",
+            "title": "Runner Up Id"
+          },
+          "runner_up_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Win probability of runner-up",
+            "title": "Runner Up Probability"
+          },
+          "winner_id": {
+            "description": "Option ID with highest win rate in this bucket",
+            "title": "Winner Id",
+            "type": "string"
+          },
+          "winner_label": {
+            "description": "Human-readable label of the winning option",
+            "title": "Winner Label",
+            "type": "string"
+          },
+          "winner_probability": {
+            "description": "Win probability of the bucket winner",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Winner Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "n_samples",
+          "winner_id",
+          "winner_label",
+          "winner_probability"
+        ],
+        "title": "BucketResult",
+        "type": "object"
+      },
+      "BucketResultV2": {
+        "description": "Win probability results for one side of a factor median split (V2 response).",
+        "properties": {
+          "n_samples": {
+            "minimum": 0.0,
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "runner_up_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runner Up Id"
+          },
+          "runner_up_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runner Up Probability"
+          },
+          "winner_id": {
+            "title": "Winner Id",
+            "type": "string"
+          },
+          "winner_label": {
+            "title": "Winner Label",
+            "type": "string"
+          },
+          "winner_probability": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Winner Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "n_samples",
+          "winner_id",
+          "winner_label",
+          "winner_probability"
+        ],
+        "title": "BucketResultV2",
+        "type": "object"
+      },
       "ClampMetrics": {
         "description": "Tracks out-of-bounds sampling for diagnostics.",
         "properties": {
@@ -36,6 +154,117 @@
           "clamp_rate"
         ],
         "title": "ClampMetrics",
+        "type": "object"
+      },
+      "ConditionalWinner": {
+        "description": "Conditional win probability analysis for a single factor.\n\nSplits MC samples at the factor's median value and computes win probabilities\nin each half. When the winner differs between halves, the decision is sensitive\nto this factor's value range.\n\nLimitations:\n- Median split is simplistic. Does not detect non-monotonic effects or\n  factor interactions.\n- Flips at extreme quantiles (top/bottom 10%) may be missed by a 50/50 split.",
+        "properties": {
+          "factor_id": {
+            "description": "Node ID of the factor",
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "factor_label": {
+            "description": "Human-readable label",
+            "title": "Factor Label",
+            "type": "string"
+          },
+          "high_bucket": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BucketResult"
+              }
+            ],
+            "description": "Results for samples at/above median"
+          },
+          "low_bucket": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BucketResult"
+              }
+            ],
+            "description": "Results for samples below median"
+          },
+          "split_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit from observed_state if available",
+            "title": "Split Unit"
+          },
+          "split_value": {
+            "description": "Median factor value used as split point",
+            "title": "Split Value",
+            "type": "number"
+          },
+          "winner_flips": {
+            "description": "True if winner differs between low and high buckets",
+            "title": "Winner Flips",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "factor_id",
+          "factor_label",
+          "split_value",
+          "low_bucket",
+          "high_bucket",
+          "winner_flips"
+        ],
+        "title": "ConditionalWinner",
+        "type": "object"
+      },
+      "ConditionalWinnerV2": {
+        "description": "Factor-conditional win probability (V2). See ConditionalWinner for limitations.",
+        "properties": {
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "factor_label": {
+            "title": "Factor Label",
+            "type": "string"
+          },
+          "high_bucket": {
+            "$ref": "#/components/schemas/BucketResultV2"
+          },
+          "low_bucket": {
+            "$ref": "#/components/schemas/BucketResultV2"
+          },
+          "split_unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Split Unit"
+          },
+          "split_value": {
+            "title": "Split Value",
+            "type": "number"
+          },
+          "winner_flips": {
+            "title": "Winner Flips",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "factor_id",
+          "factor_label",
+          "split_value",
+          "low_bucket",
+          "high_bucket",
+          "winner_flips"
+        ],
+        "title": "ConditionalWinnerV2",
         "type": "object"
       },
       "ConstraintAnalysis": {
@@ -470,6 +699,74 @@
           "path_strength_threshold"
         ],
         "title": "DiagnosticsV2",
+        "type": "object"
+      },
+      "EdgeEValueV2": {
+        "description": "E-value analogue for an edge: how wrong must the strength be to flip the recommendation?\n\nAnalogous to VanderWeele's E-value in observational epidemiology: larger values\nindicate the assumption is robust (needs a larger violation to overturn the finding).",
+        "properties": {
+          "current_mean": {
+            "description": "Current edge strength mean",
+            "title": "Current Mean",
+            "type": "number"
+          },
+          "e_value": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ratio of flip_mean to current_mean (>= 1.0). Large = robust assumption. 1.0 = already at the flip boundary. Null when edge is unflippable (see is_unflippable).",
+            "title": "E Value"
+          },
+          "edge_id": {
+            "description": "Edge identifier in 'from->to' format",
+            "title": "Edge Id",
+            "type": "string"
+          },
+          "flip_direction": {
+            "description": "Direction strength must move to flip the recommendation",
+            "enum": [
+              "increase",
+              "decrease"
+            ],
+            "title": "Flip Direction",
+            "type": "string"
+          },
+          "flip_mean": {
+            "description": "Minimum strength mean that flips the recommendation",
+            "title": "Flip Mean",
+            "type": "number"
+          },
+          "from_id": {
+            "description": "Source node ID",
+            "title": "From Id",
+            "type": "string"
+          },
+          "is_unflippable": {
+            "default": false,
+            "description": "True when no perturbation within [-1, 1] can flip the recommendation. When true, e_value is null.",
+            "title": "Is Unflippable",
+            "type": "boolean"
+          },
+          "to_id": {
+            "description": "Target node ID",
+            "title": "To Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "edge_id",
+          "from_id",
+          "to_id",
+          "flip_direction",
+          "current_mean",
+          "flip_mean"
+        ],
+        "title": "EdgeEValueV2",
         "type": "object"
       },
       "EdgeV2": {
@@ -921,6 +1218,22 @@
             ],
             "description": "Confidence level (omitted when not computed)",
             "title": "Confidence"
+          },
+          "confidence_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "bootstrap_sampling",
+                  "graph_structural"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source of confidence value: 'bootstrap_sampling' (from MC resampling) or 'graph_structural' (fallback from graph path analysis when bootstrap unavailable)",
+            "title": "Confidence Source"
           },
           "direction": {
             "description": "Direction of effect",
@@ -1502,6 +1815,21 @@
             "description": "Git commit hash (7 chars) for build verification",
             "title": "Build"
           },
+          "conditional_winners": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConditionalWinnerV2"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Factors where the winning option flips depending on factor value range.",
+            "title": "Conditional Winners"
+          },
           "critiques": {
             "description": "Structured critiques",
             "items": {
@@ -1530,6 +1858,21 @@
             "description": "ISL engine version",
             "title": "Engine Version",
             "type": "string"
+          },
+          "factor_evpi": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected Value of Perfect Information per factor: how much does removing this factor's uncertainty improve the decision metric?",
+            "title": "Factor Evpi"
           },
           "factor_sensitivity": {
             "anyOf": [
@@ -2658,6 +3001,12 @@
       "ResponseMetadataV2": {
         "description": "Execution metadata for v2 responses.",
         "properties": {
+          "auto_noise_applied": {
+            "default": false,
+            "description": "Whether auto-scaled noise (\u221a2 variance inflation) was applied to outcome distributions. Only applies to outcome/risk goal nodes. When true, p10/p90 spreads are ~\u221a2 wider than the purely model-driven distribution.",
+            "title": "Auto Noise Applied",
+            "type": "boolean"
+          },
           "clamp_metrics": {
             "anyOf": [
               {
@@ -2691,6 +3040,18 @@
             "description": "ISL service version",
             "title": "Isl Version",
             "type": "string"
+          },
+          "n_defaulted_root_nodes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of root nodes that defaulted to 0.0 due to missing observed_state.value. Non-zero indicates missing model inputs.",
+            "title": "N Defaulted Root Nodes"
           },
           "n_samples_used": {
             "description": "Actual samples used",
@@ -2997,6 +3358,18 @@
             ],
             "description": "Causal graph with dual uncertainty edges"
           },
+          "include_e_values": {
+            "default": false,
+            "description": "Compute E-value analogue per edge (minimum strength perturbation to flip recommendation). Gated for performance \u2014 adds up to 2s latency.",
+            "title": "Include E Values",
+            "type": "boolean"
+          },
+          "include_voi": {
+            "default": false,
+            "description": "Compute Expected Value of Perfect Information (EVPI) per factor. Requires parameter_uncertainties.",
+            "title": "Include Voi",
+            "type": "boolean"
+          },
           "n_samples": {
             "default": 1000,
             "description": "Number of Monte Carlo samples",
@@ -3156,6 +3529,21 @@
             ],
             "description": "Execution metadata"
           },
+          "conditional_winners": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConditionalWinner"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Factors where the winning option flips depending on factor value range. Only present when at least one factor causes a winner flip.",
+            "title": "Conditional Winners"
+          },
           "critiques": {
             "description": "Analysis critiques and warnings",
             "items": {
@@ -3163,6 +3551,36 @@
             },
             "title": "Critiques",
             "type": "array"
+          },
+          "edge_e_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "E-value analogue per edge: minimum strength perturbation to flip recommendation. Only included when computed within time budget.",
+            "title": "Edge E Values"
+          },
+          "factor_evpi": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected Value of Perfect Information per factor: how much does removing this factor's uncertainty improve P(joint_goal)?",
+            "title": "Factor Evpi"
           },
           "factor_sensitivity": {
             "description": "Sensitivity results per factor node value",
@@ -3266,6 +3684,21 @@
             "title": "Confidence",
             "type": "number"
           },
+          "defaulted_root_node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Root node IDs that defaulted to 0.0 (trigger for stability penalty).",
+            "title": "Defaulted Root Node Ids"
+          },
           "fragile_edges": {
             "description": "Edges that could flip the decision (format: 'from->to')",
             "items": {
@@ -3313,6 +3746,18 @@
             },
             "title": "Robust Edges",
             "type": "array"
+          },
+          "stability_penalty_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multiplicative penalty applied to recommendation_stability due to missing root node values. 1.0 = no penalty.",
+            "title": "Stability Penalty Factor"
           }
         },
         "required": [
@@ -3333,6 +3778,36 @@
             "minimum": 0.0,
             "title": "Confidence",
             "type": "number"
+          },
+          "defaulted_root_node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Root node IDs that defaulted to 0.0, triggering the stability penalty.",
+            "title": "Defaulted Root Node Ids"
+          },
+          "edge_e_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EdgeEValueV2"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "E-value analogue per edge: how wrong must the strength be to flip the recommendation. Only included when computed within budget.",
+            "title": "Edge E Values"
           },
           "fragile_edges": {
             "anyOf": [
@@ -3430,6 +3905,18 @@
             ],
             "description": "Factor sensitivity breakdown",
             "title": "Sensitive Factors"
+          },
+          "stability_penalty_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Multiplicative penalty applied to recommendation_stability due to missing root node values. 1.0 = no penalty. Only present when root nodes defaulted to 0.0.",
+            "title": "Stability Penalty Factor"
           }
         },
         "required": [
