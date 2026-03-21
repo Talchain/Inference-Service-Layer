@@ -365,6 +365,37 @@ class FragileEdgeV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class EdgeEValueV2(BaseModel):
+    """E-value analogue for an edge: how wrong must the strength be to flip the recommendation?
+
+    Analogous to VanderWeele's E-value in observational epidemiology: larger values
+    indicate the assumption is robust (needs a larger violation to overturn the finding).
+    """
+
+    edge_id: str = Field(..., description="Edge identifier in 'from->to' format")
+    from_id: str = Field(..., description="Source node ID")
+    to_id: str = Field(..., description="Target node ID")
+    e_value: Optional[float] = Field(
+        None,
+        ge=1.0,
+        description="Ratio of flip_mean to current_mean (>= 1.0). "
+        "Large = robust assumption. 1.0 = already at the flip boundary. "
+        "Null when edge is unflippable (see is_unflippable).",
+    )
+    is_unflippable: bool = Field(
+        default=False,
+        description="True when no perturbation within [-1, 1] can flip the recommendation. "
+        "When true, e_value is null.",
+    )
+    flip_direction: Literal["increase", "decrease"] = Field(
+        ..., description="Direction strength must move to flip the recommendation"
+    )
+    current_mean: float = Field(..., description="Current edge strength mean")
+    flip_mean: float = Field(..., description="Minimum strength mean that flips the recommendation")
+
+    model_config = {"extra": "ignore"}
+
+
 # =============================================================================
 # Robustness Result
 # =============================================================================
@@ -403,6 +434,25 @@ class RobustnessResultV2(BaseModel):
         None, ge=0, le=1, description="P(same recommendation across samples) (V1 compat)"
     )
 
+    # E-value analogue per edge (enhancement)
+    edge_e_values: Optional[List[EdgeEValueV2]] = Field(
+        None,
+        description="E-value analogue per edge: how wrong must the strength be "
+        "to flip the recommendation. Only included when computed within budget.",
+    )
+
+    # Trust penalty metadata (audit trail for root node default trust downgrade)
+    stability_penalty_factor: Optional[float] = Field(
+        None,
+        description="Multiplicative penalty applied to recommendation_stability "
+        "due to missing root node values. 1.0 = no penalty. "
+        "Only present when root nodes defaulted to 0.0.",
+    )
+    defaulted_root_node_ids: Optional[List[str]] = Field(
+        None,
+        description="Root node IDs that defaulted to 0.0, triggering the stability penalty.",
+    )
+
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {"extra": "ignore"}
@@ -433,6 +483,11 @@ class FactorSensitivityV2(BaseModel):
     direction: Literal["positive", "negative"] = Field(..., description="Direction of effect")
     confidence: Optional[float] = Field(
         None, ge=0, le=1, description="Confidence level (omitted when not computed)"
+    )
+    confidence_source: Optional[Literal["bootstrap_sampling", "graph_structural"]] = Field(
+        None,
+        description="Source of confidence value: 'bootstrap_sampling' (from MC resampling) "
+        "or 'graph_structural' (fallback from graph path analysis when bootstrap unavailable)",
     )
     importance_rank: Optional[int] = Field(
         None, ge=1, description="Rank by importance (1 = most important)"
@@ -604,6 +659,13 @@ class ISLResponseV2(BaseModel):
         None,
         description="Thresholds used for attribution_stability classification. "
         "Provisional — pending scientific review. NOT included in response_hash.",
+    )
+
+    # EVPI results (enhancement — gated by include_voi flag)
+    factor_evpi: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Expected Value of Perfect Information per factor: how much does "
+        "removing this factor's uncertainty improve the decision metric?",
     )
 
     # Correlation
