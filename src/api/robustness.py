@@ -30,6 +30,8 @@ from src.constants import (
 )
 from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
+    BucketResultV2,
+    ConditionalWinnerV2,
     ConstraintAnalysisV2,
     ConstraintResultV2,
     DiagnosticsV2,
@@ -843,6 +845,36 @@ async def _analyze_robustness_v2_enhanced(
             stability_thresholds=v1_response.stability_thresholds,  # 3C
             factor_evpi=v1_response.factor_evpi,
         )
+
+        # Convert conditional winners (V1 -> V2)
+        if v1_response.conditional_winners is not None:
+            conditional_winners_v2 = [
+                ConditionalWinnerV2(
+                    factor_id=cw.factor_id,
+                    factor_label=cw.factor_label,
+                    split_value=cw.split_value,
+                    split_unit=cw.split_unit,
+                    low_bucket=BucketResultV2(
+                        n_samples=cw.low_bucket.n_samples,
+                        winner_id=cw.low_bucket.winner_id,
+                        winner_label=cw.low_bucket.winner_label,
+                        winner_probability=cw.low_bucket.winner_probability,
+                        runner_up_id=cw.low_bucket.runner_up_id,
+                        runner_up_probability=cw.low_bucket.runner_up_probability,
+                    ),
+                    high_bucket=BucketResultV2(
+                        n_samples=cw.high_bucket.n_samples,
+                        winner_id=cw.high_bucket.winner_id,
+                        winner_label=cw.high_bucket.winner_label,
+                        winner_probability=cw.high_bucket.winner_probability,
+                        runner_up_id=cw.high_bucket.runner_up_id,
+                        runner_up_probability=cw.high_bucket.runner_up_probability,
+                    ),
+                    winner_flips=cw.winner_flips,
+                )
+                for cw in v1_response.conditional_winners
+            ]
+            builder.set_conditional_winners(conditional_winners_v2)
 
         # Update diagnostics with sampling info
         if include_diagnostics and builder.diagnostics:
