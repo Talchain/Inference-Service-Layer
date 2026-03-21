@@ -879,6 +879,7 @@ class RobustnessAnalyzerV2:
                 "recommendation_confidence": recommendation_confidence,
                 "is_robust": robustness.is_robust,
                 "execution_time_ms": execution_time,
+                "conditional_winners_count": len(conditional_winners) if conditional_winners else 0,
             },
         )
 
