@@ -117,7 +117,7 @@ class CircuitBreaker:
         logger.info(
             f"circuit_breaker_initialized",
             extra={
-                "name": name,
+                "circuit_name": name,
                 "failure_threshold": failure_threshold,
                 "timeout": timeout
             }
