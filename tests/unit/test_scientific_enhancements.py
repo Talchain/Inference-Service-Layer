@@ -582,7 +582,9 @@ class TestTrustPenaltyFloor:
         """Penalty is 0.05 per defaulted root before hitting floor."""
         for n_defaulted, expected in [(1, 0.95), (3, 0.85), (10, 0.5), (17, 0.15)]:
             factor = max(0.1, 1.0 - 0.05 * n_defaulted)
-            assert abs(factor - expected) < 1e-9, f"n={n_defaulted}: expected {expected}, got {factor}"
+            assert (
+                abs(factor - expected) < 1e-9
+            ), f"n={n_defaulted}: expected {expected}, got {factor}"
 
 
 class TestEValueUnflippableSemantics:
@@ -693,3 +695,187 @@ class TestResponseShapeIntegration:
         for evpi in response.factor_evpi:
             assert "n_evpi_samples" in evpi
             assert isinstance(evpi["n_evpi_samples"], int)
+
+
+# ===========================================================================
+# EVPI metric_type branch coverage
+# ===========================================================================
+
+
+class TestEVPIMetricType:
+    """Verify metric_type switches based on goal_constraints."""
+
+    def test_metric_type_is_p_win_recommended_without_constraints(self):
+        """Without goal_constraints, metric_type should be p_win_recommended."""
+        graph = _make_graph()
+        request = _make_request(graph, include_voi=True, include_uncertainties=True)
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+        assert response.factor_evpi is not None
+        for evpi in response.factor_evpi:
+            assert evpi["metric_type"] == "p_win_recommended"
+
+    def test_metric_type_is_p_joint_goal_with_constraints(self):
+        """With goal_constraints, metric_type should be p_joint_goal."""
+        graph = _make_graph()
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(id="opt_high", label="High", interventions={"factor_a": 0.9}),
+                InterventionOption(id="opt_low", label="Low", interventions={"factor_a": 0.1}),
+            ],
+            goal_node_id="outcome",
+            seed=12345,
+            n_samples=200,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id="factor_a", distribution="normal", std=0.1),
+                ParameterUncertainty(node_id="factor_b", distribution="normal", std=0.15),
+            ],
+            include_voi=True,
+            goal_constraints=[
+                GoalConstraint(node_id="outcome", operator=">=", value=0.3),
+            ],
+        )
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+        assert response.factor_evpi is not None
+        for evpi in response.factor_evpi:
+            assert evpi["metric_type"] == "p_joint_goal"
+
+
+# ===========================================================================
+# E-value bidirected edge exclusion
+# ===========================================================================
+
+
+class TestEValueBidirectedExclusion:
+    """Verify bidirected edges are excluded from E-value computation."""
+
+    def test_bidirected_edges_excluded_from_e_values(self):
+        """E-values should only be computed for directed (causal) edges."""
+        # Use standard graph node names so _make_request interventions are valid
+        graph = _make_graph()
+        # Add a bidirected edge
+        graph.edges.append(
+            EdgeV2(
+                **{"from": "factor_a"},
+                to="factor_b",
+                strength=StrengthDistribution(mean=0.4, std=0.1),
+                exists_probability=0.9,
+                edge_type="bidirected",
+            )
+        )
+        request = _make_request(graph, include_e_values=True)
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+        assert response.edge_e_values is not None
+        edge_ids = {ev["edge_id"] for ev in response.edge_e_values}
+        # Bidirected edge factor_a->factor_b must NOT appear
+        assert "factor_a->factor_b" not in edge_ids
+        # Only directed edges should be present (factor_a->outcome, factor_b->outcome)
+        assert len(edge_ids) == 2
+        assert "factor_a->outcome" in edge_ids
+        assert "factor_b->outcome" in edge_ids
+
+
+# ===========================================================================
+# E-value budget timeout
+# ===========================================================================
+
+
+class TestEValueBudgetTimeout:
+    """Verify E-value computation respects the 2s budget."""
+
+    def test_budget_exceeded_returns_none(self):
+        """When budget is set to 0, edge_e_values should be None (budget exceeded)."""
+        graph = _make_graph()
+        request = _make_request(graph, include_e_values=True)
+        analyzer = RobustnessAnalyzerV2()
+        # Set budget to 0ms so any edge computation exceeds it
+        original_budget = analyzer.E_VALUE_BUDGET_MS
+        analyzer.E_VALUE_BUDGET_MS = 0
+        try:
+            response = analyzer.analyze(request)
+            assert response.edge_e_values is None, "Should return None when budget is 0ms"
+        finally:
+            analyzer.E_VALUE_BUDGET_MS = original_budget
+
+
+# ===========================================================================
+# Root node penalty: intervention-overridden roots
+# ===========================================================================
+
+
+class TestRootPenaltyInterventionOverride:
+    """Verify root penalty is suppressed when all options intervene on the root."""
+
+    def test_no_warning_when_all_options_intervene(self):
+        """Root without observed_state but covered by all interventions: no warning."""
+        nodes = [
+            NodeV2(id="root_x", kind="factor", label="X", observed_state=None),
+            NodeV2(
+                id="outcome", kind="outcome", label="O", observed_state=ObservedState(value=0.0)
+            ),
+        ]
+        edges = [
+            EdgeV2(
+                **{"from": "root_x"},
+                to="outcome",
+                strength=StrengthDistribution(mean=0.6, std=0.1),
+                exists_probability=1.0,
+            ),
+        ]
+        graph = GraphV2(nodes=nodes, edges=edges)
+        # Both options intervene on root_x
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(id="opt_a", label="A", interventions={"root_x": 0.5}),
+                InterventionOption(id="opt_b", label="B", interventions={"root_x": 0.7}),
+            ],
+            goal_node_id="outcome",
+            seed=42,
+            n_samples=100,
+        )
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+        root_warnings = [
+            w for w in response.inference_warnings if w.code == "ROOT_NODE_DEFAULT_VALUE"
+        ]
+        assert len(root_warnings) == 0, "Should not warn when all options intervene on root"
+        assert response.robustness.stability_penalty_factor is None
+
+    def test_warning_when_partial_intervention(self):
+        """Root without observed_state with only some options intervening: should warn."""
+        nodes = [
+            NodeV2(id="root_x", kind="factor", label="X", observed_state=None),
+            NodeV2(
+                id="outcome", kind="outcome", label="O", observed_state=ObservedState(value=0.0)
+            ),
+        ]
+        edges = [
+            EdgeV2(
+                **{"from": "root_x"},
+                to="outcome",
+                strength=StrengthDistribution(mean=0.6, std=0.1),
+                exists_probability=1.0,
+            ),
+        ]
+        graph = GraphV2(nodes=nodes, edges=edges)
+        # Only opt_a intervenes on root_x, opt_b does not
+        request = RobustnessRequestV2(
+            graph=graph,
+            options=[
+                InterventionOption(id="opt_a", label="A", interventions={"root_x": 0.5}),
+                InterventionOption(id="opt_b", label="B", interventions={}),
+            ],
+            goal_node_id="outcome",
+            seed=42,
+            n_samples=100,
+        )
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+        root_warnings = [
+            w for w in response.inference_warnings if w.code == "ROOT_NODE_DEFAULT_VALUE"
+        ]
+        assert len(root_warnings) == 1, "Should warn when not all options intervene"

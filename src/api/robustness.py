@@ -801,6 +801,9 @@ async def _analyze_robustness_v2_enhanced(
                     confidence_val = bootstrap_confidence
                     confidence_src = "bootstrap_sampling"
                 else:
+                    # Defensive fallback: in normal flow, bootstrap always runs
+                    # when factor sensitivity exists, so this branch is unreachable.
+                    # Kept as a safety net for future code paths that may bypass bootstrap.
                     confidence_val = compute_graph_structural_confidence(fs.influence_score)
                     confidence_src = "graph_structural"
 

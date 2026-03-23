@@ -760,7 +760,10 @@ class RobustnessAnalyzerV2:
                 node.observed_state is not None and node.observed_state.value is not None
             )
             has_uncertainty = node.id in uncertainty_node_ids
-            if not has_observed_value and not has_uncertainty:
+            # Skip warning if every option intervenes on this node
+            # (intervention value overrides the base, so default 0.0 is never used)
+            all_options_intervene = all(node.id in opt.interventions for opt in request.options)
+            if not has_observed_value and not has_uncertainty and not all_options_intervene:
                 defaulted_root_node_ids.append(node.id)
                 inference_warnings.append(
                     InferenceWarning(
@@ -2513,6 +2516,16 @@ class RobustnessAnalyzerV2:
 
                 # Binary search for the flip point
                 for _ in range(self.E_VALUE_BISECT_STEPS):
+                    # Inner budget check — abort if time exceeded mid-search
+                    if (time.time() - t0) * 1000 > self.E_VALUE_BUDGET_MS:
+                        self.logger.info(
+                            "e_value_budget_exceeded",
+                            extra={
+                                "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                                "edges_completed": len(results),
+                            },
+                        )
+                        return None
                     mid = (lo + hi) / 2
                     test_config = baseline_config.copy()
                     test_config[edge_key] = mid * ep
@@ -2743,15 +2756,15 @@ class RobustnessAnalyzerV2:
             )
             return joint_prob
         else:
-            # P(win) of the fixed recommended option
-            win_count = 0
+            # P(win) of the fixed recommended option.
+            # Tie-breaking mirrors main MC: equal credit split among tied options
+            # to avoid insertion-order bias (see _run_monte_carlo tie logic).
+            win_count = 0.0
             for i in range(n_samples):
-                sample_winner = max(
-                    option_outcomes.keys(),
-                    key=lambda oid, idx=i: option_outcomes[oid][idx],  # type: ignore[misc]
-                )
-                if sample_winner == recommended_option_id:
-                    win_count += 1
+                max_outcome = max(option_outcomes[oid][i] for oid in option_outcomes)
+                winners = [oid for oid in option_outcomes if option_outcomes[oid][i] == max_outcome]
+                if recommended_option_id in winners:
+                    win_count += 1.0 / len(winners)
             return win_count / n_samples
 
     def _compute_alternative_winners(
