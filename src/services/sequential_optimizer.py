@@ -122,7 +122,7 @@ class SequentialOptimizer:
         beliefs: BeliefState,
         objective: OptimizationObjective,
         constraints: ExperimentConstraints,
-        history: List[Dict] = None,
+        history: Optional[List[Dict]] = None,
         seed: Optional[int] = None,
     ) -> RecommendedExperiment:
         """
@@ -150,13 +150,11 @@ class SequentialOptimizer:
                 "n_samples": N_THOMPSON_SAMPLES,
                 "n_beliefs": len(beliefs.parameter_distributions),
                 "n_history": len(history) if history else 0,
-            }
+            },
         )
 
         # Generate candidate actions
-        candidate_actions = self._generate_candidate_actions(
-            constraints.feasible_interventions
-        )
+        candidate_actions = self._generate_candidate_actions(constraints.feasible_interventions)
 
         for action in candidate_actions:
             # Sample parameters from beliefs
@@ -180,9 +178,7 @@ class SequentialOptimizer:
 
         # Compute expected outcome and information gain
         expected_outcome = self._predict_outcome(best_action, beliefs)
-        information_gain = self._estimate_information_gain(
-            best_action, beliefs, history or []
-        )
+        information_gain = self._estimate_information_gain(best_action, beliefs, history or [])
 
         # Compute exploration vs exploitation score
         exploration_score = self._compute_exploration_score(best_action, history or [])
@@ -192,9 +188,7 @@ class SequentialOptimizer:
             expected_outcome=expected_outcome,
             expected_information_gain=information_gain,
             cost_estimate=self._estimate_cost(best_action),
-            rationale=self._generate_rationale(
-                best_action, expected_outcome, information_gain
-            ),
+            rationale=self._generate_rationale(best_action, expected_outcome, information_gain),
             exploration_vs_exploitation=exploration_score,
         )
 
@@ -276,9 +270,7 @@ class SequentialOptimizer:
 
         return value
 
-    def _predict_outcome(
-        self, action: Dict[str, float], beliefs: BeliefState
-    ) -> Dict[str, float]:
+    def _predict_outcome(self, action: Dict[str, float], beliefs: BeliefState) -> Dict[str, float]:
         """
         Predict outcome for action using current beliefs.
 
@@ -340,7 +332,7 @@ class SequentialOptimizer:
             extra={
                 "min_distance": min_distance,
                 "information_gain": information_gain,
-            }
+            },
         )
 
         return information_gain
@@ -365,11 +357,9 @@ class SequentialOptimizer:
             v2 = action2.get(var, 0)
             distance_sq += (v1 - v2) ** 2
 
-        return np.sqrt(distance_sq)
+        return float(np.sqrt(distance_sq))
 
-    def _compute_exploration_score(
-        self, action: Dict[str, float], history: List[Dict]
-    ) -> float:
+    def _compute_exploration_score(self, action: Dict[str, float], history: List[Dict]) -> float:
         """
         Compute exploration vs exploitation score.
 

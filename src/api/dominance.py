@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 async def detect_dominance(
     request: DominanceRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-    dominance_analyzer: DominanceAnalyzer = Depends(get_dominance_analyzer)
+    dominance_analyzer: DominanceAnalyzer = Depends(get_dominance_analyzer),
 ) -> DominanceResponse:
     """
     Detect dominance relationships between options.
@@ -87,8 +87,7 @@ async def detect_dominance(
 
         # Perform dominance analysis
         dominated_relations, non_dominated_ids = dominance_analyzer.analyze(
-            options=request.options,
-            criteria=request.criteria
+            options=request.options, criteria=request.criteria
         )
 
         # Calculate frontier statistics
@@ -124,10 +123,7 @@ async def detect_dominance(
             "dominance_validation_error",
             extra={"request_id": request_id, "error": str(e)},
         )
-        raise HTTPException(
-            status_code=400,
-            detail=f"Validation error: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
 
     except HTTPException:
         raise
@@ -139,8 +135,7 @@ async def detect_dominance(
             exc_info=True,
         )
         raise HTTPException(
-            status_code=500,
-            detail="Failed to perform dominance analysis. Check logs for details."
+            status_code=500, detail="Failed to perform dominance analysis. Check logs for details."
         )
 
 
@@ -177,7 +172,7 @@ async def detect_dominance(
 async def compute_pareto_frontier(
     request: ParetoRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-    dominance_analyzer: DominanceAnalyzer = Depends(get_dominance_analyzer)
+    dominance_analyzer: DominanceAnalyzer = Depends(get_dominance_analyzer),
 ) -> ParetoResponse:
     """
     Compute Pareto frontier from options.
@@ -208,8 +203,7 @@ async def compute_pareto_frontier(
 
         # Perform dominance analysis (Pareto frontier = non-dominated options)
         dominated_relations, non_dominated_ids = dominance_analyzer.analyze(
-            options=request.options,
-            criteria=request.criteria
+            options=request.options, criteria=request.criteria
         )
 
         # Build frontier options with full details
@@ -218,16 +212,19 @@ async def compute_pareto_frontier(
             ParetoFrontierOption(
                 option_id=opt_id,
                 option_label=option_lookup[opt_id].option_label,
-                scores=option_lookup[opt_id].scores
+                scores=option_lookup[opt_id].scores,
             )
             for opt_id in non_dominated_ids
         ]
 
         # Check if frontier needs truncation
         frontier_truncated = False
-        if len(frontier_options) > request.max_frontier_size:
+        if (
+            request.max_frontier_size is not None
+            and len(frontier_options) > request.max_frontier_size
+        ):
             frontier_truncated = True
-            frontier_options = frontier_options[:request.max_frontier_size]
+            frontier_options = frontier_options[: request.max_frontier_size]
 
         logger.info(
             "pareto_completed",
@@ -259,10 +256,7 @@ async def compute_pareto_frontier(
             "pareto_validation_error",
             extra={"request_id": request_id, "error": str(e)},
         )
-        raise HTTPException(
-            status_code=400,
-            detail=f"Validation error: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
 
     except HTTPException:
         raise
@@ -274,6 +268,5 @@ async def compute_pareto_frontier(
             exc_info=True,
         )
         raise HTTPException(
-            status_code=500,
-            detail="Failed to compute Pareto frontier. Check logs for details."
+            status_code=500, detail="Failed to compute Pareto frontier. Check logs for details."
         )

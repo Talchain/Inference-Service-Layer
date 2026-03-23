@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 # Circuit breaker configuration
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5  # Failures before opening circuit
@@ -41,6 +41,7 @@ DEFAULT_BACKOFF_MULTIPLIER = 2.0
 
 class ServiceHealth(Enum):
     """Service health states."""
+
     HEALTHY = "healthy"
     DEGRADED = "degraded"
     FAILING = "failing"
@@ -48,13 +49,15 @@ class ServiceHealth(Enum):
 
 class CircuitState(Enum):
     """Circuit breaker states."""
+
     CLOSED = "closed"  # Normal operation
-    OPEN = "open"      # Failing, reject requests
+    OPEN = "open"  # Failing, reject requests
     HALF_OPEN = "half_open"  # Testing if recovered
 
 
 class FallbackStrategy(Enum):
     """Fallback strategy types."""
+
     SIMPLE = "simple"  # Return simplified result
     CACHED = "cached"  # Return cached result
     DEFAULT = "default"  # Return safe default
@@ -63,12 +66,13 @@ class FallbackStrategy(Enum):
 
 class RecoveryError(Exception):
     """Base exception for error recovery."""
+
     def __init__(
         self,
         message: str,
         original_error: Optional[Exception] = None,
         fallback_used: Optional[FallbackStrategy] = None,
-        degraded_result: Optional[Any] = None
+        degraded_result: Optional[Any] = None,
     ):
         super().__init__(message)
         self.original_error = original_error
@@ -92,7 +96,7 @@ class CircuitBreaker:
         name: str,
         failure_threshold: int = CIRCUIT_BREAKER_FAILURE_THRESHOLD,
         success_threshold: int = CIRCUIT_BREAKER_SUCCESS_THRESHOLD,
-        timeout: int = CIRCUIT_BREAKER_TIMEOUT
+        timeout: int = CIRCUIT_BREAKER_TIMEOUT,
     ):
         """
         Initialize circuit breaker.
@@ -119,11 +123,11 @@ class CircuitBreaker:
             extra={
                 "circuit_name": name,
                 "failure_threshold": failure_threshold,
-                "timeout": timeout
-            }
+                "timeout": timeout,
+            },
         )
 
-    def call(self, func: Callable[..., T], *args, **kwargs) -> T:
+    def call(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """
         Execute function with circuit breaker protection.
 
@@ -143,24 +147,20 @@ class CircuitBreaker:
                 self._transition_to_half_open()
             else:
                 logger.warning(
-                    f"circuit_breaker_open",
-                    extra={"name": self.name, "state": self.state.value}
+                    f"circuit_breaker_open", extra={"name": self.name, "state": self.state.value}
                 )
                 raise RecoveryError(
                     f"Circuit breaker '{self.name}' is OPEN - service unavailable",
-                    fallback_used=FallbackStrategy.DEFAULT
+                    fallback_used=FallbackStrategy.DEFAULT,
                 )
 
         # Check half-open limit
         if self.state == CircuitState.HALF_OPEN:
             if self.half_open_calls >= CIRCUIT_BREAKER_HALF_OPEN_MAX_CALLS:
-                logger.warning(
-                    f"circuit_breaker_half_open_limit",
-                    extra={"name": self.name}
-                )
+                logger.warning(f"circuit_breaker_half_open_limit", extra={"name": self.name})
                 raise RecoveryError(
                     f"Circuit breaker '{self.name}' half-open limit reached",
-                    fallback_used=FallbackStrategy.DEFAULT
+                    fallback_used=FallbackStrategy.DEFAULT,
                 )
             self.half_open_calls += 1
 
@@ -182,16 +182,13 @@ class CircuitBreaker:
         elapsed = (datetime.now() - self.last_failure_time).total_seconds()
         return elapsed >= self.timeout
 
-    def _transition_to_half_open(self):
+    def _transition_to_half_open(self) -> None:
         """Transition from OPEN to HALF_OPEN."""
         self.state = CircuitState.HALF_OPEN
         self.half_open_calls = 0
-        logger.info(
-            f"circuit_breaker_half_open",
-            extra={"name": self.name}
-        )
+        logger.info(f"circuit_breaker_half_open", extra={"name": self.name})
 
-    def _on_success(self):
+    def _on_success(self) -> None:
         """Handle successful call."""
         if self.state == CircuitState.HALF_OPEN:
             self.success_count += 1
@@ -203,7 +200,7 @@ class CircuitBreaker:
             # Reset failure count on success
             self.failure_count = 0
 
-    def _on_failure(self, error: Exception):
+    def _on_failure(self, error: Exception) -> None:
         """Handle failed call."""
         self.last_failure_time = datetime.now()
 
@@ -223,32 +220,26 @@ class CircuitBreaker:
                 "name": self.name,
                 "state": self.state.value,
                 "failure_count": self.failure_count,
-                "error": str(error)
-            }
+                "error": str(error),
+            },
         )
 
-    def _open_circuit(self):
+    def _open_circuit(self) -> None:
         """Open the circuit."""
         self.state = CircuitState.OPEN
         self.success_count = 0
         logger.error(
             f"circuit_breaker_opened",
-            extra={
-                "name": self.name,
-                "failure_count": self.failure_count
-            }
+            extra={"name": self.name, "failure_count": self.failure_count},
         )
 
-    def _close_circuit(self):
+    def _close_circuit(self) -> None:
         """Close the circuit (recovered)."""
         self.state = CircuitState.CLOSED
         self.failure_count = 0
         self.success_count = 0
         self.half_open_calls = 0
-        logger.info(
-            f"circuit_breaker_closed",
-            extra={"name": self.name}
-        )
+        logger.info(f"circuit_breaker_closed", extra={"name": self.name})
 
 
 class RetryStrategy:
@@ -264,7 +255,7 @@ class RetryStrategy:
         initial_delay: float = DEFAULT_INITIAL_DELAY,
         max_delay: float = DEFAULT_MAX_DELAY,
         backoff_multiplier: float = DEFAULT_BACKOFF_MULTIPLIER,
-        retryable_exceptions: Optional[List[type]] = None
+        retryable_exceptions: Optional[List[type]] = None,
     ):
         """
         Initialize retry strategy.
@@ -282,7 +273,7 @@ class RetryStrategy:
         self.backoff_multiplier = backoff_multiplier
         self.retryable_exceptions = retryable_exceptions or [Exception]
 
-    def execute(self, func: Callable[..., T], *args, **kwargs) -> T:
+    def execute(self, func: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """
         Execute function with retry logic.
 
@@ -309,8 +300,8 @@ class RetryStrategy:
                         extra={
                             "function": func.__name__,
                             "attempt": attempt,
-                            "total_attempts": self.max_retries + 1
-                        }
+                            "total_attempts": self.max_retries + 1,
+                        },
                     )
 
                 return result
@@ -327,11 +318,7 @@ class RetryStrategy:
                 if attempt >= self.max_retries:
                     logger.error(
                         f"retry_exhausted",
-                        extra={
-                            "function": func.__name__,
-                            "attempts": attempt + 1,
-                            "error": str(e)
-                        }
+                        extra={"function": func.__name__, "attempts": attempt + 1, "error": str(e)},
                     )
                     raise
 
@@ -343,8 +330,8 @@ class RetryStrategy:
                         "attempt": attempt + 1,
                         "max_retries": self.max_retries,
                         "delay": delay,
-                        "error": str(e)
-                    }
+                        "error": str(e),
+                    },
                 )
 
                 time.sleep(delay)
@@ -357,7 +344,7 @@ class RetryStrategy:
 def with_fallback(
     fallback_func: Callable[..., T],
     fallback_strategy: FallbackStrategy = FallbackStrategy.SIMPLE,
-    log_fallback: bool = True
+    log_fallback: bool = True,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator for graceful degradation with fallback.
@@ -376,9 +363,10 @@ def with_fallback(
     Returns:
         Decorated function
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             try:
                 return func(*args, **kwargs)
 
@@ -390,8 +378,8 @@ def with_fallback(
                             "function": func.__name__,
                             "fallback_strategy": fallback_strategy.value,
                             "error": str(e),
-                            "error_type": type(e).__name__
-                        }
+                            "error_type": type(e).__name__,
+                        },
                     )
 
                 try:
@@ -402,8 +390,8 @@ def with_fallback(
                             f"fallback_succeeded",
                             extra={
                                 "function": func.__name__,
-                                "fallback_strategy": fallback_strategy.value
-                            }
+                                "fallback_strategy": fallback_strategy.value,
+                            },
                         )
 
                     return result
@@ -414,22 +402,21 @@ def with_fallback(
                         extra={
                             "function": func.__name__,
                             "primary_error": str(e),
-                            "fallback_error": str(fallback_error)
-                        }
+                            "fallback_error": str(fallback_error),
+                        },
                     )
                     raise RecoveryError(
                         f"Both primary and fallback failed for {func.__name__}",
                         original_error=e,
-                        fallback_used=fallback_strategy
+                        fallback_used=fallback_strategy,
                     )
 
         return wrapper
+
     return decorator
 
 
-def with_circuit_breaker(
-    breaker: CircuitBreaker
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
+def with_circuit_breaker(breaker: CircuitBreaker) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator for circuit breaker pattern.
 
@@ -447,18 +434,21 @@ def with_circuit_breaker(
     Returns:
         Decorated function
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             return breaker.call(func, *args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
 def with_retry(
     max_retries: int = DEFAULT_MAX_RETRIES,
     initial_delay: float = DEFAULT_INITIAL_DELAY,
-    retryable_exceptions: Optional[List[type]] = None
+    retryable_exceptions: Optional[List[type]] = None,
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """
     Decorator for retry logic.
@@ -480,14 +470,16 @@ def with_retry(
     strategy = RetryStrategy(
         max_retries=max_retries,
         initial_delay=initial_delay,
-        retryable_exceptions=retryable_exceptions
+        retryable_exceptions=retryable_exceptions,
     )
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @wraps(func)
-        def wrapper(*args, **kwargs) -> T:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
             return strategy.execute(func, *args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
@@ -502,24 +494,24 @@ class HealthMonitor:
     - Circuit breaker states
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize health monitor."""
         self.metrics: Dict[str, Dict[str, int]] = {}
         self.circuit_breakers: Dict[str, CircuitBreaker] = {}
 
-    def record_success(self, service: str):
+    def record_success(self, service: str) -> None:
         """Record successful operation."""
         if service not in self.metrics:
             self.metrics[service] = {"success": 0, "failure": 0, "fallback": 0}
         self.metrics[service]["success"] += 1
 
-    def record_failure(self, service: str):
+    def record_failure(self, service: str) -> None:
         """Record failed operation."""
         if service not in self.metrics:
             self.metrics[service] = {"success": 0, "failure": 0, "fallback": 0}
         self.metrics[service]["failure"] += 1
 
-    def record_fallback(self, service: str):
+    def record_fallback(self, service: str) -> None:
         """Record fallback usage."""
         if service not in self.metrics:
             self.metrics[service] = {"success": 0, "failure": 0, "fallback": 0}
@@ -568,16 +560,13 @@ class HealthMonitor:
             return self.metrics.get(service, {})
         return self.metrics
 
-    def register_circuit_breaker(self, name: str, breaker: CircuitBreaker):
+    def register_circuit_breaker(self, name: str, breaker: CircuitBreaker) -> None:
         """Register circuit breaker for monitoring."""
         self.circuit_breakers[name] = breaker
 
     def get_circuit_states(self) -> Dict[str, str]:
         """Get all circuit breaker states."""
-        return {
-            name: breaker.state.value
-            for name, breaker in self.circuit_breakers.items()
-        }
+        return {name: breaker.state.value for name, breaker in self.circuit_breakers.items()}
 
 
 # Global health monitor instance

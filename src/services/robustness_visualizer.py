@@ -129,7 +129,7 @@ class RobustnessVisualizer:
         y_max_global = max(all_y_vals)
 
         # Initialize grid
-        grid = [[' ' for _ in range(grid_width)] for _ in range(grid_height)]
+        grid = [[" " for _ in range(grid_width)] for _ in range(grid_height)]
 
         # Fill robust regions with '#'
         for region in analysis.robust_regions:
@@ -155,7 +155,7 @@ class RobustnessVisualizer:
                 for y in range(y_start, y_end + 1):
                     for x in range(x_start, x_end + 1):
                         if 0 <= y < grid_height and 0 <= x < grid_width:
-                            grid[y][x] = '#'
+                            grid[y][x] = "#"
 
         # Add y-axis label
         lines.append(f"\n{var_y}  ^")
@@ -168,7 +168,7 @@ class RobustnessVisualizer:
                 label = f"{y_val:6.1f} |"
             else:
                 label = "       |"
-            lines.append(label + ''.join(grid[y]))
+            lines.append(label + "".join(grid[y]))
 
         # Add x-axis
         lines.append("       +" + "-" * grid_width + f"> {var_x}")

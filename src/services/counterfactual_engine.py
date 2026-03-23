@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.config import get_settings
 from src.models.requests import CounterfactualRequest
@@ -139,6 +139,7 @@ class CounterfactualEngine:
         """
         # Create cache key from equations
         import json
+
         cache_key = json.dumps(equations, sort_keys=True)
 
         # Check cache first
@@ -150,9 +151,9 @@ class CounterfactualEngine:
         for var_name, equation in equations.items():
             # Find all variable references in the equation
             # Match variable names (alphanumeric + underscore)
-            var_refs = set(re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', equation))
+            var_refs = set(re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_]*\b", equation))
             # Remove known non-variables (math functions, constants)
-            var_refs -= {'exp', 'log', 'sqrt', 'abs', 'min', 'max', 'pow'}
+            var_refs -= {"exp", "log", "sqrt", "abs", "min", "max", "pow"}
             # Only keep variables that are in the equations dict
             dependencies[var_name] = var_refs & set(equations.keys())
 
@@ -241,7 +242,7 @@ class CounterfactualEngine:
                 std_val = np.std(outcome_array)
 
                 # Coefficient of variation
-                cv = std_val / abs(mean_val) if mean_val != 0 else float('inf')
+                cv = std_val / abs(mean_val) if mean_val != 0 else float("inf")
 
                 if cv < 0.1:  # Converged!
                     logger.info(
@@ -249,8 +250,8 @@ class CounterfactualEngine:
                         extra={
                             "samples": len(all_samples[request.outcome]),
                             "cv": cv,
-                            "savings": f"{(1 - len(all_samples[request.outcome]) / self.num_iterations) * 100:.0f}%"
-                        }
+                            "savings": f"{(1 - len(all_samples[request.outcome]) / self.num_iterations) * 100:.0f}%",
+                        },
                     )
                     break
 
@@ -327,13 +328,11 @@ class CounterfactualEngine:
             # Use inverse transform sampling for exponential
             # X = -scale * ln(U) where U ~ Uniform(0, 1)
             u = rng.uniform_array(0.0, 1.0, size)
-            return -params["scale"] * np.log(u)
+            return np.asarray(-params["scale"] * np.log(u))
         else:
             raise ValueError(f"Unknown distribution type: {dist_type}")
 
-    def _evaluate_equation(
-        self, equation: str, samples: Dict[str, np.ndarray]
-    ) -> np.ndarray:
+    def _evaluate_equation(self, equation: str, samples: Dict[str, np.ndarray]) -> np.ndarray:
         """
         Safely evaluate a structural equation using AST parsing instead of eval().
 
@@ -352,7 +351,7 @@ class CounterfactualEngine:
         """
         try:
             # Parse equation into AST
-            tree = ast.parse(equation, mode='eval')
+            tree = ast.parse(equation, mode="eval")
 
             # Evaluate AST with safety checks
             result = self._eval_ast_node(tree.body, samples, depth=0)
@@ -365,9 +364,7 @@ class CounterfactualEngine:
             logger.error(f"Failed to evaluate equation '{equation}': {e}")
             raise ValueError(f"Invalid equation: {equation}")
 
-    def _eval_ast_node(
-        self, node: ast.AST, samples: Dict[str, np.ndarray], depth: int = 0
-    ) -> Any:
+    def _eval_ast_node(self, node: ast.AST, samples: Dict[str, np.ndarray], depth: int = 0) -> Any:
         """
         Recursively evaluate AST node with security checks.
 
@@ -385,9 +382,7 @@ class CounterfactualEngine:
         # Prevent deeply nested expressions (DoS protection)
         MAX_DEPTH = 20
         if depth > MAX_DEPTH:
-            raise ValueError(
-                f"Equation too complex (max nesting depth {MAX_DEPTH} exceeded)"
-            )
+            raise ValueError(f"Equation too complex (max nesting depth {MAX_DEPTH} exceeded)")
 
         # Whitelist of safe binary operations
         SAFE_OPS = {
@@ -408,13 +403,13 @@ class CounterfactualEngine:
 
         # Whitelist of safe functions
         SAFE_FUNCS = {
-            'sqrt': np.sqrt,
-            'exp': np.exp,
-            'log': np.log,
-            'abs': np.abs,
-            'sin': np.sin,
-            'cos': np.cos,
-            'tan': np.tan,
+            "sqrt": np.sqrt,
+            "exp": np.exp,
+            "log": np.log,
+            "abs": np.abs,
+            "sin": np.sin,
+            "cos": np.cos,
+            "tan": np.tan,
         }
 
         # Handle different node types
@@ -436,15 +431,13 @@ class CounterfactualEngine:
                 )
             left = self._eval_ast_node(node.left, samples, depth + 1)
             right = self._eval_ast_node(node.right, samples, depth + 1)
-            return SAFE_OPS[type(node.op)](left, right)
+            return SAFE_OPS[type(node.op)](left, right)  # type: ignore[operator]
         elif isinstance(node, ast.UnaryOp):
             # Unary operation (-, +)
             if type(node.op) not in SAFE_UNARY_OPS:
-                raise ValueError(
-                    f"Unsafe unary operation: {type(node.op).__name__}"
-                )
+                raise ValueError(f"Unsafe unary operation: {type(node.op).__name__}")
             operand = self._eval_ast_node(node.operand, samples, depth + 1)
-            return SAFE_UNARY_OPS[type(node.op)](operand)
+            return SAFE_UNARY_OPS[type(node.op)](operand)  # type: ignore[operator]
         elif isinstance(node, ast.Call):
             # Function call
             if not isinstance(node.func, ast.Name):
@@ -452,14 +445,13 @@ class CounterfactualEngine:
             func_name = node.func.id
             if func_name not in SAFE_FUNCS:
                 raise ValueError(
-                    f"Unsafe function: {func_name}. "
-                    f"Allowed: {', '.join(SAFE_FUNCS.keys())}"
+                    f"Unsafe function: {func_name}. " f"Allowed: {', '.join(SAFE_FUNCS.keys())}"
                 )
             # Evaluate arguments
             args = [self._eval_ast_node(arg, samples, depth + 1) for arg in node.args]
             if node.keywords:
                 raise ValueError("Keyword arguments not allowed in equations")
-            return SAFE_FUNCS[func_name](*args)
+            return SAFE_FUNCS[func_name](*args)  # type: ignore[operator]
         else:
             raise ValueError(
                 f"Unsafe expression type: {type(node).__name__}. "
@@ -555,7 +547,11 @@ class CounterfactualEngine:
         sources.sort(key=lambda x: x.impact, reverse=True)
 
         # Determine overall uncertainty level
-        cv = np.std(outcome_samples) / abs(np.mean(outcome_samples)) if np.mean(outcome_samples) != 0 else 0
+        cv = (
+            np.std(outcome_samples) / abs(np.mean(outcome_samples))
+            if np.mean(outcome_samples) != 0
+            else 0
+        )
         if cv < 0.1:
             overall = UncertaintyLevel.LOW
         elif cv < 0.3:

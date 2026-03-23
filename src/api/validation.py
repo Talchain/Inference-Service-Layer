@@ -10,7 +10,7 @@ Provides comprehensive validation for causal models including:
 
 import logging
 import uuid
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
@@ -177,7 +177,7 @@ async def validate_model(
         )
 
 
-def _generate_reasoning(validation_results, quality_score: float) -> str:
+def _generate_reasoning(validation_results: Any, quality_score: float) -> str:
     """Generate reasoning for quality assessment."""
     all_checks = (
         validation_results.structural.checks
@@ -512,7 +512,9 @@ async def validate_correlations(
                 "request_id": request_id,
                 "valid": result.valid,
                 "num_groups_validated": len(result.validated_groups),
-                "is_psd": result.matrix_analysis.is_positive_semi_definite if result.matrix_analysis else None,
+                "is_psd": result.matrix_analysis.is_positive_semi_definite
+                if result.matrix_analysis
+                else None,
                 "num_warnings": len(result.warnings),
                 "num_errors": len(result.errors),
             },

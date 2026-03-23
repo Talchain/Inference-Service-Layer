@@ -9,221 +9,194 @@ from prometheus_client import Counter, Histogram, Gauge
 
 # Business metrics
 assumptions_validated_total = Counter(
-    'isl_assumptions_validated_total',
-    'Total assumptions validated',
-    ['evidence_quality']
+    "isl_assumptions_validated_total", "Total assumptions validated", ["evidence_quality"]
 )
 
 models_analyzed_total = Counter(
-    'isl_models_analyzed_total',
-    'Total models analyzed',
-    ['analysis_type']
+    "isl_models_analyzed_total", "Total models analyzed", ["analysis_type"]
 )
 
 model_complexity = Histogram(
-    'isl_model_complexity',
-    'Distribution of model complexity',
-    ['metric'],
-    buckets=[5, 10, 15, 20, 30, 40, 50]
+    "isl_model_complexity",
+    "Distribution of model complexity",
+    ["metric"],
+    buckets=[5, 10, 15, 20, 30, 40, 50],
 )
 
-active_users = Gauge(
-    'isl_active_users_current',
-    'Current number of active users'
-)
+active_users = Gauge("isl_active_users_current", "Current number of active users")
 
 cache_fingerprint_matches = Counter(
-    'isl_cache_fingerprint_matches_total',
-    'Determinism verifications (fingerprint matches)'
+    "isl_cache_fingerprint_matches_total", "Determinism verifications (fingerprint matches)"
 )
 
 # ActiVA preference learning metrics
 activa_queries_generated_total = Counter(
-    'isl_activa_queries_generated_total',
-    'Total preference queries generated'
+    "isl_activa_queries_generated_total", "Total preference queries generated"
 )
 
 activa_queries_answered_total = Counter(
-    'isl_activa_queries_answered_total',
-    'Total preference queries answered',
-    ['choice']  # A or B
+    "isl_activa_queries_answered_total", "Total preference queries answered", ["choice"]  # A or B
 )
 
 activa_convergence_total = Counter(
-    'isl_activa_convergence_total',
-    'Users reached convergence',
-    ['num_queries_bucket']  # 1-5, 6-10, 11+
+    "isl_activa_convergence_total",
+    "Users reached convergence",
+    ["num_queries_bucket"],  # 1-5, 6-10, 11+
 )
 
 activa_information_gain = Histogram(
-    'isl_activa_information_gain',
-    'Expected information gain of generated queries',
-    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
+    "isl_activa_information_gain",
+    "Expected information gain of generated queries",
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
 )
 
 # FACET robustness metrics
 facet_analyses_total = Counter(
-    'isl_facet_analyses_total',
-    'Total robustness analyses performed',
-    ['status']  # robust, fragile, failed
+    "isl_facet_analyses_total",
+    "Total robustness analyses performed",
+    ["status"],  # robust, fragile, failed
 )
 
 facet_robustness_score = Histogram(
-    'isl_facet_robustness_score',
-    'Robustness scores distribution',
-    buckets=[0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
+    "isl_facet_robustness_score",
+    "Robustness scores distribution",
+    buckets=[0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0],
 )
 
 facet_fragile_recommendations_total = Counter(
-    'isl_facet_fragile_recommendations_total',
-    'Fragile recommendations flagged'
+    "isl_facet_fragile_recommendations_total", "Fragile recommendations flagged"
 )
 
 facet_robust_regions_found = Histogram(
-    'isl_facet_robust_regions_found',
-    'Number of robust regions per analysis',
-    buckets=[0, 1, 2, 3, 5, 10]
+    "isl_facet_robust_regions_found",
+    "Number of robust regions per analysis",
+    buckets=[0, 1, 2, 3, 5, 10],
 )
 
 # Habermas Machine deliberation metrics
 habermas_deliberations_total = Counter(
-    'isl_habermas_deliberations_total',
-    'Total deliberation rounds conducted',
-    ['status']  # active, converged, diverged
+    "isl_habermas_deliberations_total",
+    "Total deliberation rounds conducted",
+    ["status"],  # active, converged, diverged
 )
 
 habermas_rounds_per_session = Histogram(
-    'isl_habermas_rounds_per_session',
-    'Number of rounds per deliberation session',
-    buckets=[1, 2, 3, 5, 7, 10, 15]
+    "isl_habermas_rounds_per_session",
+    "Number of rounds per deliberation session",
+    buckets=[1, 2, 3, 5, 7, 10, 15],
 )
 
 # Production excellence metrics (Phase 3)
 
 # Batch endpoint metrics
 batch_requests_total = Counter(
-    'isl_batch_requests_total',
-    'Batch requests by type and size',
-    ['endpoint', 'batch_size_bucket']
+    "isl_batch_requests_total", "Batch requests by type and size", ["endpoint", "batch_size_bucket"]
 )
 
 batch_items_processed = Counter(
-    'isl_batch_items_processed_total',
-    'Items processed in batches',
-    ['endpoint', 'status']  # success or failed
+    "isl_batch_items_processed_total",
+    "Items processed in batches",
+    ["endpoint", "status"],  # success or failed
 )
 
 batch_processing_duration = Histogram(
-    'isl_batch_processing_duration_seconds',
-    'Batch processing duration',
-    ['endpoint'],
-    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+    "isl_batch_processing_duration_seconds",
+    "Batch processing duration",
+    ["endpoint"],
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0],
 )
 
 # Adaptive sampling metrics
 adaptive_sampling_convergence = Histogram(
-    'isl_adaptive_sampling_rounds',
-    'Samples until convergence in adaptive sampling',
-    buckets=[100, 200, 500, 1000, 2000, 5000, 10000]
+    "isl_adaptive_sampling_rounds",
+    "Samples until convergence in adaptive sampling",
+    buckets=[100, 200, 500, 1000, 2000, 5000, 10000],
 )
 
 adaptive_sampling_speedup = Histogram(
-    'isl_adaptive_sampling_speedup_ratio',
-    'Speedup ratio vs fixed sampling',
-    buckets=[1.0, 1.5, 2.0, 3.0, 5.0, 10.0]
+    "isl_adaptive_sampling_speedup_ratio",
+    "Speedup ratio vs fixed sampling",
+    buckets=[1.0, 1.5, 2.0, 3.0, 5.0, 10.0],
 )
 
 # Cache effectiveness metrics
 cache_hit_rate = Gauge(
-    'isl_cache_hit_rate_by_endpoint',
-    'Cache hit rate per endpoint',
-    ['endpoint', 'cache_type']  # topo_sort, etc.
+    "isl_cache_hit_rate_by_endpoint",
+    "Cache hit rate per endpoint",
+    ["endpoint", "cache_type"],  # topo_sort, etc.
 )
 
 cache_operations_total = Counter(
-    'isl_cache_operations_total',
-    'Cache operations',
-    ['endpoint', 'operation', 'result']  # hit, miss, evict
+    "isl_cache_operations_total",
+    "Cache operations",
+    ["endpoint", "operation", "result"],  # hit, miss, evict
 )
 
 # Memory usage metrics
 memory_usage_bytes = Gauge(
-    'isl_memory_usage_bytes',
-    'Current memory usage',
-    ['memory_type']  # rss, vms
+    "isl_memory_usage_bytes", "Current memory usage", ["memory_type"]  # rss, vms
 )
 
 memory_circuit_breaker_triggers = Counter(
-    'isl_memory_circuit_breaker_triggers_total',
-    'Circuit breaker triggers due to high memory'
+    "isl_memory_circuit_breaker_triggers_total", "Circuit breaker triggers due to high memory"
 )
 
 # Request compression metrics
 response_compression_ratio = Histogram(
-    'isl_response_compression_ratio',
-    'Compression ratio for responses',
-    ['endpoint'],
-    buckets=[0.1, 0.3, 0.5, 0.7, 0.9]
+    "isl_response_compression_ratio",
+    "Compression ratio for responses",
+    ["endpoint"],
+    buckets=[0.1, 0.3, 0.5, 0.7, 0.9],
 )
 
 compressed_bytes_saved = Counter(
-    'isl_compressed_bytes_saved_total',
-    'Total bytes saved via compression',
-    ['endpoint']
+    "isl_compressed_bytes_saved_total", "Total bytes saved via compression", ["endpoint"]
 )
 
 # Distributed tracing metrics
 trace_propagation_total = Counter(
-    'isl_trace_propagation_total',
-    'Trace ID propagation events',
-    ['source']  # header, generated
+    "isl_trace_propagation_total", "Trace ID propagation events", ["source"]  # header, generated
 )
 
 habermas_agreement_level = Histogram(
-    'isl_habermas_agreement_level',
-    'Agreement levels achieved',
-    buckets=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    "isl_habermas_agreement_level",
+    "Agreement levels achieved",
+    buckets=[0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 )
 
 habermas_convergence_total = Counter(
-    'isl_habermas_convergence_total',
-    'Successful convergences achieved'
+    "isl_habermas_convergence_total", "Successful convergences achieved"
 )
 
 # LLM usage and cost metrics (Phase 4A)
 llm_requests_total = Counter(
-    'isl_llm_requests_total',
-    'Total LLM requests made',
-    ['model', 'endpoint', 'cached']  # Track by model, endpoint, and cache status
+    "isl_llm_requests_total",
+    "Total LLM requests made",
+    ["model", "endpoint", "cached"],  # Track by model, endpoint, and cache status
 )
 
 llm_cost_dollars = Histogram(
-    'isl_llm_cost_dollars',
-    'LLM cost per request in dollars',
-    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0]
+    "isl_llm_cost_dollars",
+    "LLM cost per request in dollars",
+    buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0],
 )
 
-llm_cache_hits_total = Counter(
-    'isl_llm_cache_hits_total',
-    'Total LLM cache hits'
-)
+llm_cache_hits_total = Counter("isl_llm_cache_hits_total", "Total LLM cache hits")
 
 llm_tokens_total = Counter(
-    'isl_llm_tokens_total',
-    'Total LLM tokens used',
-    ['type', 'model']  # input/output, model name
+    "isl_llm_tokens_total", "Total LLM tokens used", ["type", "model"]  # input/output, model name
 )
 
 llm_budget_exceeded_total = Counter(
-    'isl_llm_budget_exceeded_total',
-    'Times session budget was exceeded',
-    ['session_type']  # deliberation, preference, etc.
+    "isl_llm_budget_exceeded_total",
+    "Times session budget was exceeded",
+    ["session_type"],  # deliberation, preference, etc.
 )
 
 llm_fallback_to_rules_total = Counter(
-    'isl_llm_fallback_to_rules_total',
-    'Times LLM failed and fell back to rules',
-    ['reason']  # error, budget, timeout
+    "isl_llm_fallback_to_rules_total",
+    "Times LLM failed and fell back to rules",
+    ["reason"],  # error, budget, timeout
 )
 
 
@@ -362,21 +335,21 @@ def track_llm_fallback(reason: str) -> None:
 
 # Decision Robustness Suite metrics (Brief 7)
 decision_robustness_analyses_total = Counter(
-    'isl_decision_robustness_analyses_total',
-    'Total Decision Robustness Suite analyses',
-    ['robustness_label', 'recommendation_status']
+    "isl_decision_robustness_analyses_total",
+    "Total Decision Robustness Suite analyses",
+    ["robustness_label", "recommendation_status"],
 )
 
 decision_robustness_duration = Histogram(
-    'isl_decision_robustness_duration_ms',
-    'Decision Robustness Suite analysis duration in ms',
-    buckets=[100, 500, 1000, 2000, 5000, 10000]
+    "isl_decision_robustness_duration_ms",
+    "Decision Robustness Suite analysis duration in ms",
+    buckets=[100, 500, 1000, 2000, 5000, 10000],
 )
 
 decision_robustness_options = Histogram(
-    'isl_decision_robustness_options_count',
-    'Number of options in robustness analysis',
-    buckets=[2, 3, 5, 7, 10, 15, 20]
+    "isl_decision_robustness_options_count",
+    "Number of options in robustness analysis",
+    buckets=[2, 3, 5, 7, 10, 15, 20],
 )
 
 

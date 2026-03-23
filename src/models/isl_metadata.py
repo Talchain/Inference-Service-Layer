@@ -23,33 +23,20 @@ class ISLResponseMetadata(BaseModel):
     """
 
     request_id: str = Field(
-        ...,
-        description="Unique request identifier for tracing",
-        min_length=1,
-        max_length=100
+        ..., description="Unique request identifier for tracing", min_length=1, max_length=100
     )
 
-    computation_time_ms: float = Field(
-        ...,
-        description="Computation time in milliseconds",
-        ge=0.0
-    )
+    computation_time_ms: float = Field(..., description="Computation time in milliseconds", ge=0.0)
 
-    isl_version: str = Field(
-        default="2.0",
-        description="ISL service version"
-    )
+    isl_version: str = Field(default="2.0", description="ISL service version")
 
     algorithm: Optional[str] = Field(
         None,
         description="Algorithm/method used (e.g., 'weighted_sum', 'skyline_pareto')",
-        max_length=100
+        max_length=100,
     )
 
-    cache_hit: bool = Field(
-        default=False,
-        description="Whether result was served from cache"
-    )
+    cache_hit: bool = Field(default=False, description="Whether result was served from cache")
 
     class Config:
         json_schema_extra = {
@@ -58,7 +45,7 @@ class ISLResponseMetadata(BaseModel):
                 "computation_time_ms": 123.45,
                 "isl_version": "2.0",
                 "algorithm": "weighted_sum",
-                "cache_hit": False
+                "cache_hit": False,
             }
         }
 
@@ -77,9 +64,7 @@ class MetadataBuilder:
         self.start_time = time.perf_counter()
 
     def build(
-        self,
-        algorithm: Optional[str] = None,
-        cache_hit: bool = False
+        self, algorithm: Optional[str] = None, cache_hit: bool = False
     ) -> ISLResponseMetadata:
         """
         Build metadata object with computed timing.
@@ -97,7 +82,7 @@ class MetadataBuilder:
             request_id=self.request_id,
             computation_time_ms=elapsed_ms,
             algorithm=algorithm,
-            cache_hit=cache_hit
+            cache_hit=cache_hit,
         )
 
 
@@ -105,7 +90,7 @@ def create_isl_metadata(
     request_id: str,
     computation_time_ms: float,
     algorithm: Optional[str] = None,
-    cache_hit: bool = False
+    cache_hit: bool = False,
 ) -> ISLResponseMetadata:
     """
     Create an ISL response metadata object.
@@ -123,5 +108,5 @@ def create_isl_metadata(
         request_id=request_id,
         computation_time_ms=computation_time_ms,
         algorithm=algorithm,
-        cache_hit=cache_hit
+        cache_hit=cache_hit,
     )

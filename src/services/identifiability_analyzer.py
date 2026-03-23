@@ -110,9 +110,7 @@ class IdentifiabilityAnalyzer:
             IdentifiabilityResult with full analysis
         """
         # Extract decision and goal nodes
-        decision, goal = self._extract_decision_goal(
-            graph, decision_node_id, goal_node_id
-        )
+        decision, goal = self._extract_decision_goal(graph, decision_node_id, goal_node_id)
 
         if not decision or not goal:
             return self._create_no_nodes_result(decision, goal)
@@ -127,7 +125,8 @@ class IdentifiabilityAnalyzer:
                 "identifiability_cache_hit",
                 extra={"decision": decision, "goal": goal},
             )
-            return cached_result
+            result: IdentifiabilityResult = cached_result
+            return result
 
         logger.info(
             "identifiability_analysis_started",
@@ -154,14 +153,10 @@ class IdentifiabilityAnalyzer:
 
             if y0_result:
                 # Effect is identifiable
-                result = self._create_identifiable_result(
-                    decision, goal, nx_graph, y0_result
-                )
+                result = self._create_identifiable_result(decision, goal, nx_graph, y0_result)
             else:
                 # Effect is not identifiable
-                result = self._create_non_identifiable_result(
-                    decision, goal, nx_graph
-                )
+                result = self._create_non_identifiable_result(decision, goal, nx_graph)
 
         except Exception as e:
             logger.warning(f"y0_identification_failed: {e}")
@@ -213,7 +208,8 @@ class IdentifiabilityAnalyzer:
                 "identifiability_dag_cache_hit",
                 extra={"treatment": treatment, "outcome": outcome},
             )
-            return cached_result
+            dag_result: IdentifiabilityResult = cached_result
+            return dag_result
 
         logger.info(
             "identifiability_dag_analysis_started",
@@ -241,13 +237,9 @@ class IdentifiabilityAnalyzer:
             )
 
             if y0_result:
-                result = self._create_identifiable_result(
-                    treatment, outcome, nx_graph, y0_result
-                )
+                result = self._create_identifiable_result(treatment, outcome, nx_graph, y0_result)
             else:
-                result = self._create_non_identifiable_result(
-                    treatment, outcome, nx_graph
-                )
+                result = self._create_non_identifiable_result(treatment, outcome, nx_graph)
 
         except Exception as e:
             logger.warning(f"y0_dag_identification_failed: {e}")
@@ -287,9 +279,7 @@ class IdentifiabilityAnalyzer:
 
         return decision, goal
 
-    def _compute_topology_hash(
-        self, graph: GraphV1, decision: str, goal: str
-    ) -> str:
+    def _compute_topology_hash(self, graph: GraphV1, decision: str, goal: str) -> str:
         """Compute hash of graph topology for caching."""
         # Sort nodes and edges for deterministic hashing
         node_ids = sorted([n.id for n in graph.nodes])
@@ -349,9 +339,7 @@ class IdentifiabilityAnalyzer:
     ) -> Optional[List[str]]:
         """Find a valid adjustment set using backdoor criterion."""
         all_nodes = list(graph.nodes())
-        potential_adjusters = [
-            n for n in all_nodes if n not in [treatment, outcome]
-        ]
+        potential_adjusters = [n for n in all_nodes if n not in [treatment, outcome]]
 
         backdoor_paths = self._find_backdoor_paths(graph, treatment, outcome)
 
@@ -552,9 +540,7 @@ class IdentifiabilityAnalyzer:
                 adjustment_set = []
 
         backdoor_paths = self._find_backdoor_paths(nx_graph, decision, goal)
-        formatted_paths = (
-            [" → ".join(path) for path in backdoor_paths] if backdoor_paths else None
-        )
+        formatted_paths = [" → ".join(path) for path in backdoor_paths] if backdoor_paths else None
 
         return IdentifiabilityResult(
             effect=f"{decision} → {goal}",
@@ -574,9 +560,7 @@ class IdentifiabilityAnalyzer:
     ) -> IdentifiabilityResult:
         """Create result for non-identifiable effect with hard rule enforcement."""
         backdoor_paths = self._find_backdoor_paths(nx_graph, decision, goal)
-        formatted_paths = (
-            [" → ".join(path) for path in backdoor_paths] if backdoor_paths else None
-        )
+        formatted_paths = [" → ".join(path) for path in backdoor_paths] if backdoor_paths else None
 
         suggestions = self._generate_suggestions(nx_graph, decision, goal)
 
@@ -613,9 +597,7 @@ class IdentifiabilityAnalyzer:
         """Create result when no causal path exists."""
         suggestions = [
             IdentifiabilitySuggestion(
-                description=(
-                    f"Add direct or mediated causal path from '{decision}' to '{goal}'"
-                ),
+                description=(f"Add direct or mediated causal path from '{decision}' to '{goal}'"),
                 edges_to_add=[(decision, goal)],
                 priority="critical",
             ),
@@ -726,11 +708,10 @@ class IdentifiabilityAnalyzer:
                         "Analysis used fallback method. Results should be verified."
                     ),
                     suggestions=None,
-                    backdoor_paths=self._find_backdoor_paths(nx_graph, decision, goal)
-                    and [
-                        " → ".join(p)
-                        for p in self._find_backdoor_paths(nx_graph, decision, goal)
-                    ],
+                    backdoor_paths=[
+                        " → ".join(p) for p in self._find_backdoor_paths(nx_graph, decision, goal)
+                    ]
+                    or None,
                 )
         else:
             # Cannot identify with backdoor, mark as non-identifiable
@@ -802,20 +783,18 @@ class IdentifiabilityAnalyzer:
         edges_sorted = sorted(nx_graph.edges())
         bi_sorted = sorted(bidirected_pairs)
         topo_str = (
-            f"{nodes_sorted}|{edges_sorted}|{bi_sorted}"
-            f"|{treatment_node_id}|{outcome_node_id}"
+            f"{nodes_sorted}|{edges_sorted}|{bi_sorted}" f"|{treatment_node_id}|{outcome_node_id}"
         )
         cache_key = hashlib.sha256(topo_str.encode()).hexdigest()[:16]
 
         cached = self._cache.get(cache_key)
         if cached is not None:
-            return cached
+            cached_ident: IdentifiabilityResult = cached
+            return cached_ident
 
         # Check causal path (directed only)
         if not nx.has_path(nx_graph, treatment_node_id, outcome_node_id):
-            result = self._create_no_path_result(
-                treatment_node_id, outcome_node_id, nx_graph
-            )
+            result = self._create_no_path_result(treatment_node_id, outcome_node_id, nx_graph)
             self._cache.put(cache_key, result)
             return result
 
@@ -845,9 +824,7 @@ class IdentifiabilityAnalyzer:
                 )
         except Exception as e:
             logger.warning(f"y0_v2_identification_failed: {e}")
-            result = self._fallback_analysis(
-                treatment_node_id, outcome_node_id, nx_graph
-            )
+            result = self._fallback_analysis(treatment_node_id, outcome_node_id, nx_graph)
 
         self._cache.put(cache_key, result)
         return result

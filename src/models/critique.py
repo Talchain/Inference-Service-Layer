@@ -7,7 +7,7 @@ for validation, analysis, and engine errors.
 
 import uuid
 from dataclasses import dataclass
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 from src.models.response_v2 import CritiqueV2
 
@@ -27,7 +27,7 @@ class CritiqueDefinition:
         affected_option_ids: Optional[List[str]] = None,
         affected_node_ids: Optional[List[str]] = None,
         suggestion: Optional[str] = None,
-        **template_vars,
+        **template_vars: Any,
     ) -> CritiqueV2:
         """Build a CritiqueV2 instance from this definition."""
         return CritiqueV2(
@@ -82,9 +82,7 @@ NO_EFFECTIVE_PATH_TO_GOAL = CritiqueDefinition(
     code="NO_EFFECTIVE_PATH_TO_GOAL",
     severity="blocker",
     source="validation",
-    message_template=(
-        "Option '{label}' has no interventions that can effectively affect the goal"
-    ),
+    message_template=("Option '{label}' has no interventions that can effectively affect the goal"),
     default_suggestion=(
         "Add causal edges connecting intervention targets to the goal, "
         "or target different factors"
@@ -260,9 +258,7 @@ NUMERICAL_INSTABILITY = CritiqueDefinition(
     code="NUMERICAL_INSTABILITY",
     severity="warning",
     source="analysis",
-    message_template=(
-        "Numerical instability detected in {invalid_count} of {total_count} samples"
-    ),
+    message_template=("Numerical instability detected in {invalid_count} of {total_count} samples"),
     default_suggestion="Check for extreme values or edge weights in the graph",
 )
 
@@ -270,9 +266,7 @@ LOW_EFFECTIVE_SAMPLES = CritiqueDefinition(
     code="LOW_EFFECTIVE_SAMPLES",
     severity="warning",
     source="analysis",
-    message_template=(
-        "Only {valid_count} of {total_count} samples were numerically valid"
-    ),
+    message_template=("Only {valid_count} of {total_count} samples were numerically valid"),
     default_suggestion="Results may be unreliable. Consider simplifying the graph",
 )
 
@@ -293,8 +287,7 @@ DEGENERATE_OPTION_ZERO_VARIANCE = CritiqueDefinition(
         "intervention may have no causal path to goal"
     ),
     default_suggestion=(
-        "Check that intervention targets are connected to the goal "
-        "with non-zero edge strengths"
+        "Check that intervention targets are connected to the goal " "with non-zero edge strengths"
     ),
 )
 

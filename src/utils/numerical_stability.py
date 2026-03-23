@@ -98,9 +98,7 @@ def check_baseline_near_zero(
         True if baseline was near zero, False otherwise
     """
     if abs(baseline_outcome) < BASELINE_EPSILON:
-        critiques.append(
-            BASELINE_NEAR_ZERO.build(value=f"{baseline_outcome:.2e}")
-        )
+        critiques.append(BASELINE_NEAR_ZERO.build(value=f"{baseline_outcome:.2e}"))
         logger.warning(
             f"Baseline near zero: {baseline_outcome:.2e}, "
             "sensitivity calculations will be epsilon-guarded"
@@ -134,9 +132,7 @@ def validate_mc_samples(
         if len(valid_samples) == 0:
             # All samples are non-finite — critical failure
             critiques.append(
-                MONTE_CARLO_FAILED.build(
-                    reason="All samples produced non-finite values (inf/nan)"
-                )
+                MONTE_CARLO_FAILED.build(reason="All samples produced non-finite values (inf/nan)")
             )
             return samples, critiques
 
@@ -179,8 +175,7 @@ def compute_analysis_status_with_numerical_checks(
         Adjusted analysis status
     """
     has_numerical_warnings = any(
-        c.code in ("BASELINE_NEAR_ZERO", "NUMERICAL_INSTABILITY")
-        for c in critiques
+        c.code in ("BASELINE_NEAR_ZERO", "NUMERICAL_INSTABILITY") for c in critiques
     )
 
     if base_status == "computed" and has_numerical_warnings:

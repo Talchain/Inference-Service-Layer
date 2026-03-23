@@ -40,7 +40,7 @@ class CausalRepresentationLearner:
         domain_hints: Optional[List[str]] = None,
         n_factors: int = 5,
         min_cluster_size: int = 3,
-        outcome_variable: Optional[str] = None
+        outcome_variable: Optional[str] = None,
     ) -> Tuple[List[Dict], Optional[Dict], float]:
         """
         Extract causal factors from unstructured text data.
@@ -63,9 +63,7 @@ class CausalRepresentationLearner:
 
         # Step 2: Cluster embeddings
         labels, cluster_centers = self._cluster_embeddings(
-            embeddings,
-            n_clusters=n_factors,
-            min_cluster_size=min_cluster_size
+            embeddings, n_clusters=n_factors, min_cluster_size=min_cluster_size
         )
 
         # Step 3: Extract factors from clusters
@@ -74,7 +72,9 @@ class CausalRepresentationLearner:
             cluster_indices = np.where(labels == cluster_id)[0]
 
             if len(cluster_indices) < min_cluster_size:
-                self.logger.warning(f"Cluster {cluster_id} too small ({len(cluster_indices)} texts), skipping")
+                self.logger.warning(
+                    f"Cluster {cluster_id} too small ({len(cluster_indices)} texts), skipping"
+                )
                 continue
 
             cluster_texts = [data[i] for i in cluster_indices]
@@ -88,7 +88,7 @@ class CausalRepresentationLearner:
             # Calculate strength (cluster coherence)
             strength = self._calculate_coherence(
                 embeddings[cluster_indices],
-                cluster_centers[cluster_id] if cluster_id < len(cluster_centers) else None
+                cluster_centers[cluster_id] if cluster_id < len(cluster_centers) else None,
             )
 
             # Prevalence
@@ -99,7 +99,7 @@ class CausalRepresentationLearner:
                 "strength": float(strength),
                 "representative_texts": cluster_texts[:3],  # Top 3
                 "keywords": keywords[:10],
-                "prevalence": float(prevalence)
+                "prevalence": float(prevalence),
             }
             factors.append(factor)
 
@@ -123,13 +123,13 @@ class CausalRepresentationLearner:
         simple bag-of-words + TF-IDF.
         """
         try:
-            from sentence_transformers import SentenceTransformer
+            from sentence_transformers import SentenceTransformer  # type: ignore[import-not-found]
 
             if self._embedder is None:
                 self.logger.info("Loading sentence-transformers model...")
-                self._embedder = SentenceTransformer('all-MiniLM-L6-v2')
+                self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
 
-            embeddings = self._embedder.encode(texts, show_progress_bar=False)
+            embeddings = self._embedder.encode(texts, show_progress_bar=False)  # type: ignore[attr-defined]
             return np.array(embeddings)
 
         except ImportError:
@@ -138,20 +138,16 @@ class CausalRepresentationLearner:
 
     def _embed_texts_tfidf(self, texts: List[str]) -> np.ndarray:
         """Fallback embedding using TF-IDF."""
-        from sklearn.feature_extraction.text import TfidfVectorizer
+        from sklearn.feature_extraction.text import TfidfVectorizer  # type: ignore[import-untyped]
 
         # Handle empty list
         if not texts:
             return np.array([]).reshape(0, 100)
 
-        vectorizer = TfidfVectorizer(
-            max_features=100,
-            stop_words='english',
-            ngram_range=(1, 2)
-        )
+        vectorizer = TfidfVectorizer(max_features=100, stop_words="english", ngram_range=(1, 2))
 
         try:
-            embeddings = vectorizer.fit_transform(texts).toarray()
+            embeddings: np.ndarray = vectorizer.fit_transform(texts).toarray()
             return embeddings
         except ValueError as e:
             # Handle case where all texts are stop words or empty
@@ -159,10 +155,7 @@ class CausalRepresentationLearner:
             return np.zeros((len(texts), 100))
 
     def _cluster_embeddings(
-        self,
-        embeddings: np.ndarray,
-        n_clusters: int,
-        min_cluster_size: int
+        self, embeddings: np.ndarray, n_clusters: int, min_cluster_size: int
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Cluster embeddings to identify factors.
@@ -175,7 +168,7 @@ class CausalRepresentationLearner:
         Returns:
             Tuple of (labels, cluster_centers)
         """
-        from sklearn.cluster import KMeans
+        from sklearn.cluster import KMeans  # type: ignore[import-untyped]
 
         # Use K-means for simplicity (could use HDBSCAN for auto-clustering)
         kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -194,19 +187,85 @@ class CausalRepresentationLearner:
         combined = " ".join(texts).lower()
 
         # Tokenize
-        words = re.findall(r'\b[a-z]{3,15}\b', combined)
+        words = re.findall(r"\b[a-z]{3,15}\b", combined)
 
         # Remove common stop words
         stop_words = {
-            'the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'as', 'are',
-            'was', 'were', 'been', 'be', 'have', 'has', 'had', 'do', 'does',
-            'did', 'will', 'would', 'should', 'could', 'may', 'might', 'must',
-            'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she',
-            'it', 'we', 'they', 'what', 'when', 'where', 'why', 'how', 'all',
-            'each', 'every', 'both', 'few', 'more', 'most', 'other', 'some',
-            'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than',
-            'too', 'very', 'just', 'but', 'also', 'into', 'for', 'with',
-            'about', 'from', 'there', 'their', 'out'
+            "the",
+            "is",
+            "at",
+            "which",
+            "on",
+            "and",
+            "a",
+            "an",
+            "as",
+            "are",
+            "was",
+            "were",
+            "been",
+            "be",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "should",
+            "could",
+            "may",
+            "might",
+            "must",
+            "can",
+            "this",
+            "that",
+            "these",
+            "those",
+            "i",
+            "you",
+            "he",
+            "she",
+            "it",
+            "we",
+            "they",
+            "what",
+            "when",
+            "where",
+            "why",
+            "how",
+            "all",
+            "each",
+            "every",
+            "both",
+            "few",
+            "more",
+            "most",
+            "other",
+            "some",
+            "such",
+            "no",
+            "nor",
+            "not",
+            "only",
+            "own",
+            "same",
+            "so",
+            "than",
+            "too",
+            "very",
+            "just",
+            "but",
+            "also",
+            "into",
+            "for",
+            "with",
+            "about",
+            "from",
+            "there",
+            "their",
+            "out",
         }
 
         filtered_words = [w for w in words if w not in stop_words and len(w) > 3]
@@ -219,11 +278,7 @@ class CausalRepresentationLearner:
 
         return keywords
 
-    def _name_factor(
-        self,
-        keywords: List[str],
-        domain_hints: Optional[List[str]] = None
-    ) -> str:
+    def _name_factor(self, keywords: List[str], domain_hints: Optional[List[str]] = None) -> str:
         """
         Generate a name for the factor based on keywords.
 
@@ -234,14 +289,56 @@ class CausalRepresentationLearner:
 
         # Try to find semantic themes
         themes = {
-            "usability": ["confusing", "hard", "difficult", "find", "navigate", "understand", "unclear", "complex"],
-            "performance": ["slow", "freeze", "lag", "timeout", "crash", "hang", "loading", "speed"],
+            "usability": [
+                "confusing",
+                "hard",
+                "difficult",
+                "find",
+                "navigate",
+                "understand",
+                "unclear",
+                "complex",
+            ],
+            "performance": [
+                "slow",
+                "freeze",
+                "lag",
+                "timeout",
+                "crash",
+                "hang",
+                "loading",
+                "speed",
+            ],
             "quality": ["bug", "error", "broken", "issue", "problem", "fail", "wrong", "defect"],
-            "support": ["help", "support", "question", "unclear", "documentation", "guide", "manual"],
+            "support": [
+                "help",
+                "support",
+                "question",
+                "unclear",
+                "documentation",
+                "guide",
+                "manual",
+            ],
             "pricing": ["price", "cost", "expensive", "cheap", "value", "pricing", "subscription"],
-            "features": ["feature", "functionality", "capability", "missing", "add", "request", "want"],
-            "onboarding": ["setup", "start", "onboarding", "getting", "started", "initial", "first"],
-            "integration": ["integrate", "api", "connect", "sync", "export", "import", "plugin"]
+            "features": [
+                "feature",
+                "functionality",
+                "capability",
+                "missing",
+                "add",
+                "request",
+                "want",
+            ],
+            "onboarding": [
+                "setup",
+                "start",
+                "onboarding",
+                "getting",
+                "started",
+                "initial",
+                "first",
+            ],
+            "integration": ["integrate", "api", "connect", "sync", "export", "import", "plugin"],
         }
 
         # Score each theme
@@ -253,16 +350,14 @@ class CausalRepresentationLearner:
 
         # Return best matching theme or construct from keywords
         if theme_scores:
-            best_theme = max(theme_scores, key=theme_scores.get)
+            best_theme = max(theme_scores, key=lambda k: theme_scores[k])
             return f"{best_theme}_issues"
         else:
             # Construct name from top 2 keywords
             return "_".join(keywords[:2]) + "_issues"
 
     def _calculate_coherence(
-        self,
-        cluster_embeddings: np.ndarray,
-        center: Optional[np.ndarray]
+        self, cluster_embeddings: np.ndarray, center: Optional[np.ndarray]
     ) -> float:
         """
         Calculate cluster coherence (tightness).
@@ -283,13 +378,9 @@ class CausalRepresentationLearner:
         # Typical distances are 0-2, so we scale
         coherence = max(0.0, min(1.0, 1.0 - (avg_distance / 2.0)))
 
-        return coherence
+        return float(coherence)
 
-    def _suggest_dag_structure(
-        self,
-        factors: List[Dict],
-        outcome_variable: str
-    ) -> Dict:
+    def _suggest_dag_structure(self, factors: List[Dict], outcome_variable: str) -> Dict:
         """
         Suggest DAG structure with factors as nodes.
 
@@ -299,18 +390,11 @@ class CausalRepresentationLearner:
         nodes = [f["name"] for f in factors] + [outcome_variable]
         edges = [[f["name"], outcome_variable] for f in factors]
 
-        dag = {
-            "nodes": nodes,
-            "edges": edges
-        }
+        dag = {"nodes": nodes, "edges": edges}
 
         return dag
 
-    def _calculate_overall_confidence(
-        self,
-        factors: List[Dict],
-        n_texts: int
-    ) -> float:
+    def _calculate_overall_confidence(self, factors: List[Dict], n_texts: int) -> float:
         """Calculate overall confidence in factor extraction."""
         if not factors:
             return 0.0
@@ -336,10 +420,7 @@ class CausalRepresentationLearner:
 
         # Weighted combination
         confidence = (
-            0.4 * avg_strength +
-            0.3 * coverage_score +
-            0.2 * sample_score +
-            0.1 * n_factors_score
+            0.4 * avg_strength + 0.3 * coverage_score + 0.2 * sample_score + 0.1 * n_factors_score
         )
 
         return float(min(1.0, confidence))

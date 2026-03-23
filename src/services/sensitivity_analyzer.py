@@ -8,10 +8,10 @@ P2-ISL-5: Uses epsilon-guarded calculations for baseline near-zero protection.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.constants import BASELINE_EPSILON
 from src.models.metadata import ResponseMetadata
@@ -49,54 +49,51 @@ class EnhancedSensitivityAnalyzer:
             type=AssumptionType.NO_UNOBSERVED_CONFOUNDING,
             description="All confounders between treatment and outcome are measured and controlled for",
             violated_by="Hidden variables that affect both treatment and outcome (e.g., socioeconomic status)",
-            testable=False
+            testable=False,
         ),
         AssumptionType.LINEAR_EFFECTS: CausalAssumption(
             name="Linear Effects",
             type=AssumptionType.LINEAR_EFFECTS,
             description="The causal effect is constant across the range of treatment values",
             violated_by="Non-linear relationships, threshold effects, or interactions",
-            testable=True
+            testable=True,
         ),
         AssumptionType.NO_SELECTION_BIAS: CausalAssumption(
             name="No Selection Bias",
             type=AssumptionType.NO_SELECTION_BIAS,
             description="The sample is representative of the target population",
             violated_by="Non-random sampling, missing data, or attrition",
-            testable=True
+            testable=True,
         ),
         AssumptionType.CAUSAL_SUFFICIENCY: CausalAssumption(
             name="Causal Sufficiency",
             type=AssumptionType.CAUSAL_SUFFICIENCY,
             description="All common causes of any pair of variables are included in the model",
             violated_by="Missing variables that cause multiple observed variables",
-            testable=False
+            testable=False,
         ),
         AssumptionType.POSITIVITY: CausalAssumption(
             name="Positivity",
             type=AssumptionType.POSITIVITY,
             description="Every subgroup has a non-zero probability of receiving each treatment value",
             violated_by="Some subgroups that never or always receive treatment",
-            testable=True
+            testable=True,
         ),
         AssumptionType.CONSISTENCY: CausalAssumption(
             name="Consistency",
             type=AssumptionType.CONSISTENCY,
             description="The potential outcomes match the observed outcomes for each treatment level",
             violated_by="Multiple versions of treatment or outcome measurement error",
-            testable=False
+            testable=False,
         ),
     }
 
     def __init__(self) -> None:
         """Initialize the sensitivity analyzer."""
         self.logger = logger
-        self._cache = {}
+        self._cache: Dict[str, Any] = {}
 
-    def analyze_assumption_sensitivity(
-        self,
-        request: SensitivityRequest
-    ) -> SensitivityReport:
+    def analyze_assumption_sensitivity(self, request: SensitivityRequest) -> SensitivityReport:
         """
         Compute how much each assumption affects results.
 
@@ -131,9 +128,7 @@ class EnhancedSensitivityAnalyzer:
 
                 # Generate violations
                 violations = self._generate_violations(
-                    assumption,
-                    request.violation_levels,
-                    request.n_samples
+                    assumption, request.violation_levels, request.n_samples
                 )
 
                 # Compute outcomes under violations
@@ -142,9 +137,7 @@ class EnhancedSensitivityAnalyzer:
 
                 for violation in violations:
                     outcome = self._apply_violation_and_predict(
-                        request.model,
-                        request.intervention,
-                        violation
+                        request.model, request.intervention, violation
                     )
                     outcomes.append(outcome)
 
@@ -152,18 +145,20 @@ class EnhancedSensitivityAnalyzer:
                     severity_map = {
                         ViolationType.MILD: 0.33,
                         ViolationType.MODERATE: 0.67,
-                        ViolationType.SEVERE: 1.0
+                        ViolationType.SEVERE: 1.0,
                     }
                     severity_score = severity_map.get(violation.severity, 0.5)
 
                     # P2-ISL-5: Use safe_percent_change for epsilon protection
                     deviation_pct, _ = safe_percent_change(outcome, baseline_outcome)
-                    violation_details.append({
-                        "magnitude": violation.magnitude,
-                        "severity_score": severity_score,
-                        "outcome": outcome,
-                        "deviation_percent": abs(deviation_pct)
-                    })
+                    violation_details.append(
+                        {
+                            "magnitude": violation.magnitude,
+                            "severity_score": severity_score,
+                            "outcome": outcome,
+                            "deviation_percent": abs(deviation_pct),
+                        }
+                    )
 
                 # Compute sensitivity metrics
                 metric = self._compute_sensitivity_metric(
@@ -171,7 +166,7 @@ class EnhancedSensitivityAnalyzer:
                     baseline_outcome,
                     outcomes,
                     [v.magnitude for v in violations],
-                    violation_details
+                    violation_details,
                 )
 
                 sensitivities[assumption_type_str] = metric
@@ -188,7 +183,7 @@ class EnhancedSensitivityAnalyzer:
                     max_deviation_percent=0.0,
                     robustness_score=1.0,
                     interpretation="Analysis failed - assuming robust",
-                    violation_details=[]
+                    violation_details=[],
                 )
 
         # Aggregate results
@@ -200,11 +195,7 @@ class EnhancedSensitivityAnalyzer:
 
         return report
 
-    def _predict_outcome(
-        self,
-        model: Dict,
-        intervention: Dict[str, float]
-    ) -> float:
+    def _predict_outcome(self, model: Dict, intervention: Dict[str, float]) -> float:
         """
         Predict outcome under intervention.
 
@@ -254,7 +245,7 @@ class EnhancedSensitivityAnalyzer:
                 parts = equation.split()
                 for i, part in enumerate(parts):
                     if part.replace("-", "").replace(".", "").isdigit():
-                        if i == 0 or parts[i-1] in ["+", "-"]:
+                        if i == 0 or parts[i - 1] in ["+", "-"]:
                             try:
                                 intercept = float(part)
                                 result += intercept
@@ -270,10 +261,7 @@ class EnhancedSensitivityAnalyzer:
             return 50000.0
 
     def _generate_violations(
-        self,
-        assumption: CausalAssumption,
-        violation_levels: List[float],
-        n_samples: int
+        self, assumption: CausalAssumption, violation_levels: List[float], n_samples: int
     ) -> List[ViolationScenario]:
         """
         Generate violation scenarios for an assumption.
@@ -305,7 +293,7 @@ class EnhancedSensitivityAnalyzer:
                     severity=severity,
                     magnitude=magnitude,
                     description=f"Unmeasured confounder with effect size {magnitude:.2f}",
-                    parameters={"confounder_effect": magnitude}
+                    parameters={"confounder_effect": magnitude},
                 )
                 violations.append(violation)
 
@@ -316,7 +304,7 @@ class EnhancedSensitivityAnalyzer:
                     severity=severity,
                     magnitude=magnitude,
                     description=f"Non-linear effect with curvature {magnitude:.2f}",
-                    parameters={"non_linearity": magnitude}
+                    parameters={"non_linearity": magnitude},
                 )
                 violations.append(violation)
 
@@ -327,7 +315,7 @@ class EnhancedSensitivityAnalyzer:
                     severity=severity,
                     magnitude=magnitude,
                     description=f"Selection bias with strength {magnitude:.2f}",
-                    parameters={"selection_bias": magnitude}
+                    parameters={"selection_bias": magnitude},
                 )
                 violations.append(violation)
 
@@ -338,17 +326,14 @@ class EnhancedSensitivityAnalyzer:
                     severity=severity,
                     magnitude=magnitude,
                     description=f"Assumption violation with magnitude {magnitude:.2f}",
-                    parameters={"violation_strength": magnitude}
+                    parameters={"violation_strength": magnitude},
                 )
                 violations.append(violation)
 
         return violations
 
     def _apply_violation_and_predict(
-        self,
-        model: Dict,
-        intervention: Dict[str, float],
-        violation: ViolationScenario
+        self, model: Dict, intervention: Dict[str, float], violation: ViolationScenario
     ) -> float:
         """
         Apply violation to model and predict outcome.
@@ -394,7 +379,7 @@ class EnhancedSensitivityAnalyzer:
         baseline_outcome: float,
         outcomes: List[float],
         violation_magnitudes: List[float],
-        violation_details: List[Dict]
+        violation_details: List[Dict],
     ) -> SensitivityMetric:
         """
         Compute sensitivity metrics for an assumption.
@@ -416,13 +401,10 @@ class EnhancedSensitivityAnalyzer:
 
         # Maximum deviation (P2-ISL-5: epsilon-guarded)
         max_deviation = max(
-            abs(min_outcome - baseline_outcome),
-            abs(max_outcome - baseline_outcome)
+            abs(min_outcome - baseline_outcome), abs(max_outcome - baseline_outcome)
         )
         # Use safe division for max_deviation_percent
-        max_dev_pct, _ = safe_percent_change(
-            baseline_outcome + max_deviation, baseline_outcome
-        )
+        max_dev_pct, _ = safe_percent_change(baseline_outcome + max_deviation, baseline_outcome)
         max_deviation_percent = abs(max_dev_pct)
 
         # Elasticity: % change in outcome per % change in violation
@@ -437,8 +419,7 @@ class EnhancedSensitivityAnalyzer:
 
             # Linear regression
             slope, intercept, r_value, p_value, std_err = stats.linregress(
-                violation_pct,
-                outcome_pct_changes
+                violation_pct, outcome_pct_changes
             )
 
             elasticity = abs(slope)
@@ -453,9 +434,8 @@ class EnhancedSensitivityAnalyzer:
             robustness_score = 1.0
 
         # Criticality
-        critical = (
-            elasticity > self.CRITICAL_ELASTICITY_THRESHOLD or
-            max_deviation_percent > (self.CRITICAL_DEVIATION_THRESHOLD * 100)
+        critical = elasticity > self.CRITICAL_ELASTICITY_THRESHOLD or max_deviation_percent > (
+            self.CRITICAL_DEVIATION_THRESHOLD * 100
         )
 
         # Interpretation
@@ -481,13 +461,11 @@ class EnhancedSensitivityAnalyzer:
             max_deviation_percent=max_deviation_percent,
             robustness_score=robustness_score,
             interpretation=interpretation,
-            violation_details=violation_details
+            violation_details=violation_details,
         )
 
     def _create_report(
-        self,
-        sensitivities: Dict[str, SensitivityMetric],
-        baseline_outcome: float
+        self, sensitivities: Dict[str, SensitivityMetric], baseline_outcome: float
     ) -> SensitivityReport:
         """
         Create comprehensive sensitivity report.
@@ -501,27 +479,19 @@ class EnhancedSensitivityAnalyzer:
         """
         # Sort by criticality and elasticity
         sorted_assumptions = sorted(
-            sensitivities.items(),
-            key=lambda x: (x[1].critical, x[1].elasticity),
-            reverse=True
+            sensitivities.items(), key=lambda x: (x[1].critical, x[1].elasticity), reverse=True
         )
 
         # Extract most/least critical
-        most_critical = [
-            name for name, metric in sorted_assumptions
-            if metric.critical
-        ]
+        most_critical = [name for name, metric in sorted_assumptions if metric.critical]
 
-        least_critical = [
-            name for name, metric in sorted_assumptions[-3:]
-            if not metric.critical
-        ]
+        least_critical = [name for name, metric in sorted_assumptions[-3:] if not metric.critical]
 
         # Overall robustness: weighted average
         if sensitivities:
-            overall_robustness = np.mean([
-                m.robustness_score for m in sensitivities.values()
-            ])
+            overall_robustness = float(
+                np.mean([m.robustness_score for m in sensitivities.values()])
+            )
         else:
             overall_robustness = 1.0
 
@@ -541,9 +511,7 @@ class EnhancedSensitivityAnalyzer:
         else:
             robustness_desc = "fragile"
 
-        summary = (
-            f"Results are {robustness_desc} (score: {overall_robustness:.2f}). "
-        )
+        summary = f"Results are {robustness_desc} (score: {overall_robustness:.2f}). "
 
         if most_critical:
             summary += f"Most critical assumptions: {', '.join(most_critical[:2])}. "
@@ -554,9 +522,7 @@ class EnhancedSensitivityAnalyzer:
         recommendations = []
         for name, metric in sorted_assumptions[:3]:
             if metric.critical:
-                recommendations.append(
-                    f"Strengthen '{name}': {self._get_recommendation(name)}"
-                )
+                recommendations.append(f"Strengthen '{name}': {self._get_recommendation(name)}")
 
         # Metadata
         from src.__version__ import __version__
@@ -565,14 +531,16 @@ class EnhancedSensitivityAnalyzer:
 
         config_details = {
             "violation_levels": len(sensitivities),
-            "baseline_outcome": baseline_outcome
+            "baseline_outcome": baseline_outcome,
         }
 
         metadata = ResponseMetadata(
             isl_version=__version__,
-            config_fingerprint=hashlib.md5(json.dumps(config_details, sort_keys=True).encode()).hexdigest()[:12],
+            config_fingerprint=hashlib.md5(
+                json.dumps(config_details, sort_keys=True).encode()
+            ).hexdigest()[:12],
             config_details=config_details,
-            request_id="sensitivity_analysis"
+            request_id="sensitivity_analysis",
         )
 
         return SensitivityReport(
@@ -583,7 +551,7 @@ class EnhancedSensitivityAnalyzer:
             confidence_level=confidence,
             summary=summary,
             recommendations=recommendations[:5],  # Limit to 5
-            metadata=metadata
+            metadata=metadata,
         )
 
     def _get_recommendation(self, assumption_name: str) -> str:
@@ -594,7 +562,7 @@ class EnhancedSensitivityAnalyzer:
             "No Selection Bias": "Use propensity score weighting or collect more representative data",
             "Causal Sufficiency": "Conduct sensitivity analysis with unmeasured confounding",
             "Positivity": "Check treatment overlap across subgroups and consider trimming",
-            "Consistency": "Standardize treatment protocols and outcome measurement"
+            "Consistency": "Standardize treatment protocols and outcome measurement",
         }
 
         return recommendations.get(assumption_name, "Validate assumption with domain experts")

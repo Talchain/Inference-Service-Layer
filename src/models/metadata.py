@@ -24,13 +24,12 @@ class ResponseMetadata(BaseModel):
     """
 
     isl_version: str = Field(
-        description="ISL service version (semver)",
-        json_schema_extra={"example": "1.0.0"}
+        description="ISL service version (semver)", json_schema_extra={"example": "1.0.0"}
     )
 
     config_fingerprint: str = Field(
         description="Hash of determinism-critical config",
-        json_schema_extra={"example": "a3f8c9d2e1b4"}
+        json_schema_extra={"example": "a3f8c9d2e1b4"},
     )
 
     config_details: Dict[str, Any] = Field(
@@ -41,12 +40,11 @@ class ResponseMetadata(BaseModel):
                 "confidence_level": 0.95,
                 "learning_rate": 0.1,
             }
-        }
+        },
     )
 
     request_id: str = Field(
-        description="Request ID for tracing",
-        json_schema_extra={"example": "req_abc123"}
+        description="Request ID for tracing", json_schema_extra={"example": "req_abc123"}
     )
 
 

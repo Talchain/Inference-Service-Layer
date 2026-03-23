@@ -55,11 +55,7 @@ def detect_graph_cycle(edges: List[Dict[str, Any]]) -> bool:
     nodes_in_edges: set = set()
 
     for edge in edges:
-        source = (
-            edge.get("from")
-            or edge.get("from_")
-            or edge.get("source_id")
-        )
+        source = edge.get("from") or edge.get("from_") or edge.get("source_id")
         target = edge.get("to") or edge.get("target_id")
 
         if source and target:
@@ -109,17 +105,14 @@ def canonicalise_interventions(interventions: Dict[str, float]) -> str:
     pairs = sorted(
         (
             k,
-            round(v / IDENTICAL_OPTIONS_VALUE_TOLERANCE)
-            * IDENTICAL_OPTIONS_VALUE_TOLERANCE,
+            round(v / IDENTICAL_OPTIONS_VALUE_TOLERANCE) * IDENTICAL_OPTIONS_VALUE_TOLERANCE,
         )
         for k, v in interventions.items()
     )
     return json.dumps(pairs, sort_keys=True)
 
 
-def detect_identical_options(
-    options: List[Dict[str, Any]]
-) -> Optional[Tuple[str, str]]:
+def detect_identical_options(options: List[Dict[str, Any]]) -> Optional[Tuple[str, str]]:
     """
     Detect if any two options have identical interventions.
 
@@ -221,9 +214,7 @@ class RequestValidator:
         # 0c. Check for disconnected components (warning only)
         disconnected_count = self._count_disconnected_components()
         if disconnected_count > 1:
-            critiques.append(
-                GRAPH_DISCONNECTED.build(count=disconnected_count)
-            )
+            critiques.append(GRAPH_DISCONNECTED.build(count=disconnected_count))
 
         # 0d. Check edge strength ranges (warning only)
         for edge in self.edges:
@@ -243,9 +234,7 @@ class RequestValidator:
         # 1. Validate goal node exists
         goal_found = self.goal_node_id in self.nodes_by_id
         if not goal_found:
-            critiques.append(
-                MISSING_GOAL_NODE.build(affected_node_ids=[self.goal_node_id])
-            )
+            critiques.append(MISSING_GOAL_NODE.build(affected_node_ids=[self.goal_node_id]))
             # Can't validate paths without goal - return early
             return ValidationResult(
                 is_valid=False,
@@ -279,9 +268,7 @@ class RequestValidator:
                 continue  # Can't validate paths without interventions
 
             # Check intervention targets exist
-            invalid_targets = [
-                t for t in interventions.keys() if t not in self.nodes_by_id
-            ]
+            invalid_targets = [t for t in interventions.keys() if t not in self.nodes_by_id]
             if invalid_targets:
                 critiques.append(
                     INVALID_INTERVENTION_TARGET.build(
@@ -362,11 +349,7 @@ class RequestValidator:
 
         # Union nodes connected by edges
         for edge in self.edges:
-            from_node = (
-                edge.get("from")
-                or edge.get("from_")
-                or edge.get("source_id")
-            )
+            from_node = edge.get("from") or edge.get("from_") or edge.get("source_id")
             to_node = edge.get("to") or edge.get("target_id")
             if from_node in node_ids and to_node in node_ids:
                 union(from_node, to_node)

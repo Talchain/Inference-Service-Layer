@@ -108,8 +108,7 @@ async def generate_teaching_examples(
                 "user_id": _hash_user_id(request.user_id),
                 "concept": request.target_concept,
                 "num_examples": len(examples),
-                "avg_teaching_value": sum(ex.information_value for ex in examples)
-                / len(examples)
+                "avg_teaching_value": sum(ex.information_value for ex in examples) / len(examples)
                 if examples
                 else 0,
             },

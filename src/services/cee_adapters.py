@@ -6,7 +6,7 @@ into ISL's internal representations (NetworkX DAGs, StructuralModels, etc.).
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import networkx as nx
 import numpy as np
@@ -52,7 +52,7 @@ def graph_v1_to_networkx(graph: GraphV1) -> nx.DiGraph:
             label=node.label,
             body=node.body,
             belief=node.belief,
-            metadata=node.metadata or {}
+            metadata=node.metadata or {},
         )
 
     # Add edges with attributes
@@ -61,7 +61,7 @@ def graph_v1_to_networkx(graph: GraphV1) -> nx.DiGraph:
             edge.from_,
             edge.to,
             weight=edge.weight if edge.weight is not None else 1.0,
-            label=edge.label
+            label=edge.label,
         )
 
     return G
@@ -103,12 +103,11 @@ def graph_v1_to_structural_model(graph: GraphV1) -> StructuralModel:
             # Root node - exogenous variable
             # Use belief as prior if available
             node_data = G.nodes[node]
-            belief = node_data.get('belief', 0.5)
+            belief = node_data.get("belief", 0.5)
 
             # Create simple normal distribution centered at belief
             distributions[node] = Distribution(
-                type=DistributionType.NORMAL,
-                parameters={"mean": float(belief * 100), "std": 20.0}
+                type=DistributionType.NORMAL, parameters={"mean": float(belief * 100), "std": 20.0}
             )
             # Root nodes have no equation (exogenous)
         else:
@@ -116,7 +115,7 @@ def graph_v1_to_structural_model(graph: GraphV1) -> StructuralModel:
             terms = []
             for parent in predecessors:
                 edge_data = G.get_edge_data(parent, node)
-                weight = edge_data.get('weight', 1.0)
+                weight = edge_data.get("weight", 1.0)
                 terms.append(f"{weight}*{parent}")
 
             # Add small noise term
@@ -124,11 +123,7 @@ def graph_v1_to_structural_model(graph: GraphV1) -> StructuralModel:
             equation = f"{intercept} + " + " + ".join(terms)
             equations[node] = equation
 
-    return StructuralModel(
-        variables=variables,
-        equations=equations,
-        distributions=distributions
-    )
+    return StructuralModel(variables=variables, equations=equations, distributions=distributions)
 
 
 def infer_treatment(graph: GraphV1) -> str:
@@ -145,18 +140,13 @@ def infer_treatment(graph: GraphV1) -> str:
         str: Node ID to use as treatment
     """
     # Look for decision or option nodes
-    decision_nodes = [
-        node.id for node in graph.nodes
-        if node.kind.value in ['decision', 'option']
-    ]
+    decision_nodes = [node.id for node in graph.nodes if node.kind.value in ["decision", "option"]]
 
     if decision_nodes:
         return decision_nodes[0]
 
     # Fallback: first node
-    logger.warning(
-        "No decision/option nodes found in graph, using first node as treatment"
-    )
+    logger.warning("No decision/option nodes found in graph, using first node as treatment")
     return graph.nodes[0].id
 
 
@@ -174,22 +164,17 @@ def infer_outcome(graph: GraphV1) -> str:
         str: Node ID to use as outcome
     """
     # Look for outcome or goal nodes
-    outcome_nodes = [
-        node.id for node in graph.nodes
-        if node.kind.value in ['outcome', 'goal']
-    ]
+    outcome_nodes = [node.id for node in graph.nodes if node.kind.value in ["outcome", "goal"]]
 
     if outcome_nodes:
         return outcome_nodes[0]
 
     # Fallback: last node (often the outcome in decision graphs)
-    logger.warning(
-        "No outcome/goal nodes found in graph, using last node as outcome"
-    )
+    logger.warning("No outcome/goal nodes found in graph, using last node as outcome")
     return graph.nodes[-1].id
 
 
-def extract_assumptions(graph: GraphV1) -> List[Dict[str, any]]:
+def extract_assumptions(graph: GraphV1) -> List[Dict[str, Any]]:
     """
     Extract assumptions from GraphV1 for sensitivity analysis.
 
@@ -206,27 +191,31 @@ def extract_assumptions(graph: GraphV1) -> List[Dict[str, any]]:
     # Extract beliefs from nodes
     for node in graph.nodes:
         if node.belief is not None:
-            assumptions.append({
-                "name": f"{node.id}_belief",
-                "description": f"Belief in {node.label}",
-                "current_value": node.belief,
-                "range": [0.0, 1.0]
-            })
+            assumptions.append(
+                {
+                    "name": f"{node.id}_belief",
+                    "description": f"Belief in {node.label}",
+                    "current_value": node.belief,
+                    "range": [0.0, 1.0],
+                }
+            )
 
     # Extract edge weights
     for edge in graph.edges:
         if edge.weight is not None:
-            assumptions.append({
-                "name": f"{edge.from_}_to_{edge.to}_weight",
-                "description": f"Influence of {edge.from_} on {edge.to}",
-                "current_value": edge.weight,
-                "range": [-3.0, 3.0]
-            })
+            assumptions.append(
+                {
+                    "name": f"{edge.from_}_to_{edge.to}_weight",
+                    "description": f"Influence of {edge.from_} on {edge.to}",
+                    "current_value": edge.weight,
+                    "range": [-3.0, 3.0],
+                }
+            )
 
     return assumptions
 
 
-def calculate_graph_complexity(graph: GraphV1) -> Dict[str, any]:
+def calculate_graph_complexity(graph: GraphV1) -> Dict[str, Any]:
     """
     Calculate complexity metrics for GraphV1.
 
@@ -269,17 +258,14 @@ def format_graph_summary(graph: GraphV1) -> str:
     Returns:
         str: Summary description
     """
-    node_types = {}
+    node_types: Dict[str, int] = {}
     for node in graph.nodes:
         kind = node.kind.value
         node_types[kind] = node_types.get(kind, 0) + 1
 
     type_summary = ", ".join(f"{count} {kind}" for kind, count in sorted(node_types.items()))
 
-    return (
-        f"Graph with {len(graph.nodes)} nodes ({type_summary}) "
-        f"and {len(graph.edges)} edges"
-    )
+    return f"Graph with {len(graph.nodes)} nodes ({type_summary}) " f"and {len(graph.edges)} edges"
 
 
 def find_critical_path_edges(G: nx.DiGraph, treatment: str, outcome: str) -> List[Tuple[str, str]]:
@@ -344,12 +330,7 @@ def calculate_node_centralities(G: nx.DiGraph) -> Dict[str, float]:
     return centralities
 
 
-def identify_node_role(
-    node_id: str,
-    graph: GraphV1,
-    treatment: str,
-    outcome: str
-) -> str:
+def identify_node_role(node_id: str, graph: GraphV1, treatment: str, outcome: str) -> str:
     """
     Identify the role of a node in the causal graph.
 
@@ -363,9 +344,9 @@ def identify_node_role(
         Role string: 'treatment', 'outcome', 'mediator', 'confounder', 'other'
     """
     if node_id == treatment:
-        return 'treatment'
+        return "treatment"
     elif node_id == outcome:
-        return 'outcome'
+        return "outcome"
 
     # Check if node is on path between treatment and outcome
     G = graph_v1_to_networkx(graph)
@@ -375,15 +356,15 @@ def identify_node_role(
             paths = list(nx.all_simple_paths(G, treatment, outcome, cutoff=10))
             for path in paths:
                 if node_id in path:
-                    return 'mediator'
+                    return "mediator"
 
         # Check if node influences both treatment and outcome (confounder)
         has_path_to_treatment = nx.has_path(G, node_id, treatment)
         has_path_to_outcome = nx.has_path(G, node_id, outcome)
 
         if has_path_to_treatment and has_path_to_outcome:
-            return 'confounder'
+            return "confounder"
     except (nx.NetworkXError, nx.NodeNotFound):
         pass
 
-    return 'other'
+    return "other"

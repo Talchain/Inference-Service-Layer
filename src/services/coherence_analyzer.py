@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 
-from src.models.requests import CoherenceAnalysisRequest, RankedOption
+from src.models.requests import CoherenceAnalysisRequest, CoherenceRankedOption as RankedOption
 from src.models.responses import (
     CoherenceAnalysis,
     CoherenceAnalysisResponse,
@@ -55,9 +55,7 @@ class CoherenceAnalyzer:
             CoherenceAnalysisResponse with analysis results
         """
         # Sort options by expected value (descending)
-        sorted_options = sorted(
-            request.options, key=lambda x: x.expected_value, reverse=True
-        )
+        sorted_options = sorted(request.options, key=lambda x: x.expected_value, reverse=True)
 
         # Get top option and second option
         top_option = sorted_options[0]
@@ -114,7 +112,7 @@ class CoherenceAnalyzer:
         top_positive = top_option.expected_value > 0
         if not top_positive:
             warnings.append(
-                f"Top option '{top_option.name}' has negative expected value "
+                f"Top option '{top_option.name}' has negative expected value "  # type: ignore[attr-defined]
                 f"({top_option.expected_value:.2f})"
             )
 
@@ -132,11 +130,11 @@ class CoherenceAnalyzer:
             if abs(top_option.expected_value) > 0:
                 relative_margin = abs(margin) / abs(top_option.expected_value)
             else:
-                relative_margin = 0.0 if margin == 0 else float('inf')
+                relative_margin = 0.0 if margin == 0 else float("inf")
 
             if relative_margin < close_race_threshold:
                 warnings.append(
-                    f"Close race detected: '{top_option.name}' leads '{second_option.name}' "
+                    f"Close race detected: '{top_option.name}' leads '{second_option.name}' "  # type: ignore[attr-defined]
                     f"by only {margin_pct:.1f}%"
                 )
         else:
@@ -213,7 +211,9 @@ class CoherenceAnalyzer:
             # Calculate value change for top option
             original_top_value = options[0].expected_value
             if original_top_value != 0:
-                value_change_pct = ((new_top_value - original_top_value) / abs(original_top_value)) * 100
+                value_change_pct = (
+                    (new_top_value - original_top_value) / abs(original_top_value)
+                ) * 100
             else:
                 value_change_pct = 0.0
 
@@ -341,9 +341,9 @@ class CoherenceAnalyzer:
             )
 
         # Confidence interval overlap recommendation
-        top_ci = options[0].confidence_interval if options else None
+        top_ci = options[0].confidence_interval if options else None  # type: ignore[attr-defined]
         if top_ci and len(options) > 1:
-            second_ci = options[1].confidence_interval
+            second_ci = options[1].confidence_interval  # type: ignore[attr-defined]
             if second_ci and top_ci[0] < second_ci[1]:  # Intervals overlap
                 recommendations.append(
                     "Confidence intervals overlap between top options - "

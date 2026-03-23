@@ -11,7 +11,7 @@ from itertools import product
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.models.requests import (
     DecisionVariable,
@@ -82,11 +82,13 @@ class ContinuousOptimizer:
 
         # Handle no feasible solution
         if not feasible_results:
-            warnings.append(OptimisationWarning(
-                code="NO_FEASIBLE_SOLUTION",
-                message="No feasible solution found. All grid points violate constraints.",
-                affected_variables=var_ids
-            ))
+            warnings.append(
+                OptimisationWarning(
+                    code="NO_FEASIBLE_SOLUTION",
+                    message="No feasible solution found. All grid points violate constraints.",
+                    affected_variables=var_ids,
+                )
+            )
             return OptimisationResponse(
                 optimal_point=None,
                 sensitivity=None,
@@ -94,9 +96,9 @@ class ContinuousOptimizer:
                     grid_points_evaluated=total_points,
                     feasible_points=0,
                     computation_time_ms=computation_time_ms,
-                    convergence_achieved=False
+                    convergence_achieved=False,
                 ),
-                warnings=warnings
+                warnings=warnings,
             )
 
         # Find optimal point
@@ -109,21 +111,25 @@ class ContinuousOptimizer:
         obj_values = [o for _, o in feasible_results]
         obj_range = max(obj_values) - min(obj_values)
         if obj_range < 1e-10:
-            warnings.append(OptimisationWarning(
-                code="FLAT_OBJECTIVE",
-                message="Objective function is essentially flat across all feasible points.",
-                affected_variables=var_ids
-            ))
+            warnings.append(
+                OptimisationWarning(
+                    code="FLAT_OBJECTIVE",
+                    message="Objective function is essentially flat across all feasible points.",
+                    affected_variables=var_ids,
+                )
+            )
 
         # Check for multiple optima (values within 0.1% of optimum)
         tolerance = abs(optimal_obj) * 0.001 if optimal_obj != 0 else 1e-10
         near_optimal = [v for v, o in feasible_results if abs(o - optimal_obj) <= tolerance]
         if len(near_optimal) > 1:
-            warnings.append(OptimisationWarning(
-                code="MULTIPLE_OPTIMA",
-                message=f"Found {len(near_optimal)} near-optimal points. Solution may not be unique.",
-                affected_variables=None
-            ))
+            warnings.append(
+                OptimisationWarning(
+                    code="MULTIPLE_OPTIMA",
+                    message=f"Found {len(near_optimal)} near-optimal points. Solution may not be unique.",
+                    affected_variables=None,
+                )
+            )
 
         # Check boundary conditions
         boundary_vars = []
@@ -134,29 +140,29 @@ class ContinuousOptimizer:
 
         is_boundary = len(boundary_vars) > 0
         if is_boundary:
-            warnings.append(OptimisationWarning(
-                code="BOUNDARY_OPTIMUM",
-                message=f"Optimal point is at variable bounds: {boundary_vars}. Consider expanding bounds.",
-                affected_variables=boundary_vars
-            ))
+            warnings.append(
+                OptimisationWarning(
+                    code="BOUNDARY_OPTIMUM",
+                    message=f"Optimal point is at variable bounds: {boundary_vars}. Consider expanding bounds.",
+                    affected_variables=boundary_vars,
+                )
+            )
 
         # Check for active constraints
         if request.constraints:
-            active_constraints = self._find_active_constraints(
-                request.constraints, optimal_vars
-            )
+            active_constraints = self._find_active_constraints(request.constraints, optimal_vars)
             if active_constraints:
-                warnings.append(OptimisationWarning(
-                    code="CONSTRAINT_ACTIVE",
-                    message=f"Constraints active at optimum: {active_constraints}",
-                    affected_variables=None
-                ))
+                warnings.append(
+                    OptimisationWarning(
+                        code="CONSTRAINT_ACTIVE",
+                        message=f"Constraints active at optimum: {active_constraints}",
+                        affected_variables=None,
+                    )
+                )
 
         # Compute confidence interval
         noise_std = request.noise_std if request.noise_std else abs(optimal_obj) * 0.05
-        ci = self._compute_confidence_interval(
-            optimal_obj, noise_std, request.confidence_level
-        )
+        ci = self._compute_confidence_interval(optimal_obj, noise_std, request.confidence_level)
 
         # Compute sensitivity analysis
         sensitivity = self._compute_sensitivity(
@@ -170,7 +176,7 @@ class ContinuousOptimizer:
             confidence_interval=ci,
             is_boundary=is_boundary,
             boundary_variables=boundary_vars if is_boundary else None,
-            feasible=True
+            feasible=True,
         )
 
         return OptimisationResponse(
@@ -180,9 +186,9 @@ class ContinuousOptimizer:
                 grid_points_evaluated=total_points,
                 feasible_points=feasible_points,
                 computation_time_ms=computation_time_ms,
-                convergence_achieved=True
+                convergence_achieved=True,
             ),
-            warnings=warnings
+            warnings=warnings,
         )
 
     def _build_grids(
@@ -198,9 +204,7 @@ class ContinuousOptimizer:
                 )
             else:
                 # Use uniform grid
-                grids[var.variable_id] = np.linspace(
-                    var.lower_bound, var.upper_bound, n_points
-                )
+                grids[var.variable_id] = np.linspace(var.lower_bound, var.upper_bound, n_points)
         return grids
 
     def _evaluate_objective(
@@ -214,9 +218,7 @@ class ContinuousOptimizer:
         return result
 
     def _check_constraints(
-        self,
-        constraints: Optional[List[OptimisationConstraint]],
-        var_values: Dict[str, float]
+        self, constraints: Optional[List[OptimisationConstraint]], var_values: Dict[str, float]
     ) -> bool:
         """Check if point satisfies all constraints."""
         if not constraints:
@@ -241,9 +243,7 @@ class ContinuousOptimizer:
         return True
 
     def _find_active_constraints(
-        self,
-        constraints: List[OptimisationConstraint],
-        var_values: Dict[str, float]
+        self, constraints: List[OptimisationConstraint], var_values: Dict[str, float]
     ) -> List[str]:
         """Find constraints that are active (binding) at the given point."""
         active = []
@@ -273,9 +273,7 @@ class ContinuousOptimizer:
         half_width = z_score * noise_std
 
         return ConfidenceInterval(
-            lower=value - half_width,
-            upper=value + half_width,
-            confidence_level=confidence_level
+            lower=value - half_width, upper=value + half_width, confidence_level=confidence_level
         )
 
     def _compute_sensitivity(
@@ -283,13 +281,12 @@ class ContinuousOptimizer:
         request: OptimisationRequest,
         optimal_vars: Dict[str, float],
         optimal_obj: float,
-        feasible_results: List[Tuple[Dict[str, float], float]]
+        feasible_results: List[Tuple[Dict[str, float], float]],
     ) -> OptimisationSensitivity:
         """Compute sensitivity analysis at optimal point."""
         var_ids = [v.variable_id for v in request.decision_variables]
         var_bounds = {
-            v.variable_id: (v.lower_bound, v.upper_bound)
-            for v in request.decision_variables
+            v.variable_id: (v.lower_bound, v.upper_bound) for v in request.decision_variables
         }
 
         # Compute gradients (partial derivatives)
@@ -352,18 +349,14 @@ class ContinuousOptimizer:
                 normalized_gradients[var_id] = 0
 
         # Sort by normalized gradient, take top variables
-        sorted_vars = sorted(
-            normalized_gradients.items(), key=lambda x: x[1], reverse=True
-        )
+        sorted_vars = sorted(normalized_gradients.items(), key=lambda x: x[1], reverse=True)
         critical_threshold = 0.5 * max(normalized_gradients.values()) if normalized_gradients else 0
-        critical_variables = [
-            var_id for var_id, ng in sorted_vars if ng >= critical_threshold
-        ]
+        critical_variables = [var_id for var_id, ng in sorted_vars if ng >= critical_threshold]
 
         return OptimisationSensitivity(
             range_within_5pct=range_5pct,
             gradient_at_optimum=gradients,
             robustness=robustness,
             robustness_score=robustness_score,
-            critical_variables=critical_variables
+            critical_variables=critical_variables,
         )

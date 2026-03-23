@@ -50,12 +50,8 @@ class PathValidator:
         self.config = config or PathValidationConfig()
 
         # Build two adjacency lists: structural and effective
-        self.structural_adjacency = self._build_adjacency(
-            edges, check_strength=False
-        )
-        self.effective_adjacency = self._build_adjacency(
-            edges, check_strength=True
-        )
+        self.structural_adjacency = self._build_adjacency(edges, check_strength=False)
+        self.effective_adjacency = self._build_adjacency(edges, check_strength=True)
 
     def _build_adjacency(
         self,
@@ -94,11 +90,7 @@ class PathValidator:
                     continue
 
             # Get source node (handle multiple field name conventions)
-            source = (
-                edge.get("from")
-                or edge.get("from_")
-                or edge.get("source_id")
-            )
+            source = edge.get("from") or edge.get("from_") or edge.get("source_id")
             target = edge.get("to") or edge.get("target_id")
 
             if source and target:
@@ -217,9 +209,7 @@ class PathValidator:
             else:
                 targets_without_effective += 1
                 if structural:
-                    warnings.append(
-                        f"Target '{target}' has path but coefficients may be too small"
-                    )
+                    warnings.append(f"Target '{target}' has path but coefficients may be too small")
 
         return OptionDiagnosticV2(
             option_id=option_id,

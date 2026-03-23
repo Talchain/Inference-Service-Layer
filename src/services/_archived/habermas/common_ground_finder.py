@@ -149,7 +149,7 @@ class CommonGroundFinder:
 
         Uses name-based grouping (in production, would use embeddings).
         """
-        groups = defaultdict(list)
+        groups: Dict[str, List[Dict]] = defaultdict(list)
 
         for value_item in all_values:
             value_name = value_item["value"].value_name
@@ -174,9 +174,9 @@ class CommonGroundFinder:
             return []
 
         # Group similar concerns
-        concern_groups = defaultdict(list)
+        concern_groups: Dict[str, List[Dict]] = defaultdict(list)
         for concern_item in all_concerns:
-            concern_name = concern_item["concern"].concern_name
+            concern_name = concern_item["concern"].concern_name  # type: ignore[attr-defined]
             normalized = concern_name.lower().replace("_", " ").strip()
             concern_groups[normalized].append(concern_item)
 
@@ -229,9 +229,7 @@ class CommonGroundFinder:
             return 0.0
 
         # Weight by number of supporters
-        weighted_scores = [
-            s.agreement_score * len(s.supporting_members) for s in all_shared
-        ]
+        weighted_scores = [s.agreement_score * len(s.supporting_members) for s in all_shared]
 
         total_agreements = sum(weighted_scores)
         max_possible = len(all_shared) * len(positions)

@@ -8,10 +8,10 @@ import logging
 import os
 import sys
 from functools import lru_cache
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import ConfigDict, Field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Note: CorrelationIDFormatter import is deferred to setup_logging() to avoid circular imports
 
@@ -47,8 +47,7 @@ class Settings(BaseSettings):
 
     # Environment Configuration
     ENVIRONMENT: str = Field(
-        default="development",
-        description="Environment: development, staging, or production"
+        default="development", description="Environment: development, staging, or production"
     )
 
     # API Configuration
@@ -69,58 +68,44 @@ class Settings(BaseSettings):
     # Authentication
     # Supports both ISL_API_KEYS (preferred) and ISL_API_KEY (legacy) for backward compatibility
     ISL_API_KEYS: Optional[str] = Field(
-        default=None,
-        description="Comma-separated list of valid API keys for authentication"
+        default=None, description="Comma-separated list of valid API keys for authentication"
     )
     ISL_API_KEY: Optional[str] = Field(
         default=None,
-        description="Legacy: Single API key for authentication (use ISL_API_KEYS instead)"
+        description="Legacy: Single API key for authentication (use ISL_API_KEYS instead)",
     )
     ISL_AUTH_DISABLED: bool = Field(
-        default=False,
-        description="Explicitly disable authentication (for local development only)"
+        default=False, description="Explicitly disable authentication (for local development only)"
     )
 
     # Sentry Error Tracking
-    SENTRY_ENABLED: bool = Field(
-        default=False,
-        description="Enable Sentry error tracking"
-    )
-    SENTRY_DSN: Optional[str] = Field(
-        default=None,
-        description="Sentry Data Source Name"
-    )
+    SENTRY_ENABLED: bool = Field(default=False, description="Enable Sentry error tracking")
+    SENTRY_DSN: Optional[str] = Field(default=None, description="Sentry Data Source Name")
     SENTRY_ENVIRONMENT: Optional[str] = Field(
-        default=None,
-        description="Sentry environment (defaults to ENVIRONMENT)"
+        default=None, description="Sentry environment (defaults to ENVIRONMENT)"
     )
     SENTRY_TRACES_SAMPLE_RATE: float = Field(
-        default=0.1,
-        description="Percentage of transactions to trace (0.0-1.0)"
+        default=0.1, description="Percentage of transactions to trace (0.0-1.0)"
     )
     SENTRY_PROFILES_SAMPLE_RATE: float = Field(
-        default=0.1,
-        description="Percentage of transactions to profile (0.0-1.0)"
+        default=0.1, description="Percentage of transactions to profile (0.0-1.0)"
     )
 
     # CORS Configuration
     CORS_ORIGINS: str = Field(
         default="http://localhost:3000,http://localhost:8080",
-        description="Comma-separated list of allowed CORS origins"
+        description="Comma-separated list of allowed CORS origins",
     )
     CORS_ALLOW_CREDENTIALS: bool = Field(
-        default=False,
-        description="Allow credentials in CORS requests"
+        default=False, description="Allow credentials in CORS requests"
     )
 
     # Rate Limiting
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = Field(
-        default=100,
-        description="Maximum requests per minute per client"
+        default=100, description="Maximum requests per minute per client"
     )
     TRUSTED_PROXIES: str = Field(
-        default="",
-        description="Comma-separated list of trusted proxy IPs/CIDRs"
+        default="", description="Comma-separated list of trusted proxy IPs/CIDRs"
     )
 
     # Redis Configuration
@@ -133,12 +118,10 @@ class Settings(BaseSettings):
 
     # Request Limits
     MAX_REQUEST_SIZE_MB: int = Field(
-        default=10,
-        description="Maximum request body size in megabytes"
+        default=10, description="Maximum request body size in megabytes"
     )
     REQUEST_TIMEOUT_SECONDS: int = Field(
-        default=60,
-        description="Maximum time for request processing"
+        default=60, description="Maximum time for request processing"
     )
 
     # Computation Settings
@@ -159,32 +142,25 @@ class Settings(BaseSettings):
 
     # Decision Robustness Suite (Brief 7)
     ENABLE_ROBUSTNESS_SUITE: bool = Field(
-        default=True,
-        description="Enable Decision Robustness Suite unified analysis"
+        default=True, description="Enable Decision Robustness Suite unified analysis"
     )
     ENABLE_PARETO_FRONTIER: bool = Field(
-        default=True,
-        description="Enable Pareto frontier analysis for multi-goal decisions"
+        default=True, description="Enable Pareto frontier analysis for multi-goal decisions"
     )
     ENABLE_OUTCOME_LOGGING: bool = Field(
-        default=True,
-        description="Enable outcome logging for calibration"
+        default=True, description="Enable outcome logging for calibration"
     )
 
     # Y₀ Identifiability Analysis (Brief 6)
     ENABLE_IDENTIFIABILITY_ANALYSIS: bool = Field(
-        default=True,
-        description="Enable Y₀ identifiability analysis with hard rule enforcement"
+        default=True, description="Enable Y₀ identifiability analysis with hard rule enforcement"
     )
 
-    model_config = ConfigDict(
-        env_file=".env",
-        case_sensitive=True
-    )
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
     @field_validator("ISL_API_KEYS")
     @classmethod
-    def validate_api_keys_in_production(cls, v, info):
+    def validate_api_keys_in_production(cls, v: Any, info: Any) -> Any:
         """Require API keys in production environment."""
         # Note: info.data may not have ENVIRONMENT yet during validation
         # This is a soft validation; hard validation happens in startup check
@@ -192,7 +168,7 @@ class Settings(BaseSettings):
 
     @field_validator("CORS_ORIGINS")
     @classmethod
-    def validate_cors_origins(cls, v, info):
+    def validate_cors_origins(cls, v: Any, info: Any) -> Any:
         """Validate CORS origins don't contain wildcards and use HTTPS in production."""
         # Get environment from info.data if available
         env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
@@ -240,7 +216,7 @@ class Settings(BaseSettings):
         Returns:
             List of validation error messages (empty if valid)
         """
-        errors = []
+        errors: List[str] = []
 
         if not self.is_production():
             return errors
@@ -251,7 +227,9 @@ class Settings(BaseSettings):
 
         # CRITICAL: ISL_AUTH_DISABLED must never be true in production
         if self.ISL_AUTH_DISABLED:
-            errors.append("ISL_AUTH_DISABLED=true is not allowed in production - authentication must be enabled")
+            errors.append(
+                "ISL_AUTH_DISABLED=true is not allowed in production - authentication must be enabled"
+            )
 
         if "*" in self.CORS_ORIGINS:
             errors.append("Wildcard CORS origins not allowed in production")

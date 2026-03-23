@@ -97,7 +97,7 @@ class StrengthDistribution(BaseModel):
         v = float(v)
         if not math.isfinite(v):
             raise ValueError(f"mean must be a finite number (no NaN or Inf), got {v}")
-        return v  # actual clamp happens in model_validator after all fields are set
+        return float(v)  # actual clamp happens in model_validator after all fields are set
 
     @field_validator("std", mode="before")
     @classmethod
@@ -108,7 +108,7 @@ class StrengthDistribution(BaseModel):
         v = float(v)
         if not math.isfinite(v):
             raise ValueError(f"std must be a finite number (no NaN or Inf), got {v}")
-        return v
+        return float(v)
 
     @model_validator(mode="after")
     def clamp_mean(self) -> "StrengthDistribution":
@@ -428,7 +428,7 @@ class GraphV2(BaseModel):
 
     @field_validator("edges")
     @classmethod
-    def validate_edges_reference_nodes(cls, v: List[EdgeV2], info) -> List[EdgeV2]:
+    def validate_edges_reference_nodes(cls, v: List[EdgeV2], info: Any) -> List[EdgeV2]:
         """Validate edges reference existing nodes."""
         if "nodes" in info.data:
             node_ids = {node.id for node in info.data["nodes"]}
@@ -612,7 +612,7 @@ class RobustnessRequestV2(BaseModel):
 
     @field_validator("seed", mode="before")
     @classmethod
-    def normalise_seed_to_int(cls, v):
+    def normalise_seed_to_int(cls, v: Any) -> Optional[int]:
         """Normalise seed to int: numeric strings → int, non-numeric → deterministic hash."""
         if v is None:
             return v
@@ -695,7 +695,7 @@ class RobustnessRequestV2(BaseModel):
 
     @field_validator("goal_node_id")
     @classmethod
-    def validate_goal_node_exists(cls, v: str, info) -> str:
+    def validate_goal_node_exists(cls, v: str, info: Any) -> str:
         """Validate goal node exists in graph."""
         if "graph" in info.data:
             node_ids = {node.id for node in info.data["graph"].nodes}

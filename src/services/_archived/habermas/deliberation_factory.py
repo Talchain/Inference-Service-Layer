@@ -8,18 +8,18 @@ import logging
 from typing import Optional
 
 from src.config.llm_config import get_llm_config
-from src.services.common_ground_finder import CommonGroundFinder
-from src.services.consensus_generator import ConsensusGenerator
-from src.services.deliberation_orchestrator import DeliberationOrchestrator
+from src.services.common_ground_finder import CommonGroundFinder  # type: ignore[import-untyped]
+from src.services.consensus_generator import ConsensusGenerator  # type: ignore[import-untyped]
+from src.services.deliberation_orchestrator import DeliberationOrchestrator  # type: ignore[import-untyped]
 from src.services.llm_client import LLMClient
-from src.services.value_extractor import ValueExtractor
+from src.services.value_extractor import ValueExtractor  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
 # Try to import LLM services
 try:
-    from src.services.consensus_generator_llm import ConsensusGeneratorLLM
-    from src.services.value_extractor_llm import ValueExtractorLLM
+    from src.services.consensus_generator_llm import ConsensusGeneratorLLM  # type: ignore[import-untyped]
+    from src.services.value_extractor_llm import ValueExtractorLLM  # type: ignore[import-untyped]
 
     LLM_SERVICES_AVAILABLE = True
 except ImportError:
@@ -52,9 +52,7 @@ def create_deliberation_orchestrator(
                 logger.warning("OpenAI API key not configured, using rule-based services")
                 should_use_llm = False
             elif llm_config.provider == "anthropic" and not llm_config.anthropic_api_key:
-                logger.warning(
-                    "Anthropic API key not configured, using rule-based services"
-                )
+                logger.warning("Anthropic API key not configured, using rule-based services")
                 should_use_llm = False
 
             if should_use_llm:

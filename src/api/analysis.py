@@ -74,7 +74,7 @@ async def analyze_sensitivity(
             },
         )
 
-        result = sensitivity_analyzer.analyze(request)
+        result = sensitivity_analyzer.analyze(request)  # type: ignore[attr-defined]
 
         logger.info(
             "sensitivity_analysis_completed",
@@ -87,7 +87,7 @@ async def analyze_sensitivity(
             },
         )
 
-        return result
+        return result  # type: ignore[no-any-return]
 
     except HTTPException:
         raise

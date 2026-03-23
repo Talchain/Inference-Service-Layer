@@ -49,7 +49,7 @@ class ValueExtractor:
         "doubt",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize value extractor."""
         pass
 
@@ -115,7 +115,7 @@ class ValueExtractor:
         """
         values = []
         text_lower = text.lower()
-        sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+        sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
 
         for value_category, keywords in self.VALUE_KEYWORDS.items():
             # Check if any keyword is present
@@ -124,9 +124,7 @@ class ValueExtractor:
             if matches:
                 # Find relevant sentences
                 relevant_sentences = [
-                    s
-                    for s in sentences
-                    if any(kw in s.lower() for kw in matches)
+                    s for s in sentences if any(kw in s.lower() for kw in matches)
                 ]
 
                 if relevant_sentences:
@@ -169,7 +167,7 @@ class ValueExtractor:
         """
         concerns = []
         text_lower = text.lower()
-        sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+        sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
 
         # Find sentences with concern indicators
         concern_sentences = [

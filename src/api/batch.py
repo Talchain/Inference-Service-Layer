@@ -109,7 +109,9 @@ class BatchCounterfactualResponse(BaseModel):
 # === Helper Functions ===
 
 
-def _process_validation_item_sync(index: int, request: CausalValidationRequest) -> BatchValidationItem:
+def _process_validation_item_sync(
+    index: int, request: CausalValidationRequest
+) -> BatchValidationItem:
     """
     Process a single validation request (synchronous).
 
@@ -131,7 +133,9 @@ def _process_validation_item_sync(index: int, request: CausalValidationRequest) 
         return BatchValidationItem(index=index, success=False, result=None, error=str(e))
 
 
-async def _process_validation_item(index: int, request: CausalValidationRequest) -> BatchValidationItem:
+async def _process_validation_item(
+    index: int, request: CausalValidationRequest
+) -> BatchValidationItem:
     """
     Process a single validation request asynchronously.
 
@@ -148,7 +152,7 @@ async def _process_validation_item(index: int, request: CausalValidationRequest)
         # Run sync function in thread pool with timeout
         result = await asyncio.wait_for(
             asyncio.to_thread(_process_validation_item_sync, index, request),
-            timeout=BATCH_ITEM_TIMEOUT_SECONDS
+            timeout=BATCH_ITEM_TIMEOUT_SECONDS,
         )
         return result
     except asyncio.TimeoutError:
@@ -160,7 +164,7 @@ async def _process_validation_item(index: int, request: CausalValidationRequest)
             index=index,
             success=False,
             result=None,
-            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s"
+            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s",
         )
     except Exception as e:
         logger.error(
@@ -169,10 +173,7 @@ async def _process_validation_item(index: int, request: CausalValidationRequest)
             exc_info=True,
         )
         return BatchValidationItem(
-            index=index,
-            success=False,
-            result=None,
-            error=f"Processing error: {str(e)}"
+            index=index, success=False, result=None, error=f"Processing error: {str(e)}"
         )
 
 
@@ -219,7 +220,7 @@ async def _process_counterfactual_item(
         # Run sync function in thread pool with timeout
         result = await asyncio.wait_for(
             asyncio.to_thread(_process_counterfactual_item_sync, index, request),
-            timeout=BATCH_ITEM_TIMEOUT_SECONDS
+            timeout=BATCH_ITEM_TIMEOUT_SECONDS,
         )
         return result
     except asyncio.TimeoutError:
@@ -231,7 +232,7 @@ async def _process_counterfactual_item(
             index=index,
             success=False,
             result=None,
-            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s"
+            error=f"Request timed out after {BATCH_ITEM_TIMEOUT_SECONDS}s",
         )
     except Exception as e:
         logger.error(
@@ -240,10 +241,7 @@ async def _process_counterfactual_item(
             exc_info=True,
         )
         return BatchCounterfactualItem(
-            index=index,
-            success=False,
-            result=None,
-            error=f"Processing error: {str(e)}"
+            index=index, success=False, result=None, error=f"Processing error: {str(e)}"
         )
 
 
@@ -302,17 +300,16 @@ async def batch_validate_causal_models(
         # Create semaphore to limit concurrency
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-        async def process_with_semaphore(idx: int, req: CausalValidationRequest) -> BatchValidationItem:
+        async def process_with_semaphore(
+            idx: int, req: CausalValidationRequest
+        ) -> BatchValidationItem:
             """Process single item with concurrency limit."""
             async with semaphore:
                 return await _process_validation_item(idx, req)
 
         # Process all requests concurrently using asyncio.gather()
         # return_exceptions=False because exceptions are already handled in _process_validation_item
-        tasks = [
-            process_with_semaphore(idx, req)
-            for idx, req in enumerate(request.requests)
-        ]
+        tasks = [process_with_semaphore(idx, req) for idx, req in enumerate(request.requests)]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
         # Calculate summary statistics
@@ -403,17 +400,16 @@ async def batch_analyze_counterfactuals(
         # Create semaphore to limit concurrency
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-        async def process_with_semaphore(idx: int, req: CounterfactualRequest) -> BatchCounterfactualItem:
+        async def process_with_semaphore(
+            idx: int, req: CounterfactualRequest
+        ) -> BatchCounterfactualItem:
             """Process single item with concurrency limit."""
             async with semaphore:
                 return await _process_counterfactual_item(idx, req)
 
         # Process all requests concurrently using asyncio.gather()
         # return_exceptions=False because exceptions are already handled in _process_counterfactual_item
-        tasks = [
-            process_with_semaphore(idx, req)
-            for idx, req in enumerate(request.requests)
-        ]
+        tasks = [process_with_semaphore(idx, req) for idx, req in enumerate(request.requests)]
         results = await asyncio.gather(*tasks, return_exceptions=False)
 
         # Calculate summary statistics

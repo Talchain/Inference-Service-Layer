@@ -17,7 +17,7 @@ import logging
 from typing import Dict, List
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.models.phase1_models import (
     CounterfactualQuery,
@@ -134,9 +134,7 @@ class BeliefUpdater:
                 "avg_uncertainty_before": np.mean(
                     list(current_beliefs.uncertainty_estimates.values())
                 ),
-                "avg_uncertainty_after": np.mean(
-                    list(updated_uncertainty.values())
-                ),
+                "avg_uncertainty_after": np.mean(list(updated_uncertainty.values())),
             },
         )
 
@@ -362,7 +360,7 @@ class BeliefUpdater:
         """
         # Compute from uncertainty estimates
         avg_uncertainty = np.mean(list(beliefs.uncertainty_estimates.values()))
-        return avg_uncertainty * 2.0
+        return float(avg_uncertainty * 2.0)
 
     def _identify_top_priorities(
         self,
@@ -414,14 +412,10 @@ class BeliefUpdater:
         top_priorities = self._identify_top_priorities(beliefs, top_n=3)
 
         if len(top_priorities) >= 1:
-            insights.append(
-                f"You strongly prioritize {top_priorities[0]} in your decisions"
-            )
+            insights.append(f"You strongly prioritize {top_priorities[0]} in your decisions")
 
         if len(top_priorities) >= 2:
-            insights.append(
-                f"You value {top_priorities[0]} over {top_priorities[1]}"
-            )
+            insights.append(f"You value {top_priorities[0]} over {top_priorities[1]}")
 
         # Check uncertainty levels
         avg_uncertainty = np.mean(list(beliefs.uncertainty_estimates.values()))

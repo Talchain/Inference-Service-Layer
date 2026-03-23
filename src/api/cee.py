@@ -13,7 +13,7 @@ CEE gracefully degrades if endpoints are unavailable or return 501.
 
 import logging
 import uuid
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 
@@ -105,10 +105,7 @@ async def analyze_sensitivity_detailed(
         assumptions = extract_assumptions(request.graph)
 
         if not assumptions:
-            logger.warning(
-                "no_assumptions_found",
-                extra={"request_id": request_id}
-            )
+            logger.warning("no_assumptions_found", extra={"request_id": request_id})
             # Return empty result if no assumptions
             response = SensitivityDetailedResponse(assumptions=[])
             response.metadata = metadata_builder.build(algorithm="assumption_extraction")
@@ -124,17 +121,13 @@ async def analyze_sensitivity_detailed(
 
         for assumption in assumptions:
             # Calculate sensitivity based on graph topology
-            sensitivity = _calculate_assumption_sensitivity(
-                assumption, G, treatment, outcome
-            )
+            sensitivity = _calculate_assumption_sensitivity(assumption, G, treatment, outcome)
 
             impact_desc = _format_impact_description(assumption, sensitivity)
 
             assumption_results.append(
                 AssumptionSensitivity(
-                    variable=assumption["name"],
-                    sensitivity=sensitivity,
-                    impact=impact_desc
+                    variable=assumption["name"], sensitivity=sensitivity, impact=impact_desc
                 )
             )
 
@@ -147,7 +140,7 @@ async def analyze_sensitivity_detailed(
                 "request_id": request_id,
                 "num_assumptions": len(assumption_results),
                 "top_sensitivity": assumption_results[0].sensitivity if assumption_results else 0,
-            }
+            },
         )
 
         response = SensitivityDetailedResponse(assumptions=assumption_results)
@@ -160,12 +153,9 @@ async def analyze_sensitivity_detailed(
         logger.error(
             "cee_sensitivity_error",
             extra={"request_id": request_id, "error": str(e)},
-            exc_info=True
+            exc_info=True,
         )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Sensitivity analysis failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Sensitivity analysis failed: {str(e)}")
 
 
 @router.post(
@@ -224,7 +214,7 @@ async def generate_contrastive(
         if request.target_outcome not in node_ids:
             raise HTTPException(
                 status_code=400,
-                detail=f"Target outcome '{request.target_outcome}' not found in graph"
+                detail=f"Target outcome '{request.target_outcome}' not found in graph",
             )
 
         # Generate contrastive alternatives
@@ -236,7 +226,7 @@ async def generate_contrastive(
             extra={
                 "request_id": request_id,
                 "num_alternatives": len(alternatives),
-            }
+            },
         )
 
         response = ContrastiveResponse(alternatives=alternatives)
@@ -249,12 +239,9 @@ async def generate_contrastive(
         logger.error(
             "cee_contrastive_error",
             extra={"request_id": request_id, "error": str(e)},
-            exc_info=True
+            exc_info=True,
         )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Contrastive explanation failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Contrastive explanation failed: {str(e)}")
 
 
 @router.post(
@@ -312,8 +299,7 @@ async def predict_conformal(
         node_ids = [node.id for node in request.graph.nodes]
         if request.variable not in node_ids:
             raise HTTPException(
-                status_code=400,
-                detail=f"Variable '{request.variable}' not found in graph"
+                status_code=400, detail=f"Variable '{request.variable}' not found in graph"
             )
 
         # Generate conformal prediction interval
@@ -327,13 +313,13 @@ async def predict_conformal(
             extra={
                 "request_id": request_id,
                 "interval_width": interval[1] - interval[0],
-            }
+            },
         )
 
         response = ConformalResponse(
             prediction_interval=interval,
             confidence_level=0.90,
-            uncertainty_source=uncertainty_source
+            uncertainty_source=uncertainty_source,
         )
         response.metadata = metadata_builder.build(algorithm="conformal_prediction")
         return response
@@ -342,14 +328,9 @@ async def predict_conformal(
         raise
     except Exception as e:
         logger.error(
-            "cee_conformal_error",
-            extra={"request_id": request_id, "error": str(e)},
-            exc_info=True
+            "cee_conformal_error", extra={"request_id": request_id, "error": str(e)}, exc_info=True
         )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Conformal prediction failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Conformal prediction failed: {str(e)}")
 
 
 @router.post(
@@ -411,9 +392,7 @@ async def suggest_validation_strategies(
 
         # Get adjustment strategies from advanced validator
         strategies = validation_suggester.suggest_adjustment_strategies(
-            dag=G,
-            treatment=treatment,
-            outcome=outcome
+            dag=G, treatment=treatment, outcome=outcome
         )
 
         # Convert to ValidationImprovement format
@@ -426,9 +405,7 @@ async def suggest_validation_strategies(
 
             improvements.append(
                 ValidationImprovement(
-                    type=improvement_type,
-                    description=strategy.explanation,
-                    priority=priority
+                    type=improvement_type, description=strategy.explanation, priority=priority
                 )
             )
 
@@ -441,7 +418,7 @@ async def suggest_validation_strategies(
             extra={
                 "request_id": request_id,
                 "num_improvements": len(improvements),
-            }
+            },
         )
 
         response = ValidationStrategiesResponse(suggested_improvements=improvements)
@@ -454,18 +431,19 @@ async def suggest_validation_strategies(
         logger.error(
             "cee_validation_strategies_error",
             extra={"request_id": request_id, "error": str(e)},
-            exc_info=True
+            exc_info=True,
         )
         raise HTTPException(
-            status_code=500,
-            detail=f"Validation strategies generation failed: {str(e)}"
+            status_code=500, detail=f"Validation strategies generation failed: {str(e)}"
         )
 
 
 # Helper functions
 
 
-def _calculate_assumption_sensitivity(assumption: dict, G, treatment: str, outcome: str) -> float:
+def _calculate_assumption_sensitivity(
+    assumption: dict, G: Any, treatment: str, outcome: str
+) -> float:
     """
     Calculate sensitivity score for an assumption.
 
@@ -484,13 +462,14 @@ def _calculate_assumption_sensitivity(assumption: dict, G, treatment: str, outco
             if nx.has_path(G, treatment, outcome):
                 paths = list(nx.all_simple_paths(G, treatment, outcome, cutoff=10))
                 on_critical_path = any(
-                    from_node in path and to_node in path and
-                    path.index(from_node) + 1 == path.index(to_node)
+                    from_node in path
+                    and to_node in path
+                    and path.index(from_node) + 1 == path.index(to_node)
                     for path in paths
                 )
 
                 if on_critical_path:
-                    return 0.85 + (abs(assumption.get("current_value", 1.0)) / 3.0) * 0.15
+                    return float(0.85 + (abs(assumption.get("current_value", 1.0)) / 3.0) * 0.15)
                 else:
                     return 0.45
     elif "_belief" in assumption["name"]:
@@ -500,7 +479,7 @@ def _calculate_assumption_sensitivity(assumption: dict, G, treatment: str, outco
         # Check centrality
         try:
             degree_centrality = nx.degree_centrality(G).get(node, 0)
-            return 0.5 + (degree_centrality * 0.5)
+            return float(0.5 + (degree_centrality * 0.5))
         except:
             return 0.5
 
@@ -522,7 +501,7 @@ def _format_impact_description(assumption: dict, sensitivity: float) -> str:
         return f"Uncertainty in this variable creates {magnitude} outcome variance"
 
 
-def _generate_alternatives(G, target_outcome: str, graph) -> List[ContrastiveAlternative]:
+def _generate_alternatives(G: Any, target_outcome: str, graph: Any) -> List[ContrastiveAlternative]:
     """Generate contrastive alternatives."""
     import networkx as nx
 
@@ -540,7 +519,7 @@ def _generate_alternatives(G, target_outcome: str, graph) -> List[ContrastiveAlt
                     ContrastiveAlternative(
                         change=f"Strengthen {pred_node.label} by increasing investment or focus",
                         outcome_diff=f"Would increase likelihood of achieving {target_outcome}",
-                        feasibility=0.75
+                        feasibility=0.75,
                     )
                 )
 
@@ -551,7 +530,7 @@ def _generate_alternatives(G, target_outcome: str, graph) -> List[ContrastiveAlt
             ContrastiveAlternative(
                 change="Add additional supporting factors or enablers",
                 outcome_diff=f"Would provide alternative pathways to {outcome_node.label}",
-                feasibility=0.60
+                feasibility=0.60,
             )
         )
 
@@ -561,14 +540,14 @@ def _generate_alternatives(G, target_outcome: str, graph) -> List[ContrastiveAlt
             ContrastiveAlternative(
                 change="Reduce uncertainty by gathering more data on key assumptions",
                 outcome_diff="Would narrow confidence intervals and improve decision quality",
-                feasibility=0.85
+                feasibility=0.85,
             )
         )
 
     return alternatives[:3]  # Top 3
 
 
-def _generate_conformal_interval(G, variable: str, graph) -> tuple:
+def _generate_conformal_interval(G: Any, variable: str, graph: Any) -> tuple:
     """Generate conformal prediction interval."""
     import networkx as nx
 
@@ -614,7 +593,7 @@ def _map_strategy_type(strategy_type: str) -> str:
     return mapping.get(strategy_type.lower(), "model_structure")
 
 
-def _assess_priority(strategy) -> str:
+def _assess_priority(strategy: Any) -> str:
     """Assess priority based on strategy confidence."""
     if strategy.expected_identifiability > 0.8:
         return "high"
@@ -624,7 +603,7 @@ def _assess_priority(strategy) -> str:
         return "low"
 
 
-def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
+def _generate_general_recommendations(graph: Any, G: Any) -> List[ValidationImprovement]:
     """Generate general validation recommendations."""
     import networkx as nx
 
@@ -637,7 +616,7 @@ def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
             ValidationImprovement(
                 type="data_collection",
                 description="Assign confidence levels to more nodes by gathering expert estimates or historical data",
-                priority="medium"
+                priority="medium",
             )
         )
 
@@ -647,7 +626,7 @@ def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
             ValidationImprovement(
                 type="model_structure",
                 description="Graph has disconnected components - consider adding relationships or splitting into separate models",
-                priority="high"
+                priority="high",
             )
         )
 
@@ -658,7 +637,7 @@ def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
             ValidationImprovement(
                 type="model_structure",
                 description=f"Some nodes are isolated: {', '.join(isolated[:3])} - add causal relationships",
-                priority="medium"
+                priority="medium",
             )
         )
 
@@ -669,7 +648,7 @@ def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
             ValidationImprovement(
                 type="model_structure",
                 description="Over 50% of edges lack explicit weights. Call /api/v1/causal/parameter-recommendations for suggested ranges based on causal topology.",
-                priority="high"
+                priority="high",
             )
         )
 
@@ -680,7 +659,7 @@ def _generate_general_recommendations(graph, G) -> List[ValidationImprovement]:
             ValidationImprovement(
                 type="model_structure",
                 description=f"All {len(weights)} edges have uniform weight ({weights[0]}). Call /api/v1/causal/parameter-recommendations to differentiate based on causal importance.",
-                priority="medium"
+                priority="medium",
             )
         )
 

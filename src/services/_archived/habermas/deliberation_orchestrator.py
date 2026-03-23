@@ -19,9 +19,9 @@ from src.models.deliberation import (
     MemberPosition,
 )
 from src.models.metadata import create_response_metadata
-from src.services.common_ground_finder import CommonGroundFinder
-from src.services.consensus_generator import ConsensusGenerator
-from src.services.value_extractor import ValueExtractor
+from src.services.common_ground_finder import CommonGroundFinder  # type: ignore[import-untyped]
+from src.services.consensus_generator import ConsensusGenerator  # type: ignore[import-untyped]
+from src.services.value_extractor import ValueExtractor  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 

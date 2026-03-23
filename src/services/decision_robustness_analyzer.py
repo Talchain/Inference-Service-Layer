@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.config import get_settings
 from src.models.decision_robustness import (
@@ -134,8 +134,7 @@ class DecisionRobustnessAnalyzer:
                 },
             )
             raise ValueError(
-                f"Goal node '{goal_id}' not found in graph. "
-                f"Available nodes: {sorted(node_ids)}"
+                f"Goal node '{goal_id}' not found in graph. " f"Available nodes: {sorted(node_ids)}"
             )
 
         # Check additional goals exist
@@ -168,9 +167,7 @@ class DecisionRobustnessAnalyzer:
 
         # Check intervention nodes exist (warning only, don't fail)
         for option in request.options:
-            missing_interventions = [
-                k for k in option.interventions.keys() if k not in node_ids
-            ]
+            missing_interventions = [k for k in option.interventions.keys() if k not in node_ids]
             if missing_interventions:
                 logger.warning(
                     "validation_warning",
@@ -197,7 +194,7 @@ class DecisionRobustnessAnalyzer:
 
     def _has_cycle(self, graph: GraphV1) -> bool:
         """Check if graph has a cycle using DFS."""
-        adjacency = {}
+        adjacency: Dict[str, List[str]] = {}
         for node in graph.nodes:
             adjacency[node.id] = []
         for edge in graph.edges:
@@ -218,15 +215,15 @@ class DecisionRobustnessAnalyzer:
             rec_stack.discard(node)
             return False
 
-        for node in adjacency:
-            if node not in visited:
-                if dfs(node):
+        for node_id in adjacency:
+            if node_id not in visited:
+                if dfs(node_id):
                     return True
         return False
 
     def _get_connected_nodes(self, graph: GraphV1, goal_id: str) -> set:
         """Get all nodes connected to the goal node (ancestors)."""
-        reverse_adj = {}
+        reverse_adj: dict[str, list[str]] = {}
         for node in graph.nodes:
             reverse_adj[node.id] = []
         for edge in graph.edges:
@@ -344,7 +341,10 @@ class DecisionRobustnessAnalyzer:
             completed_analyses.append("robustness_bounds")
             logger.debug(
                 "analysis_step_completed",
-                extra={"step": "robustness_bounds", "elapsed_ms": (time.time() - step_start) * 1000},
+                extra={
+                    "step": "robustness_bounds",
+                    "elapsed_ms": (time.time() - step_start) * 1000,
+                },
             )
 
             # Step 6: Determine robustness label
@@ -475,7 +475,7 @@ class DecisionRobustnessAnalyzer:
             )
             # Return partial results
             return self._build_partial_result(
-                request, graph_model if 'graph_model' in dir() else {}, rng
+                request, graph_model if "graph_model" in dir() else {}, rng
             )
 
         except Exception as e:
@@ -499,7 +499,7 @@ class DecisionRobustnessAnalyzer:
         Returns:
             Internal graph model dictionary
         """
-        model = {
+        model: Dict[str, Any] = {
             "nodes": {},
             "edges": [],
             "adjacency": {},  # node_id -> list of (target_id, weight)
@@ -510,7 +510,7 @@ class DecisionRobustnessAnalyzer:
         for node in graph.nodes:
             node_data = {
                 "id": node.id,
-                "kind": node.kind.value if hasattr(node.kind, 'value') else node.kind,
+                "kind": node.kind.value if hasattr(node.kind, "value") else node.kind,
                 "label": node.label or node.id,
                 "belief": node.belief,
                 "metadata": node.metadata or {},
@@ -640,7 +640,9 @@ class DecisionRobustnessAnalyzer:
                         incoming_sum = 0.0
                         all_sources_ready = True
 
-                        for source_id, src_weight in graph_model["reverse_adjacency"].get(target_id, []):
+                        for source_id, src_weight in graph_model["reverse_adjacency"].get(
+                            target_id, []
+                        ):
                             if source_id in node_values:
                                 # Add weighted contribution with noise
                                 noise = rng.normal(0, 0.1 * abs(src_weight))
@@ -1105,9 +1107,7 @@ class DecisionRobustnessAnalyzer:
 
             # Compute EVPI
             # EVPI = E[max utility with perfect info] - max E[utility under uncertainty]
-            evpi = self._compute_evpi(
-                param_id, mean, std, graph_model, utility_spec, rng.spawn()
-            )
+            evpi = self._compute_evpi(param_id, mean, std, graph_model, utility_spec, rng.spawn())
 
             # Compute EVSI for each sample size
             best_evsi = 0.0
@@ -1124,7 +1124,9 @@ class DecisionRobustnessAnalyzer:
             # Generate recommendation
             if evpi > 10000:
                 rec = "High value - consider gathering data"
-                suggestion = f"Gather data on {param_id}. Sample size of {best_sample_size} recommended."
+                suggestion = (
+                    f"Gather data on {param_id}. Sample size of {best_sample_size} recommended."
+                )
             elif evpi > 1000:
                 rec = "Moderate value - gather data if convenient"
                 suggestion = f"Consider sampling {best_sample_size} observations for {param_id}."
@@ -1237,7 +1239,7 @@ class DecisionRobustnessAnalyzer:
         reduction_factor = 1 - 1 / np.sqrt(sample_size + 1)
         evsi = evpi * reduction_factor * 0.7  # Conservative factor
 
-        return max(0, evsi)
+        return float(max(0, evsi))
 
     def _compute_pareto_frontier(
         self,
@@ -1265,15 +1267,13 @@ class DecisionRobustnessAnalyzer:
             all_goals.extend(utility_spec.additional_goals)
 
         # Compute goal values for each option
-        option_goal_values = {}
+        option_goal_values: Dict[str, Dict[str, Any]] = {}
 
         for opt in options:
-            goal_values = {}
+            goal_values: Dict[str, float] = {}
             for goal in all_goals:
                 # Estimate goal value
-                value = self._quick_utility_estimate(
-                    graph_model, goal, rng.spawn(), 100
-                )
+                value = self._quick_utility_estimate(graph_model, goal, rng.spawn(), 100)
                 goal_values[goal] = value
 
             option_goal_values[opt.id] = {
@@ -1296,12 +1296,10 @@ class DecisionRobustnessAnalyzer:
                 # Check if other dominates this option
                 # (at least as good in all goals, strictly better in at least one)
                 at_least_as_good = all(
-                    other_data["values"][g] >= data["values"][g]
-                    for g in all_goals
+                    other_data["values"][g] >= data["values"][g] for g in all_goals
                 )
                 strictly_better = any(
-                    other_data["values"][g] > data["values"][g]
-                    for g in all_goals
+                    other_data["values"][g] > data["values"][g] for g in all_goals
                 )
 
                 if at_least_as_good and strictly_better:
@@ -1320,7 +1318,10 @@ class DecisionRobustnessAnalyzer:
                     )
                     if best_for_goal != opt_id:
                         diff_pct = (
-                            (option_goal_values[best_for_goal]["values"][goal] - data["values"][goal])
+                            (
+                                option_goal_values[best_for_goal]["values"][goal]
+                                - data["values"][goal]
+                            )
                             / max(abs(data["values"][goal]), 1)
                             * 100
                         )
@@ -1404,7 +1405,11 @@ class DecisionRobustnessAnalyzer:
         # Sensitivity insight with actionable framing
         if sensitivity_params:
             top_param = sensitivity_params[0]
-            direction_word = "improves" if top_param.impact_direction == ImpactDirectionEnum.POSITIVE else "decreases"
+            direction_word = (
+                "improves"
+                if top_param.impact_direction == ImpactDirectionEnum.POSITIVE
+                else "decreases"
+            )
 
             if top_param.sensitivity_score > 0.7:
                 parts.append(
@@ -1412,9 +1417,7 @@ class DecisionRobustnessAnalyzer:
                     f"on the outcome—if it {direction_word}, the expected results change significantly."
                 )
             elif top_param.sensitivity_score > 0.4:
-                parts.append(
-                    f"The outcome is moderately sensitive to {top_param.parameter_label}."
-                )
+                parts.append(f"The outcome is moderately sensitive to {top_param.parameter_label}.")
 
         # Flip threshold with concrete guidance
         if robustness_bounds and robustness_label != RobustnessLabelEnum.ROBUST:
@@ -1479,9 +1482,7 @@ class DecisionRobustnessAnalyzer:
                     option_id=opt.id,
                     option_label=opt.label,
                     expected_utility=0.0,
-                    utility_distribution=UtilityDistribution(
-                        p5=0, p25=0, p50=0, p75=0, p95=0
-                    ),
+                    utility_distribution=UtilityDistribution(p5=0, p25=0, p50=0, p75=0, p95=0),
                     rank=i + 1,
                     vs_baseline=None,
                     vs_baseline_pct=None,
@@ -1525,14 +1526,10 @@ def get_graph_hash(graph: GraphV1) -> str:
         SHA256 hash string
     """
     # Create canonical representation
-    nodes_repr = sorted([
-        (n.id, n.kind.value if hasattr(n.kind, 'value') else n.kind)
-        for n in graph.nodes
-    ])
-    edges_repr = sorted([
-        (e.from_, e.to, e.weight)
-        for e in graph.edges
-    ])
+    nodes_repr = sorted(
+        [(n.id, n.kind.value if hasattr(n.kind, "value") else n.kind) for n in graph.nodes]
+    )
+    edges_repr = sorted([(e.from_, e.to, e.weight) for e in graph.edges])
 
     canonical = json.dumps({"nodes": nodes_repr, "edges": edges_repr}, sort_keys=True)
     return hashlib.sha256(canonical.encode()).hexdigest()[:16]

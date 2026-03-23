@@ -6,7 +6,7 @@ based on user's risk profile (averse, neutral, or seeking).
 """
 
 import math
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from src.models.requests import RiskOption
 from src.models.responses import AdjustedScore, RankingChange
@@ -23,10 +23,7 @@ class RiskAdjuster:
     """
 
     def adjust(
-        self,
-        options: List[RiskOption],
-        risk_coefficient: float,
-        risk_type: str
+        self, options: List[RiskOption], risk_coefficient: float, risk_type: str
     ) -> Tuple[List[AdjustedScore], bool, List[RankingChange], str]:
         """
         Apply risk adjustment to options.
@@ -44,55 +41,49 @@ class RiskAdjuster:
             - Plain English interpretation string
         """
         # Extract mean and variance for each option
-        scores_data = []
+        scores_data: List[Dict[str, Any]] = []
         for option in options:
             mean, variance = self._extract_mean_variance(option)
-            scores_data.append({
-                'option_id': option.option_id,
-                'option_label': option.option_label,
-                'mean': mean,
-                'variance': variance
-            })
+            scores_data.append(
+                {
+                    "option_id": option.option_id,
+                    "option_label": option.option_label,
+                    "mean": mean,
+                    "variance": variance,
+                }
+            )
 
         # Compute certainty equivalents
         adjusted_scores = []
         for data in scores_data:
             ce = self._compute_certainty_equivalent(
-                mean=data['mean'],
-                variance=data['variance'],
+                mean=data["mean"],
+                variance=data["variance"],
                 coefficient=risk_coefficient,
-                risk_type=risk_type
+                risk_type=risk_type,
             )
 
             # Clamp CE to [0, 1] range
             ce = max(0.0, min(1.0, ce))
 
-            adjusted_scores.append(AdjustedScore(
-                option_id=data['option_id'],
-                option_label=data['option_label'],
-                original_score=data['mean'],
-                certainty_equivalent=ce,
-                adjustment=ce - data['mean'],
-                variance=data['variance'] if data['variance'] > 0 else None
-            ))
+            adjusted_scores.append(
+                AdjustedScore(
+                    option_id=data["option_id"],
+                    option_label=data["option_label"],
+                    original_score=data["mean"],
+                    certainty_equivalent=ce,
+                    adjustment=ce - data["mean"],
+                    variance=data["variance"] if data["variance"] > 0 else None,
+                )
+            )
 
         # Sort by original score (descending) to determine original ranks
-        original_ranking = sorted(
-            adjusted_scores,
-            key=lambda x: x.original_score,
-            reverse=True
-        )
-        original_ranks = {
-            score.option_id: rank + 1
-            for rank, score in enumerate(original_ranking)
-        }
+        original_ranking = sorted(adjusted_scores, key=lambda x: x.original_score, reverse=True)
+        original_ranks = {score.option_id: rank + 1 for rank, score in enumerate(original_ranking)}
 
         # Sort by certainty equivalent (descending) to determine adjusted ranks
         adjusted_scores.sort(key=lambda x: x.certainty_equivalent, reverse=True)
-        adjusted_ranks = {
-            score.option_id: rank + 1
-            for rank, score in enumerate(adjusted_scores)
-        }
+        adjusted_ranks = {score.option_id: rank + 1 for rank, score in enumerate(adjusted_scores)}
 
         # Check if rankings changed
         rankings_changed = original_ranks != adjusted_ranks
@@ -106,16 +97,17 @@ class RiskAdjuster:
                 if orig_rank != adj_rank:
                     # Find option label
                     option_label = next(
-                        s.option_label for s in adjusted_scores
-                        if s.option_id == option_id
+                        s.option_label for s in adjusted_scores if s.option_id == option_id
                     )
-                    ranking_changes.append(RankingChange(
-                        option_id=option_id,
-                        option_label=option_label,
-                        original_rank=orig_rank,
-                        adjusted_rank=adj_rank,
-                        rank_change=orig_rank - adj_rank  # Positive = improved
-                    ))
+                    ranking_changes.append(
+                        RankingChange(
+                            option_id=option_id,
+                            option_label=option_label,
+                            original_rank=orig_rank,
+                            adjusted_rank=adj_rank,
+                            rank_change=orig_rank - adj_rank,  # Positive = improved
+                        )
+                    )
 
             # Sort by absolute rank change (largest changes first)
             ranking_changes.sort(key=lambda x: abs(x.rank_change), reverse=True)
@@ -126,7 +118,7 @@ class RiskAdjuster:
             risk_coefficient=risk_coefficient,
             risk_type=risk_type,
             rankings_changed=rankings_changed,
-            ranking_changes=ranking_changes
+            ranking_changes=ranking_changes,
         )
 
         return adjusted_scores, rankings_changed, ranking_changes, interpretation
@@ -148,7 +140,7 @@ class RiskAdjuster:
         """
         if option.mean is not None and option.std_dev is not None:
             # Direct mean-variance representation
-            return option.mean, option.std_dev ** 2
+            return option.mean, option.std_dev**2
 
         elif option.p10 is not None and option.p50 is not None and option.p90 is not None:
             # Percentile representation - approximate mean and variance
@@ -157,22 +149,17 @@ class RiskAdjuster:
             # - (p90 - p10) ≈ 2.56 standard deviations (90% - 10% = 80% interval)
             mean = option.p50
             std_dev_approx = (option.p90 - option.p10) / 2.56
-            variance = std_dev_approx ** 2
+            variance = std_dev_approx**2
             return mean, variance
 
         else:
             # Should not reach here due to validation
             raise ValueError(
-                f"Option {option.option_id} must have either (mean, std_dev) "
-                "or (p10, p50, p90)"
+                f"Option {option.option_id} must have either (mean, std_dev) " "or (p10, p50, p90)"
             )
 
     def _compute_certainty_equivalent(
-        self,
-        mean: float,
-        variance: float,
-        coefficient: float,
-        risk_type: str
+        self, mean: float, variance: float, coefficient: float, risk_type: str
     ) -> float:
         """
         Compute certainty equivalent using mean-variance approach.
@@ -211,7 +198,7 @@ class RiskAdjuster:
         risk_coefficient: float,
         risk_type: str,
         rankings_changed: bool,
-        ranking_changes: List[RankingChange]
+        ranking_changes: List[RankingChange],
     ) -> str:
         """
         Generate plain English interpretation of risk adjustment.
@@ -261,10 +248,7 @@ class RiskAdjuster:
             # Add variance context for the most significant change
             if top_changes:
                 top_change = top_changes[0]
-                top_option = next(
-                    s for s in adjusted_scores
-                    if s.option_id == top_change.option_id
-                )
+                top_option = next(s for s in adjusted_scores if s.option_id == top_change.option_id)
                 if top_option.variance is not None and top_option.variance > 0:
                     parts[-1] += f" due to variance={top_option.variance:.4f}"
 

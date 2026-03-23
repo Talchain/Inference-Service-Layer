@@ -174,13 +174,15 @@ class ParsedSCM:
         }
 
         # Add numpy functions for more complex operations
-        safe_namespace.update({
-            "sqrt": np.sqrt,
-            "exp": np.exp,
-            "log": np.log,
-            "sin": np.sin,
-            "cos": np.cos,
-        })
+        safe_namespace.update(
+            {
+                "sqrt": np.sqrt,
+                "exp": np.exp,
+                "log": np.log,
+                "sin": np.sin,
+                "cos": np.cos,
+            }
+        )
 
         # Add current variable values
         safe_namespace.update(values)

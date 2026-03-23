@@ -10,7 +10,7 @@ import uuid
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.models.requests import ConditionalRecommendRequest, RankedOption
 from src.models.responses import (
@@ -41,13 +41,12 @@ class ConditionalRecommendationEngine:
     # Monte Carlo settings
     DEFAULT_MC_SAMPLES = 1000
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the conditional recommendation engine."""
         self.logger = logger
 
     def generate_recommendations(
-        self,
-        request: ConditionalRecommendRequest
+        self, request: ConditionalRecommendRequest
     ) -> ConditionalRecommendResponse:
         """
         Generate conditional recommendations for ranked options.
@@ -70,44 +69,34 @@ class ConditionalRecommendationEngine:
 
         if "threshold" in request.condition_types:
             threshold_conditions = self._generate_threshold_conditions(
-                request.ranked_options,
-                primary_option,
-                request.parameters_to_condition_on
+                request.ranked_options, primary_option, request.parameters_to_condition_on
             )
             conditions.extend(threshold_conditions)
 
         if "dominance" in request.condition_types:
             dominance_conditions = self._generate_dominance_conditions(
-                request.ranked_options,
-                primary_option
+                request.ranked_options, primary_option
             )
             conditions.extend(dominance_conditions)
 
         if "risk_profile" in request.condition_types:
             risk_conditions = self._generate_risk_profile_conditions(
-                request.ranked_options,
-                primary_option
+                request.ranked_options, primary_option
             )
             conditions.extend(risk_conditions)
 
         if "scenario" in request.condition_types:
             scenario_conditions = self._generate_scenario_conditions(
-                request.ranked_options,
-                primary_option
+                request.ranked_options, primary_option
             )
             conditions.extend(scenario_conditions)
 
         # Sort by impact and limit
-        conditions = self._rank_and_limit_conditions(
-            conditions,
-            request.max_conditions
-        )
+        conditions = self._rank_and_limit_conditions(conditions, request.max_conditions)
 
         # Calculate robustness summary
         robustness = self._calculate_robustness_summary(
-            conditions,
-            request.ranked_options,
-            primary_option
+            conditions, request.ranked_options, primary_option
         )
 
         # Create primary recommendation
@@ -115,27 +104,20 @@ class ConditionalRecommendationEngine:
             option_id=primary_option.option_id,
             label=primary_option.label,
             confidence=self._calculate_confidence(request.ranked_options, primary_option),
-            expected_value=primary_option.expected_value
+            expected_value=primary_option.expected_value,
         )
 
         return ConditionalRecommendResponse(
             primary_recommendation=primary_rec,
             conditional_recommendations=conditions,
-            robustness_summary=robustness
+            robustness_summary=robustness,
         )
 
-    def _get_primary_recommendation(
-        self,
-        options: List[RankedOption]
-    ) -> RankedOption:
+    def _get_primary_recommendation(self, options: List[RankedOption]) -> RankedOption:
         """Get the primary recommended option (highest expected value)."""
         return max(options, key=lambda x: x.expected_value)
 
-    def _calculate_confidence(
-        self,
-        options: List[RankedOption],
-        primary: RankedOption
-    ) -> str:
+    def _calculate_confidence(self, options: List[RankedOption], primary: RankedOption) -> str:
         """
         Calculate confidence level for the primary recommendation.
 
@@ -157,7 +139,7 @@ class ConditionalRecommendationEngine:
         if primary_std >= ZERO_VARIANCE_TOLERANCE:
             gap_ratio = gap / primary_std
         else:
-            gap_ratio = float('inf')
+            gap_ratio = float("inf")
 
         # Classify confidence
         if gap_ratio > 2.0:
@@ -177,22 +159,19 @@ class ConditionalRecommendationEngine:
             # Std of uniform is (b-a)/sqrt(12)
             low = params.get("low", params.get("a", 0))
             high = params.get("high", params.get("b", 1))
-            return (high - low) / np.sqrt(12)
+            return float((high - low) / np.sqrt(12))
         elif option.distribution.type == DistributionType.BETA:
             # Use variance approximation for beta
             a = params.get("a", params.get("alpha", 2))
             b = params.get("b", params.get("beta", 2))
             variance = (a * b) / ((a + b) ** 2 * (a + b + 1))
-            return np.sqrt(variance)
+            return float(np.sqrt(variance))
         else:
             # Default fallback
             return abs(option.expected_value) * 0.1
 
     def _generate_threshold_conditions(
-        self,
-        options: List[RankedOption],
-        primary: RankedOption,
-        parameters: Optional[List[str]]
+        self, options: List[RankedOption], primary: RankedOption, parameters: Optional[List[str]]
     ) -> List[ConditionalRecommendation]:
         """
         Generate threshold-based conditions.
@@ -212,9 +191,7 @@ class ConditionalRecommendationEngine:
                     continue
 
                 # Calculate crossover threshold
-                threshold_result = self._find_crossover_threshold(
-                    primary, option, param
-                )
+                threshold_result = self._find_crossover_threshold(primary, option, param)
 
                 if threshold_result is not None:
                     threshold_value, direction, probability = threshold_result
@@ -231,18 +208,16 @@ class ConditionalRecommendationEngine:
                         condition_type="threshold",
                         condition_description=description,
                         condition_expression=ConditionExpression(
-                            parameter=param,
-                            operator=operator,
-                            value=threshold_value
+                            parameter=param, operator=operator, value=threshold_value
                         ),
                         triggered_recommendation=PrimaryRecommendation(
                             option_id=option.option_id,
                             label=option.label,
                             confidence="medium",
-                            expected_value=option.expected_value
+                            expected_value=option.expected_value,
                         ),
                         probability_of_condition=probability,
-                        impact_magnitude=self._calculate_impact_magnitude(primary, option)
+                        impact_magnitude=self._calculate_impact_magnitude(primary, option),
                     )
                     conditions.append(condition)
 
@@ -265,10 +240,7 @@ class ConditionalRecommendationEngine:
         return list(parameters)[:5]  # Limit to 5
 
     def _find_crossover_threshold(
-        self,
-        primary: RankedOption,
-        alternative: RankedOption,
-        parameter: str
+        self, primary: RankedOption, alternative: RankedOption, parameter: str
     ) -> Optional[Tuple[float, str, float]]:
         """
         Find the threshold where alternative becomes preferred.
@@ -311,9 +283,7 @@ class ConditionalRecommendationEngine:
         return (threshold_value, direction, round(probability, 3))
 
     def _generate_dominance_conditions(
-        self,
-        options: List[RankedOption],
-        primary: RankedOption
+        self, options: List[RankedOption], primary: RankedOption
     ) -> List[ConditionalRecommendation]:
         """
         Generate dominance-based conditions.
@@ -342,27 +312,23 @@ class ConditionalRecommendationEngine:
                     condition_type="dominance",
                     condition_description=description,
                     condition_expression=ConditionExpression(
-                        parameter=param,
-                        operator=operator,
-                        value=value
+                        parameter=param, operator=operator, value=value
                     ),
                     triggered_recommendation=PrimaryRecommendation(
                         option_id=option.option_id,
                         label=option.label,
                         confidence="medium",
-                        expected_value=option.expected_value
+                        expected_value=option.expected_value,
                     ),
                     probability_of_condition=probability,
-                    impact_magnitude=self._calculate_impact_magnitude(primary, option)
+                    impact_magnitude=self._calculate_impact_magnitude(primary, option),
                 )
                 conditions.append(condition)
 
         return conditions
 
     def _check_conditional_dominance(
-        self,
-        primary: RankedOption,
-        alternative: RankedOption
+        self, primary: RankedOption, alternative: RankedOption
     ) -> Optional[Tuple[str, str, float, float]]:
         """
         Check if alternative can dominate primary under some conditions.
@@ -379,7 +345,7 @@ class ConditionalRecommendationEngine:
             operator = ">"
             # Calculate threshold where safer option wins
             ev_diff = primary.expected_value - alternative.expected_value
-            variance_diff = primary_std ** 2 - alt_std ** 2
+            variance_diff = primary_std**2 - alt_std**2
 
             if variance_diff > 0:
                 threshold = ev_diff / variance_diff
@@ -390,9 +356,7 @@ class ConditionalRecommendationEngine:
         return None
 
     def _generate_risk_profile_conditions(
-        self,
-        options: List[RankedOption],
-        primary: RankedOption
+        self, options: List[RankedOption], primary: RankedOption
     ) -> List[ConditionalRecommendation]:
         """
         Generate risk-profile based conditions.
@@ -409,9 +373,7 @@ class ConditionalRecommendationEngine:
             if ranked_list[0].option_id != primary.option_id:
                 best_under_profile = ranked_list[0]
 
-                description = (
-                    f"Choose {best_under_profile.label} if {profile.replace('_', ' ')}"
-                )
+                description = f"Choose {best_under_profile.label} if {profile.replace('_', ' ')}"
 
                 # Map profile to parameter
                 if profile == "risk_averse":
@@ -430,28 +392,23 @@ class ConditionalRecommendationEngine:
                     condition_type="risk_profile",
                     condition_description=description,
                     condition_expression=ConditionExpression(
-                        parameter=param,
-                        operator=operator,
-                        value=value
+                        parameter=param, operator=operator, value=value
                     ),
                     triggered_recommendation=PrimaryRecommendation(
                         option_id=best_under_profile.option_id,
                         label=best_under_profile.label,
                         confidence="medium",
-                        expected_value=best_under_profile.expected_value
+                        expected_value=best_under_profile.expected_value,
                     ),
                     probability_of_condition=probability,
-                    impact_magnitude=self._calculate_impact_magnitude(
-                        primary, best_under_profile
-                    )
+                    impact_magnitude=self._calculate_impact_magnitude(primary, best_under_profile),
                 )
                 conditions.append(condition)
 
         return conditions
 
     def _calculate_risk_adjusted_rankings(
-        self,
-        options: List[RankedOption]
+        self, options: List[RankedOption]
     ) -> Dict[str, List[RankedOption]]:
         """
         Calculate rankings under different risk profiles.
@@ -465,7 +422,7 @@ class ConditionalRecommendationEngine:
         for opt in options:
             std = self._get_distribution_std(opt)
             # Mean - variance penalty
-            adjusted = opt.expected_value - self.RISK_AVERSE_FACTOR * (std ** 2)
+            adjusted = opt.expected_value - self.RISK_AVERSE_FACTOR * (std**2)
             averse_values.append((adjusted, opt))
 
         averse_values.sort(key=lambda x: x[0], reverse=True)
@@ -485,9 +442,7 @@ class ConditionalRecommendationEngine:
         return rankings
 
     def _generate_scenario_conditions(
-        self,
-        options: List[RankedOption],
-        primary: RankedOption
+        self, options: List[RankedOption], primary: RankedOption
     ) -> List[ConditionalRecommendation]:
         """
         Generate scenario-based conditions.
@@ -504,9 +459,7 @@ class ConditionalRecommendationEngine:
 
         for scenario_name, param, operator, value, prob in scenarios:
             # Find best option under scenario
-            best_under_scenario = self._find_best_under_scenario(
-                options, scenario_name
-            )
+            best_under_scenario = self._find_best_under_scenario(options, scenario_name)
 
             if best_under_scenario and best_under_scenario.option_id != primary.option_id:
                 description = (
@@ -519,29 +472,23 @@ class ConditionalRecommendationEngine:
                     condition_type="scenario",
                     condition_description=description,
                     condition_expression=ConditionExpression(
-                        parameter=param,
-                        operator=operator,
-                        value=value
+                        parameter=param, operator=operator, value=value
                     ),
                     triggered_recommendation=PrimaryRecommendation(
                         option_id=best_under_scenario.option_id,
                         label=best_under_scenario.label,
                         confidence="low",
-                        expected_value=best_under_scenario.expected_value
+                        expected_value=best_under_scenario.expected_value,
                     ),
                     probability_of_condition=prob,
-                    impact_magnitude=self._calculate_impact_magnitude(
-                        primary, best_under_scenario
-                    )
+                    impact_magnitude=self._calculate_impact_magnitude(primary, best_under_scenario),
                 )
                 conditions.append(condition)
 
         return conditions
 
     def _find_best_under_scenario(
-        self,
-        options: List[RankedOption],
-        scenario: str
+        self, options: List[RankedOption], scenario: str
     ) -> Optional[RankedOption]:
         """Find best option under a given scenario."""
         if scenario == "pessimistic":
@@ -558,11 +505,7 @@ class ConditionalRecommendationEngine:
             return adjusted[0][1]
         return None
 
-    def _calculate_impact_magnitude(
-        self,
-        primary: RankedOption,
-        alternative: RankedOption
-    ) -> str:
+    def _calculate_impact_magnitude(self, primary: RankedOption, alternative: RankedOption) -> str:
         """Calculate impact magnitude of switching from primary to alternative."""
         ev_diff = abs(primary.expected_value - alternative.expected_value)
         rel_diff = ev_diff / abs(primary.expected_value) if primary.expected_value != 0 else 0
@@ -575,15 +518,13 @@ class ConditionalRecommendationEngine:
             return "low"
 
     def _rank_and_limit_conditions(
-        self,
-        conditions: List[ConditionalRecommendation],
-        max_conditions: int
+        self, conditions: List[ConditionalRecommendation], max_conditions: int
     ) -> List[ConditionalRecommendation]:
         """Rank conditions by impact and limit to max_conditions."""
         # Sort by impact magnitude (high > medium > low) and probability
         impact_order = {"high": 3, "medium": 2, "low": 1}
 
-        def sort_key(cond: ConditionalRecommendation):
+        def sort_key(cond: ConditionalRecommendation) -> tuple:
             impact_score = impact_order.get(cond.impact_magnitude, 0)
             prob_score = cond.probability_of_condition or 0
             return (impact_score, prob_score)
@@ -596,7 +537,7 @@ class ConditionalRecommendationEngine:
         self,
         conditions: List[ConditionalRecommendation],
         options: List[RankedOption],
-        primary: RankedOption
+        primary: RankedOption,
     ) -> RobustnessSummary:
         """Calculate robustness summary for the recommendation."""
         # Count conditions by impact
@@ -629,5 +570,5 @@ class ConditionalRecommendationEngine:
             recommendation_stability=stability,
             conditions_count=len(conditions),
             closest_flip_point=closest_flip,
-            safety_margin=safety_margin
+            safety_margin=safety_margin,
         )

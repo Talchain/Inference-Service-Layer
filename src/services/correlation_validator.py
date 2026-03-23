@@ -47,9 +47,7 @@ class CorrelationValidator:
     PSD_TOLERANCE = -1e-10  # Allow small negative eigenvalues due to numerical precision
     CONDITION_WARNING_THRESHOLD = 100.0
 
-    def validate(
-        self, request: CorrelationValidationRequest
-    ) -> CorrelationValidationResponse:
+    def validate(self, request: CorrelationValidationRequest) -> CorrelationValidationResponse:
         """
         Validate correlation specification.
 
@@ -70,9 +68,7 @@ class CorrelationValidator:
             factors = request.correlation_matrix.factors
 
             # Validate matrix
-            matrix_analysis = self._analyze_matrix(
-                matrix, request.check_positive_definite
-            )
+            matrix_analysis = self._analyze_matrix(matrix, request.check_positive_definite)
 
             implied_matrix = ImpliedCorrelationMatrix(
                 factors=factors,
@@ -81,9 +77,7 @@ class CorrelationValidator:
 
             # Check factor references in graph
             if request.graph:
-                ref_warnings = self._validate_factor_references(
-                    set(factors), request.graph
-                )
+                ref_warnings = self._validate_factor_references(set(factors), request.graph)
                 warnings.extend(ref_warnings)
 
         else:
@@ -91,7 +85,7 @@ class CorrelationValidator:
             all_factors: Set[str] = set()
             factor_correlations: Dict[Tuple[str, str], float] = {}
 
-            for group in request.correlation_groups:
+            for group in request.correlation_groups or []:
                 # Validate individual group
                 group_result = self._validate_group(group)
                 validated_groups.append(group_result)
@@ -102,8 +96,9 @@ class CorrelationValidator:
 
                     # Store pairwise correlations
                     for i, f1 in enumerate(group.factors):
-                        for f2 in group.factors[i + 1:]:
-                            key = tuple(sorted([f1, f2]))
+                        for f2 in group.factors[i + 1 :]:
+                            sorted_pair = sorted([f1, f2])
+                            key: Tuple[str, str] = (sorted_pair[0], sorted_pair[1])
                             if key in factor_correlations:
                                 if factor_correlations[key] != group.correlation:
                                     warnings.append(
@@ -139,18 +134,14 @@ class CorrelationValidator:
                 )
 
                 # Analyze the matrix
-                matrix_analysis = self._analyze_matrix(
-                    matrix, request.check_positive_definite
-                )
+                matrix_analysis = self._analyze_matrix(matrix, request.check_positive_definite)
             else:
                 implied_matrix = None
                 matrix_analysis = None
 
             # Check factor references in graph
             if request.graph and all_factors:
-                ref_warnings = self._validate_factor_references(
-                    all_factors, request.graph
-                )
+                ref_warnings = self._validate_factor_references(all_factors, request.graph)
                 warnings.extend(ref_warnings)
 
         # Check for high correlations
@@ -222,9 +213,7 @@ class CorrelationValidator:
             issues=issues,
         )
 
-    def _analyze_matrix(
-        self, matrix: np.ndarray, check_psd: bool
-    ) -> CorrelationMatrixAnalysis:
+    def _analyze_matrix(self, matrix: np.ndarray, check_psd: bool) -> CorrelationMatrixAnalysis:
         """
         Analyze correlation matrix properties.
 
@@ -254,7 +243,7 @@ class CorrelationValidator:
                 if min_eigenvalue > 0:
                     condition_number = max_eigenvalue / min_eigenvalue
                 else:
-                    condition_number = float('inf')
+                    condition_number = float("inf")
 
                 # Suggest regularization if not PSD
                 if not is_psd:
@@ -268,8 +257,12 @@ class CorrelationValidator:
         return CorrelationMatrixAnalysis(
             is_positive_semi_definite=is_psd,
             min_eigenvalue=round(min_eigenvalue, 6) if min_eigenvalue is not None else None,
-            condition_number=round(condition_number, 2) if condition_number is not None and condition_number != float('inf') else None,
-            suggested_regularization=round(suggested_regularization, 4) if suggested_regularization is not None else None,
+            condition_number=round(condition_number, 2)
+            if condition_number is not None and condition_number != float("inf")
+            else None,
+            suggested_regularization=round(suggested_regularization, 4)
+            if suggested_regularization is not None
+            else None,
         )
 
     def _validate_factor_references(
@@ -289,9 +282,7 @@ class CorrelationValidator:
 
         # Extract node IDs and factor nodes
         node_ids = {node.id for node in graph.nodes}
-        factor_nodes = {
-            node.id for node in graph.nodes if node.kind == NodeKind.FACTOR
-        }
+        factor_nodes = {node.id for node in graph.nodes if node.kind == NodeKind.FACTOR}
 
         missing = factors - node_ids
         if missing:

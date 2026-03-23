@@ -327,9 +327,7 @@ class RobustnessAnalyzer:
         sampled_interventions = region.sample_random(n=min_samples, seed=seed)
 
         # Simulate counterfactuals for each sample
-        outcomes_by_variable: Dict[str, List[float]] = {
-            var: [] for var in target_outcome.keys()
-        }
+        outcomes_by_variable: Dict[str, List[float]] = {var: [] for var in target_outcome.keys()}
 
         for i, intervention in enumerate(sampled_interventions):
             try:

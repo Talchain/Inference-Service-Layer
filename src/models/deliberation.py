@@ -389,5 +389,5 @@ class DeliberationResponse(BaseModel):
                 },
                 "status": "active",
             }
-        }
+        },
     }

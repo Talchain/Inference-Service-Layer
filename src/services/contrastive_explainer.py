@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.models.requests import ContrastiveExplanationRequest, InterventionConstraints
 from src.models.responses import (
@@ -220,10 +220,10 @@ class ContrastiveExplainer:
 
         # Try both directions (increase and decrease)
         best_intervention = None
-        best_distance = float('inf')
+        best_distance = float("inf")
 
-        for direction in ['increase', 'decrease']:
-            if direction == 'increase':
+        for direction in ["increase", "decrease"]:
+            if direction == "increase":
                 low, high = current_val, var_max
             else:
                 low, high = var_min, current_val
@@ -250,13 +250,13 @@ class ContrastiveExplainer:
                 if outcome is not None and target_min <= outcome <= target_max:
                     # Target achieved, try smaller change
                     best_val = mid
-                    if direction == 'increase':
+                    if direction == "increase":
                         high = mid
                     else:
                         low = mid
                 else:
                     # Need larger change
-                    if direction == 'increase':
+                    if direction == "increase":
                         low = mid
                     else:
                         high = mid
@@ -372,7 +372,7 @@ class ContrastiveExplainer:
         vals2 = np.linspace(min2, max2, grid_points)
 
         best_intervention = None
-        best_distance = float('inf')
+        best_distance = float("inf")
 
         for v1 in vals1:
             for v2 in vals2:
@@ -387,7 +387,7 @@ class ContrastiveExplainer:
 
                 if outcome is not None and target_min <= outcome <= target_max:
                     # Compute total distance
-                    distance = np.sqrt((v1 - current_val1)**2 + (v2 - current_val2)**2)
+                    distance = np.sqrt((v1 - current_val1) ** 2 + (v2 - current_val2) ** 2)
                     if distance < best_distance:
                         best_distance = distance
                         best_intervention = intervention
@@ -514,6 +514,7 @@ class ContrastiveExplainer:
 
             # Get confidence interval from counterfactual
             from src.models.requests import CounterfactualRequest
+
             cf_request = CounterfactualRequest(
                 model=model,
                 intervention=intervention,
@@ -526,13 +527,11 @@ class ContrastiveExplainer:
                 rank=0,  # Will be set during ranking
                 changes=changes,
                 expected_outcome={outcome_var: expected_outcome},
-                confidence_interval={
-                    outcome_var: cf_result.prediction.confidence_interval
-                },
+                confidence_interval={outcome_var: cf_result.prediction.confidence_interval},
                 feasibility=feasibility,
                 cost_estimate=cost_estimate,
-                robustness=robustness_result['level'],
-                robustness_score=robustness_result['score'],
+                robustness=robustness_result["level"],
+                robustness_score=robustness_result["score"],
             )
 
         except Exception as e:
@@ -590,18 +589,18 @@ class ContrastiveExplainer:
                 level = RobustnessLevel.FRAGILE
 
             return {
-                'level': level,
-                'score': result.robustness_score,
-                'analysis': result,
+                "level": level,
+                "score": result.robustness_score,
+                "analysis": result,
             }
 
         except Exception as e:
             logger.warning(f"Robustness analysis failed: {e}")
             # Default to moderate robustness if analysis fails
             return {
-                'level': RobustnessLevel.MODERATE,
-                'score': 0.5,
-                'analysis': None,
+                "level": RobustnessLevel.MODERATE,
+                "score": 0.5,
+                "analysis": None,
             }
 
     def _compute_feasibility(
@@ -636,7 +635,7 @@ class ContrastiveExplainer:
 
         # Compute feasibility based on change magnitude
         # Smaller changes = more feasible
-        total_change = 0
+        total_change: float = 0
         for var, new_val in intervention.items():
             old_val = current_state.get(var, 0)
             if old_val != 0:
@@ -669,7 +668,7 @@ class ContrastiveExplainer:
         # Simple heuristic based on number of changes and magnitude
         num_changes = len(intervention)
 
-        total_relative_change = 0
+        total_relative_change: float = 0
         for var, new_val in intervention.items():
             old_val = current_state.get(var, 0)
             if old_val != 0:
@@ -709,24 +708,22 @@ class ContrastiveExplainer:
             cost_order = {"low": 0, "medium": 1, "high": 2}
             interventions = sorted(
                 interventions,
-                key=lambda x: (cost_order.get(x.cost_estimate, 3), -x.robustness_score)
+                key=lambda x: (cost_order.get(x.cost_estimate, 3), -x.robustness_score),
             )
         elif criterion == "feasibility":
             interventions = sorted(
-                interventions,
-                key=lambda x: (-x.feasibility, -x.robustness_score)
+                interventions, key=lambda x: (-x.feasibility, -x.robustness_score)
             )
         else:  # change_magnitude (default)
             # Compute total change magnitude for each intervention
             def change_magnitude(intervention: MinimalIntervention) -> float:
-                total = 0
+                total: float = 0
                 for change in intervention.changes.values():
                     total += abs(change.delta)
                 return total
 
             interventions = sorted(
-                interventions,
-                key=lambda x: (change_magnitude(x), -x.robustness_score)
+                interventions, key=lambda x: (change_magnitude(x), -x.robustness_score)
             )
 
         # Assign ranks
@@ -759,20 +756,11 @@ class ContrastiveExplainer:
 
         # Find best by each criterion
         cost_order = {"low": 0, "medium": 1, "high": 2}
-        best_by_cost = min(
-            interventions,
-            key=lambda x: cost_order.get(x.cost_estimate, 3)
-        ).rank
+        best_by_cost = min(interventions, key=lambda x: cost_order.get(x.cost_estimate, 3)).rank
 
-        best_by_robustness = max(
-            interventions,
-            key=lambda x: x.robustness_score
-        ).rank
+        best_by_robustness = max(interventions, key=lambda x: x.robustness_score).rank
 
-        best_by_feasibility = max(
-            interventions,
-            key=lambda x: x.feasibility
-        ).rank
+        best_by_feasibility = max(interventions, key=lambda x: x.feasibility).rank
 
         # Generate synergies text
         if len(interventions) == 1:

@@ -87,7 +87,7 @@ def _init_sentry() -> None:
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.starlette import StarletteIntegration
 
-        def before_send_filter(event, hint):
+        def before_send_filter(event: Any, hint: Any) -> Any:
             """Add request_id to Sentry events and filter sensitive data."""
             from src.utils.tracing import get_trace_id
 
@@ -127,7 +127,7 @@ def _init_sentry() -> None:
                 "environment": settings.SENTRY_ENVIRONMENT or settings.ENVIRONMENT,
                 "traces_sample_rate": settings.SENTRY_TRACES_SAMPLE_RATE,
                 "release": f"isl@{settings.VERSION}",
-            }
+            },
         )
 
     except ImportError:
@@ -153,7 +153,7 @@ if config_errors:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """
     Lifespan context manager for startup and shutdown events.
 
@@ -189,7 +189,7 @@ app = FastAPI(
 app.add_middleware(
     GZipMiddleware,
     minimum_size=1000,  # Only compress responses >1KB
-    compresslevel=6     # Balance speed vs compression (1-9, 6 is good default)
+    compresslevel=6,  # Balance speed vs compression (1-9, 6 is good default)
 )
 
 
@@ -206,7 +206,7 @@ async def add_security_headers(request: Request, call_next: Callable) -> Respons
     - Strict-Transport-Security: HSTS for HTTPS (if applicable)
     - Content-Security-Policy: Restrictive CSP for API-only service
     """
-    response = await call_next(request)
+    response: Response = await call_next(request)
 
     # Prevent MIME type sniffing
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -265,7 +265,7 @@ if not _api_keys_configured and not settings.ISL_AUTH_DISABLED:
 app.add_middleware(
     APIKeyAuthMiddleware,
     api_keys=settings.ISL_API_KEYS or settings.ISL_API_KEY,
-    auth_disabled=settings.ISL_AUTH_DISABLED
+    auth_disabled=settings.ISL_AUTH_DISABLED,
 )
 
 # Configure CORS middleware using settings
@@ -278,7 +278,7 @@ logger.info(
     extra={
         "origins": CORS_ORIGINS,
         "allow_credentials": settings.CORS_ALLOW_CREDENTIALS,
-    }
+    },
 )
 
 app.add_middleware(
@@ -363,7 +363,7 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
     )
 
     try:
-        response = await call_next(request)
+        response: Response = await call_next(request)
         duration_seconds = time.time() - start_time
         duration_ms = duration_seconds * 1000
 
@@ -404,6 +404,7 @@ async def log_requests(request: Request, call_next: Callable) -> Response:
         # https://github.com/encode/starlette/issues/1678
         # This occurs when validation errors are raised before middleware completes
         import anyio
+
         if isinstance(exc, (anyio.EndOfStream, anyio.WouldBlock)):
             # Decrement active requests before re-raising
             active_requests.dec()
@@ -447,7 +448,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     from src.utils.tracing import get_trace_id
 
     # Extract request ID from headers (X-Request-Id or X-Trace-Id)
-    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+    request_id = (
+        request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+    )
 
     # Map status codes to appropriate error codes
     if exc.status_code == 400:
@@ -512,13 +515,14 @@ async def validation_exception_handler(
     from src.utils.tracing import get_trace_id
 
     # Extract request ID
-    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+    request_id = (
+        request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+    )
 
     # Extract validation failures
     errors = exc.errors()
     validation_failures = [
-        f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}"
-        for err in errors
+        f"{'.'.join(str(loc) for loc in err['loc'])}: {err['msg']}" for err in errors
     ]
 
     # Create recovery hints
@@ -568,10 +572,7 @@ def _build_v2_pydantic_error_response(
     from src.utils.tracing import get_trace_id, sanitize_request_id
 
     # Extract request ID (same fallback chain as generic handlers)
-    inbound_id = (
-        request.headers.get("X-Request-Id")
-        or request.headers.get("X-Trace-Id")
-    )
+    inbound_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id")
     if inbound_id:
         request_id, _ = sanitize_request_id(inbound_id)
     else:
@@ -583,13 +584,15 @@ def _build_v2_pydantic_error_response(
         # Strip leading "body" from location path (FastAPI artifact)
         loc_parts = [str(loc) for loc in error["loc"] if loc != "body"]
         loc_path = " -> ".join(loc_parts)
-        critiques.append(CritiqueV2(
-            id=f"critique_{uuid.uuid4().hex[:8]}",
-            code="VALIDATION_ERROR",
-            severity="blocker",
-            message=f"{loc_path}: {error['msg']}" if loc_path else error["msg"],
-            source="validation",
-        ))
+        critiques.append(
+            CritiqueV2(
+                id=f"critique_{uuid.uuid4().hex[:8]}",
+                code="VALIDATION_ERROR",
+                severity="blocker",
+                message=f"{loc_path}: {error['msg']}" if loc_path else error["msg"],
+                source="validation",
+            )
+        )
 
     status_reason = critiques[0].message if critiques else "Request validation failed"
 
@@ -613,7 +616,9 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     from src.utils.tracing import get_trace_id
 
     # Extract request ID
-    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+    request_id = (
+        request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+    )
 
     logger.error(
         "unhandled_exception",
@@ -630,6 +635,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     if settings.SENTRY_ENABLED:
         try:
             import sentry_sdk
+
             with sentry_sdk.push_scope() as scope:
                 scope.set_tag("request_id", request_id)
                 scope.set_extra("path", request.url.path)
@@ -662,7 +668,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             hints=[
                 "Check server logs for details",
                 "Simplify your request if possible",
-                "Contact support if the error persists"
+                "Contact support if the error persists",
             ],
             suggestion="Retry with the same input or contact support",
         ),

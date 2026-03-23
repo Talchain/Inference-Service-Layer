@@ -154,9 +154,7 @@ class MemoryCache:
             now = time.time()
 
             # Create or update entry
-            entry = CacheEntry(
-                value=value, expires_at=expires_at, created_at=now, hit_count=0
-            )
+            entry = CacheEntry(value=value, expires_at=expires_at, created_at=now, hit_count=0)
 
             # If key exists, update it (moves to end automatically)
             if key in self._cache:
@@ -231,9 +229,7 @@ class MemoryCache:
         """
         with self._lock:
             now = time.time()
-            expired_keys = [
-                key for key, entry in self._cache.items() if now > entry.expires_at
-            ]
+            expired_keys = [key for key, entry in self._cache.items() if now > entry.expires_at]
 
             for key in expired_keys:
                 del self._cache[key]
@@ -247,7 +243,7 @@ class MemoryCache:
     def _start_cleanup_thread(self) -> None:
         """Start background thread for periodic cleanup."""
 
-        def cleanup_loop():
+        def cleanup_loop() -> None:
             while not self._stop_cleanup.is_set():
                 # Wait for cleanup interval or stop signal
                 if self._stop_cleanup.wait(timeout=self._cleanup_interval):
@@ -358,9 +354,7 @@ _named_caches: Dict[str, MemoryCache] = {}
 _named_cache_lock = threading.Lock()
 
 
-def get_named_cache(
-    name: str, max_size: int = 1000, ttl: int = 3600
-) -> MemoryCache:
+def get_named_cache(name: str, max_size: int = 1000, ttl: int = 3600) -> MemoryCache:
     """
     Get or create a named cache instance.
 
@@ -398,4 +392,4 @@ def clear_all_named_caches() -> None:
 def get_all_named_cache_stats() -> Dict[str, Dict[str, Any]]:
     """Get statistics for all named caches."""
     with _named_cache_lock:
-        return {name: cache.get_stats() for name, cache in _named_caches.items()}
+        return {name: cache.get_stats() for name, cache in _named_caches.items()}  # type: ignore[misc]

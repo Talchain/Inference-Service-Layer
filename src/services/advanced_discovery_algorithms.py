@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 
 # Algorithm configuration
 NOTEARS_MAX_ITER = 100  # Maximum optimization iterations
-NOTEARS_H_TOL = 1e-8    # Tolerance for acyclicity constraint
-NOTEARS_RHO_MAX = 1e+16  # Maximum penalty parameter
+NOTEARS_H_TOL = 1e-8  # Tolerance for acyclicity constraint
+NOTEARS_RHO_MAX = 1e16  # Maximum penalty parameter
 PC_ALPHA = 0.05  # Significance level for independence tests
 
 
@@ -64,9 +64,7 @@ class NOTEARSDiscovery:
         self.h_tol = h_tol
         self.rho_max = rho_max
 
-    def discover(
-        self, data: np.ndarray, variable_names: List[str]
-    ) -> Tuple[nx.DiGraph, float]:
+    def discover(self, data: np.ndarray, variable_names: List[str]) -> Tuple[nx.DiGraph, float]:
         """
         Discover DAG structure from data using NOTEARS.
 
@@ -84,7 +82,7 @@ class NOTEARSDiscovery:
                 "n_variables": data.shape[1],
                 "lambda1": self.lambda1,
                 "lambda2": self.lambda2,
-            }
+            },
         )
 
         # Center the data
@@ -105,7 +103,7 @@ class NOTEARSDiscovery:
                 "n_edges": len(dag.edges()),
                 "score": score,
                 "is_acyclic": nx.is_directed_acyclic_graph(dag),
-            }
+            },
         )
 
         return dag, score
@@ -160,9 +158,7 @@ class NOTEARSDiscovery:
 
         return W
 
-    def _update_weights(
-        self, X: np.ndarray, W: np.ndarray, rho: float, alpha: float
-    ) -> np.ndarray:
+    def _update_weights(self, X: np.ndarray, W: np.ndarray, rho: float, alpha: float) -> np.ndarray:
         """
         Update weights using gradient descent.
 
@@ -212,7 +208,7 @@ class NOTEARSDiscovery:
         M = W * W  # Element-wise square
         E = LA.matrix_power(np.eye(d) + M / d, d)  # Approximation of exp
         h = np.trace(E) - d
-        return h
+        return float(h)
 
     def _gradient_h(self, W: np.ndarray) -> np.ndarray:
         """
@@ -228,7 +224,7 @@ class NOTEARSDiscovery:
         M = W * W
         E = LA.matrix_power(np.eye(d) + M / d, d - 1)
         grad = E.T * W * 2
-        return grad
+        return np.asarray(grad)
 
     def _soft_threshold(self, W: np.ndarray, threshold: float) -> np.ndarray:
         """
@@ -241,7 +237,7 @@ class NOTEARSDiscovery:
         Returns:
             Thresholded matrix
         """
-        return np.sign(W) * np.maximum(np.abs(W) - threshold, 0)
+        return np.asarray(np.sign(W) * np.maximum(np.abs(W) - threshold, 0))
 
     def _threshold_weights(self, W: np.ndarray, threshold: float = 0.3) -> np.ndarray:
         """
@@ -258,9 +254,7 @@ class NOTEARSDiscovery:
         W_thresholded[np.abs(W_thresholded) < threshold] = 0
         return W_thresholded
 
-    def _weight_matrix_to_dag(
-        self, W: np.ndarray, variable_names: List[str]
-    ) -> nx.DiGraph:
+    def _weight_matrix_to_dag(self, W: np.ndarray, variable_names: List[str]) -> nx.DiGraph:
         """
         Convert weight matrix to NetworkX DAG.
 
@@ -279,11 +273,7 @@ class NOTEARSDiscovery:
             for j in range(d):
                 if i != j and W[i, j] != 0:
                     # Edge from i to j with weight
-                    dag.add_edge(
-                        variable_names[i],
-                        variable_names[j],
-                        weight=float(W[i, j])
-                    )
+                    dag.add_edge(variable_names[i], variable_names[j], weight=float(W[i, j]))
 
         return dag
 
@@ -304,7 +294,7 @@ class NOTEARSDiscovery:
         R = X - X @ W
 
         # Log-likelihood (Gaussian)
-        log_likelihood = -0.5 * n * np.log(2 * np.pi) - 0.5 * n * np.log(np.mean(R ** 2))
+        log_likelihood = -0.5 * n * np.log(2 * np.pi) - 0.5 * n * np.log(np.mean(R**2))
 
         # Number of parameters (non-zero edges)
         k = np.count_nonzero(W)
@@ -334,9 +324,7 @@ class PCAlgorithm:
         """
         self.alpha = alpha
 
-    def discover(
-        self, data: np.ndarray, variable_names: List[str]
-    ) -> Tuple[nx.DiGraph, float]:
+    def discover(self, data: np.ndarray, variable_names: List[str]) -> Tuple[nx.DiGraph, float]:
         """
         Discover DAG structure using PC algorithm.
 
@@ -353,7 +341,7 @@ class PCAlgorithm:
                 "n_samples": data.shape[0],
                 "n_variables": data.shape[1],
                 "alpha": self.alpha,
-            }
+            },
         )
 
         n, d = data.shape
@@ -372,14 +360,12 @@ class PCAlgorithm:
             extra={
                 "n_edges": len(dag.edges()),
                 "is_acyclic": nx.is_directed_acyclic_graph(dag),
-            }
+            },
         )
 
         return dag, confidence
 
-    def _learn_skeleton(
-        self, data: np.ndarray, variable_names: List[str]
-    ) -> nx.Graph:
+    def _learn_skeleton(self, data: np.ndarray, variable_names: List[str]) -> nx.Graph:
         """
         Learn undirected skeleton using conditional independence.
 
@@ -449,7 +435,7 @@ class AdvancedCausalDiscovery:
         data: np.ndarray,
         variable_names: List[str],
         algorithm: str = "notears",
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[nx.DiGraph, float]:
         """
         Discover causal structure using specified algorithm.

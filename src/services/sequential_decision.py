@@ -45,14 +45,11 @@ class SequentialDecisionEngine:
     Supports multi-stage decisions where later choices depend on earlier outcomes.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the sequential decision engine."""
         self.logger = logger
 
-    def analyze(
-        self,
-        request: SequentialAnalysisRequest
-    ) -> SequentialAnalysisResponse:
+    def analyze(self, request: SequentialAnalysisRequest) -> SequentialAnalysisResponse:
         """
         Analyze a sequential decision problem using backward induction.
 
@@ -62,63 +59,42 @@ class SequentialDecisionEngine:
         Returns:
             SequentialAnalysisResponse with optimal policy and analysis
         """
-        self.logger.info(
-            f"Analyzing sequential decision with {len(request.stages)} stages"
-        )
+        self.logger.info(f"Analyzing sequential decision with {len(request.stages)} stages")
 
         # Build internal representation
         graph_data = self._build_graph_data(request.graph)
 
         # Run backward induction
         node_values, optimal_actions = self._backward_induction(
-            graph_data,
-            request.stages,
-            request.discount_factor,
-            request.risk_tolerance
+            graph_data, request.stages, request.discount_factor, request.risk_tolerance or "neutral"
         )
 
         # Build optimal policy
-        policy = self._build_policy(
-            graph_data,
-            request.stages,
-            node_values,
-            optimal_actions
-        )
+        policy = self._build_policy(graph_data, request.stages, node_values, optimal_actions)
 
         # Generate stage analyses
         stage_analyses = self._generate_stage_analyses(
-            graph_data,
-            request.stages,
-            node_values,
-            optimal_actions,
-            request.discount_factor
+            graph_data, request.stages, node_values, optimal_actions, request.discount_factor
         )
 
         # Calculate value of flexibility
         value_of_flexibility = self._compute_value_of_flexibility(
-            graph_data,
-            request.stages,
-            node_values,
-            request.discount_factor
+            graph_data, request.stages, node_values, request.discount_factor
         )
 
         # Determine sensitivity to timing
         sensitivity_to_timing = self._assess_timing_sensitivity(
-            stage_analyses,
-            value_of_flexibility
+            stage_analyses, value_of_flexibility
         )
 
         return SequentialAnalysisResponse(
             optimal_policy=policy,
             stage_analyses=stage_analyses,
             value_of_flexibility=value_of_flexibility,
-            sensitivity_to_timing=sensitivity_to_timing
+            sensitivity_to_timing=sensitivity_to_timing,
         )
 
-    def get_policy_tree(
-        self,
-        request: SequentialAnalysisRequest
-    ) -> PolicyTreeResponse:
+    def get_policy_tree(self, request: SequentialAnalysisRequest) -> PolicyTreeResponse:
         """
         Generate policy tree representation.
 
@@ -133,10 +109,7 @@ class SequentialDecisionEngine:
 
         # Run backward induction
         node_values, optimal_actions = self._backward_induction(
-            graph_data,
-            request.stages,
-            request.discount_factor,
-            request.risk_tolerance
+            graph_data, request.stages, request.discount_factor, request.risk_tolerance or "neutral"
         )
 
         # Find root node (decision node at stage 0)
@@ -159,22 +132,17 @@ class SequentialDecisionEngine:
             request.graph.stage_assignments,
             node_values,
             optimal_actions,
-            visited=set()
+            visited=set(),
         )
 
         # Count nodes
         total_nodes = self._count_tree_nodes(root)
 
         return PolicyTreeResponse(
-            root=root,
-            total_stages=len(request.stages),
-            total_nodes=total_nodes
+            root=root, total_stages=len(request.stages), total_nodes=total_nodes
         )
 
-    def stage_sensitivity(
-        self,
-        request: StageSensitivityRequest
-    ) -> StageSensitivityResponse:
+    def stage_sensitivity(self, request: StageSensitivityRequest) -> StageSensitivityResponse:
         """
         Perform stage-by-stage sensitivity analysis.
 
@@ -189,10 +157,7 @@ class SequentialDecisionEngine:
 
         # Get baseline policy
         baseline_values, baseline_actions = self._backward_induction(
-            graph_data,
-            request.stages,
-            discount_factor=0.95,
-            risk_tolerance="neutral"
+            graph_data, request.stages, discount_factor=0.95, risk_tolerance="neutral"
         )
 
         # Identify parameters to vary
@@ -200,7 +165,7 @@ class SequentialDecisionEngine:
 
         # Analyze each stage
         stage_results = []
-        all_sensitivities = {}
+        all_sensitivities: Dict[str, List[float]] = {}
 
         for stage in request.stages:
             stage_result = self._analyze_stage_sensitivity(
@@ -210,7 +175,7 @@ class SequentialDecisionEngine:
                 parameters,
                 request.variation_range,
                 baseline_values,
-                baseline_actions
+                baseline_actions,
             )
             stage_results.append(stage_result)
 
@@ -222,40 +187,39 @@ class SequentialDecisionEngine:
 
         # Calculate overall robustness
         if stage_results:
-            overall_robustness = np.mean([r.robustness_score for r in stage_results])
+            overall_robustness = float(np.mean([r.robustness_score for r in stage_results]))
         else:
             overall_robustness = 1.0
 
         # Find most sensitive parameters
-        avg_sensitivities = {
-            param: np.mean(values)
-            for param, values in all_sensitivities.items()
+        avg_sensitivities: Dict[str, float] = {
+            param: float(np.mean(values)) for param, values in all_sensitivities.items()
         }
         most_sensitive = sorted(
-            avg_sensitivities.keys(),
-            key=lambda x: avg_sensitivities[x],
-            reverse=True
+            avg_sensitivities.keys(), key=lambda x: avg_sensitivities[x], reverse=True
         )[:3]
 
         explanation = ExplanationMetadata(
             summary=f"Policy is {'robust' if overall_robustness > 0.7 else 'moderately robust' if overall_robustness > 0.4 else 'fragile'} to parameter changes",
             reasoning=self._generate_sensitivity_reasoning(most_sensitive, avg_sensitivities),
             technical_basis="One-at-a-time sensitivity analysis with backward induction",
-            assumptions=["Parameters vary independently", "Linear approximation to sensitivity"]
+            assumptions=["Parameters vary independently", "Linear approximation to sensitivity"],
         )
 
         return StageSensitivityResponse(
             stage_results=stage_results,
             overall_robustness=round(overall_robustness, 3),
             most_sensitive_parameters=most_sensitive,
-            explanation=explanation
+            explanation=explanation,
         )
 
     def _build_graph_data(self, graph: SequentialGraph) -> Dict[str, Any]:
         """Build internal graph representation."""
         nodes = {}
-        edges = defaultdict(list)  # from_node -> list of edges
-        incoming_edges = defaultdict(list)  # to_node -> list of edges
+        edges: Dict[str, List[Dict[str, Any]]] = defaultdict(list)  # from_node -> list of edges
+        incoming_edges: Dict[str, List[Dict[str, Any]]] = defaultdict(
+            list
+        )  # to_node -> list of edges
 
         for node in graph.nodes:
             nodes[node.id] = {
@@ -263,7 +227,7 @@ class SequentialDecisionEngine:
                 "type": node.type,
                 "label": node.label,
                 "payoff": node.payoff,
-                "probabilities": node.probabilities
+                "probabilities": node.probabilities,
             }
 
         for edge in graph.edges:
@@ -273,7 +237,7 @@ class SequentialDecisionEngine:
                 "action": edge.action,
                 "outcome": edge.outcome,
                 "probability": edge.probability,
-                "immediate_payoff": edge.immediate_payoff or 0
+                "immediate_payoff": edge.immediate_payoff or 0,
             }
             edges[edge.from_node].append(edge_data)
             incoming_edges[edge.to_node].append(edge_data)
@@ -282,7 +246,7 @@ class SequentialDecisionEngine:
             "nodes": nodes,
             "edges": dict(edges),
             "incoming_edges": dict(incoming_edges),
-            "stage_assignments": graph.stage_assignments
+            "stage_assignments": graph.stage_assignments,
         }
 
     def _backward_induction(
@@ -290,7 +254,7 @@ class SequentialDecisionEngine:
         graph_data: Dict[str, Any],
         stages: List[DecisionStage],
         discount_factor: float,
-        risk_tolerance: str
+        risk_tolerance: str,
     ) -> Tuple[Dict[str, float], Dict[str, str]]:
         """
         Perform backward induction to find optimal policy.
@@ -303,15 +267,13 @@ class SequentialDecisionEngine:
         stage_assignments = graph_data["stage_assignments"]
 
         # Initialize values for terminal nodes
-        node_values = {}
-        optimal_actions = {}
+        node_values: Dict[str, float] = {}
+        optimal_actions: Dict[str, str] = {}
 
         for node_id, node in nodes.items():
             if node["type"] == "terminal":
                 payoff = node.get("payoff", 0) or 0
-                node_values[node_id] = self._risk_adjust_value(
-                    payoff, 0, risk_tolerance
-                )
+                node_values[node_id] = self._risk_adjust_value(payoff, 0, risk_tolerance)
 
         # Sort stages in reverse order
         sorted_stages = sorted(stages, key=lambda s: s.stage_index, reverse=True)
@@ -320,8 +282,7 @@ class SequentialDecisionEngine:
         for stage in sorted_stages:
             # Get all nodes at this stage
             stage_nodes = [
-                node_id for node_id, s in stage_assignments.items()
-                if s == stage.stage_index
+                node_id for node_id, s in stage_assignments.items() if s == stage.stage_index
             ]
 
             for node_id in stage_nodes:
@@ -333,13 +294,13 @@ class SequentialDecisionEngine:
 
                 if not outgoing:
                     # No outgoing edges - treat as terminal with 0 payoff
-                    node_values[node_id] = 0
+                    node_values[node_id] = 0.0
                     continue
 
                 if node["type"] == "decision":
                     # Decision node: maximize over actions
-                    best_value = float('-inf')
-                    best_action = None
+                    best_value = float("-inf")
+                    best_action: str = ""
 
                     for edge in outgoing:
                         child_id = edge["to"]
@@ -354,15 +315,15 @@ class SequentialDecisionEngine:
 
                         if total > best_value:
                             best_value = total
-                            best_action = edge.get("action", child_id)
+                            best_action = str(edge.get("action", child_id))
 
                     node_values[node_id] = best_value
                     optimal_actions[node_id] = best_action
 
                 elif node["type"] == "chance":
                     # Chance node: expected value over outcomes
-                    expected_value = 0
-                    total_prob = 0
+                    expected_value: float = 0.0
+                    total_prob: float = 0.0
 
                     for edge in outgoing:
                         child_id = edge["to"]
@@ -391,12 +352,7 @@ class SequentialDecisionEngine:
 
         return node_values, optimal_actions
 
-    def _risk_adjust_value(
-        self,
-        mean: float,
-        variance: float,
-        risk_tolerance: str
-    ) -> float:
+    def _risk_adjust_value(self, mean: float, variance: float, risk_tolerance: str) -> float:
         """Apply risk adjustment to expected value."""
         if risk_tolerance == "neutral" or variance == 0:
             return mean
@@ -409,10 +365,7 @@ class SequentialDecisionEngine:
         return mean
 
     def _estimate_outcome_variance(
-        self,
-        outgoing_edges: List[Dict],
-        node_values: Dict[str, float],
-        discount_factor: float
+        self, outgoing_edges: List[Dict], node_values: Dict[str, float], discount_factor: float
     ) -> float:
         """Estimate variance of outcomes from a chance node."""
         if not outgoing_edges:
@@ -443,14 +396,14 @@ class SequentialDecisionEngine:
         mean = sum(p * v for p, v in zip(probs, values))
         variance = sum(p * (v - mean) ** 2 for p, v in zip(probs, values))
 
-        return variance
+        return float(variance)
 
     def _build_policy(
         self,
         graph_data: Dict[str, Any],
         stages: List[DecisionStage],
         node_values: Dict[str, float],
-        optimal_actions: Dict[str, str]
+        optimal_actions: Dict[str, str],
     ) -> Policy:
         """Build policy from backward induction results."""
         stage_policies = []
@@ -493,30 +446,29 @@ class SequentialDecisionEngine:
                     # Add as conditional action if not default
                     if action != default_action:
                         # Generate a condition based on context
-                        condition = self._generate_condition_string(
-                            edge, graph_data
+                        condition = self._generate_condition_string(edge, graph_data)
+
+                        conditional_actions.append(
+                            ConditionalAction(
+                                condition=condition, action=action, expected_value_if_taken=ev
+                            )
                         )
 
-                        conditional_actions.append(ConditionalAction(
-                            condition=condition,
-                            action=action,
-                            expected_value_if_taken=ev
-                        ))
-
                 decision_rule = DecisionRule(
-                    default_action=default_action,
-                    conditional_actions=conditional_actions
+                    default_action=default_action, conditional_actions=conditional_actions
                 )
 
                 # Determine what this stage is contingent on
                 contingent_on = stage.resolution_nodes or []
 
-                stage_policies.append(StagePolicy(
-                    stage_index=stage.stage_index,
-                    stage_label=stage.stage_label,
-                    decision_rule=decision_rule,
-                    contingent_on=contingent_on
-                ))
+                stage_policies.append(
+                    StagePolicy(
+                        stage_index=stage.stage_index,
+                        stage_label=stage.stage_label,
+                        decision_rule=decision_rule,
+                        contingent_on=contingent_on,
+                    )
+                )
 
                 break  # One policy per stage for simplicity
 
@@ -530,16 +482,11 @@ class SequentialDecisionEngine:
             stages=stage_policies,
             expected_total_value=root_value,
             value_distribution=PolicyDistribution(
-                type="normal",
-                parameters={"mean": root_value, "std": value_std}
-            )
+                type="normal", parameters={"mean": root_value, "std": value_std}
+            ),
         )
 
-    def _generate_condition_string(
-        self,
-        edge: Dict,
-        graph_data: Dict
-    ) -> str:
+    def _generate_condition_string(self, edge: Dict, graph_data: Dict) -> str:
         """Generate human-readable condition string for an edge."""
         outcome = edge.get("outcome")
         action = edge.get("action")
@@ -553,11 +500,7 @@ class SequentialDecisionEngine:
         else:
             return f"If {action or 'alternative'}"
 
-    def _get_root_value(
-        self,
-        graph_data: Dict[str, Any],
-        node_values: Dict[str, float]
-    ) -> float:
+    def _get_root_value(self, graph_data: Dict[str, Any], node_values: Dict[str, float]) -> float:
         """Get value at root node (earliest stage decision)."""
         stage_assignments = graph_data["stage_assignments"]
         nodes = graph_data["nodes"]
@@ -583,7 +526,7 @@ class SequentialDecisionEngine:
         stages: List[DecisionStage],
         node_values: Dict[str, float],
         optimal_actions: Dict[str, str],
-        discount_factor: float
+        discount_factor: float,
     ) -> List[StageAnalysis]:
         """Generate detailed analysis for each stage."""
         analyses = []
@@ -612,13 +555,15 @@ class SequentialDecisionEngine:
                     continuation = node_values.get(child_id, 0)
                     total = immediate + discount_factor * continuation
 
-                    options.append(StageOption(
-                        option_id=action,
-                        label=action.replace("_", " ").title(),
-                        immediate_value=immediate,
-                        continuation_value=continuation,
-                        total_value=total
-                    ))
+                    options.append(
+                        StageOption(
+                            option_id=action,
+                            label=action.replace("_", " ").title(),
+                            immediate_value=immediate,
+                            continuation_value=continuation,
+                            total_value=total,
+                        )
+                    )
 
             # Calculate information value
             info_value = self._calculate_information_value(
@@ -632,13 +577,15 @@ class SequentialDecisionEngine:
                     graph_data, stages, node_values, discount_factor
                 )
 
-            analyses.append(StageAnalysis(
-                stage_index=stage.stage_index,
-                stage_label=stage.stage_label,
-                options_at_stage=options,
-                information_value=info_value,
-                optimal_waiting_value=waiting_value
-            ))
+            analyses.append(
+                StageAnalysis(
+                    stage_index=stage.stage_index,
+                    stage_label=stage.stage_label,
+                    options_at_stage=options,
+                    information_value=info_value,
+                    optimal_waiting_value=waiting_value,
+                )
+            )
 
         return analyses
 
@@ -647,7 +594,7 @@ class SequentialDecisionEngine:
         stage: DecisionStage,
         graph_data: Dict[str, Any],
         node_values: Dict[str, float],
-        discount_factor: float
+        discount_factor: float,
     ) -> float:
         """
         Calculate value of information revealed at this stage.
@@ -660,7 +607,7 @@ class SequentialDecisionEngine:
             return 0
 
         # Simplified: estimate as variance reduction
-        total_variance = 0
+        total_variance: float = 0.0
         for node_id in resolution_nodes:
             if node_id in graph_data["nodes"]:
                 node = graph_data["nodes"][node_id]
@@ -679,7 +626,7 @@ class SequentialDecisionEngine:
         graph_data: Dict[str, Any],
         stages: List[DecisionStage],
         node_values: Dict[str, float],
-        discount_factor: float
+        discount_factor: float,
     ) -> float:
         """Calculate value of waiting/delaying first stage decision."""
         # Simplified: value of waiting is related to information gained
@@ -694,10 +641,7 @@ class SequentialDecisionEngine:
         # Estimate value with perfect information (upper bound)
         # This would require resolving all uncertainty first
         info_value_stage1 = self._calculate_information_value(
-            stages[1] if len(stages) > 1 else stages[0],
-            graph_data,
-            node_values,
-            discount_factor
+            stages[1] if len(stages) > 1 else stages[0], graph_data, node_values, discount_factor
         )
 
         # Waiting value is discounted information value
@@ -710,7 +654,7 @@ class SequentialDecisionEngine:
         graph_data: Dict[str, Any],
         stages: List[DecisionStage],
         node_values: Dict[str, float],
-        discount_factor: float
+        discount_factor: float,
     ) -> float:
         """
         Compute value of flexibility (waiting vs committing now).
@@ -723,19 +667,14 @@ class SequentialDecisionEngine:
         v_flexible = self._get_root_value(graph_data, node_values)
 
         # Calculate committed value (ignore future information)
-        v_committed = self._calculate_committed_value(
-            graph_data, stages, discount_factor
-        )
+        v_committed = self._calculate_committed_value(graph_data, stages, discount_factor)
 
         value_of_flexibility = max(0, v_flexible - v_committed)
 
         return round(value_of_flexibility, 2)
 
     def _calculate_committed_value(
-        self,
-        graph_data: Dict[str, Any],
-        stages: List[DecisionStage],
-        discount_factor: float
+        self, graph_data: Dict[str, Any], stages: List[DecisionStage], discount_factor: float
     ) -> float:
         """Calculate value when committing upfront (ignoring future information)."""
         nodes = graph_data["nodes"]
@@ -754,7 +693,7 @@ class SequentialDecisionEngine:
 
         # Calculate expected value of each action without conditioning on information
         outgoing = edges.get(first_decision, [])
-        best_committed_value = float('-inf')
+        best_committed_value = float("-inf")
 
         for edge in outgoing:
             immediate = edge.get("immediate_payoff", 0) or 0
@@ -770,14 +709,10 @@ class SequentialDecisionEngine:
             if total > best_committed_value:
                 best_committed_value = total
 
-        return best_committed_value if best_committed_value > float('-inf') else 0
+        return best_committed_value if best_committed_value > float("-inf") else 0
 
     def _calculate_average_continuation(
-        self,
-        node_id: str,
-        graph_data: Dict[str, Any],
-        discount_factor: float,
-        visited: Set[str]
+        self, node_id: str, graph_data: Dict[str, Any], discount_factor: float, visited: Set[str]
     ) -> float:
         """Calculate average continuation value (non-optimal)."""
         if node_id in visited:
@@ -811,9 +746,7 @@ class SequentialDecisionEngine:
         return np.mean(values) if values else 0
 
     def _assess_timing_sensitivity(
-        self,
-        stage_analyses: List[StageAnalysis],
-        value_of_flexibility: float
+        self, stage_analyses: List[StageAnalysis], value_of_flexibility: float
     ) -> str:
         """Assess how sensitive results are to timing."""
         if not stage_analyses:
@@ -847,7 +780,7 @@ class SequentialDecisionEngine:
         stage_assignments: Dict[str, int],
         node_values: Dict[str, float],
         optimal_actions: Dict[str, str],
-        visited: Set[str]
+        visited: Set[str],
     ) -> PolicyTreeNode:
         """Recursively build a policy tree node."""
         if node_id in visited:
@@ -859,7 +792,7 @@ class SequentialDecisionEngine:
                 label="(cyclic reference)",
                 optimal_action=None,
                 expected_value=0,
-                children=[]
+                children=[],
             )
 
         visited.add(node_id)
@@ -875,7 +808,7 @@ class SequentialDecisionEngine:
                 label=node_id,
                 optimal_action=None,
                 expected_value=0,
-                children=[]
+                children=[],
             )
 
         node = nodes[node_id]
@@ -915,7 +848,7 @@ class SequentialDecisionEngine:
             label=label,
             optimal_action=optimal_action,
             expected_value=expected_value,
-            children=children
+            children=children,
         )
 
     def _count_tree_nodes(self, root: PolicyTreeNode) -> int:
@@ -949,14 +882,14 @@ class SequentialDecisionEngine:
         parameters: List[str],
         variation_range: float,
         baseline_values: Dict[str, float],
-        baseline_actions: Dict[str, str]
+        baseline_actions: Dict[str, str],
     ) -> StageSensitivityResult:
         """Analyze sensitivity for a single stage."""
         sensitivities = {}
         policy_changes = {}
 
         # Get baseline value at this stage's decision nodes
-        baseline_stage_value = 0
+        baseline_stage_value: float = 0.0
         for node_id in stage.decision_nodes:
             if node_id in baseline_values:
                 baseline_stage_value = baseline_values[node_id]
@@ -965,19 +898,14 @@ class SequentialDecisionEngine:
         # Test each parameter
         for param in parameters:
             # Perturb parameter and re-run backward induction
-            perturbed_graph = self._perturb_parameter(
-                graph_data, param, variation_range
-            )
+            perturbed_graph = self._perturb_parameter(graph_data, param, variation_range)
 
             perturbed_values, perturbed_actions = self._backward_induction(
-                perturbed_graph,
-                all_stages,
-                discount_factor=0.95,
-                risk_tolerance="neutral"
+                perturbed_graph, all_stages, discount_factor=0.95, risk_tolerance="neutral"
             )
 
             # Calculate sensitivity
-            perturbed_stage_value = 0
+            perturbed_stage_value: float = 0.0
             for node_id in stage.decision_nodes:
                 if node_id in perturbed_values:
                     perturbed_stage_value = perturbed_values[node_id]
@@ -999,8 +927,8 @@ class SequentialDecisionEngine:
 
         # Calculate robustness score
         if sensitivities:
-            avg_sensitivity = np.mean(list(sensitivities.values()))
-            robustness = max(0, 1.0 - avg_sensitivity)
+            avg_sensitivity = float(np.mean(list(sensitivities.values())))
+            robustness = max(0.0, 1.0 - avg_sensitivity)
         else:
             robustness = 1.0
 
@@ -1009,17 +937,15 @@ class SequentialDecisionEngine:
             stage_label=stage.stage_label,
             parameter_sensitivities=sensitivities,
             policy_changes_at=policy_changes if policy_changes else None,
-            robustness_score=round(robustness, 3)
+            robustness_score=round(robustness, 3),
         )
 
     def _perturb_parameter(
-        self,
-        graph_data: Dict[str, Any],
-        param: str,
-        variation: float
+        self, graph_data: Dict[str, Any], param: str, variation: float
     ) -> Dict[str, Any]:
         """Create perturbed copy of graph data."""
         import copy
+
         perturbed = copy.deepcopy(graph_data)
 
         # Parse parameter name to find what to perturb
@@ -1037,14 +963,12 @@ class SequentialDecisionEngine:
             for node_id in perturbed["edges"]:
                 for edge in perturbed["edges"][node_id]:
                     if edge.get("probability") is not None:
-                        edge["probability"] *= (1 - variation)
+                        edge["probability"] *= 1 - variation
 
         return perturbed
 
     def _generate_sensitivity_reasoning(
-        self,
-        most_sensitive: List[str],
-        sensitivities: Dict[str, float]
+        self, most_sensitive: List[str], sensitivities: Dict[str, float]
     ) -> str:
         """Generate reasoning text for sensitivity analysis."""
         if not most_sensitive:

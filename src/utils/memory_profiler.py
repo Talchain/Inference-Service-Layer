@@ -9,9 +9,9 @@ Provides:
 
 import functools
 import logging
-from typing import Callable, Dict
+from typing import Any, Callable, Dict
 
-import psutil
+import psutil  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class MemoryMonitor:
         return {
             "rss_mb": mem_info.rss / 1024 / 1024,  # Resident Set Size
             "vms_mb": mem_info.vms / 1024 / 1024,  # Virtual Memory Size
-            "percent": process.memory_percent(),     # % of system memory
+            "percent": process.memory_percent(),  # % of system memory
             "available_mb": psutil.virtual_memory().available / 1024 / 1024,
         }
 
@@ -56,7 +56,7 @@ class MemoryMonitor:
         }
 
     @staticmethod
-    def memory_limit(max_mb: int = 512):
+    def memory_limit(max_mb: int = 512) -> Callable[..., Any]:
         """
         Decorator to enforce memory limits on functions.
 
@@ -69,9 +69,10 @@ class MemoryMonitor:
                 # Operation that might use a lot of memory
                 pass
         """
-        def decorator(func: Callable):
+
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @functools.wraps(func)
-            def wrapper(*args, **kwargs):
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
                 mem_before = MemoryMonitor.get_memory_usage()
 
                 result = func(*args, **kwargs)
@@ -86,15 +87,16 @@ class MemoryMonitor:
                             "function": func.__name__,
                             "delta_mb": delta,
                             "limit_mb": max_mb,
-                        }
+                        },
                     )
                     raise MemoryError(
-                        f"Function '{func.__name__}' used {delta:.1f}MB, "
-                        f"limit is {max_mb}MB"
+                        f"Function '{func.__name__}' used {delta:.1f}MB, " f"limit is {max_mb}MB"
                     )
 
                 return result
+
             return wrapper
+
         return decorator
 
     @staticmethod
@@ -112,7 +114,7 @@ class MemoryMonitor:
                 "rss_mb": round(mem["rss_mb"], 1),
                 "percent": round(mem["percent"], 1),
                 "available_mb": round(mem["available_mb"], 1),
-            }
+            },
         )
 
 
@@ -127,4 +129,4 @@ def check_memory_threshold(threshold_percent: float = 85.0) -> bool:
         True if memory usage is below threshold, False otherwise
     """
     mem = psutil.virtual_memory()
-    return mem.percent < threshold_percent
+    return bool(mem.percent < threshold_percent)

@@ -24,11 +24,12 @@ logger = logging.getLogger(__name__)
 _tracing_module = None
 
 
-def _get_tracing_module():
+def _get_tracing_module() -> Any:
     """Lazy import of tracing module to avoid circular imports."""
     global _tracing_module
     if _tracing_module is None:
         from . import tracing
+
         _tracing_module = tracing
     return _tracing_module
 
@@ -36,10 +37,10 @@ def _get_tracing_module():
 # Patterns for PII detection and redaction
 PII_PATTERNS: List[tuple[str, Pattern]] = [
     ("api_key", re.compile(r'(?i)(api[_-]?key|apikey|x-api-key)["\s:=]+([a-zA-Z0-9_\-]{16,})')),
-    ("bearer_token", re.compile(r'(?i)bearer\s+([a-zA-Z0-9_\-\.]{20,})')),
+    ("bearer_token", re.compile(r"(?i)bearer\s+([a-zA-Z0-9_\-\.]{20,})")),
     ("password", re.compile(r'(?i)(password|passwd|pwd)["\s:=]+([^\s"\']{4,})')),
-    ("credit_card", re.compile(r'\b(?:\d{4}[- ]?){3}\d{4}\b')),
-    ("ssn", re.compile(r'\b\d{3}-\d{2}-\d{4}\b')),
+    ("credit_card", re.compile(r"\b(?:\d{4}[- ]?){3}\d{4}\b")),
+    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
 ]
 
 # Fields that should be completely redacted
@@ -117,7 +118,7 @@ def sanitize_model_for_logging(model: Dict[str, Any]) -> Dict[str, Any]:
         "node_count": len(nodes),
         "edge_count": len(edges),
         "has_parameters": bool(model.get("parameters")),
-        "has_distributions": bool(model.get("distributions"))
+        "has_distributions": bool(model.get("distributions")),
     }
 
 
@@ -165,7 +166,7 @@ def log_request_safe(
     endpoint: str,
     user_id: Optional[str] = None,
     request_data: Optional[Dict[str, Any]] = None,
-    request_id: Optional[str] = None
+    request_id: Optional[str] = None,
 ) -> None:
     """
     Log request without sensitive data.
@@ -206,7 +207,7 @@ def log_response_safe(
     status_code: int,
     duration_ms: float,
     request_id: Optional[str] = None,
-    error: Optional[str] = None
+    error: Optional[str] = None,
 ) -> None:
     """
     Log response without sensitive data.
@@ -229,7 +230,7 @@ def log_response_safe(
     log_data: Dict[str, Any] = {
         "endpoint": endpoint,
         "status_code": status_code,
-        "duration_ms": round(duration_ms, 2)
+        "duration_ms": round(duration_ms, 2),
     }
 
     if request_id:
@@ -261,15 +262,12 @@ def sanitize_error_for_logging(error: Exception) -> Dict[str, str]:
     """
     return {
         "error_type": type(error).__name__,
-        "error_message": str(error)[:200]  # Limit message length
+        "error_message": str(error)[:200],  # Limit message length
     }
 
 
 def log_error_safe(
-    endpoint: str,
-    error: Exception,
-    request_id: Optional[str] = None,
-    user_id: Optional[str] = None
+    endpoint: str, error: Exception, request_id: Optional[str] = None, user_id: Optional[str] = None
 ) -> None:
     """
     Log error without sensitive data.
@@ -287,10 +285,7 @@ def log_error_safe(
         ... except ValueError as e:
         ...     log_error_safe("/api/v1/causal/validate", e, "req_abc")
     """
-    log_data: Dict[str, Any] = {
-        "endpoint": endpoint,
-        **sanitize_error_for_logging(error)
-    }
+    log_data: Dict[str, Any] = {"endpoint": endpoint, **sanitize_error_for_logging(error)}
 
     if request_id:
         log_data["request_id"] = request_id
@@ -304,6 +299,7 @@ def log_error_safe(
 # =============================================================================
 # PII Redaction Functions
 # =============================================================================
+
 
 def redact_value(value: Any, field_name: str = "") -> Any:
     """
@@ -365,10 +361,11 @@ def redact_string(text: str) -> str:
     for pattern_name, pattern in PII_PATTERNS:
         if pattern_name in ("api_key", "bearer_token", "password"):
             # Replace the captured secret value
-            def redact_match(m):
+            def redact_match(m: "re.Match[str]") -> str:
                 if m.lastindex and m.lastindex >= 2:
                     return f"{m.group(1)}=[REDACTED]"
                 return "[REDACTED]"
+
             result = pattern.sub(redact_match, result)
         elif pattern_name == "credit_card":
             result = pattern.sub("[CARD-REDACTED]", result)
@@ -382,12 +379,13 @@ def redact_string(text: str) -> str:
 # Correlation ID JSON Formatter
 # =============================================================================
 
+
 class CorrelationIDFormatter(jsonlogger.JsonFormatter):
     """
     JSON formatter that automatically injects correlation IDs and redacts PII.
     """
 
-    def __init__(self, *args, redact_pii: bool = True, **kwargs):
+    def __init__(self, *args: Any, redact_pii: bool = True, **kwargs: Any) -> None:
         """
         Initialize the formatter.
 
@@ -437,6 +435,7 @@ class CorrelationIDFormatter(jsonlogger.JsonFormatter):
 # Security Audit Logger
 # =============================================================================
 
+
 class SecurityAuditLogger:
     """
     Dedicated logger for security-relevant events.
@@ -481,12 +480,14 @@ class SecurityAuditLogger:
                 "event_type": "authentication",
                 "success": success,
                 "client_ip": client_ip,
-                "api_key_prefix": api_key_prefix[:8] + "..." if api_key_prefix and len(api_key_prefix) > 8 else api_key_prefix,
+                "api_key_prefix": api_key_prefix[:8] + "..."
+                if api_key_prefix and len(api_key_prefix) > 8
+                else api_key_prefix,
                 "reason": reason,
                 "path": path,
                 "audit": True,
                 "correlation_id": trace_id,
-            }
+            },
         )
 
     def log_authorization_check(
@@ -525,7 +526,7 @@ class SecurityAuditLogger:
                 "reason": reason,
                 "audit": True,
                 "correlation_id": trace_id,
-            }
+            },
         )
 
     def log_rate_limit_exceeded(
@@ -560,7 +561,7 @@ class SecurityAuditLogger:
                 "path": path,
                 "audit": True,
                 "correlation_id": trace_id,
-            }
+            },
         )
 
     def log_suspicious_activity(
@@ -600,7 +601,7 @@ class SecurityAuditLogger:
                 "details": details,
                 "audit": True,
                 "correlation_id": trace_id,
-            }
+            },
         )
 
     def log_config_validation_failure(
@@ -622,7 +623,7 @@ class SecurityAuditLogger:
                 "errors": errors,
                 "environment": environment,
                 "audit": True,
-            }
+            },
         )
 
 

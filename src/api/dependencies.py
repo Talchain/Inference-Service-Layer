@@ -22,6 +22,7 @@ from src.services.threshold_identifier import ThresholdIdentifier
 # Analysis Services
 # ============================================================================
 
+
 @lru_cache()
 def get_dominance_analyzer() -> DominanceAnalyzer:
     """
@@ -61,6 +62,7 @@ def get_threshold_identifier() -> ThresholdIdentifier:
 # ============================================================================
 # Aggregation Services
 # ============================================================================
+
 
 @lru_cache()
 def get_multi_criteria_aggregator() -> MultiCriteriaAggregator:

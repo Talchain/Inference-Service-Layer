@@ -95,7 +95,7 @@ def _extract_bidirected_pairs(graph: GraphV2) -> List[Tuple[str, str]]:
             canonical = tuple(sorted([edge.from_, edge.to]))
             if canonical not in seen:
                 seen.add(canonical)
-                pairs.append(canonical)
+                pairs.append(canonical)  # type: ignore[arg-type]
     return pairs
 
 
@@ -158,8 +158,7 @@ def _build_intervention_options(
                 float_interventions[k] = float(v)
             except (TypeError, ValueError):
                 raise ValueError(
-                    f"Option {opt['id']!r}: intervention value for {k!r} "
-                    f"is not numeric: {v!r}"
+                    f"Option {opt['id']!r}: intervention value for {k!r} " f"is not numeric: {v!r}"
                 )
         result.append(
             InterventionOption(
@@ -247,9 +246,7 @@ def analyze_confounding_sensitivity(
         # Sweep through normalised multiples (skip 0.0× — that's the baseline)
         for multiple in _SWEEP_MULTIPLES[1:]:
             confounder_strength = multiple * median_strength
-            modified_graph = _inject_confounder(
-                graph, node_a, node_b, confounder_strength
-            )
+            modified_graph = _inject_confounder(graph, node_a, node_b, confounder_strength)
 
             request = RobustnessRequestV2(
                 request_id=f"confounding-{node_a}-{node_b}-{multiple}x",

@@ -283,7 +283,7 @@ class ConstraintResultV2(BaseModel):
         None, description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
     )
 
-    @computed_field
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def value(self) -> float:
         """Contract-aligned alias for threshold (v2.7 input field name).

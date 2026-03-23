@@ -99,36 +99,29 @@ class ErrorResponse(BaseModel):
     code: str = Field(..., description="Error code (e.g., 'ISL_INVALID_DAG')")
     message: str = Field(..., description="Human-readable error message")
     reason: Optional[str] = Field(
-        default=None,
-        description="Fine-grained reason code for the error"
+        default=None, description="Fine-grained reason code for the error"
     )
 
     # Service-specific details (optional)
     recovery: Optional[RecoveryHints] = Field(
-        default=None,
-        description="Recovery suggestions and hints"
+        default=None, description="Recovery suggestions and hints"
     )
 
     # ISL domain-specific fields
     validation_failures: Optional[List[str]] = Field(
-        default=None,
-        description="List of validation failures (ISL-specific)"
+        default=None, description="List of validation failures (ISL-specific)"
     )
     node_count: Optional[int] = Field(
-        default=None,
-        description="Number of nodes in DAG (for structure errors)"
+        default=None, description="Number of nodes in DAG (for structure errors)"
     )
     edge_count: Optional[int] = Field(
-        default=None,
-        description="Number of edges in DAG (for structure errors)"
+        default=None, description="Number of edges in DAG (for structure errors)"
     )
     missing_nodes: Optional[List[str]] = Field(
-        default=None,
-        description="List of missing nodes referenced in equations"
+        default=None, description="List of missing nodes referenced in equations"
     )
     attempted_methods: Optional[List[str]] = Field(
-        default=None,
-        description="Identification methods attempted (for validation errors)"
+        default=None, description="Identification methods attempted (for validation errors)"
     )
 
     # Platform-required fields (all services MUST include)
@@ -136,12 +129,9 @@ class ErrorResponse(BaseModel):
     source: str = Field(default="isl", description="Service that generated error")
     request_id: str = Field(
         default_factory=lambda: f"req_{uuid4().hex[:16]}",
-        description="Request ID for correlation (from X-Request-Id header)"
+        description="Request ID for correlation (from X-Request-Id header)",
     )
-    degraded: Optional[bool] = Field(
-        default=False,
-        description="Result is partial/incomplete"
-    )
+    degraded: Optional[bool] = Field(default=False, description="Result is partial/incomplete")
 
     model_config = {
         "json_schema_extra": {
@@ -155,19 +145,21 @@ class ErrorResponse(BaseModel):
                         "recovery": {
                             "hints": [
                                 "Check for circular dependencies in your model",
-                                "Use a DAG visualization tool to identify cycles"
+                                "Use a DAG visualization tool to identify cycles",
                             ],
                             "suggestion": "Remove edges that create cycles",
-                            "example": "If A→B→C→A exists, remove one edge"
+                            "example": "If A→B→C→A exists, remove one edge",
                         },
-                        "validation_failures": ["Cycle: Price → Revenue → CustomerSatisfaction → Price"],
+                        "validation_failures": [
+                            "Cycle: Price → Revenue → CustomerSatisfaction → Price"
+                        ],
                         "node_count": 5,
                         "edge_count": 6,
                         "retryable": False,
                         "source": "isl",
                         "request_id": "req_abc123def456",
-                        "degraded": False
-                    }
+                        "degraded": False,
+                    },
                 },
                 {
                     "title": "Validation Error",
@@ -179,16 +171,16 @@ class ErrorResponse(BaseModel):
                             "hints": [
                                 "Add measured confounders to the model",
                                 "Consider using instrumental variables",
-                                "Explore front-door criterion"
+                                "Explore front-door criterion",
                             ],
-                            "suggestion": "Measure and include confounding variables"
+                            "suggestion": "Measure and include confounding variables",
                         },
                         "attempted_methods": ["backdoor", "front_door", "do_calculus"],
                         "retryable": False,
                         "source": "isl",
                         "request_id": "req_xyz789",
-                        "degraded": False
-                    }
+                        "degraded": False,
+                    },
                 },
                 {
                     "title": "Timeout Error",
@@ -198,16 +190,16 @@ class ErrorResponse(BaseModel):
                         "recovery": {
                             "hints": [
                                 "Simplify your causal model",
-                                "Reduce Monte Carlo iterations"
+                                "Reduce Monte Carlo iterations",
                             ],
-                            "suggestion": "Retry with a simpler model"
+                            "suggestion": "Retry with a simpler model",
                         },
                         "retryable": True,
                         "source": "isl",
                         "request_id": "req_timeout123",
-                        "degraded": False
-                    }
-                }
+                        "degraded": False,
+                    },
+                },
             ]
         }
     }
@@ -241,16 +233,20 @@ class AssumptionDetail(BaseModel):
     its type, description, and criticality.
     """
 
-    type: str = Field(..., description="Assumption type (e.g., 'no_unmeasured_confounding', 'positivity')")
+    type: str = Field(
+        ..., description="Assumption type (e.g., 'no_unmeasured_confounding', 'positivity')"
+    )
     description: str = Field(..., description="Human-readable explanation of the assumption")
-    critical: bool = Field(..., description="Whether this assumption is critical for identification")
+    critical: bool = Field(
+        ..., description="Whether this assumption is critical for identification"
+    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "type": "no_unmeasured_confounding",
                 "description": "No unmeasured confounders after adjusting for adjustment set",
-                "critical": True
+                "critical": True,
             }
         }
     }
@@ -264,7 +260,9 @@ class AlternativeMethod(BaseModel):
     are applicable and why.
     """
 
-    method: str = Field(..., description="Method name (e.g., 'backdoor', 'front_door', 'instrumental_variables')")
+    method: str = Field(
+        ..., description="Method name (e.g., 'backdoor', 'front_door', 'instrumental_variables')"
+    )
     applicable: bool = Field(..., description="Whether this method is applicable to the problem")
     reason: str = Field(..., description="Why the method is or is not applicable")
 
@@ -273,7 +271,7 @@ class AlternativeMethod(BaseModel):
             "example": {
                 "method": "front_door",
                 "applicable": False,
-                "reason": "No mediator set completely captures causal pathway"
+                "reason": "No mediator set completely captures causal pathway",
             }
         }
     }
@@ -288,14 +286,16 @@ class ConditionalIndependence(BaseModel):
 
     variable_a: str = Field(..., description="First variable")
     variable_b: str = Field(..., description="Second variable")
-    conditioning_set: List[str] = Field(default_factory=list, description="Variables to condition on")
+    conditioning_set: List[str] = Field(
+        default_factory=list, description="Variables to condition on"
+    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "variable_a": "Revenue",
                 "variable_b": "Competitors",
-                "conditioning_set": ["Brand"]
+                "conditioning_set": ["Brand"],
             }
         }
     }
@@ -311,26 +311,22 @@ class SuggestionAction(BaseModel):
     # For add_mediator/add_confounder
     add_node: Optional[str] = Field(default=None, description="Node to add to the graph")
     add_edges: Optional[List[Tuple[str, str]]] = Field(
-        default=None,
-        description="Edges to add (list of [from, to] pairs)"
+        default=None, description="Edges to add (list of [from, to] pairs)"
     )
 
     # For reverse_edge
     reverse_edge: Optional[Tuple[str, str]] = Field(
-        default=None,
-        description="Edge to reverse ([from, to] pair)"
+        default=None, description="Edge to reverse ([from, to] pair)"
     )
 
     # For remove_edge
     remove_edge: Optional[Tuple[str, str]] = Field(
-        default=None,
-        description="Edge to remove ([from, to] pair)"
+        default=None, description="Edge to remove ([from, to] pair)"
     )
 
     # For conditional independence
     assume_independence: Optional[ConditionalIndependence] = Field(
-        default=None,
-        description="Conditional independence assumption to make"
+        default=None, description="Conditional independence assumption to make"
     )
 
     model_config = {
@@ -340,15 +336,10 @@ class SuggestionAction(BaseModel):
                     "title": "Add Confounder",
                     "value": {
                         "add_node": "Competitors",
-                        "add_edges": [["Competitors", "Price"], ["Competitors", "Revenue"]]
-                    }
+                        "add_edges": [["Competitors", "Price"], ["Competitors", "Revenue"]],
+                    },
                 },
-                {
-                    "title": "Reverse Edge",
-                    "value": {
-                        "reverse_edge": ["A", "B"]
-                    }
-                }
+                {"title": "Reverse Edge", "value": {"reverse_edge": ["A", "B"]}},
             ]
         }
     }
@@ -364,14 +355,11 @@ class ValidationSuggestion(BaseModel):
 
     type: str = Field(
         ...,
-        description="Suggestion type: add_mediator, add_confounder, reverse_edge, add_conditional_independence, remove_edge"
+        description="Suggestion type: add_mediator, add_confounder, reverse_edge, add_conditional_independence, remove_edge",
     )
     description: str = Field(..., description="Plain English description of the suggestion")
     technical_detail: str = Field(..., description="Precise causal graph operation or assumption")
-    priority: str = Field(
-        ...,
-        description="Priority level: critical, recommended, optional"
-    )
+    priority: str = Field(..., description="Priority level: critical, recommended, optional")
     action: SuggestionAction = Field(..., description="Specific action to take")
 
     model_config = {
@@ -386,9 +374,9 @@ class ValidationSuggestion(BaseModel):
                         "priority": "critical",
                         "action": {
                             "add_node": "Competitors",
-                            "add_edges": [["Competitors", "Price"], ["Competitors", "Revenue"]]
-                        }
-                    }
+                            "add_edges": [["Competitors", "Price"], ["Competitors", "Revenue"]],
+                        },
+                    },
                 },
                 {
                     "title": "Add Mediator",
@@ -399,10 +387,13 @@ class ValidationSuggestion(BaseModel):
                         "priority": "recommended",
                         "action": {
                             "add_node": "CustomerSentiment",
-                            "add_edges": [["Price", "CustomerSentiment"], ["CustomerSentiment", "Revenue"]]
-                        }
-                    }
-                }
+                            "add_edges": [
+                                ["Price", "CustomerSentiment"],
+                                ["CustomerSentiment", "Revenue"],
+                            ],
+                        },
+                    },
+                },
             ]
         }
     }
@@ -426,7 +417,7 @@ class CausalValidationResponse(BaseModel):
     # Enhanced identifiable case fields
     method: Optional[str] = Field(
         default=None,
-        description="Identification method used: backdoor, front_door, instrumental_variables, do_calculus"
+        description="Identification method used: backdoor, front_door, instrumental_variables, do_calculus",
     )
     adjustment_sets: Optional[List[List[str]]] = Field(
         default=None,
@@ -437,16 +428,13 @@ class CausalValidationResponse(BaseModel):
         description="Minimal sufficient adjustment set",
     )
     identification_formula: Optional[str] = Field(
-        default=None,
-        description="Human-readable identification formula"
+        default=None, description="Human-readable identification formula"
     )
     structured_assumptions: Optional[List[AssumptionDetail]] = Field(
-        default=None,
-        description="Required assumptions for valid identification (structured)"
+        default=None, description="Required assumptions for valid identification (structured)"
     )
     alternative_methods: Optional[List[AlternativeMethod]] = Field(
-        default=None,
-        description="Alternative identification methods considered"
+        default=None, description="Alternative identification methods considered"
     )
     backdoor_paths: Optional[List[str]] = Field(
         default=None,
@@ -456,19 +444,17 @@ class CausalValidationResponse(BaseModel):
     # Enhanced non-identifiable case fields
     reason: Optional[str] = Field(
         default=None,
-        description="Why identification failed (e.g., 'no_causal_path', 'unmeasured_confounding', 'selection_bias')"
+        description="Why identification failed (e.g., 'no_causal_path', 'unmeasured_confounding', 'selection_bias')",
     )
     suggestions: Optional[List[ValidationSuggestion]] = Field(
-        default=None,
-        description="Structured, actionable suggestions to achieve identifiability"
+        default=None, description="Structured, actionable suggestions to achieve identifiability"
     )
     legacy_suggestions: Optional[List[str]] = Field(
         default=None,
-        description="Legacy string suggestions (deprecated, use 'suggestions' instead)"
+        description="Legacy string suggestions (deprecated, use 'suggestions' instead)",
     )
     attempted_methods: Optional[List[str]] = Field(
-        default=None,
-        description="Methods attempted during identification"
+        default=None, description="Methods attempted during identification"
     )
     issues: Optional[List[ValidationIssue]] = Field(
         default=None,
@@ -477,8 +463,7 @@ class CausalValidationResponse(BaseModel):
 
     # Degraded mode fields
     fallback_assessment: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Best-effort assessment when Y₀ fails"
+        default=None, description="Best-effort assessment when Y₀ fails"
     )
 
     # Always present
@@ -487,9 +472,7 @@ class CausalValidationResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -507,25 +490,25 @@ class CausalValidationResponse(BaseModel):
                             {
                                 "type": "no_unmeasured_confounding",
                                 "description": "No unmeasured confounders after adjusting for Brand",
-                                "critical": True
+                                "critical": True,
                             },
                             {
                                 "type": "positivity",
                                 "description": "All price values possible at all Brand levels",
-                                "critical": True
-                            }
+                                "critical": True,
+                            },
                         ],
                         "alternative_methods": [
                             {
                                 "method": "backdoor",
                                 "applicable": True,
-                                "reason": "Valid adjustment set exists"
+                                "reason": "Valid adjustment set exists",
                             },
                             {
                                 "method": "front_door",
                                 "applicable": False,
-                                "reason": "No mediator set completely captures pathway"
-                            }
+                                "reason": "No mediator set completely captures pathway",
+                            },
                         ],
                         "backdoor_paths": ["Price ← Brand → Revenue"],
                         "confidence": "high",
@@ -533,9 +516,12 @@ class CausalValidationResponse(BaseModel):
                             "summary": "Effect is identifiable by controlling for Brand",
                             "reasoning": "Brand influences both Price and Revenue, creating confounding. Controlling for Brand blocks the backdoor path.",
                             "technical_basis": "Backdoor criterion satisfied with adjustment set {Brand}",
-                            "assumptions": ["No unmeasured confounding", "Correct causal structure"]
-                        }
-                    }
+                            "assumptions": [
+                                "No unmeasured confounding",
+                                "Correct causal structure",
+                            ],
+                        },
+                    },
                 },
                 {
                     "title": "Non-Identifiable",
@@ -545,7 +531,7 @@ class CausalValidationResponse(BaseModel):
                         "suggestions": [
                             "Add measured confounders to the model",
                             "Consider using instrumental variables if available",
-                            "Explore front-door criterion with full mediation"
+                            "Explore front-door criterion with full mediation",
                         ],
                         "attempted_methods": ["backdoor", "front_door", "do_calculus"],
                         "confidence": "high",
@@ -553,10 +539,10 @@ class CausalValidationResponse(BaseModel):
                             "summary": "Effect cannot be identified due to unmeasured confounding",
                             "reasoning": "Backdoor paths exist but no valid adjustment set found with measured variables.",
                             "technical_basis": "No identification formula available",
-                            "assumptions": ["DAG structure correct"]
-                        }
-                    }
-                }
+                            "assumptions": ["DAG structure correct"],
+                        },
+                    },
+                },
             ]
         }
     }
@@ -657,9 +643,7 @@ class CounterfactualResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -763,9 +747,7 @@ class TeamAlignmentResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -853,9 +835,7 @@ class SensitivityAnalysisResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -902,18 +882,11 @@ class HealthResponse(BaseModel):
 
     status: str = Field(default="healthy", description="Service status")
     version: str = Field(..., description="Service version")
-    build: str = Field(
-        default="unknown",
-        description="Short Git commit SHA (7 chars)"
-    )
-    build_full: Optional[str] = Field(
-        default=None,
-        description="Full Git commit SHA (40 chars)"
-    )
+    build: str = Field(default="unknown", description="Short Git commit SHA (7 chars)")
+    build_full: Optional[str] = Field(default=None, description="Full Git commit SHA (40 chars)")
     timestamp: str = Field(..., description="Current timestamp")
     config_fingerprint: Optional[str] = Field(
-        default=None,
-        description="Config fingerprint for determinism verification"
+        default=None, description="Config fingerprint for determinism verification"
     )
 
     model_config = {
@@ -1057,9 +1030,7 @@ class ContrastiveExplanationResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -1125,7 +1096,11 @@ class ScenarioResult(BaseModel):
                 "prediction": {
                     "point_estimate": 35000,
                     "confidence_interval": {"lower": 33000, "upper": 37000},
-                    "sensitivity_range": {"optimistic": 38000, "pessimistic": 32000, "explanation": "Range accounts for uncertainty"},
+                    "sensitivity_range": {
+                        "optimistic": 38000,
+                        "pessimistic": 32000,
+                        "explanation": "Range accounts for uncertainty",
+                    },
                 },
                 "uncertainty": {
                     "overall": "medium",
@@ -1144,10 +1119,7 @@ class PairwiseInteraction(BaseModel):
     """Pairwise interaction between two variables."""
 
     variables: Tuple[str, str] = Field(..., description="Pair of variables")
-    type: str = Field(
-        ...,
-        description="Interaction type: synergistic, antagonistic, or additive"
-    )
+    type: str = Field(..., description="Interaction type: synergistic, antagonistic, or additive")
     effect_size: float = Field(..., description="Interaction effect size in outcome units")
     significance: float = Field(..., description="Significance score (0-1)", ge=0, le=1)
     explanation: str = Field(..., description="Plain English explanation")
@@ -1155,7 +1127,7 @@ class PairwiseInteraction(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "variables": ("Price", "Quality"),
+                "variables": ["Price", "Quality"],
                 "type": "synergistic",
                 "effect_size": 5000,
                 "significance": 0.85,
@@ -1179,7 +1151,7 @@ class InteractionAnalysis(BaseModel):
             "example": {
                 "pairwise": [
                     {
-                        "variables": ("Price", "Quality"),
+                        "variables": ["Price", "Quality"],
                         "type": "synergistic",
                         "effect_size": 5000,
                         "significance": 0.85,
@@ -1240,9 +1212,7 @@ class BatchCounterfactualResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -1253,13 +1223,19 @@ class BatchCounterfactualResponse(BaseModel):
                         "scenario_id": "baseline",
                         "intervention": {"Price": 40},
                         "label": "Current pricing",
-                        "prediction": {"point_estimate": 30000, "confidence_interval": {"lower": 28000, "upper": 32000}},
+                        "prediction": {
+                            "point_estimate": 30000,
+                            "confidence_interval": {"lower": 28000, "upper": 32000},
+                        },
                     },
                     {
                         "scenario_id": "increase",
                         "intervention": {"Price": 50},
                         "label": "10% increase",
-                        "prediction": {"point_estimate": 35000, "confidence_interval": {"lower": 33000, "upper": 37000}},
+                        "prediction": {
+                            "point_estimate": 35000,
+                            "confidence_interval": {"lower": 33000, "upper": 37000},
+                        },
                     },
                 ],
                 "interactions": {
@@ -1293,20 +1269,13 @@ class TransportAssumption(BaseModel):
 
     type: str = Field(
         ...,
-        description="Assumption type (e.g., 'same_mechanism', 'no_selection_bias', 'common_support')"
+        description="Assumption type (e.g., 'same_mechanism', 'no_selection_bias', 'common_support')",
     )
-    description: str = Field(
-        ...,
-        description="Human-readable explanation of the assumption"
-    )
+    description: str = Field(..., description="Human-readable explanation of the assumption")
     critical: bool = Field(
-        ...,
-        description="Whether this assumption is critical for transportability"
+        ..., description="Whether this assumption is critical for transportability"
     )
-    testable: bool = Field(
-        ...,
-        description="Whether this assumption can be empirically tested"
-    )
+    testable: bool = Field(..., description="Whether this assumption can be empirically tested")
 
     model_config = {
         "json_schema_extra": {
@@ -1314,7 +1283,7 @@ class TransportAssumption(BaseModel):
                 "type": "same_mechanism",
                 "description": "The causal mechanism Price→Revenue is the same in both UK and Germany",
                 "critical": True,
-                "testable": False
+                "testable": False,
             }
         }
     }
@@ -1329,48 +1298,28 @@ class TransportabilityResponse(BaseModel):
     assumptions and robustness assessment.
     """
 
-    transportable: bool = Field(
-        ...,
-        description="Whether the causal effect can be transported"
-    )
+    transportable: bool = Field(..., description="Whether the causal effect can be transported")
     method: Optional[str] = Field(
         default=None,
-        description="Transportability method used (e.g., 'selection_diagram', 'weighting', 'direct')"
+        description="Transportability method used (e.g., 'selection_diagram', 'weighting', 'direct')",
     )
-    formula: Optional[str] = Field(
-        default=None,
-        description="Transport formula if transportable"
-    )
+    formula: Optional[str] = Field(default=None, description="Transport formula if transportable")
     required_assumptions: List[TransportAssumption] = Field(
-        default_factory=list,
-        description="Assumptions required for valid transport"
+        default_factory=list, description="Assumptions required for valid transport"
     )
-    robustness: str = Field(
-        ...,
-        description="Robustness assessment: robust, moderate, fragile"
-    )
-    reason: Optional[str] = Field(
-        default=None,
-        description="Reason if not transportable"
-    )
+    robustness: str = Field(..., description="Robustness assessment: robust, moderate, fragile")
+    reason: Optional[str] = Field(default=None, description="Reason if not transportable")
     suggestions: Optional[List[str]] = Field(
-        default=None,
-        description="Suggestions if not transportable"
+        default=None, description="Suggestions if not transportable"
     )
     confidence: ConfidenceLevel = Field(
-        ...,
-        description="Confidence in transportability assessment"
+        ..., description="Confidence in transportability assessment"
     )
-    explanation: ExplanationMetadata = Field(
-        ...,
-        description="Plain English explanation"
-    )
+    explanation: ExplanationMetadata = Field(..., description="Plain English explanation")
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -1387,14 +1336,14 @@ class TransportabilityResponse(BaseModel):
                                 "type": "same_mechanism",
                                 "description": "Price→Revenue mechanism identical in UK and Germany",
                                 "critical": True,
-                                "testable": False
+                                "testable": False,
                             },
                             {
                                 "type": "no_selection_bias",
                                 "description": "Selection into domains doesn't affect mechanism",
                                 "critical": True,
-                                "testable": True
-                            }
+                                "testable": True,
+                            },
                         ],
                         "robustness": "moderate",
                         "confidence": "medium",
@@ -1402,9 +1351,12 @@ class TransportabilityResponse(BaseModel):
                             "summary": "Effect can be transported by adjusting for domain selection",
                             "reasoning": "Selection diagram shows effect is transportable via re-weighting by domain-specific covariates",
                             "technical_basis": "Y₀ transportability algorithm with selection nodes",
-                            "assumptions": ["Same causal mechanism", "Measured selection variables"]
-                        }
-                    }
+                            "assumptions": [
+                                "Same causal mechanism",
+                                "Measured selection variables",
+                            ],
+                        },
+                    },
                 },
                 {
                     "title": "Non-Transportable Effect",
@@ -1414,7 +1366,7 @@ class TransportabilityResponse(BaseModel):
                         "suggestions": [
                             "Collect data on market structure differences",
                             "Test if price elasticity differs between domains",
-                            "Consider stratified analysis by market segment"
+                            "Consider stratified analysis by market segment",
                         ],
                         "robustness": "fragile",
                         "confidence": "high",
@@ -1422,10 +1374,13 @@ class TransportabilityResponse(BaseModel):
                             "summary": "Effect cannot be transported due to mechanism differences",
                             "reasoning": "Regulatory differences between UK and Germany alter Price→Revenue mechanism",
                             "technical_basis": "Y₀ transportability algorithm - no valid transport formula found",
-                            "assumptions": ["DAG structure correct", "Selection variables complete"]
-                        }
-                    }
-                }
+                            "assumptions": [
+                                "DAG structure correct",
+                                "Selection variables complete",
+                            ],
+                        },
+                    },
+                },
             ]
         }
     }
@@ -1498,9 +1453,7 @@ class CoverageGuarantee(BaseModel):
                 "nominal_coverage": 0.95,
                 "guaranteed_coverage": 0.9474,
                 "finite_sample_valid": True,
-                "assumptions": [
-                    "Exchangeability of calibration and test points"
-                ],
+                "assumptions": ["Exchangeability of calibration and test points"],
             }
         }
     }
@@ -1574,12 +1527,8 @@ class ComparisonMetrics(BaseModel):
                 "monte_carlo_interval": {
                     "Revenue": {"lower": 49000, "upper": 55000, "confidence_level": 0.95}
                 },
-                "conformal_interval": {
-                    "Revenue": (48000, 56000)
-                },
-                "width_ratio": {
-                    "Revenue": 1.33
-                },
+                "conformal_interval": {"Revenue": [48000, 56000]},
+                "width_ratio": {"Revenue": 1.33},
                 "interpretation": "Conformal interval is 33% wider, providing more honest uncertainty quantification with finite-sample guarantees",
             }
         }
@@ -1652,7 +1601,7 @@ class ConformalCounterfactualResponse(BaseModel):
                     "monte_carlo_interval": {
                         "Revenue": {"lower": 49000, "upper": 55000, "confidence_level": 0.95}
                     },
-                    "conformal_interval": {"Revenue": (48000, 56000)},
+                    "conformal_interval": {"Revenue": [48000, 56000]},
                     "width_ratio": {"Revenue": 1.33},
                     "interpretation": "Conformal interval is 33% wider",
                 },
@@ -1676,24 +1625,13 @@ class AdjustmentStrategyDetail(BaseModel):
     """
 
     strategy_type: str = Field(
-        ...,
-        description="Strategy type: backdoor, frontdoor, or instrumental"
+        ..., description="Strategy type: backdoor, frontdoor, or instrumental"
     )
-    nodes_to_add: List[str] = Field(
-        ...,
-        description="Nodes that need to be added/measured"
-    )
-    edges_to_add: List[Tuple[str, str]] = Field(
-        ...,
-        description="Edges to add to the DAG"
-    )
-    explanation: str = Field(
-        ...,
-        description="Plain English explanation of the strategy"
-    )
+    nodes_to_add: List[str] = Field(..., description="Nodes that need to be added/measured")
+    edges_to_add: List[Tuple[str, str]] = Field(..., description="Edges to add to the DAG")
+    explanation: str = Field(..., description="Plain English explanation of the strategy")
     theoretical_basis: str = Field(
-        ...,
-        description="Theoretical justification (e.g., Pearl's backdoor criterion)"
+        ..., description="Theoretical justification (e.g., Pearl's backdoor criterion)"
     )
     expected_identifiability: float = Field(
         ...,
@@ -1708,8 +1646,8 @@ class AdjustmentStrategyDetail(BaseModel):
                 "strategy_type": "backdoor",
                 "nodes_to_add": ["Competitors"],
                 "edges_to_add": [
-                    ("Competitors", "Price"),
-                    ("Competitors", "Revenue"),
+                    ["Competitors", "Price"],
+                    ["Competitors", "Revenue"],
                 ],
                 "explanation": "Add and measure Competitors variable, then control for it to block backdoor paths",
                 "theoretical_basis": "Pearl's backdoor criterion",
@@ -1727,31 +1665,23 @@ class PathAnalysisDetail(BaseModel):
     """
 
     backdoor_paths: List[List[str]] = Field(
-        ...,
-        description="Backdoor paths from treatment to outcome"
+        ..., description="Backdoor paths from treatment to outcome"
     )
     frontdoor_paths: List[List[str]] = Field(
-        ...,
-        description="Directed paths from treatment to outcome"
+        ..., description="Directed paths from treatment to outcome"
     )
     blocked_paths: List[List[str]] = Field(
-        ...,
-        description="Paths that are already blocked by colliders"
+        ..., description="Paths that are already blocked by colliders"
     )
     critical_nodes: List[str] = Field(
-        ...,
-        description="Nodes that block multiple paths if controlled"
+        ..., description="Nodes that block multiple paths if controlled"
     )
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "backdoor_paths": [
-                    ["Price", "Competitors", "Revenue"]
-                ],
-                "frontdoor_paths": [
-                    ["Price", "Revenue"]
-                ],
+                "backdoor_paths": [["Price", "Competitors", "Revenue"]],
+                "frontdoor_paths": [["Price", "Revenue"]],
                 "blocked_paths": [],
                 "critical_nodes": ["Competitors"],
             }
@@ -1767,17 +1697,10 @@ class ValidationStrategyResponse(BaseModel):
     """
 
     strategies: List[AdjustmentStrategyDetail] = Field(
-        ...,
-        description="Adjustment strategies ranked by expected success"
+        ..., description="Adjustment strategies ranked by expected success"
     )
-    path_analysis: PathAnalysisDetail = Field(
-        ...,
-        description="Comprehensive path analysis"
-    )
-    explanation: ExplanationMetadata = Field(
-        ...,
-        description="Plain English explanation"
-    )
+    path_analysis: PathAnalysisDetail = Field(..., description="Comprehensive path analysis")
+    explanation: ExplanationMetadata = Field(..., description="Plain English explanation")
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
@@ -1827,19 +1750,16 @@ class DiscoveredDAG(BaseModel):
         ge=0,
         le=1,
     )
-    method: str = Field(
-        ...,
-        description="Discovery method used (correlation, knowledge, hybrid)"
-    )
+    method: str = Field(..., description="Discovery method used (correlation, knowledge, hybrid)")
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "nodes": ["Price", "Quality", "Revenue"],
                 "edges": [
-                    ("Price", "Revenue"),
-                    ("Quality", "Revenue"),
-                    ("Quality", "Price"),
+                    ["Price", "Revenue"],
+                    ["Quality", "Revenue"],
+                    ["Quality", "Price"],
                 ],
                 "confidence": 0.75,
                 "method": "correlation",
@@ -1856,13 +1776,9 @@ class DiscoveryResponse(BaseModel):
     """
 
     discovered_dags: List[DiscoveredDAG] = Field(
-        ...,
-        description="Discovered DAG structures ranked by confidence"
+        ..., description="Discovered DAG structures ranked by confidence"
     )
-    explanation: ExplanationMetadata = Field(
-        ...,
-        description="Plain English explanation"
-    )
+    explanation: ExplanationMetadata = Field(..., description="Plain English explanation")
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
@@ -1878,8 +1794,8 @@ class DiscoveryResponse(BaseModel):
                     {
                         "nodes": ["Price", "Quality", "Revenue"],
                         "edges": [
-                            ("Price", "Revenue"),
-                            ("Quality", "Revenue"),
+                            ["Price", "Revenue"],
+                            ["Quality", "Revenue"],
                         ],
                         "confidence": 0.85,
                         "method": "correlation",
@@ -1903,28 +1819,16 @@ class RecommendedExperimentDetail(BaseModel):
     Specifies intervention values, expected outcomes, and information gain.
     """
 
-    intervention: Dict[str, float] = Field(
-        ...,
-        description="Recommended intervention values"
-    )
-    expected_outcome: Dict[str, float] = Field(
-        ...,
-        description="Expected outcome values"
-    )
+    intervention: Dict[str, float] = Field(..., description="Recommended intervention values")
+    expected_outcome: Dict[str, float] = Field(..., description="Expected outcome values")
     expected_information_gain: float = Field(
         ...,
         description="Expected information gain from this experiment (0-1)",
         ge=0,
         le=1,
     )
-    cost_estimate: float = Field(
-        ...,
-        description="Estimated cost of the experiment"
-    )
-    rationale: str = Field(
-        ...,
-        description="Plain English rationale for this recommendation"
-    )
+    cost_estimate: float = Field(..., description="Estimated cost of the experiment")
+    rationale: str = Field(..., description="Plain English rationale for this recommendation")
     exploration_vs_exploitation: float = Field(
         ...,
         description="Exploration vs exploitation score (0=exploit, 1=explore)",
@@ -1954,13 +1858,9 @@ class ExperimentRecommendationResponse(BaseModel):
     """
 
     recommendation: RecommendedExperimentDetail = Field(
-        ...,
-        description="Recommended next experiment"
+        ..., description="Recommended next experiment"
     )
-    explanation: ExplanationMetadata = Field(
-        ...,
-        description="Plain English explanation"
-    )
+    explanation: ExplanationMetadata = Field(..., description="Plain English explanation")
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
@@ -1984,7 +1884,10 @@ class ExperimentRecommendationResponse(BaseModel):
                     "summary": "Recommend testing Price=55 to maximize learning",
                     "reasoning": "This intervention has high information gain (0.75) and explores undersampled region",
                     "technical_basis": "Thompson sampling with 100 posterior samples",
-                    "assumptions": ["Parameter beliefs accurate", "Cost-benefit tradeoff acceptable"],
+                    "assumptions": [
+                        "Parameter beliefs accurate",
+                        "Cost-benefit tradeoff acceptable",
+                    ],
                 },
             }
         }
@@ -2001,10 +1904,7 @@ class AssumptionSensitivity(BaseModel):
 
     variable: str = Field(..., description="Node ID or variable name", max_length=100)
     sensitivity: float = Field(
-        ...,
-        description="Sensitivity score (0-1), higher = more sensitive",
-        ge=0.0,
-        le=1.0
+        ..., description="Sensitivity score (0-1), higher = more sensitive", ge=0.0, le=1.0
     )
     impact: str = Field(..., description="Description of impact", max_length=500)
 
@@ -2013,7 +1913,7 @@ class AssumptionSensitivity(BaseModel):
             "example": {
                 "variable": "n_market_size",
                 "sensitivity": 0.92,
-                "impact": "10% change in market size estimate leads to 25% swing in projected ROI"
+                "impact": "10% change in market size estimate leads to 25% swing in projected ROI",
             }
         }
     }
@@ -2023,12 +1923,10 @@ class SensitivityDetailedResponse(BaseModel):
     """Response model for detailed sensitivity analysis."""
 
     assumptions: List[AssumptionSensitivity] = Field(
-        ...,
-        description="List of assumptions with sensitivity analysis"
+        ..., description="List of assumptions with sensitivity analysis"
     )
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2038,13 +1936,13 @@ class SensitivityDetailedResponse(BaseModel):
                     {
                         "variable": "n_market_size",
                         "sensitivity": 0.92,
-                        "impact": "10% change in market size estimate leads to 25% swing in projected ROI"
+                        "impact": "10% change in market size estimate leads to 25% swing in projected ROI",
                     },
                     {
                         "variable": "n_adoption_rate",
                         "sensitivity": 0.78,
-                        "impact": "Adoption rate uncertainty accounts for most outcome variance"
-                    }
+                        "impact": "Adoption rate uncertainty accounts for most outcome variance",
+                    },
                 ]
             }
         }
@@ -2055,24 +1953,15 @@ class ContrastiveAlternative(BaseModel):
     """Single contrastive alternative suggestion."""
 
     change: str = Field(..., description="What to change", max_length=1000)
-    outcome_diff: str = Field(
-        ...,
-        description="How outcome would differ",
-        max_length=1000
-    )
-    feasibility: float = Field(
-        ...,
-        description="Implementation feasibility (0-1)",
-        ge=0.0,
-        le=1.0
-    )
+    outcome_diff: str = Field(..., description="How outcome would differ", max_length=1000)
+    feasibility: float = Field(..., description="Implementation feasibility (0-1)", ge=0.0, le=1.0)
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "change": "Increase initial marketing budget by 40%",
                 "outcome_diff": "Would increase market penetration from 12% to 18% in Q1",
-                "feasibility": 0.85
+                "feasibility": 0.85,
             }
         }
     }
@@ -2082,12 +1971,10 @@ class ContrastiveResponse(BaseModel):
     """Response model for contrastive explanation."""
 
     alternatives: List[ContrastiveAlternative] = Field(
-        ...,
-        description="List of actionable alternatives"
+        ..., description="List of actionable alternatives"
     )
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2097,13 +1984,13 @@ class ContrastiveResponse(BaseModel):
                     {
                         "change": "Increase initial marketing budget by 40%",
                         "outcome_diff": "Would increase market penetration from 12% to 18% in Q1",
-                        "feasibility": 0.85
+                        "feasibility": 0.85,
                     },
                     {
                         "change": "Partner with established distributor",
                         "outcome_diff": "Would reduce time-to-market by 3 months but increase costs 15%",
-                        "feasibility": 0.60
-                    }
+                        "feasibility": 0.60,
+                    },
                 ]
             }
         }
@@ -2114,25 +2001,12 @@ class ConformalResponse(BaseModel):
     """Response model for conformal prediction."""
 
     prediction_interval: List[float] = Field(
-        ...,
-        description="Numeric bounds [lower, upper]",
-        min_length=2,
-        max_length=2
+        ..., description="Numeric bounds [lower, upper]", min_length=2, max_length=2
     )
-    confidence_level: float = Field(
-        ...,
-        description="Confidence level (0-1)",
-        ge=0.0,
-        le=1.0
-    )
-    uncertainty_source: str = Field(
-        ...,
-        description="Main source of uncertainty",
-        max_length=500
-    )
+    confidence_level: float = Field(..., description="Confidence level (0-1)", ge=0.0, le=1.0)
+    uncertainty_source: str = Field(..., description="Main source of uncertainty", max_length=500)
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2140,7 +2014,7 @@ class ConformalResponse(BaseModel):
             "example": {
                 "prediction_interval": [45000, 78000],
                 "confidence_level": 0.90,
-                "uncertainty_source": "Market demand volatility and competitor response timing"
+                "uncertainty_source": "Market demand volatility and competitor response timing",
             }
         }
     }
@@ -2152,25 +2026,17 @@ class ValidationImprovement(BaseModel):
     type: str = Field(
         ...,
         description="Category (e.g., data_collection, model_structure, sensitivity_test)",
-        max_length=100
+        max_length=100,
     )
-    description: str = Field(
-        ...,
-        description="What to do",
-        max_length=1000
-    )
-    priority: str = Field(
-        ...,
-        description="Implementation priority",
-        pattern="^(high|medium|low)$"
-    )
+    description: str = Field(..., description="What to do", max_length=1000)
+    priority: str = Field(..., description="Implementation priority", pattern="^(high|medium|low)$")
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "type": "data_collection",
                 "description": "Gather historical adoption data from 3-5 comparable product launches to calibrate adoption rate assumptions",
-                "priority": "high"
+                "priority": "high",
             }
         }
     }
@@ -2180,12 +2046,10 @@ class ValidationStrategiesResponse(BaseModel):
     """Response model for validation strategies."""
 
     suggested_improvements: List[ValidationImprovement] = Field(
-        ...,
-        description="List of suggested model improvements"
+        ..., description="List of suggested model improvements"
     )
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2195,18 +2059,18 @@ class ValidationStrategiesResponse(BaseModel):
                     {
                         "type": "data_collection",
                         "description": "Gather historical adoption data from 3-5 comparable product launches to calibrate adoption rate assumptions",
-                        "priority": "high"
+                        "priority": "high",
                     },
                     {
                         "type": "model_structure",
                         "description": "Add explicit node for competitor response to capture strategic interaction effects",
-                        "priority": "medium"
+                        "priority": "medium",
                     },
                     {
                         "type": "sensitivity_test",
                         "description": "Test model robustness by varying market size estimate ±20%",
-                        "priority": "low"
-                    }
+                        "priority": "low",
+                    },
                 ]
             }
         }
@@ -2222,44 +2086,24 @@ class ParameterRecommendation(BaseModel):
     """Single parameter recommendation with range and rationale."""
 
     parameter: str = Field(
-        ...,
-        description="Parameter name (e.g., 'n_decision_to_n_outcome_weight')",
-        max_length=200
+        ..., description="Parameter name (e.g., 'n_decision_to_n_outcome_weight')", max_length=200
     )
-    parameter_type: str = Field(
-        ...,
-        description="Type of parameter",
-        pattern="^(weight|belief)$"
-    )
+    parameter_type: str = Field(..., description="Type of parameter", pattern="^(weight|belief)$")
     current_value: Optional[float] = Field(
-        default=None,
-        description="Current parameter value (if provided in request)"
+        default=None, description="Current parameter value (if provided in request)"
     )
     recommended_range: List[float] = Field(
-        ...,
-        description="Recommended range [min, max]",
-        min_length=2,
-        max_length=2
+        ..., description="Recommended range [min, max]", min_length=2, max_length=2
     )
-    recommended_typical: float = Field(
-        ...,
-        description="Typical/center value of recommended range"
-    )
+    recommended_typical: float = Field(..., description="Typical/center value of recommended range")
     rationale: str = Field(
-        ...,
-        description="Explanation of why this range is recommended",
-        max_length=500
+        ..., description="Explanation of why this range is recommended", max_length=500
     )
     importance: float = Field(
-        ...,
-        description="Parameter importance (0-1, from sensitivity analysis)",
-        ge=0.0,
-        le=1.0
+        ..., description="Parameter importance (0-1, from sensitivity analysis)", ge=0.0, le=1.0
     )
     confidence: str = Field(
-        ...,
-        description="Confidence in recommendation",
-        pattern="^(high|medium|low)$"
+        ..., description="Confidence in recommendation", pattern="^(high|medium|low)$"
     )
 
     model_config = {
@@ -2272,7 +2116,7 @@ class ParameterRecommendation(BaseModel):
                 "recommended_typical": 1.5,
                 "rationale": "Critical path edge connecting decision to outcome - requires strong causal influence",
                 "importance": 0.92,
-                "confidence": "high"
+                "confidence": "high",
             }
         }
     }
@@ -2282,13 +2126,9 @@ class ParameterRecommendationResponse(BaseModel):
     """Response model for parameter recommendation endpoint."""
 
     recommendations: List[ParameterRecommendation] = Field(
-        ...,
-        description="List of parameter recommendations sorted by importance"
+        ..., description="List of parameter recommendations sorted by importance"
     )
-    graph_characteristics: Dict[str, Any] = Field(
-        ...,
-        description="Metadata about graph structure"
-    )
+    graph_characteristics: Dict[str, Any] = Field(..., description="Metadata about graph structure")
 
     model_config = {
         "json_schema_extra": {
@@ -2302,7 +2142,7 @@ class ParameterRecommendationResponse(BaseModel):
                         "recommended_typical": 1.5,
                         "rationale": "Critical path edge connecting decision to outcome - requires strong causal influence",
                         "importance": 0.92,
-                        "confidence": "high"
+                        "confidence": "high",
                     },
                     {
                         "parameter": "n_decision_belief",
@@ -2312,14 +2152,14 @@ class ParameterRecommendationResponse(BaseModel):
                         "recommended_typical": 0.85,
                         "rationale": "Treatment node - high certainty recommended for robust analysis",
                         "importance": 0.78,
-                        "confidence": "high"
-                    }
+                        "confidence": "high",
+                    },
                 ],
                 "graph_characteristics": {
                     "num_critical_edges": 3,
                     "max_path_length": 4,
-                    "avg_centrality": 0.42
-                }
+                    "avg_centrality": 0.42,
+                },
             }
         }
     }
@@ -2333,23 +2173,10 @@ class ParameterRecommendationResponse(BaseModel):
 class DominanceRelation(BaseModel):
     """Information about a dominated option."""
 
-    dominated_option_id: str = Field(
-        ...,
-        description="ID of the option that is dominated"
-    )
-    dominated_option_label: str = Field(
-        ...,
-        description="Label of the option that is dominated"
-    )
-    dominated_by: List[str] = Field(
-        ...,
-        description="List of option IDs that dominate this option"
-    )
-    degree: int = Field(
-        ...,
-        description="Number of options that dominate this option",
-        ge=0
-    )
+    dominated_option_id: str = Field(..., description="ID of the option that is dominated")
+    dominated_option_label: str = Field(..., description="Label of the option that is dominated")
+    dominated_by: List[str] = Field(..., description="List of option IDs that dominate this option")
+    degree: int = Field(..., description="Number of options that dominate this option", ge=0)
 
     model_config = {
         "json_schema_extra": {
@@ -2357,7 +2184,7 @@ class DominanceRelation(BaseModel):
                 "dominated_option_id": "opt_b",
                 "dominated_option_label": "Option B: Conservative Growth",
                 "dominated_by": ["opt_c", "opt_a"],
-                "degree": 2
+                "degree": 2,
             }
         }
     }
@@ -2367,26 +2194,15 @@ class DominanceResponse(BaseModel):
     """Response model for dominance detection endpoint."""
 
     dominated: List[DominanceRelation] = Field(
-        ...,
-        description="Options that are dominated by others (sorted by degree, descending)"
+        ..., description="Options that are dominated by others (sorted by degree, descending)"
     )
     non_dominated_ids: List[str] = Field(
-        ...,
-        description="Option IDs that are not dominated (Pareto frontier)"
+        ..., description="Option IDs that are not dominated (Pareto frontier)"
     )
-    total_options: int = Field(
-        ...,
-        description="Total number of options analyzed",
-        ge=2
-    )
-    frontier_size: int = Field(
-        ...,
-        description="Number of options on Pareto frontier",
-        ge=1
-    )
+    total_options: int = Field(..., description="Total number of options analyzed", ge=2)
+    frontier_size: int = Field(..., description="Number of options on Pareto frontier", ge=1)
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2397,7 +2213,7 @@ class DominanceResponse(BaseModel):
                         "dominated_option_id": "opt_b",
                         "dominated_option_label": "Option B: Conservative Growth",
                         "dominated_by": ["opt_c"],
-                        "degree": 1
+                        "degree": 1,
                     }
                 ],
                 "non_dominated_ids": ["opt_a", "opt_c"],
@@ -2408,8 +2224,8 @@ class DominanceResponse(BaseModel):
                     "computation_time_ms": 2.5,
                     "isl_version": "2.0",
                     "algorithm": "pairwise_dominance",
-                    "cache_hit": False
-                }
+                    "cache_hit": False,
+                },
             }
         }
     }
@@ -2425,17 +2241,14 @@ class ParetoFrontierOption(BaseModel):
 
     option_id: str = Field(..., description="Option identifier")
     option_label: str = Field(..., description="Human-readable option label")
-    scores: Dict[str, float] = Field(
-        ...,
-        description="Normalized scores by criterion_id"
-    )
+    scores: Dict[str, float] = Field(..., description="Normalized scores by criterion_id")
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "option_id": "opt_a",
                 "option_label": "Option A: Aggressive Growth",
-                "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70},
             }
         }
     }
@@ -2445,30 +2258,18 @@ class ParetoResponse(BaseModel):
     """Response model for Pareto frontier endpoint."""
 
     frontier: List[ParetoFrontierOption] = Field(
-        ...,
-        description="Options on the Pareto frontier (non-dominated options)"
+        ..., description="Options on the Pareto frontier (non-dominated options)"
     )
     dominated: List[DominanceRelation] = Field(
-        ...,
-        description="Options that are dominated (sorted by degree, descending)"
+        ..., description="Options that are dominated (sorted by degree, descending)"
     )
-    frontier_size: int = Field(
-        ...,
-        description="Number of options on Pareto frontier",
-        ge=1
-    )
-    total_options: int = Field(
-        ...,
-        description="Total number of options analyzed",
-        ge=2
-    )
+    frontier_size: int = Field(..., description="Number of options on Pareto frontier", ge=1)
+    total_options: int = Field(..., description="Total number of options analyzed", ge=2)
     frontier_truncated: bool = Field(
-        default=False,
-        description="True if frontier was truncated due to max_frontier_size limit"
+        default=False, description="True if frontier was truncated due to max_frontier_size limit"
     )
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2478,20 +2279,20 @@ class ParetoResponse(BaseModel):
                     {
                         "option_id": "opt_a",
                         "option_label": "Option A: Aggressive Growth",
-                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70},
                     },
                     {
                         "option_id": "opt_c",
                         "option_label": "Option C: Balanced Approach",
-                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
-                    }
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80},
+                    },
                 ],
                 "dominated": [
                     {
                         "dominated_option_id": "opt_b",
                         "dominated_option_label": "Option B: Conservative Growth",
                         "dominated_by": ["opt_c"],
-                        "degree": 1
+                        "degree": 1,
                     }
                 ],
                 "frontier_size": 2,
@@ -2502,8 +2303,8 @@ class ParetoResponse(BaseModel):
                     "computation_time_ms": 2.8,
                     "isl_version": "2.0",
                     "algorithm": "skyline_pareto",
-                    "cache_hit": False
-                }
+                    "cache_hit": False,
+                },
             }
         }
     }
@@ -2521,14 +2322,10 @@ class AggregatedRanking(BaseModel):
     option_label: str = Field(..., description="Human-readable option label")
     rank: int = Field(..., description="Rank (1-based, 1 = best)", ge=1)
     aggregated_score: float = Field(
-        ...,
-        description="Final aggregated score (0-100 scale)",
-        ge=0.0,
-        le=100.0
+        ..., description="Final aggregated score (0-100 scale)", ge=0.0, le=100.0
     )
     scores_by_criterion: Dict[str, float] = Field(
-        ...,
-        description="Normalized scores (0-1) used in aggregation by criterion_id"
+        ..., description="Normalized scores (0-1) used in aggregation by criterion_id"
     )
 
     model_config = {
@@ -2538,11 +2335,7 @@ class AggregatedRanking(BaseModel):
                 "option_label": "Option A: Aggressive Growth",
                 "rank": 1,
                 "aggregated_score": 72.5,
-                "scores_by_criterion": {
-                    "revenue": 0.85,
-                    "risk": 0.40,
-                    "timeline": 0.70
-                }
+                "scores_by_criterion": {"revenue": 0.85, "risk": 0.40, "timeline": 0.70},
             }
         }
     }
@@ -2555,19 +2348,10 @@ class TradeOff(BaseModel):
     option_a_label: str = Field(..., description="First option label")
     option_b_id: str = Field(..., description="Second option ID")
     option_b_label: str = Field(..., description="Second option label")
-    a_better_on: List[str] = Field(
-        ...,
-        description="Criterion IDs where option A scores higher"
-    )
-    b_better_on: List[str] = Field(
-        ...,
-        description="Criterion IDs where option B scores higher"
-    )
+    a_better_on: List[str] = Field(..., description="Criterion IDs where option A scores higher")
+    b_better_on: List[str] = Field(..., description="Criterion IDs where option B scores higher")
     max_difference: float = Field(
-        ...,
-        description="Largest score gap across criteria",
-        ge=0.0,
-        le=1.0
+        ..., description="Largest score gap across criteria", ge=0.0, le=1.0
     )
 
     model_config = {
@@ -2579,7 +2363,7 @@ class TradeOff(BaseModel):
                 "option_b_label": "Option B: Conservative Growth",
                 "a_better_on": ["revenue", "timeline"],
                 "b_better_on": ["risk"],
-                "max_difference": 0.45
+                "max_difference": 0.45,
             }
         }
     }
@@ -2591,16 +2375,11 @@ class ValidationWarning(BaseModel):
     code: str = Field(
         ...,
         description="Warning code",
-        pattern="^(WEIGHTS_NORMALIZED|OPTION_MISMATCH|SCORE_CLAMPED|MISSING_CRITERION)$"
+        pattern="^(WEIGHTS_NORMALIZED|OPTION_MISMATCH|SCORE_CLAMPED|MISSING_CRITERION)$",
     )
-    message: str = Field(
-        ...,
-        description="Human-readable warning message",
-        max_length=500
-    )
+    message: str = Field(..., description="Human-readable warning message", max_length=500)
     affected_items: Optional[List[str]] = Field(
-        None,
-        description="IDs of affected items (options, criteria, etc.)"
+        None, description="IDs of affected items (options, criteria, etc.)"
     )
 
     model_config = {
@@ -2608,7 +2387,7 @@ class ValidationWarning(BaseModel):
             "example": {
                 "code": "WEIGHTS_NORMALIZED",
                 "message": "Weights normalized from sum=0.95 to sum=1.0",
-                "affected_items": ["revenue", "risk"]
+                "affected_items": ["revenue", "risk"],
             }
         }
     }
@@ -2618,35 +2397,30 @@ class MultiCriteriaResponse(BaseModel):
     """Response model for multi-criteria aggregation endpoint."""
 
     aggregated_rankings: List[AggregatedRanking] = Field(
-        ...,
-        description="Options ranked by aggregated score (sorted best to worst)"
+        ..., description="Options ranked by aggregated score (sorted best to worst)"
     )
     trade_offs: List[TradeOff] = Field(
-        ...,
-        description="Significant trade-offs between top options"
+        ..., description="Significant trade-offs between top options"
     )
     warnings: Optional[List[ValidationWarning]] = Field(
-        None,
-        description="Warnings about auto-corrections or validation issues"
+        None, description="Warnings about auto-corrections or validation issues"
     )
 
     # Y₀ Identifiability fields (Task: Y₀ Hard Rule)
     identifiability: Optional["IdentifiabilityInfo"] = Field(
         default=None,
-        description="Identifiability analysis for the primary decision→goal effect (if graph provided)"
+        description="Identifiability analysis for the primary decision→goal effect (if graph provided)",
     )
     recommendation_status: Optional["RecommendationStatusEnum"] = Field(
-        default=None,
-        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+        default=None, description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
     )
     recommendation_caveat: Optional[str] = Field(
         default=None,
-        description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
+        description="Caveat for recommendations (required if recommendation_status is 'exploratory')",
     )
 
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2658,15 +2432,15 @@ class MultiCriteriaResponse(BaseModel):
                         "option_label": "Option A",
                         "rank": 1,
                         "aggregated_score": 72.5,
-                        "scores_by_criterion": {"revenue": 0.85, "risk": 0.40}
+                        "scores_by_criterion": {"revenue": 0.85, "risk": 0.40},
                     },
                     {
                         "option_id": "opt_b",
                         "option_label": "Option B",
                         "rank": 2,
                         "aggregated_score": 68.0,
-                        "scores_by_criterion": {"revenue": 0.60, "risk": 0.80}
-                    }
+                        "scores_by_criterion": {"revenue": 0.60, "risk": 0.80},
+                    },
                 ],
                 "trade_offs": [
                     {
@@ -2676,14 +2450,14 @@ class MultiCriteriaResponse(BaseModel):
                         "option_b_label": "Option B",
                         "a_better_on": ["revenue"],
                         "b_better_on": ["risk"],
-                        "max_difference": 0.40
+                        "max_difference": 0.40,
                     }
                 ],
                 "warnings": [
                     {
                         "code": "WEIGHTS_NORMALIZED",
                         "message": "Weights normalized from sum=0.95 to sum=1.0",
-                        "affected_items": ["revenue", "risk"]
+                        "affected_items": ["revenue", "risk"],
                     }
                 ],
                 "metadata": {
@@ -2691,8 +2465,8 @@ class MultiCriteriaResponse(BaseModel):
                     "computation_time_ms": 5.2,
                     "isl_version": "2.0",
                     "algorithm": "weighted_sum",
-                    "cache_hit": False
-                }
+                    "cache_hit": False,
+                },
             }
         }
     }
@@ -2708,26 +2482,13 @@ class AdjustedScore(BaseModel):
 
     option_id: str = Field(..., description="Option identifier")
     option_label: str = Field(..., description="Human-readable option label")
-    original_score: float = Field(
-        ...,
-        description="Original score (mean or p50)",
-        ge=0.0,
-        le=1.0
-    )
+    original_score: float = Field(..., description="Original score (mean or p50)", ge=0.0, le=1.0)
     certainty_equivalent: float = Field(
-        ...,
-        description="Risk-adjusted certainty equivalent score",
-        ge=0.0,
-        le=1.0
+        ..., description="Risk-adjusted certainty equivalent score", ge=0.0, le=1.0
     )
-    adjustment: float = Field(
-        ...,
-        description="Adjustment amount (CE - original, can be negative)"
-    )
+    adjustment: float = Field(..., description="Adjustment amount (CE - original, can be negative)")
     variance: Optional[float] = Field(
-        None,
-        description="Variance of original distribution (if mean/std_dev provided)",
-        ge=0.0
+        None, description="Variance of original distribution (if mean/std_dev provided)", ge=0.0
     )
 
     model_config = {
@@ -2738,7 +2499,7 @@ class AdjustedScore(BaseModel):
                 "original_score": 0.80,
                 "certainty_equivalent": 0.60,
                 "adjustment": -0.20,
-                "variance": 0.04
+                "variance": 0.04,
             }
         }
     }
@@ -2752,8 +2513,7 @@ class RankingChange(BaseModel):
     original_rank: int = Field(..., description="Rank before adjustment (1-based)", ge=1)
     adjusted_rank: int = Field(..., description="Rank after adjustment (1-based)", ge=1)
     rank_change: int = Field(
-        ...,
-        description="Change in rank (positive = improved, negative = worsened)"
+        ..., description="Change in rank (positive = improved, negative = worsened)"
     )
 
     model_config = {
@@ -2763,7 +2523,7 @@ class RankingChange(BaseModel):
                 "option_label": "Conservative Growth Strategy",
                 "original_rank": 2,
                 "adjusted_rank": 1,
-                "rank_change": 1
+                "rank_change": 1,
             }
         }
     }
@@ -2773,25 +2533,19 @@ class RiskAdjustmentResponse(BaseModel):
     """Response model for risk adjustment endpoint."""
 
     adjusted_scores: List[AdjustedScore] = Field(
-        ...,
-        description="Options with risk-adjusted scores (sorted by CE, descending)"
+        ..., description="Options with risk-adjusted scores (sorted by CE, descending)"
     )
     rankings_changed: bool = Field(
-        ...,
-        description="True if rankings changed after risk adjustment"
+        ..., description="True if rankings changed after risk adjustment"
     )
     ranking_changes: Optional[List[RankingChange]] = Field(
-        None,
-        description="Detailed ranking changes (only if rankings_changed=True)"
+        None, description="Detailed ranking changes (only if rankings_changed=True)"
     )
     risk_interpretation: str = Field(
-        ...,
-        description="Plain English interpretation of risk adjustment impact",
-        max_length=1000
+        ..., description="Plain English interpretation of risk adjustment impact", max_length=1000
     )
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2804,7 +2558,7 @@ class RiskAdjustmentResponse(BaseModel):
                         "original_score": 0.60,
                         "certainty_equivalent": 0.59,
                         "adjustment": -0.01,
-                        "variance": 0.0025
+                        "variance": 0.0025,
                     },
                     {
                         "option_id": "opt_aggressive",
@@ -2812,7 +2566,7 @@ class RiskAdjustmentResponse(BaseModel):
                         "original_score": 0.80,
                         "certainty_equivalent": 0.60,
                         "adjustment": -0.20,
-                        "variance": 0.04
+                        "variance": 0.04,
                     },
                     {
                         "option_id": "opt_balanced",
@@ -2820,8 +2574,8 @@ class RiskAdjustmentResponse(BaseModel):
                         "original_score": 0.70,
                         "certainty_equivalent": 0.58,
                         "adjustment": -0.12,
-                        "variance": 0.0225
-                    }
+                        "variance": 0.0225,
+                    },
                 ],
                 "rankings_changed": True,
                 "ranking_changes": [
@@ -2830,15 +2584,15 @@ class RiskAdjustmentResponse(BaseModel):
                         "option_label": "Conservative Growth Strategy",
                         "original_rank": 3,
                         "adjusted_rank": 1,
-                        "rank_change": 2
+                        "rank_change": 2,
                     },
                     {
                         "option_id": "opt_aggressive",
                         "option_label": "Aggressive Growth Strategy",
                         "original_rank": 1,
                         "adjusted_rank": 2,
-                        "rank_change": -1
-                    }
+                        "rank_change": -1,
+                    },
                 ],
                 "risk_interpretation": "Risk aversion (coefficient=2.0) significantly penalizes high-variance options. Conservative strategy moves from rank 3 to rank 1 after adjustment, while aggressive strategy drops from rank 1 to rank 2 due to high variance (0.04).",
                 "metadata": {
@@ -2846,8 +2600,8 @@ class RiskAdjustmentResponse(BaseModel):
                     "computation_time_ms": 1.8,
                     "isl_version": "2.0",
                     "algorithm": "mean_variance_risk_averse",
-                    "cache_hit": False
-                }
+                    "cache_hit": False,
+                },
             }
         }
     }
@@ -2863,27 +2617,18 @@ class RankingThreshold(BaseModel):
 
     parameter_id: str = Field(..., description="Parameter identifier")
     parameter_label: str = Field(..., description="Parameter label")
-    threshold_value: float = Field(
-        ...,
-        description="Parameter value where ranking changes"
-    )
+    threshold_value: float = Field(..., description="Parameter value where ranking changes")
     ranking_before: List[str] = Field(
-        ...,
-        description="Option ranking before threshold (option_ids, best to worst)"
+        ..., description="Option ranking before threshold (option_ids, best to worst)"
     )
     ranking_after: List[str] = Field(
-        ...,
-        description="Option ranking after threshold (option_ids, best to worst)"
+        ..., description="Option ranking after threshold (option_ids, best to worst)"
     )
     options_affected: List[str] = Field(
-        ...,
-        description="Option IDs whose ranks changed at this threshold"
+        ..., description="Option IDs whose ranks changed at this threshold"
     )
     score_gap: Optional[float] = Field(
-        None,
-        description="Score difference between swapped options at threshold",
-        ge=0.0,
-        le=1.0
+        None, description="Score difference between swapped options at threshold", ge=0.0, le=1.0
     )
 
     model_config = {
@@ -2895,7 +2640,7 @@ class RankingThreshold(BaseModel):
                 "ranking_before": ["opt_a", "opt_c", "opt_b"],
                 "ranking_after": ["opt_b", "opt_a", "opt_c"],
                 "options_affected": ["opt_a", "opt_b"],
-                "score_gap": 0.05
+                "score_gap": 0.05,
             }
         }
     }
@@ -2907,21 +2652,19 @@ class ParameterSensitivity(BaseModel):
     parameter_id: str = Field(..., description="Parameter identifier")
     parameter_label: str = Field(..., description="Parameter label")
     changes_count: int = Field(
-        ...,
-        description="Number of ranking changes across parameter sweep",
-        ge=0
+        ..., description="Number of ranking changes across parameter sweep", ge=0
     )
     most_sensitive_range: Optional[List[float]] = Field(
         None,
         description="Parameter range [min, max] where most changes occur (if any changes)",
         min_length=2,
-        max_length=2
+        max_length=2,
     )
     sensitivity_score: float = Field(
         ...,
         description="Normalized sensitivity score (0-1, higher = more sensitive)",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
 
     model_config = {
@@ -2931,7 +2674,7 @@ class ParameterSensitivity(BaseModel):
                 "parameter_label": "Product Price",
                 "changes_count": 2,
                 "most_sensitive_range": [45.0, 55.0],
-                "sensitivity_score": 0.85
+                "sensitivity_score": 0.85,
             }
         }
     }
@@ -2942,24 +2685,19 @@ class ThresholdIdentificationResponse(BaseModel):
 
     thresholds: List[RankingThreshold] = Field(
         ...,
-        description="Ranking thresholds across all parameters (sorted by parameter, then value)"
+        description="Ranking thresholds across all parameters (sorted by parameter, then value)",
     )
     sensitivity_ranking: List[ParameterSensitivity] = Field(
-        ...,
-        description="Parameters ranked by sensitivity (most sensitive first)"
+        ..., description="Parameters ranked by sensitivity (most sensitive first)"
     )
     total_thresholds: int = Field(
-        ...,
-        description="Total number of thresholds found across all parameters",
-        ge=0
+        ..., description="Total number of thresholds found across all parameters", ge=0
     )
     monotonic_parameters: List[str] = Field(
-        ...,
-        description="Parameter IDs with no ranking changes (monotonic)"
+        ..., description="Parameter IDs with no ranking changes (monotonic)"
     )
     metadata: Optional["ISLResponseMetadata"] = Field(
-        None,
-        description="Request metadata for tracing and monitoring"
+        None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -2973,7 +2711,7 @@ class ThresholdIdentificationResponse(BaseModel):
                         "ranking_before": ["opt_a", "opt_c", "opt_b"],
                         "ranking_after": ["opt_b", "opt_a", "opt_c"],
                         "options_affected": ["opt_a", "opt_b"],
-                        "score_gap": 0.05
+                        "score_gap": 0.05,
                     },
                     {
                         "parameter_id": "price",
@@ -2982,8 +2720,8 @@ class ThresholdIdentificationResponse(BaseModel):
                         "ranking_before": ["opt_b", "opt_a", "opt_c"],
                         "ranking_after": ["opt_b", "opt_c", "opt_a"],
                         "options_affected": ["opt_a", "opt_c"],
-                        "score_gap": 0.02
-                    }
+                        "score_gap": 0.02,
+                    },
                 ],
                 "sensitivity_ranking": [
                     {
@@ -2991,15 +2729,15 @@ class ThresholdIdentificationResponse(BaseModel):
                         "parameter_label": "Product Price",
                         "changes_count": 2,
                         "most_sensitive_range": [45.0, 65.0],
-                        "sensitivity_score": 1.0
+                        "sensitivity_score": 1.0,
                     },
                     {
                         "parameter_id": "marketing_spend",
                         "parameter_label": "Marketing Spend",
                         "changes_count": 0,
                         "most_sensitive_range": None,
-                        "sensitivity_score": 0.0
-                    }
+                        "sensitivity_score": 0.0,
+                    },
                 ],
                 "total_thresholds": 2,
                 "monotonic_parameters": ["marketing_spend"],
@@ -3008,11 +2746,12 @@ class ThresholdIdentificationResponse(BaseModel):
                     "computation_time_ms": 3.5,
                     "isl_version": "2.0",
                     "algorithm": "sequential_ranking_comparison",
-                    "cache_hit": False
-                }
+                    "cache_hit": False,
+                },
             }
         }
     }
+
 
 # ============================================================================
 # Phase 4: Sequential Decisions & Conditional Recommendations - Response Models
@@ -3022,27 +2761,15 @@ class ThresholdIdentificationResponse(BaseModel):
 class ConditionExpression(BaseModel):
     """Machine-readable condition expression."""
 
-    parameter: str = Field(
-        ...,
-        description="Parameter name being conditioned on"
-    )
+    parameter: str = Field(..., description="Parameter name being conditioned on")
     operator: str = Field(
-        ...,
-        description="Comparison operator",
-        pattern="^(<|<=|>|>=|==|in_range)$"
+        ..., description="Comparison operator", pattern="^(<|<=|>|>=|==|in_range)$"
     )
-    value: Any = Field(
-        ...,
-        description="Threshold value or range tuple for 'in_range'"
-    )
+    value: Any = Field(..., description="Threshold value or range tuple for 'in_range'")
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "parameter": "marketing_roi",
-                "operator": "<",
-                "value": 0.3
-            }
+            "example": {"parameter": "marketing_roi", "operator": "<", "value": 0.3}
         }
     }
 
@@ -3052,11 +2779,7 @@ class PrimaryRecommendation(BaseModel):
 
     option_id: str = Field(..., description="Recommended option ID")
     label: str = Field(..., description="Human-readable label")
-    confidence: str = Field(
-        ...,
-        description="Confidence level",
-        pattern="^(high|medium|low)$"
-    )
+    confidence: str = Field(..., description="Confidence level", pattern="^(high|medium|low)$")
     expected_value: float = Field(..., description="Expected value of this option")
 
     model_config = {
@@ -3065,7 +2788,7 @@ class PrimaryRecommendation(BaseModel):
                 "option_id": "option_a",
                 "label": "Aggressive Expansion",
                 "confidence": "high",
-                "expected_value": 75000.0
+                "expected_value": 75000.0,
             }
         }
     }
@@ -3078,30 +2801,22 @@ class ConditionalRecommendation(BaseModel):
     condition_type: str = Field(
         ...,
         description="Type of condition",
-        pattern="^(threshold|dominance|risk_profile|scenario)$"
+        pattern="^(threshold|dominance|risk_profile|scenario)$",
     )
     condition_description: str = Field(
-        ...,
-        description="Human-readable description of the condition"
+        ..., description="Human-readable description of the condition"
     )
     condition_expression: ConditionExpression = Field(
-        ...,
-        description="Machine-readable condition expression"
+        ..., description="Machine-readable condition expression"
     )
     triggered_recommendation: PrimaryRecommendation = Field(
-        ...,
-        description="Recommendation when condition is true"
+        ..., description="Recommendation when condition is true"
     )
     probability_of_condition: Optional[float] = Field(
-        default=None,
-        description="Estimated probability that condition is true",
-        ge=0.0,
-        le=1.0
+        default=None, description="Estimated probability that condition is true", ge=0.0, le=1.0
     )
     impact_magnitude: str = Field(
-        ...,
-        description="Impact magnitude if condition is true",
-        pattern="^(high|medium|low)$"
+        ..., description="Impact magnitude if condition is true", pattern="^(high|medium|low)$"
     )
 
     model_config = {
@@ -3113,16 +2828,16 @@ class ConditionalRecommendation(BaseModel):
                 "condition_expression": {
                     "parameter": "marketing_roi",
                     "operator": "<",
-                    "value": 0.3
+                    "value": 0.3,
                 },
                 "triggered_recommendation": {
                     "option_id": "option_b",
                     "label": "Conservative Growth",
                     "confidence": "medium",
-                    "expected_value": 50000.0
+                    "expected_value": 50000.0,
                 },
                 "probability_of_condition": 0.25,
-                "impact_magnitude": "high"
+                "impact_magnitude": "high",
             }
         }
     }
@@ -3132,22 +2847,16 @@ class RobustnessSummary(BaseModel):
     """Summary of recommendation robustness."""
 
     recommendation_stability: str = Field(
-        ...,
-        description="Overall stability classification",
-        pattern="^(robust|moderate|fragile)$"
+        ..., description="Overall stability classification", pattern="^(robust|moderate|fragile)$"
     )
     conditions_count: int = Field(
-        ...,
-        description="Number of conditions that could flip the recommendation",
-        ge=0
+        ..., description="Number of conditions that could flip the recommendation", ge=0
     )
     closest_flip_point: Optional[ConditionExpression] = Field(
-        default=None,
-        description="Nearest condition that would flip the recommendation"
+        default=None, description="Nearest condition that would flip the recommendation"
     )
     safety_margin: Optional[float] = Field(
-        default=None,
-        description="Distance to nearest flip point (in parameter units)"
+        default=None, description="Distance to nearest flip point (in parameter units)"
     )
 
     model_config = {
@@ -3155,12 +2864,8 @@ class RobustnessSummary(BaseModel):
             "example": {
                 "recommendation_stability": "moderate",
                 "conditions_count": 3,
-                "closest_flip_point": {
-                    "parameter": "market_size",
-                    "operator": "<",
-                    "value": 0.75
-                },
-                "safety_margin": 0.15
+                "closest_flip_point": {"parameter": "market_size", "operator": "<", "value": 0.75},
+                "safety_margin": 0.15,
             }
         }
     }
@@ -3170,27 +2875,21 @@ class ConditionalRecommendResponse(BaseModel):
     """Response model for conditional recommendation endpoint."""
 
     schema_version: str = Field(
-        default="conditional_recommend.v1",
-        description="Schema version for this response"
+        default="conditional_recommend.v1", description="Schema version for this response"
     )
     primary_recommendation: PrimaryRecommendation = Field(
-        ...,
-        description="Primary (unconditional) recommendation"
+        ..., description="Primary (unconditional) recommendation"
     )
     conditional_recommendations: List[ConditionalRecommendation] = Field(
-        ...,
-        description="List of conditional recommendations"
+        ..., description="List of conditional recommendations"
     )
     robustness_summary: RobustnessSummary = Field(
-        ...,
-        description="Summary of recommendation robustness"
+        ..., description="Summary of recommendation robustness"
     )
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -3201,7 +2900,7 @@ class ConditionalRecommendResponse(BaseModel):
                     "option_id": "option_a",
                     "label": "Aggressive Expansion",
                     "confidence": "high",
-                    "expected_value": 75000.0
+                    "expected_value": 75000.0,
                 },
                 "conditional_recommendations": [
                     {
@@ -3211,16 +2910,16 @@ class ConditionalRecommendResponse(BaseModel):
                         "condition_expression": {
                             "parameter": "marketing_roi",
                             "operator": "<",
-                            "value": 0.3
+                            "value": 0.3,
                         },
                         "triggered_recommendation": {
                             "option_id": "option_b",
                             "label": "Conservative Growth",
                             "confidence": "medium",
-                            "expected_value": 50000.0
+                            "expected_value": 50000.0,
                         },
                         "probability_of_condition": 0.25,
-                        "impact_magnitude": "high"
+                        "impact_magnitude": "high",
                     }
                 ],
                 "robustness_summary": {
@@ -3229,10 +2928,10 @@ class ConditionalRecommendResponse(BaseModel):
                     "closest_flip_point": {
                         "parameter": "market_size",
                         "operator": "<",
-                        "value": 0.75
+                        "value": 0.75,
                     },
-                    "safety_margin": 0.15
-                }
+                    "safety_margin": 0.15,
+                },
             }
         }
     }
@@ -3244,17 +2943,10 @@ class ConditionalRecommendResponse(BaseModel):
 class ConditionalAction(BaseModel):
     """A conditional action in a decision rule."""
 
-    condition: str = Field(
-        ...,
-        description="Human-readable condition string"
-    )
-    action: str = Field(
-        ...,
-        description="Action to take if condition is met"
-    )
+    condition: str = Field(..., description="Human-readable condition string")
+    action: str = Field(..., description="Action to take if condition is met")
     expected_value_if_taken: float = Field(
-        ...,
-        description="Expected value if this action is taken"
+        ..., description="Expected value if this action is taken"
     )
 
     model_config = {
@@ -3262,7 +2954,7 @@ class ConditionalAction(BaseModel):
             "example": {
                 "condition": "If demand_signal > 0.7",
                 "action": "expand",
-                "expected_value_if_taken": 85000.0
+                "expected_value_if_taken": 85000.0,
             }
         }
     }
@@ -3271,13 +2963,9 @@ class ConditionalAction(BaseModel):
 class DecisionRule(BaseModel):
     """Conditional decision rule based on observed state."""
 
-    default_action: str = Field(
-        ...,
-        description="Default action if no conditions are met"
-    )
+    default_action: str = Field(..., description="Default action if no conditions are met")
     conditional_actions: List[ConditionalAction] = Field(
-        default_factory=list,
-        description="List of conditional actions"
+        default_factory=list, description="List of conditional actions"
     )
 
     model_config = {
@@ -3288,14 +2976,14 @@ class DecisionRule(BaseModel):
                     {
                         "condition": "If market_favorable",
                         "action": "expand",
-                        "expected_value_if_taken": 85000.0
+                        "expected_value_if_taken": 85000.0,
                     },
                     {
                         "condition": "If market_unfavorable",
                         "action": "exit",
-                        "expected_value_if_taken": 10000.0
-                    }
-                ]
+                        "expected_value_if_taken": 10000.0,
+                    },
+                ],
             }
         }
     }
@@ -3308,8 +2996,7 @@ class StagePolicy(BaseModel):
     stage_label: str = Field(..., description="Human-readable stage label")
     decision_rule: DecisionRule = Field(..., description="Decision rule for this stage")
     contingent_on: List[str] = Field(
-        default_factory=list,
-        description="What must be observed before this stage"
+        default_factory=list, description="What must be observed before this stage"
     )
 
     model_config = {
@@ -3323,11 +3010,11 @@ class StagePolicy(BaseModel):
                         {
                             "condition": "If market_favorable",
                             "action": "premium_pricing",
-                            "expected_value_if_taken": 100000.0
+                            "expected_value_if_taken": 100000.0,
                         }
-                    ]
+                    ],
                 },
-                "contingent_on": ["market_outcome"]
+                "contingent_on": ["market_outcome"],
             }
         }
     }
@@ -3341,10 +3028,7 @@ class PolicyDistribution(BaseModel):
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "type": "normal",
-                "parameters": {"mean": 45000, "std": 15000}
-            }
+            "example": {"type": "normal", "parameters": {"mean": 45000, "std": 15000}}
         }
     }
 
@@ -3352,18 +3036,11 @@ class PolicyDistribution(BaseModel):
 class Policy(BaseModel):
     """Optimal policy across all stages."""
 
-    stages: List[StagePolicy] = Field(
-        ...,
-        description="Policy for each stage"
-    )
+    stages: List[StagePolicy] = Field(..., description="Policy for each stage")
     expected_total_value: float = Field(
-        ...,
-        description="Expected total value following this policy"
+        ..., description="Expected total value following this policy"
     )
-    value_distribution: PolicyDistribution = Field(
-        ...,
-        description="Distribution of total value"
-    )
+    value_distribution: PolicyDistribution = Field(..., description="Distribution of total value")
 
     model_config = {
         "json_schema_extra": {
@@ -3372,18 +3049,15 @@ class Policy(BaseModel):
                     {
                         "stage_index": 0,
                         "stage_label": "Investment",
-                        "decision_rule": {
-                            "default_action": "invest",
-                            "conditional_actions": []
-                        },
-                        "contingent_on": []
+                        "decision_rule": {"default_action": "invest", "conditional_actions": []},
+                        "contingent_on": [],
                     }
                 ],
                 "expected_total_value": 45000.0,
                 "value_distribution": {
                     "type": "normal",
-                    "parameters": {"mean": 45000, "std": 15000}
-                }
+                    "parameters": {"mean": 45000, "std": 15000},
+                },
             }
         }
     }
@@ -3394,18 +3068,9 @@ class StageOption(BaseModel):
 
     option_id: str = Field(..., description="Option identifier")
     label: str = Field(..., description="Human-readable label")
-    immediate_value: float = Field(
-        ...,
-        description="Immediate payoff of choosing this option"
-    )
-    continuation_value: float = Field(
-        ...,
-        description="Expected value of future stages"
-    )
-    total_value: float = Field(
-        ...,
-        description="Total value (immediate + discounted continuation)"
-    )
+    immediate_value: float = Field(..., description="Immediate payoff of choosing this option")
+    continuation_value: float = Field(..., description="Expected value of future stages")
+    total_value: float = Field(..., description="Total value (immediate + discounted continuation)")
 
     model_config = {
         "json_schema_extra": {
@@ -3414,7 +3079,7 @@ class StageOption(BaseModel):
                 "label": "Make Investment",
                 "immediate_value": -50000,
                 "continuation_value": 95000,
-                "total_value": 45000
+                "total_value": 45000,
             }
         }
     }
@@ -3426,16 +3091,11 @@ class StageAnalysis(BaseModel):
     stage_index: int = Field(..., description="Stage index", ge=0)
     stage_label: str = Field(..., description="Human-readable stage label")
     options_at_stage: List[StageOption] = Field(
-        ...,
-        description="Options available at this stage with analysis"
+        ..., description="Options available at this stage with analysis"
     )
-    information_value: float = Field(
-        ...,
-        description="Value of information revealed at this stage"
-    )
+    information_value: float = Field(..., description="Value of information revealed at this stage")
     optimal_waiting_value: Optional[float] = Field(
-        default=None,
-        description="Value of delaying decision (if applicable)"
+        default=None, description="Value of delaying decision (if applicable)"
     )
 
     model_config = {
@@ -3449,18 +3109,18 @@ class StageAnalysis(BaseModel):
                         "label": "Make Investment",
                         "immediate_value": -50000,
                         "continuation_value": 95000,
-                        "total_value": 45000
+                        "total_value": 45000,
                     },
                     {
                         "option_id": "wait",
                         "label": "Wait and See",
                         "immediate_value": 0,
                         "continuation_value": 20000,
-                        "total_value": 20000
-                    }
+                        "total_value": 20000,
+                    },
                 ],
                 "information_value": 15000.0,
-                "optimal_waiting_value": 20000.0
+                "optimal_waiting_value": 20000.0,
             }
         }
     }
@@ -3470,32 +3130,18 @@ class SequentialAnalysisResponse(BaseModel):
     """Response model for sequential decision analysis."""
 
     schema_version: str = Field(
-        default="sequential.v1",
-        description="Schema version for this response"
+        default="sequential.v1", description="Schema version for this response"
     )
-    optimal_policy: Policy = Field(
-        ...,
-        description="Optimal policy across all stages"
-    )
-    stage_analyses: List[StageAnalysis] = Field(
-        ...,
-        description="Detailed analysis for each stage"
-    )
-    value_of_flexibility: float = Field(
-        ...,
-        description="Value of waiting vs committing now"
-    )
+    optimal_policy: Policy = Field(..., description="Optimal policy across all stages")
+    stage_analyses: List[StageAnalysis] = Field(..., description="Detailed analysis for each stage")
+    value_of_flexibility: float = Field(..., description="Value of waiting vs committing now")
     sensitivity_to_timing: str = Field(
-        ...,
-        description="How sensitive results are to timing",
-        pattern="^(high|medium|low)$"
+        ..., description="How sensitive results are to timing", pattern="^(high|medium|low)$"
     )
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -3509,9 +3155,9 @@ class SequentialAnalysisResponse(BaseModel):
                             "stage_label": "Investment",
                             "decision_rule": {
                                 "default_action": "invest",
-                                "conditional_actions": []
+                                "conditional_actions": [],
                             },
-                            "contingent_on": []
+                            "contingent_on": [],
                         },
                         {
                             "stage_index": 1,
@@ -3522,18 +3168,18 @@ class SequentialAnalysisResponse(BaseModel):
                                     {
                                         "condition": "If market_favorable",
                                         "action": "premium",
-                                        "expected_value_if_taken": 100000
+                                        "expected_value_if_taken": 100000,
                                     }
-                                ]
+                                ],
                             },
-                            "contingent_on": ["market_outcome"]
-                        }
+                            "contingent_on": ["market_outcome"],
+                        },
                     ],
                     "expected_total_value": 45000.0,
                     "value_distribution": {
                         "type": "normal",
-                        "parameters": {"mean": 45000, "std": 15000}
-                    }
+                        "parameters": {"mean": 45000, "std": 15000},
+                    },
                 },
                 "stage_analyses": [
                     {
@@ -3545,15 +3191,15 @@ class SequentialAnalysisResponse(BaseModel):
                                 "label": "Make Investment",
                                 "immediate_value": -50000,
                                 "continuation_value": 95000,
-                                "total_value": 45000
+                                "total_value": 45000,
                             }
                         ],
                         "information_value": 15000.0,
-                        "optimal_waiting_value": 20000.0
+                        "optimal_waiting_value": 20000.0,
                     }
                 ],
                 "value_of_flexibility": 25000.0,
-                "sensitivity_to_timing": "medium"
+                "sensitivity_to_timing": "medium",
             }
         }
     }
@@ -3564,20 +3210,14 @@ class PolicyTreeNode(BaseModel):
 
     node_id: str = Field(..., description="Node identifier")
     stage: int = Field(..., description="Stage this node belongs to")
-    node_type: str = Field(
-        ...,
-        description="Type of node",
-        pattern="^(decision|chance|terminal)$"
-    )
+    node_type: str = Field(..., description="Type of node", pattern="^(decision|chance|terminal)$")
     label: str = Field(..., description="Human-readable label")
     optimal_action: Optional[str] = Field(
-        default=None,
-        description="Optimal action at this node (for decision nodes)"
+        default=None, description="Optimal action at this node (for decision nodes)"
     )
     expected_value: float = Field(..., description="Expected value at this node")
     children: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Child nodes with transition info"
+        default_factory=list, description="Child nodes with transition info"
     )
 
     model_config = {
@@ -3589,13 +3229,7 @@ class PolicyTreeNode(BaseModel):
                 "label": "Investment Decision",
                 "optimal_action": "invest",
                 "expected_value": 45000,
-                "children": [
-                    {
-                        "action": "invest",
-                        "child_id": "market_node",
-                        "probability": 1.0
-                    }
-                ]
+                "children": [{"action": "invest", "child_id": "market_node", "probability": 1.0}],
             }
         }
     }
@@ -3604,22 +3238,14 @@ class PolicyTreeNode(BaseModel):
 class PolicyTreeResponse(BaseModel):
     """Response model for policy tree endpoint."""
 
-    schema_version: str = Field(
-        default="policy_tree.v1",
-        description="Schema version"
-    )
-    root: PolicyTreeNode = Field(
-        ...,
-        description="Root node of the policy tree"
-    )
+    schema_version: str = Field(default="policy_tree.v1", description="Schema version")
+    root: PolicyTreeNode = Field(..., description="Root node of the policy tree")
     total_stages: int = Field(..., description="Total number of stages")
     total_nodes: int = Field(..., description="Total number of nodes in tree")
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -3633,10 +3259,10 @@ class PolicyTreeResponse(BaseModel):
                     "label": "Investment Decision",
                     "optimal_action": "invest",
                     "expected_value": 45000,
-                    "children": []
+                    "children": [],
                 },
                 "total_stages": 3,
-                "total_nodes": 7
+                "total_nodes": 7,
             }
         }
     }
@@ -3648,33 +3274,21 @@ class StageSensitivityResult(BaseModel):
     stage_index: int = Field(..., description="Stage index")
     stage_label: str = Field(..., description="Stage label")
     parameter_sensitivities: Dict[str, float] = Field(
-        ...,
-        description="Mapping of parameter names to sensitivity scores"
+        ..., description="Mapping of parameter names to sensitivity scores"
     )
     policy_changes_at: Optional[Dict[str, float]] = Field(
-        default=None,
-        description="Parameter values where optimal policy changes"
+        default=None, description="Parameter values where optimal policy changes"
     )
-    robustness_score: float = Field(
-        ...,
-        description="Stage robustness score (0-1)",
-        ge=0.0,
-        le=1.0
-    )
+    robustness_score: float = Field(..., description="Stage robustness score (0-1)", ge=0.0, le=1.0)
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "stage_index": 0,
                 "stage_label": "Investment Decision",
-                "parameter_sensitivities": {
-                    "market_probability": 0.85,
-                    "investment_cost": 0.45
-                },
-                "policy_changes_at": {
-                    "market_probability": 0.35
-                },
-                "robustness_score": 0.72
+                "parameter_sensitivities": {"market_probability": 0.85, "investment_cost": 0.45},
+                "policy_changes_at": {"market_probability": 0.35},
+                "robustness_score": 0.72,
             }
         }
     }
@@ -3683,34 +3297,21 @@ class StageSensitivityResult(BaseModel):
 class StageSensitivityResponse(BaseModel):
     """Response model for stage sensitivity analysis."""
 
-    schema_version: str = Field(
-        default="stage_sensitivity.v1",
-        description="Schema version"
-    )
+    schema_version: str = Field(default="stage_sensitivity.v1", description="Schema version")
     stage_results: List[StageSensitivityResult] = Field(
-        ...,
-        description="Sensitivity results for each stage"
+        ..., description="Sensitivity results for each stage"
     )
     overall_robustness: float = Field(
-        ...,
-        description="Overall policy robustness score",
-        ge=0.0,
-        le=1.0
+        ..., description="Overall policy robustness score", ge=0.0, le=1.0
     )
     most_sensitive_parameters: List[str] = Field(
-        ...,
-        description="Parameters with highest sensitivity"
+        ..., description="Parameters with highest sensitivity"
     )
-    explanation: ExplanationMetadata = Field(
-        ...,
-        description="Plain English explanation"
-    )
+    explanation: ExplanationMetadata = Field(..., description="Plain English explanation")
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
     model_config = {
@@ -3723,12 +3324,10 @@ class StageSensitivityResponse(BaseModel):
                         "stage_label": "Investment Decision",
                         "parameter_sensitivities": {
                             "market_probability": 0.85,
-                            "investment_cost": 0.45
+                            "investment_cost": 0.45,
                         },
-                        "policy_changes_at": {
-                            "market_probability": 0.35
-                        },
-                        "robustness_score": 0.72
+                        "policy_changes_at": {"market_probability": 0.35},
+                        "robustness_score": 0.72,
                     }
                 ],
                 "overall_robustness": 0.68,
@@ -3737,8 +3336,8 @@ class StageSensitivityResponse(BaseModel):
                     "summary": "Policy is moderately robust to parameter changes",
                     "reasoning": "Market probability has high sensitivity - small changes could flip optimal decision",
                     "technical_basis": "One-at-a-time sensitivity analysis with policy tracking",
-                    "assumptions": ["Parameters vary independently"]
-                }
+                    "assumptions": ["Parameters vary independently"],
+                },
             }
         }
     }
@@ -3753,29 +3352,17 @@ class OptimalPoint(BaseModel):
     """Optimal point found by optimization."""
 
     variable_values: Dict[str, float] = Field(
-        ...,
-        description="Optimal values for each decision variable"
+        ..., description="Optimal values for each decision variable"
     )
-    objective_value: float = Field(
-        ...,
-        description="Objective function value at optimal point"
-    )
+    objective_value: float = Field(..., description="Objective function value at optimal point")
     confidence_interval: ConfidenceInterval = Field(
-        ...,
-        description="Confidence interval for the objective value"
+        ..., description="Confidence interval for the objective value"
     )
-    is_boundary: bool = Field(
-        ...,
-        description="True if optimal point is on variable bounds"
-    )
+    is_boundary: bool = Field(..., description="True if optimal point is on variable bounds")
     boundary_variables: Optional[List[str]] = Field(
-        default=None,
-        description="Variables at their bounds (if is_boundary=True)"
+        default=None, description="Variables at their bounds (if is_boundary=True)"
     )
-    feasible: bool = Field(
-        default=True,
-        description="True if point satisfies all constraints"
-    )
+    feasible: bool = Field(default=True, description="True if point satisfies all constraints")
 
     model_config = {
         "json_schema_extra": {
@@ -3785,11 +3372,11 @@ class OptimalPoint(BaseModel):
                 "confidence_interval": {
                     "lower": 21000.0,
                     "upper": 24000.0,
-                    "confidence_level": 0.95
+                    "confidence_level": 0.95,
                 },
                 "is_boundary": True,
                 "boundary_variables": ["quantity"],
-                "feasible": True
+                "feasible": True,
             }
         }
     }
@@ -3799,43 +3386,29 @@ class OptimisationSensitivity(BaseModel):
     """Sensitivity analysis at the optimal point."""
 
     range_within_5pct: Dict[str, List[float]] = Field(
-        ...,
-        description="Variable ranges where objective stays within 5% of optimum [min, max]"
+        ..., description="Variable ranges where objective stays within 5% of optimum [min, max]"
     )
     gradient_at_optimum: Dict[str, float] = Field(
-        ...,
-        description="Partial derivatives (sensitivity coefficients) at optimum"
+        ..., description="Partial derivatives (sensitivity coefficients) at optimum"
     )
     robustness: str = Field(
-        ...,
-        description="Overall robustness assessment",
-        pattern="^(robust|moderate|fragile)$"
+        ..., description="Overall robustness assessment", pattern="^(robust|moderate|fragile)$"
     )
     robustness_score: float = Field(
-        ...,
-        description="Numerical robustness score (0-1)",
-        ge=0.0,
-        le=1.0
+        ..., description="Numerical robustness score (0-1)", ge=0.0, le=1.0
     )
     critical_variables: List[str] = Field(
-        default_factory=list,
-        description="Variables with highest sensitivity"
+        default_factory=list, description="Variables with highest sensitivity"
     )
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "range_within_5pct": {
-                    "price": [60.0, 70.0],
-                    "quantity": [450.0, 500.0]
-                },
-                "gradient_at_optimum": {
-                    "price": 85.5,
-                    "quantity": -4.2
-                },
+                "range_within_5pct": {"price": [60.0, 70.0], "quantity": [450.0, 500.0]},
+                "gradient_at_optimum": {"price": 85.5, "quantity": -4.2},
                 "robustness": "moderate",
                 "robustness_score": 0.65,
-                "critical_variables": ["quantity"]
+                "critical_variables": ["quantity"],
             }
         }
     }
@@ -3847,16 +3420,11 @@ class OptimisationWarning(BaseModel):
     code: str = Field(
         ...,
         description="Warning code",
-        pattern="^(NO_FEASIBLE_SOLUTION|FLAT_OBJECTIVE|BOUNDARY_OPTIMUM|NON_CONVEX|MULTIPLE_OPTIMA|CONSTRAINT_ACTIVE)$"
+        pattern="^(NO_FEASIBLE_SOLUTION|FLAT_OBJECTIVE|BOUNDARY_OPTIMUM|NON_CONVEX|MULTIPLE_OPTIMA|CONSTRAINT_ACTIVE)$",
     )
-    message: str = Field(
-        ...,
-        description="Human-readable warning message",
-        max_length=500
-    )
+    message: str = Field(..., description="Human-readable warning message", max_length=500)
     affected_variables: Optional[List[str]] = Field(
-        default=None,
-        description="Variables affected by this warning"
+        default=None, description="Variables affected by this warning"
     )
 
     model_config = {
@@ -3864,7 +3432,7 @@ class OptimisationWarning(BaseModel):
             "example": {
                 "code": "BOUNDARY_OPTIMUM",
                 "message": "Optimal point is at constraint boundary for 'quantity'. Consider relaxing constraints.",
-                "affected_variables": ["quantity"]
+                "affected_variables": ["quantity"],
             }
         }
     }
@@ -3873,25 +3441,12 @@ class OptimisationWarning(BaseModel):
 class GridSearchMetrics(BaseModel):
     """Metrics from grid search optimization."""
 
-    grid_points_evaluated: int = Field(
-        ...,
-        description="Number of grid points evaluated",
-        ge=0
-    )
+    grid_points_evaluated: int = Field(..., description="Number of grid points evaluated", ge=0)
     feasible_points: int = Field(
-        ...,
-        description="Number of points satisfying all constraints",
-        ge=0
+        ..., description="Number of points satisfying all constraints", ge=0
     )
-    computation_time_ms: float = Field(
-        ...,
-        description="Computation time in milliseconds",
-        ge=0
-    )
-    convergence_achieved: bool = Field(
-        ...,
-        description="True if optimization converged"
-    )
+    computation_time_ms: float = Field(..., description="Computation time in milliseconds", ge=0)
+    convergence_achieved: bool = Field(..., description="True if optimization converged")
 
     model_config = {
         "json_schema_extra": {
@@ -3899,7 +3454,7 @@ class GridSearchMetrics(BaseModel):
                 "grid_points_evaluated": 400,
                 "feasible_points": 350,
                 "computation_time_ms": 125.5,
-                "convergence_achieved": True
+                "convergence_achieved": True,
             }
         }
     }
@@ -3909,44 +3464,35 @@ class OptimisationResponse(BaseModel):
     """Response model for continuous optimization endpoint."""
 
     schema_version: str = Field(
-        default="optimise.v1",
-        description="Schema version for this response"
+        default="optimise.v1", description="Schema version for this response"
     )
     optimal_point: Optional[OptimalPoint] = Field(
-        default=None,
-        description="Optimal point (None if no feasible solution)"
+        default=None, description="Optimal point (None if no feasible solution)"
     )
     sensitivity: Optional[OptimisationSensitivity] = Field(
-        default=None,
-        description="Sensitivity analysis at optimal point"
+        default=None, description="Sensitivity analysis at optimal point"
     )
-    grid_metrics: GridSearchMetrics = Field(
-        ...,
-        description="Metrics from grid search"
-    )
+    grid_metrics: GridSearchMetrics = Field(..., description="Metrics from grid search")
     warnings: List[OptimisationWarning] = Field(
-        default_factory=list,
-        description="Warnings about the optimization result"
+        default_factory=list, description="Warnings about the optimization result"
     )
 
     # Y₀ Identifiability fields (Task: Y₀ Hard Rule)
     identifiability: Optional["IdentifiabilityInfo"] = Field(
         default=None,
-        description="Identifiability analysis for the primary decision→goal effect (if graph provided)"
+        description="Identifiability analysis for the primary decision→goal effect (if graph provided)",
     )
     recommendation_status: Optional["RecommendationStatusEnum"] = Field(
-        default=None,
-        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+        default=None, description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
     )
     recommendation_caveat: Optional[str] = Field(
         default=None,
-        description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
+        description="Caveat for recommendations (required if recommendation_status is 'exploratory')",
     )
 
     # Metadata for determinism and reproducibility
     metadata: Optional["ISLResponseMetadata"] = Field(
-        default=None,
-        description="Request metadata for tracing and monitoring"
+        default=None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -3959,36 +3505,30 @@ class OptimisationResponse(BaseModel):
                     "confidence_interval": {
                         "lower": 21000.0,
                         "upper": 24000.0,
-                        "confidence_level": 0.95
+                        "confidence_level": 0.95,
                     },
                     "is_boundary": True,
                     "boundary_variables": ["quantity"],
-                    "feasible": True
+                    "feasible": True,
                 },
                 "sensitivity": {
-                    "range_within_5pct": {
-                        "price": [60.0, 70.0],
-                        "quantity": [450.0, 500.0]
-                    },
-                    "gradient_at_optimum": {
-                        "price": 85.5,
-                        "quantity": -4.2
-                    },
+                    "range_within_5pct": {"price": [60.0, 70.0], "quantity": [450.0, 500.0]},
+                    "gradient_at_optimum": {"price": 85.5, "quantity": -4.2},
                     "robustness": "moderate",
                     "robustness_score": 0.65,
-                    "critical_variables": ["quantity"]
+                    "critical_variables": ["quantity"],
                 },
                 "grid_metrics": {
                     "grid_points_evaluated": 400,
                     "feasible_points": 350,
                     "computation_time_ms": 125.5,
-                    "convergence_achieved": True
+                    "convergence_achieved": True,
                 },
                 "warnings": [
                     {
                         "code": "BOUNDARY_OPTIMUM",
                         "message": "Optimal point is at constraint boundary for 'quantity'.",
-                        "affected_variables": ["quantity"]
+                        "affected_variables": ["quantity"],
                     }
                 ],
                 "metadata": {
@@ -3996,8 +3536,8 @@ class OptimisationResponse(BaseModel):
                     "computation_time_ms": 125.5,
                     "isl_version": "2.0",
                     "algorithm": "grid_search",
-                    "cache_hit": False
-                }
+                    "cache_hit": False,
+                },
             }
         }
     }
@@ -4011,30 +3551,12 @@ class OptimisationResponse(BaseModel):
 class ConstraintViolation(BaseModel):
     """Details of a constraint violation."""
 
-    constraint_id: str = Field(
-        ...,
-        description="ID of the violated constraint"
-    )
-    constraint_label: Optional[str] = Field(
-        None,
-        description="Human-readable constraint label"
-    )
-    actual_value: float = Field(
-        ...,
-        description="Actual value that violated the constraint"
-    )
-    threshold: float = Field(
-        ...,
-        description="Threshold value that was violated"
-    )
-    violation_magnitude: float = Field(
-        ...,
-        description="How much the constraint was violated by"
-    )
-    is_hard_violation: bool = Field(
-        ...,
-        description="Whether this is a hard constraint violation"
-    )
+    constraint_id: str = Field(..., description="ID of the violated constraint")
+    constraint_label: Optional[str] = Field(None, description="Human-readable constraint label")
+    actual_value: float = Field(..., description="Actual value that violated the constraint")
+    threshold: float = Field(..., description="Threshold value that was violated")
+    violation_magnitude: float = Field(..., description="How much the constraint was violated by")
+    is_hard_violation: bool = Field(..., description="Whether this is a hard constraint violation")
 
     model_config = {
         "json_schema_extra": {
@@ -4044,7 +3566,7 @@ class ConstraintViolation(BaseModel):
                 "actual_value": 120000,
                 "threshold": 100000,
                 "violation_magnitude": 20000,
-                "is_hard_violation": True
+                "is_hard_violation": True,
             }
         }
     }
@@ -4053,22 +3575,14 @@ class ConstraintViolation(BaseModel):
 class InfeasibleOption(BaseModel):
     """An option that violates one or more constraints."""
 
-    option_id: str = Field(
-        ...,
-        description="ID of the infeasible option"
-    )
+    option_id: str = Field(..., description="ID of the infeasible option")
     violated_constraints: List[str] = Field(
-        ...,
-        description="List of constraint IDs that were violated"
+        ..., description="List of constraint IDs that were violated"
     )
     violation_details: List[ConstraintViolation] = Field(
-        ...,
-        description="Detailed information about each violation"
+        ..., description="Detailed information about each violation"
     )
-    total_violation_magnitude: float = Field(
-        ...,
-        description="Sum of all violation magnitudes"
-    )
+    total_violation_magnitude: float = Field(..., description="Sum of all violation magnitudes")
 
     model_config = {
         "json_schema_extra": {
@@ -4081,10 +3595,10 @@ class InfeasibleOption(BaseModel):
                         "actual_value": 120000,
                         "threshold": 100000,
                         "violation_magnitude": 20000,
-                        "is_hard_violation": True
+                        "is_hard_violation": True,
                     }
                 ],
-                "total_violation_magnitude": 20000
+                "total_violation_magnitude": 20000,
             }
         }
     }
@@ -4093,26 +3607,15 @@ class InfeasibleOption(BaseModel):
 class ConstraintValidationResult(BaseModel):
     """Result of validating a single constraint specification."""
 
-    constraint_id: str = Field(
-        ...,
-        description="ID of the constraint"
-    )
-    is_valid: bool = Field(
-        ...,
-        description="Whether the constraint is properly specified"
-    )
+    constraint_id: str = Field(..., description="ID of the constraint")
+    is_valid: bool = Field(..., description="Whether the constraint is properly specified")
     issues: List[str] = Field(
-        default_factory=list,
-        description="List of issues with the constraint specification"
+        default_factory=list, description="List of issues with the constraint specification"
     )
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "constraint_id": "budget_limit",
-                "is_valid": True,
-                "issues": []
-            }
+            "example": {"constraint_id": "budget_limit", "is_valid": True, "issues": []}
         }
     }
 
@@ -4121,12 +3624,10 @@ class FeasibilityResult(BaseModel):
     """Feasibility analysis results."""
 
     feasible_options: List[str] = Field(
-        ...,
-        description="List of option IDs that satisfy all constraints"
+        ..., description="List of option IDs that satisfy all constraints"
     )
     infeasible_options: List[InfeasibleOption] = Field(
-        ...,
-        description="Options that violate constraints with details"
+        ..., description="Options that violate constraints with details"
     )
 
     model_config = {
@@ -4138,9 +3639,9 @@ class FeasibilityResult(BaseModel):
                         "option_id": "option_3",
                         "violated_constraints": ["budget_constraint"],
                         "violation_details": [],
-                        "total_violation_magnitude": 5000
+                        "total_violation_magnitude": 5000,
                     }
-                ]
+                ],
             }
         }
     }
@@ -4149,31 +3650,19 @@ class FeasibilityResult(BaseModel):
 class FeasibilityResponse(BaseModel):
     """Response model for feasibility check endpoint."""
 
-    schema_version: str = Field(
-        default="feasibility.v1",
-        description="Schema version"
-    )
+    schema_version: str = Field(default="feasibility.v1", description="Schema version")
     constraint_validation: List[ConstraintValidationResult] = Field(
-        ...,
-        description="Validation results for constraint specifications"
+        ..., description="Validation results for constraint specifications"
     )
-    feasibility: FeasibilityResult = Field(
-        ...,
-        description="Feasibility analysis results"
-    )
-    summary: str = Field(
-        ...,
-        description="Human-readable summary of results"
-    )
+    feasibility: FeasibilityResult = Field(..., description="Feasibility analysis results")
+    summary: str = Field(..., description="Human-readable summary of results")
     warnings: List[str] = Field(
-        default_factory=list,
-        description="Any warnings generated during analysis"
+        default_factory=list, description="Any warnings generated during analysis"
     )
 
     # Metadata for determinism and reproducibility
     metadata: Optional["ISLResponseMetadata"] = Field(
-        default=None,
-        description="Request metadata for tracing and monitoring"
+        default=None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -4190,12 +3679,12 @@ class FeasibilityResponse(BaseModel):
                             "option_id": "option_3",
                             "violated_constraints": ["budget_constraint"],
                             "violation_details": [],
-                            "total_violation_magnitude": 5000
+                            "total_violation_magnitude": 5000,
                         }
-                    ]
+                    ],
                 },
                 "summary": "2 of 3 options are feasible",
-                "warnings": []
+                "warnings": [],
             }
         }
     }
@@ -4218,30 +3707,20 @@ class CoherenceAnalysis(BaseModel):
     """Coherence analysis results."""
 
     top_option_positive: bool = Field(
-        ...,
-        description="Whether the top option has positive expected value"
+        ..., description="Whether the top option has positive expected value"
     )
-    margin_to_second: float = Field(
-        ...,
-        description="Margin between top option and second-best"
-    )
+    margin_to_second: float = Field(..., description="Margin between top option and second-best")
     margin_to_second_pct: float = Field(
-        ...,
-        description="Margin as percentage of top option's value"
+        ..., description="Margin as percentage of top option's value"
     )
     ranking_stability: RankingStability = Field(
-        ...,
-        description="Stability classification of rankings"
+        ..., description="Stability classification of rankings"
     )
     stability_score: float = Field(
-        ...,
-        description="Numerical stability score (0-1, higher is more stable)",
-        ge=0.0,
-        le=1.0
+        ..., description="Numerical stability score (0-1, higher is more stable)", ge=0.0, le=1.0
     )
     warnings: List[str] = Field(
-        default_factory=list,
-        description="Coherence warnings and edge case flags"
+        default_factory=list, description="Coherence warnings and edge case flags"
     )
 
     model_config = {
@@ -4252,7 +3731,7 @@ class CoherenceAnalysis(BaseModel):
                 "margin_to_second_pct": 4.0,
                 "ranking_stability": "sensitive",
                 "stability_score": 0.65,
-                "warnings": ["Close race detected between top options"]
+                "warnings": ["Close race detected between top options"],
             }
         }
     }
@@ -4261,22 +3740,10 @@ class CoherenceAnalysis(BaseModel):
 class PerturbationResult(BaseModel):
     """Result of a single perturbation scenario."""
 
-    perturbation_id: int = Field(
-        ...,
-        description="Perturbation scenario ID"
-    )
-    top_option_id: str = Field(
-        ...,
-        description="ID of top option in this scenario"
-    )
-    ranking_changed: bool = Field(
-        ...,
-        description="Whether ranking changed from baseline"
-    )
-    value_change_pct: float = Field(
-        ...,
-        description="Percentage change in top option's value"
-    )
+    perturbation_id: int = Field(..., description="Perturbation scenario ID")
+    top_option_id: str = Field(..., description="ID of top option in this scenario")
+    ranking_changed: bool = Field(..., description="Whether ranking changed from baseline")
+    value_change_pct: float = Field(..., description="Percentage change in top option's value")
 
     model_config = {
         "json_schema_extra": {
@@ -4284,7 +3751,7 @@ class PerturbationResult(BaseModel):
                 "perturbation_id": 1,
                 "top_option_id": "option_b",
                 "ranking_changed": True,
-                "value_change_pct": -3.5
+                "value_change_pct": -3.5,
             }
         }
     }
@@ -4293,28 +3760,16 @@ class PerturbationResult(BaseModel):
 class StabilityAnalysis(BaseModel):
     """Detailed stability analysis from perturbations."""
 
-    num_perturbations: int = Field(
-        ...,
-        description="Number of perturbations performed"
-    )
-    ranking_changes: int = Field(
-        ...,
-        description="Number of times ranking changed"
-    )
+    num_perturbations: int = Field(..., description="Number of perturbations performed")
+    ranking_changes: int = Field(..., description="Number of times ranking changed")
     ranking_change_rate: float = Field(
-        ...,
-        description="Rate of ranking changes (0-1)",
-        ge=0.0,
-        le=1.0
+        ..., description="Rate of ranking changes (0-1)", ge=0.0, le=1.0
     )
     most_frequent_alternative: Optional[str] = Field(
-        None,
-        description="Option that most often took top rank when changed"
+        None, description="Option that most often took top rank when changed"
     )
     sample_perturbations: List[PerturbationResult] = Field(
-        default_factory=list,
-        description="Sample of perturbation results",
-        max_length=10
+        default_factory=list, description="Sample of perturbation results", max_length=10
     )
 
     model_config = {
@@ -4324,7 +3779,7 @@ class StabilityAnalysis(BaseModel):
                 "ranking_changes": 35,
                 "ranking_change_rate": 0.35,
                 "most_frequent_alternative": "option_b",
-                "sample_perturbations": []
+                "sample_perturbations": [],
             }
         }
     }
@@ -4333,27 +3788,16 @@ class StabilityAnalysis(BaseModel):
 class CoherenceAnalysisResponse(BaseModel):
     """Response model for coherence analysis endpoint."""
 
-    schema_version: str = Field(
-        default="coherence.v1",
-        description="Schema version"
-    )
-    coherence_analysis: CoherenceAnalysis = Field(
-        ...,
-        description="Core coherence metrics"
-    )
-    stability_analysis: StabilityAnalysis = Field(
-        ...,
-        description="Detailed stability analysis"
-    )
+    schema_version: str = Field(default="coherence.v1", description="Schema version")
+    coherence_analysis: CoherenceAnalysis = Field(..., description="Core coherence metrics")
+    stability_analysis: StabilityAnalysis = Field(..., description="Detailed stability analysis")
     recommendations: List[str] = Field(
-        default_factory=list,
-        description="Actionable recommendations based on analysis"
+        default_factory=list, description="Actionable recommendations based on analysis"
     )
 
     # Metadata for determinism and reproducibility
     metadata: Optional["ISLResponseMetadata"] = Field(
-        default=None,
-        description="Request metadata for tracing and monitoring"
+        default=None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -4366,19 +3810,19 @@ class CoherenceAnalysisResponse(BaseModel):
                     "margin_to_second_pct": 4.0,
                     "ranking_stability": "sensitive",
                     "stability_score": 0.65,
-                    "warnings": ["Close race detected between top options"]
+                    "warnings": ["Close race detected between top options"],
                 },
                 "stability_analysis": {
                     "num_perturbations": 100,
                     "ranking_changes": 35,
                     "ranking_change_rate": 0.35,
                     "most_frequent_alternative": "option_b",
-                    "sample_perturbations": []
+                    "sample_perturbations": [],
                 },
                 "recommendations": [
                     "Consider gathering more data to reduce uncertainty",
-                    "Top options are close - decision may depend on risk tolerance"
-                ]
+                    "Top options are close - decision may depend on risk tolerance",
+                ],
             }
         }
     }
@@ -4392,32 +3836,16 @@ class CoherenceAnalysisResponse(BaseModel):
 class NormalisedGoal(BaseModel):
     """Normalised goal specification after validation."""
 
-    goal_id: str = Field(
-        ...,
-        description="Goal identifier"
-    )
-    label: str = Field(
-        ...,
-        description="Goal label"
-    )
-    direction: str = Field(
-        ...,
-        description="Optimization direction"
-    )
+    goal_id: str = Field(..., description="Goal identifier")
+    label: str = Field(..., description="Goal label")
+    direction: str = Field(..., description="Optimization direction")
     normalised_weight: float = Field(
-        ...,
-        description="Weight after normalization (sums to 1.0)",
-        ge=0.0,
-        le=1.0
+        ..., description="Weight after normalization (sums to 1.0)", ge=0.0, le=1.0
     )
     original_weight: Optional[float] = Field(
-        None,
-        description="Original weight before normalization"
+        None, description="Original weight before normalization"
     )
-    priority: Optional[int] = Field(
-        None,
-        description="Priority for lexicographic ordering"
-    )
+    priority: Optional[int] = Field(None, description="Priority for lexicographic ordering")
 
     model_config = {
         "json_schema_extra": {
@@ -4427,7 +3855,7 @@ class NormalisedGoal(BaseModel):
                 "direction": "maximize",
                 "normalised_weight": 0.6,
                 "original_weight": 0.6,
-                "priority": 1
+                "priority": 1,
             }
         }
     }
@@ -4436,25 +3864,16 @@ class NormalisedGoal(BaseModel):
 class UtilityValidationWarning(BaseModel):
     """Warning from utility validation."""
 
-    code: str = Field(
-        ...,
-        description="Warning code"
-    )
-    message: str = Field(
-        ...,
-        description="Human-readable warning message"
-    )
-    affected_goals: Optional[List[str]] = Field(
-        None,
-        description="List of goal IDs affected"
-    )
+    code: str = Field(..., description="Warning code")
+    message: str = Field(..., description="Human-readable warning message")
+    affected_goals: Optional[List[str]] = Field(None, description="List of goal IDs affected")
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "code": "WEIGHTS_NORMALIZED",
                 "message": "Weights normalized from sum=1.5 to sum=1.0",
-                "affected_goals": ["revenue", "cost", "quality"]
+                "affected_goals": ["revenue", "cost", "quality"],
             }
         }
     }
@@ -4463,47 +3882,29 @@ class UtilityValidationWarning(BaseModel):
 class UtilityValidationResponse(BaseModel):
     """Response model for utility function validation endpoint."""
 
-    schema_version: str = Field(
-        default="utility.v1",
-        description="Schema version"
-    )
-    valid: bool = Field(
-        ...,
-        description="Whether the utility specification is valid"
-    )
+    schema_version: str = Field(default="utility.v1", description="Schema version")
+    valid: bool = Field(..., description="Whether the utility specification is valid")
     normalised_weights: Dict[str, float] = Field(
-        ...,
-        description="Normalized weights by goal ID (sum to 1.0)"
+        ..., description="Normalized weights by goal ID (sum to 1.0)"
     )
     normalised_goals: List[NormalisedGoal] = Field(
-        ...,
-        description="Full normalised goal specifications"
+        ..., description="Full normalised goal specifications"
     )
-    aggregation_method: str = Field(
-        ...,
-        description="Aggregation method to be used"
-    )
-    risk_tolerance: str = Field(
-        ...,
-        description="Risk tolerance setting"
-    )
+    aggregation_method: str = Field(..., description="Aggregation method to be used")
+    risk_tolerance: str = Field(..., description="Risk tolerance setting")
     default_behaviour_applied: List[str] = Field(
-        default_factory=list,
-        description="List of default behaviours that were applied"
+        default_factory=list, description="List of default behaviours that were applied"
     )
     warnings: List[UtilityValidationWarning] = Field(
-        default_factory=list,
-        description="Validation warnings"
+        default_factory=list, description="Validation warnings"
     )
     errors: List[str] = Field(
-        default_factory=list,
-        description="Validation errors (if valid=false)"
+        default_factory=list, description="Validation errors (if valid=false)"
     )
 
     # Metadata for tracing
     metadata: Optional["ISLResponseMetadata"] = Field(
-        default=None,
-        description="Request metadata for tracing and monitoring"
+        default=None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -4511,22 +3912,19 @@ class UtilityValidationResponse(BaseModel):
             "example": {
                 "schema_version": "utility.v1",
                 "valid": True,
-                "normalised_weights": {
-                    "revenue": 0.6,
-                    "cost": 0.4
-                },
+                "normalised_weights": {"revenue": 0.6, "cost": 0.4},
                 "normalised_goals": [
                     {
                         "goal_id": "revenue",
                         "label": "Revenue",
                         "direction": "maximize",
-                        "normalised_weight": 0.6
+                        "normalised_weight": 0.6,
                     }
                 ],
                 "aggregation_method": "weighted_sum",
                 "risk_tolerance": "risk_neutral",
                 "default_behaviour_applied": [],
-                "warnings": []
+                "warnings": [],
             }
         }
     }
@@ -4540,26 +3938,11 @@ class UtilityValidationResponse(BaseModel):
 class ValidatedCorrelationGroup(BaseModel):
     """Validated correlation group with additional metadata."""
 
-    group_id: str = Field(
-        ...,
-        description="Group identifier"
-    )
-    factors: List[str] = Field(
-        ...,
-        description="Factor IDs in the group"
-    )
-    correlation: float = Field(
-        ...,
-        description="Correlation coefficient"
-    )
-    is_valid: bool = Field(
-        ...,
-        description="Whether this group specification is valid"
-    )
-    issues: List[str] = Field(
-        default_factory=list,
-        description="Issues with this group"
-    )
+    group_id: str = Field(..., description="Group identifier")
+    factors: List[str] = Field(..., description="Factor IDs in the group")
+    correlation: float = Field(..., description="Correlation coefficient")
+    is_valid: bool = Field(..., description="Whether this group specification is valid")
+    issues: List[str] = Field(default_factory=list, description="Issues with this group")
 
     model_config = {
         "json_schema_extra": {
@@ -4568,7 +3951,7 @@ class ValidatedCorrelationGroup(BaseModel):
                 "factors": ["demand", "competition"],
                 "correlation": 0.7,
                 "is_valid": True,
-                "issues": []
+                "issues": [],
             }
         }
     }
@@ -4578,20 +3961,16 @@ class CorrelationMatrixAnalysis(BaseModel):
     """Analysis of the correlation matrix."""
 
     is_positive_semi_definite: bool = Field(
-        ...,
-        description="Whether matrix is positive semi-definite (valid for sampling)"
+        ..., description="Whether matrix is positive semi-definite (valid for sampling)"
     )
     min_eigenvalue: Optional[float] = Field(
-        None,
-        description="Minimum eigenvalue (negative indicates not PSD)"
+        None, description="Minimum eigenvalue (negative indicates not PSD)"
     )
     condition_number: Optional[float] = Field(
-        None,
-        description="Condition number (high values indicate near-singularity)"
+        None, description="Condition number (high values indicate near-singularity)"
     )
     suggested_regularization: Optional[float] = Field(
-        None,
-        description="Suggested regularization if matrix is not PSD"
+        None, description="Suggested regularization if matrix is not PSD"
     )
 
     model_config = {
@@ -4600,7 +3979,7 @@ class CorrelationMatrixAnalysis(BaseModel):
                 "is_positive_semi_definite": True,
                 "min_eigenvalue": 0.15,
                 "condition_number": 3.2,
-                "suggested_regularization": None
+                "suggested_regularization": None,
             }
         }
     }
@@ -4609,21 +3988,12 @@ class CorrelationMatrixAnalysis(BaseModel):
 class ImpliedCorrelationMatrix(BaseModel):
     """The implied correlation matrix from groups."""
 
-    factors: List[str] = Field(
-        ...,
-        description="Factor IDs in matrix order"
-    )
-    matrix: List[List[float]] = Field(
-        ...,
-        description="Correlation matrix values"
-    )
+    factors: List[str] = Field(..., description="Factor IDs in matrix order")
+    matrix: List[List[float]] = Field(..., description="Correlation matrix values")
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "factors": ["demand", "competition"],
-                "matrix": [[1.0, 0.7], [0.7, 1.0]]
-            }
+            "example": {"factors": ["demand", "competition"], "matrix": [[1.0, 0.7], [0.7, 1.0]]}
         }
     }
 
@@ -4631,21 +4001,13 @@ class ImpliedCorrelationMatrix(BaseModel):
 class CorrelationValidationWarning(BaseModel):
     """Warning from correlation validation."""
 
-    code: str = Field(
-        ...,
-        description="Warning code"
-    )
-    message: str = Field(
-        ...,
-        description="Human-readable warning message"
-    )
+    code: str = Field(..., description="Warning code")
+    message: str = Field(..., description="Human-readable warning message")
     affected_groups: Optional[List[str]] = Field(
-        None,
-        description="Group IDs affected by this warning"
+        None, description="Group IDs affected by this warning"
     )
     affected_factors: Optional[List[str]] = Field(
-        None,
-        description="Factor IDs affected by this warning"
+        None, description="Factor IDs affected by this warning"
     )
 
     model_config = {
@@ -4653,7 +4015,7 @@ class CorrelationValidationWarning(BaseModel):
             "example": {
                 "code": "HIGH_CORRELATION",
                 "message": "Correlation of 0.95 between demand and sales may indicate redundancy",
-                "affected_factors": ["demand", "sales"]
+                "affected_factors": ["demand", "sales"],
             }
         }
     }
@@ -4662,39 +4024,29 @@ class CorrelationValidationWarning(BaseModel):
 class CorrelationValidationResponse(BaseModel):
     """Response model for correlation validation endpoint."""
 
-    schema_version: str = Field(
-        default="correlation.v1",
-        description="Schema version"
-    )
+    schema_version: str = Field(default="correlation.v1", description="Schema version")
     valid: bool = Field(
-        ...,
-        description="Whether the correlation specification is valid for sampling"
+        ..., description="Whether the correlation specification is valid for sampling"
     )
     validated_groups: List[ValidatedCorrelationGroup] = Field(
-        default_factory=list,
-        description="Validation results for each correlation group"
+        default_factory=list, description="Validation results for each correlation group"
     )
     implied_matrix: Optional[ImpliedCorrelationMatrix] = Field(
-        None,
-        description="The implied correlation matrix from groups"
+        None, description="The implied correlation matrix from groups"
     )
     matrix_analysis: Optional[CorrelationMatrixAnalysis] = Field(
-        None,
-        description="Analysis of the correlation matrix properties"
+        None, description="Analysis of the correlation matrix properties"
     )
     warnings: List[CorrelationValidationWarning] = Field(
-        default_factory=list,
-        description="Validation warnings"
+        default_factory=list, description="Validation warnings"
     )
     errors: List[str] = Field(
-        default_factory=list,
-        description="Validation errors (if valid=false)"
+        default_factory=list, description="Validation errors (if valid=false)"
     )
 
     # Metadata for tracing
     metadata: Optional["ISLResponseMetadata"] = Field(
-        default=None,
-        description="Request metadata for tracing and monitoring"
+        default=None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -4708,15 +4060,15 @@ class CorrelationValidationResponse(BaseModel):
                         "factors": ["demand", "competition"],
                         "correlation": 0.7,
                         "is_valid": True,
-                        "issues": []
+                        "issues": [],
                     }
                 ],
                 "matrix_analysis": {
                     "is_positive_semi_definite": True,
                     "min_eigenvalue": 0.3,
-                    "condition_number": 2.5
+                    "condition_number": 2.5,
                 },
-                "warnings": []
+                "warnings": [],
             }
         }
     }
@@ -4748,20 +4100,16 @@ class IdentifiabilitySuggestionResponse(BaseModel):
     """Suggestion for making an effect identifiable."""
 
     description: str = Field(
-        ...,
-        description="Human-readable suggestion for making effect identifiable"
+        ..., description="Human-readable suggestion for making effect identifiable"
     )
     variable_to_add: Optional[str] = Field(
-        None,
-        description="Variable that could be added to enable identification"
+        None, description="Variable that could be added to enable identification"
     )
     edges_to_add: Optional[List[Tuple[str, str]]] = Field(
-        None,
-        description="Edges that could be added to enable identification"
+        None, description="Edges that could be added to enable identification"
     )
     priority: str = Field(
-        default="recommended",
-        description="Priority: 'critical', 'recommended', 'optional'"
+        default="recommended", description="Priority: 'critical', 'recommended', 'optional'"
     )
 
     model_config = {
@@ -4769,8 +4117,11 @@ class IdentifiabilitySuggestionResponse(BaseModel):
             "example": {
                 "description": "Adding 'market_conditions' as an observed factor would enable backdoor adjustment",
                 "variable_to_add": "market_conditions_observed",
-                "edges_to_add": [["market_conditions_observed", "price"], ["market_conditions_observed", "revenue"]],
-                "priority": "recommended"
+                "edges_to_add": [
+                    ["market_conditions_observed", "price"],
+                    ["market_conditions_observed", "revenue"],
+                ],
+                "priority": "recommended",
             }
         }
     }
@@ -4785,28 +4136,23 @@ class IdentifiabilityInfo(BaseModel):
     """
 
     effect: str = Field(
-        ...,
-        description="The causal effect being analyzed (e.g., 'decision → goal')"
+        ..., description="The causal effect being analyzed (e.g., 'decision → goal')"
     )
     identifiable: bool = Field(
-        ...,
-        description="Whether the causal effect is identifiable from observational data"
+        ..., description="Whether the causal effect is identifiable from observational data"
     )
     method: Optional[IdentificationMethodEnum] = Field(
         None,
-        description="Method used for identification: backdoor, frontdoor, instrumental, do_calculus, or non_identifiable"
+        description="Method used for identification: backdoor, frontdoor, instrumental, do_calculus, or non_identifiable",
     )
     adjustment_set: Optional[List[str]] = Field(
-        None,
-        description="Variables to condition on for identification (if identifiable)"
+        None, description="Variables to condition on for identification (if identifiable)"
     )
     confidence: ConfidenceLevel = Field(
-        ...,
-        description="Confidence in the identifiability assessment"
+        ..., description="Confidence in the identifiability assessment"
     )
     explanation: str = Field(
-        ...,
-        description="Human-readable explanation of identifiability status"
+        ..., description="Human-readable explanation of identifiability status"
     )
 
     model_config = {
@@ -4817,7 +4163,7 @@ class IdentifiabilityInfo(BaseModel):
                 "method": "backdoor",
                 "adjustment_set": ["market_segment"],
                 "confidence": "high",
-                "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+                "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment.",
             }
         }
     }
@@ -4832,34 +4178,27 @@ class IdentifiabilityResponse(BaseModel):
     """
 
     schema_version: str = Field(
-        default="identifiability.v1",
-        description="Schema version for this response"
+        default="identifiability.v1", description="Schema version for this response"
     )
     identifiability: IdentifiabilityInfo = Field(
-        ...,
-        description="Core identifiability analysis results"
+        ..., description="Core identifiability analysis results"
     )
     recommendation_status: RecommendationStatusEnum = Field(
-        ...,
-        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+        ..., description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
     )
     recommendation_caveat: Optional[str] = Field(
-        None,
-        description="Caveat for recommendations if effect is non-identifiable"
+        None, description="Caveat for recommendations if effect is non-identifiable"
     )
     suggestions: Optional[List[IdentifiabilitySuggestionResponse]] = Field(
-        None,
-        description="Suggestions for making effect identifiable (if non-identifiable)"
+        None, description="Suggestions for making effect identifiable (if non-identifiable)"
     )
     backdoor_paths: Optional[List[str]] = Field(
-        None,
-        description="Backdoor paths identified in the graph"
+        None, description="Backdoor paths identified in the graph"
     )
 
     # Metadata for tracing
     metadata: Optional["ISLResponseMetadata"] = Field(
-        default=None,
-        description="Request metadata for tracing and monitoring"
+        default=None, description="Request metadata for tracing and monitoring"
     )
 
     model_config = {
@@ -4875,13 +4214,13 @@ class IdentifiabilityResponse(BaseModel):
                             "method": "backdoor",
                             "adjustment_set": ["market_segment"],
                             "confidence": "high",
-                            "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment."
+                            "explanation": "The effect of 'price' on 'revenue' is identifiable using the backdoor criterion. Adjust for: market_segment.",
                         },
                         "recommendation_status": "actionable",
                         "recommendation_caveat": None,
                         "suggestions": None,
-                        "backdoor_paths": ["price → market_segment → revenue"]
-                    }
+                        "backdoor_paths": ["price → market_segment → revenue"],
+                    },
                 },
                 {
                     "title": "Non-Identifiable Effect (Hard Rule Applied)",
@@ -4893,7 +4232,7 @@ class IdentifiabilityResponse(BaseModel):
                             "method": "non_identifiable",
                             "adjustment_set": None,
                             "confidence": "high",
-                            "explanation": "The effect of 'marketing_spend' on 'sales' is NOT identifiable. There is unmeasured confounding that cannot be blocked."
+                            "explanation": "The effect of 'marketing_spend' on 'sales' is NOT identifiable. There is unmeasured confounding that cannot be blocked.",
                         },
                         "recommendation_status": "exploratory",
                         "recommendation_caveat": "Causal effect cannot be confirmed from current model structure. Recommendations should be treated as exploratory hypotheses, not actionable conclusions.",
@@ -4901,18 +4240,18 @@ class IdentifiabilityResponse(BaseModel):
                             {
                                 "description": "If 'market_conditions' were observed as a confounder, conditioning on it might block the backdoor path",
                                 "variable_to_add": "market_conditions_observed",
-                                "priority": "recommended"
+                                "priority": "recommended",
                             },
                             {
                                 "description": "Adding an instrumental variable that affects 'marketing_spend' but not 'sales' directly could enable identification",
                                 "variable_to_add": "marketing_spend_instrument",
                                 "edges_to_add": [["marketing_spend_instrument", "marketing_spend"]],
-                                "priority": "recommended"
-                            }
+                                "priority": "recommended",
+                            },
                         ],
-                        "backdoor_paths": ["marketing_spend → unmeasured_confounder → sales"]
-                    }
-                }
+                        "backdoor_paths": ["marketing_spend → unmeasured_confounder → sales"],
+                    },
+                },
             ]
         }
     }
@@ -4927,16 +4266,14 @@ class IdentifiabilityEnhancedResponse(BaseModel):
     """
 
     identifiability: Optional[IdentifiabilityInfo] = Field(
-        None,
-        description="Identifiability analysis for the primary decision→goal effect"
+        None, description="Identifiability analysis for the primary decision→goal effect"
     )
     recommendation_status: Optional[RecommendationStatusEnum] = Field(
-        None,
-        description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
+        None, description="HARD RULE: 'actionable' if identifiable, 'exploratory' if not"
     )
     recommendation_caveat: Optional[str] = Field(
         None,
-        description="Caveat for recommendations (required if recommendation_status is 'exploratory')"
+        description="Caveat for recommendations (required if recommendation_status is 'exploratory')",
     )
 
 
@@ -4975,12 +4312,8 @@ class ConfoundingPairResponse(BaseModel):
         None, description="Multiple of median edge strength (interpretable threshold)"
     )
     baseline_winner: str = Field(..., description="Recommended option at confounder_strength=0")
-    flipped_winner: Optional[str] = Field(
-        None, description="Recommended option after flip, if any"
-    )
-    interpretation: str = Field(
-        ..., description="Human-readable interpretation (provisional)"
-    )
+    flipped_winner: Optional[str] = Field(None, description="Recommended option after flip, if any")
+    interpretation: str = Field(..., description="Human-readable interpretation (provisional)")
 
 
 class ConfoundingSensitivityResponse(BaseModel):

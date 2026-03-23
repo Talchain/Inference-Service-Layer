@@ -31,7 +31,9 @@ CACHE_MAX_SIZE = 500  # Maximum cached results
 
 # Circuit breakers for expensive operations
 _path_analysis_breaker = CircuitBreaker("path_analysis", failure_threshold=3, timeout=60)
-_strategy_generation_breaker = CircuitBreaker("strategy_generation", failure_threshold=3, timeout=60)
+_strategy_generation_breaker = CircuitBreaker(
+    "strategy_generation", failure_threshold=3, timeout=60
+)
 
 
 class AdjustmentStrategy:
@@ -114,18 +116,18 @@ class AdvancedValidationSuggester:
 
         # Initialize caches for expensive operations
         if enable_caching:
-            self._path_cache = get_cache(
-                "validation_paths", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL
-            )
+            self._path_cache = get_cache("validation_paths", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL)
             self._strategy_cache = get_cache(
                 "validation_strategies", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL
             )
             logger.info("caching_enabled", extra={"service": "AdvancedValidationSuggester"})
         else:
-            self._path_cache = None
-            self._strategy_cache = None
+            self._path_cache = None  # type: ignore[assignment]
+            self._strategy_cache = None  # type: ignore[assignment]
 
-    def _create_dag_cache_key(self, dag: nx.DiGraph, treatment: str, outcome: str, operation: str) -> Dict:
+    def _create_dag_cache_key(
+        self, dag: nx.DiGraph, treatment: str, outcome: str, operation: str
+    ) -> Dict:
         """
         Create cache key for DAG-based operations.
 
@@ -180,9 +182,10 @@ class AdvancedValidationSuggester:
                         "treatment": treatment,
                         "outcome": outcome,
                         "n_strategies": len(cached_result),
-                    }
+                    },
                 )
-                return cached_result
+                result: List[AdjustmentStrategy] = cached_result
+                return result
 
         logger.info(
             "generating_adjustment_strategies",
@@ -191,14 +194,13 @@ class AdvancedValidationSuggester:
                 "outcome": outcome,
                 "n_nodes": len(dag.nodes()),
                 "n_edges": len(dag.edges()),
-            }
+            },
         )
 
         try:
             # Use circuit breaker for expensive strategy generation
             strategies = _strategy_generation_breaker.call(
-                self._generate_strategies_internal,
-                dag, treatment, outcome
+                self._generate_strategies_internal, dag, treatment, outcome
             )
 
             health_monitor.record_success("validation_suggester")
@@ -218,7 +220,7 @@ class AdvancedValidationSuggester:
                     "error": str(e),
                     "circuit_state": _strategy_generation_breaker.state.value,
                 },
-                exc_info=True
+                exc_info=True,
             )
             health_monitor.record_fallback("validation_suggester")
             return self._fallback_to_simple_strategies(dag, treatment, outcome)
@@ -245,9 +247,7 @@ class AdvancedValidationSuggester:
         strategies.extend(backdoor_strategies)
 
         # 2. Frontdoor adjustment (if backdoor not possible)
-        if not backdoor_strategies or all(
-            len(s.nodes_to_add) > 3 for s in backdoor_strategies
-        ):
+        if not backdoor_strategies or all(len(s.nodes_to_add) > 3 for s in backdoor_strategies):
             frontdoor_strategy = self._find_frontdoor_strategy(dag, treatment, outcome)
             if frontdoor_strategy:
                 strategies.append(frontdoor_strategy)
@@ -265,15 +265,15 @@ class AdvancedValidationSuggester:
             extra={
                 "n_strategies": len(ranked_strategies),
                 "strategy_types": [s.type for s in ranked_strategies],
-                "top_identifiability": ranked_strategies[0].expected_identifiability if ranked_strategies else 0,
-            }
+                "top_identifiability": ranked_strategies[0].expected_identifiability
+                if ranked_strategies
+                else 0,
+            },
         )
 
         return ranked_strategies
 
-    def analyze_paths(
-        self, dag: nx.DiGraph, treatment: str, outcome: str
-    ) -> PathAnalysis:
+    def analyze_paths(self, dag: nx.DiGraph, treatment: str, outcome: str) -> PathAnalysis:
         """
         Comprehensive path analysis.
 
@@ -293,8 +293,7 @@ class AdvancedValidationSuggester:
         try:
             # Use circuit breaker for expensive path analysis
             path_analysis = _path_analysis_breaker.call(
-                self._analyze_paths_internal,
-                dag, treatment, outcome
+                self._analyze_paths_internal, dag, treatment, outcome
             )
             health_monitor.record_success("path_analysis")
             return path_analysis
@@ -307,7 +306,7 @@ class AdvancedValidationSuggester:
                     "error": str(e),
                     "circuit_state": _path_analysis_breaker.state.value,
                 },
-                exc_info=True
+                exc_info=True,
             )
             health_monitor.record_fallback("path_analysis")
             return self._fallback_path_analysis(dag, treatment, outcome)
@@ -352,7 +351,7 @@ class AdvancedValidationSuggester:
         Returns:
             List of backdoor adjustment strategies
         """
-        strategies = []
+        strategies: List[AdjustmentStrategy] = []
 
         # Find backdoor paths
         backdoor_paths = self._find_backdoor_paths(dag, treatment, outcome)
@@ -478,9 +477,7 @@ class AdvancedValidationSuggester:
                 continue
 
             # Check exclusion restriction: all paths from node to outcome go through treatment
-            satisfies_exclusion = self._check_exclusion_restriction(
-                dag, node, treatment, outcome
-            )
+            satisfies_exclusion = self._check_exclusion_restriction(dag, node, treatment, outcome)
 
             if affects_treatment and satisfies_exclusion:
                 # Valid instrument
@@ -566,11 +563,12 @@ class AdvancedValidationSuggester:
                         "treatment": treatment,
                         "outcome": outcome,
                         "n_paths": len(cached_result),
-                    }
+                    },
                 )
-                return cached_result
+                paths_result: List[List[str]] = cached_result
+                return paths_result
 
-        backdoor_paths = []
+        backdoor_paths: List[List[str]] = []
 
         if treatment not in dag.nodes() or outcome not in dag.nodes():
             return backdoor_paths
@@ -584,7 +582,7 @@ class AdvancedValidationSuggester:
         # For each parent, find paths to outcome
         for parent in treatment_parents:
             # Use DFS to find paths that respect edge directions
-            visited = set()
+            visited: Set[str] = set()
             current_path = [parent]
             self._dfs_backdoor_paths(
                 dag, parent, outcome, treatment, current_path, visited, backdoor_paths
@@ -714,7 +712,7 @@ class AdvancedValidationSuggester:
         Returns:
             List of critical nodes ranked by impact
         """
-        node_impact = defaultdict(int)
+        node_impact: Dict[str, int] = defaultdict(int)
 
         for path in backdoor_paths:
             # Count how many paths each node appears in
@@ -802,8 +800,8 @@ class AdvancedValidationSuggester:
             extra={
                 "treatment": treatment,
                 "outcome": outcome,
-                "reason": "Complex strategy generation failed"
-            }
+                "reason": "Complex strategy generation failed",
+            },
         )
 
         strategies = []
@@ -812,8 +810,7 @@ class AdvancedValidationSuggester:
             # Simple strategy: suggest controlling for all non-treatment, non-outcome nodes
             # This is a safe (if inefficient) backdoor adjustment
             potential_confounders = [
-                node for node in dag.nodes()
-                if node not in [treatment, outcome]
+                node for node in dag.nodes() if node not in [treatment, outcome]
             ]
 
             if potential_confounders:
@@ -825,7 +822,7 @@ class AdvancedValidationSuggester:
                     nodes_to_add=[],
                     edges_to_add=[],
                     explanation=f"Control for variables: {', '.join(confounders_to_control)} "
-                                f"(simplified backdoor adjustment)",
+                    f"(simplified backdoor adjustment)",
                     theoretical_basis="Conservative backdoor criterion (controls for all available variables)",
                     expected_identifiability=0.6,  # Lower confidence for simplified approach
                 )
@@ -847,11 +844,7 @@ class AdvancedValidationSuggester:
 
         except Exception as e:
             # Ultimate fallback: return minimal suggestion
-            logger.error(
-                "simple_strategy_fallback_failed",
-                extra={"error": str(e)},
-                exc_info=True
-            )
+            logger.error("simple_strategy_fallback_failed", extra={"error": str(e)}, exc_info=True)
 
             # Return absolute minimal strategy
             return [
@@ -886,8 +879,8 @@ class AdvancedValidationSuggester:
             extra={
                 "treatment": treatment,
                 "outcome": outcome,
-                "reason": "Complex path analysis failed"
-            }
+                "reason": "Complex path analysis failed",
+            },
         )
 
         try:
@@ -905,11 +898,7 @@ class AdvancedValidationSuggester:
 
         except Exception as e:
             # Ultimate fallback: return empty analysis
-            logger.error(
-                "simple_path_analysis_failed",
-                extra={"error": str(e)},
-                exc_info=True
-            )
+            logger.error("simple_path_analysis_failed", extra={"error": str(e)}, exc_info=True)
 
             # Return minimal empty analysis (always succeeds)
             return PathAnalysis(
@@ -919,9 +908,7 @@ class AdvancedValidationSuggester:
                 critical_nodes=[],
             )
 
-    def _rank_strategies(
-        self, strategies: List[AdjustmentStrategy]
-    ) -> List[AdjustmentStrategy]:
+    def _rank_strategies(self, strategies: List[AdjustmentStrategy]) -> List[AdjustmentStrategy]:
         """
         Rank strategies by desirability.
 

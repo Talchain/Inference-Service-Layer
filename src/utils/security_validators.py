@@ -21,9 +21,9 @@ MAX_MONTE_CARLO_SAMPLES = 100000
 MIN_MONTE_CARLO_SAMPLES = 1000
 
 # Regex patterns
-IDENTIFIER_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
-USER_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-]+$')
-SAFE_EQUATION_PATTERN = re.compile(r'^[a-zA-Z0-9_+\-*/()., ]+$')
+IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+USER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
+SAFE_EQUATION_PATTERN = re.compile(r"^[a-zA-Z0-9_+\-*/()., ]+$")
 
 
 def validate_dag_size(nodes: List[str], edges: List[Tuple[str, str]]) -> None:
@@ -63,8 +63,7 @@ def validate_no_self_loops(edges: List[Tuple[str, str]]) -> None:
     for edge in edges:
         if edge[0] == edge[1]:
             raise ValueError(
-                f"Self-loops not allowed: {edge[0]} → {edge[0]}. "
-                f"DAGs must be acyclic."
+                f"Self-loops not allowed: {edge[0]} → {edge[0]}. " f"DAGs must be acyclic."
             )
 
 
@@ -80,10 +79,7 @@ def validate_no_duplicate_nodes(nodes: List[str]) -> None:
     """
     if len(nodes) != len(set(nodes)):
         duplicates = [n for n in nodes if nodes.count(n) > 1]
-        raise ValueError(
-            f"Duplicate nodes found: {set(duplicates)}. "
-            f"Each node must be unique."
-        )
+        raise ValueError(f"Duplicate nodes found: {set(duplicates)}. " f"Each node must be unique.")
 
 
 def validate_edges_reference_nodes(edges: List[Tuple[str, str]], nodes: List[str]) -> None:
@@ -199,10 +195,7 @@ def validate_dict_size(d: Dict[str, Any], field_name: str = "dictionary") -> Non
         ValueError: If too large
     """
     if len(d) > MAX_DICT_SIZE:
-        raise ValueError(
-            f"{field_name} cannot exceed {MAX_DICT_SIZE} entries "
-            f"(got {len(d)})"
-        )
+        raise ValueError(f"{field_name} cannot exceed {MAX_DICT_SIZE} entries " f"(got {len(d)})")
 
 
 def validate_monte_carlo_samples(samples: int) -> None:

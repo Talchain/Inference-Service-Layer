@@ -9,7 +9,7 @@ Tests coherence analysis including:
 
 import pytest
 
-from src.models.requests import CoherenceAnalysisRequest, RankedOption
+from src.models.requests import CoherenceAnalysisRequest, CoherenceRankedOption as RankedOption
 from src.models.responses import RankingStability
 from src.models.shared import GraphNodeV1, GraphV1, NodeKind
 from src.services.coherence_analyzer import CoherenceAnalyzer

@@ -21,19 +21,19 @@ logger = logging.getLogger(__name__)
 # Node role colors
 NODE_COLORS = {
     "treatment": "#3498db",  # Blue
-    "outcome": "#e74c3c",    # Red
-    "confounder": "#f39c12", # Orange
-    "mediator": "#9b59b6",   # Purple
-    "instrument": "#1abc9c", # Teal
-    "default": "#95a5a6",    # Gray
+    "outcome": "#e74c3c",  # Red
+    "confounder": "#f39c12",  # Orange
+    "mediator": "#9b59b6",  # Purple
+    "instrument": "#1abc9c",  # Teal
+    "default": "#95a5a6",  # Gray
 }
 
 # Edge colors
 EDGE_COLORS = {
-    "backdoor": "#e74c3c",   # Red (confounding)
-    "direct": "#2ecc71",     # Green (causal)
-    "highlighted": "#f39c12",# Orange (highlighted path)
-    "default": "#7f8c8d",    # Dark gray
+    "backdoor": "#e74c3c",  # Red (confounding)
+    "direct": "#2ecc71",  # Green (causal)
+    "highlighted": "#f39c12",  # Orange (highlighted path)
+    "default": "#7f8c8d",  # Dark gray
 }
 
 
@@ -45,7 +45,7 @@ class DAGVisualization:
     annotations, path highlighting, and multiple export formats.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize DAG visualization generator."""
         pass
 
@@ -77,22 +77,22 @@ class DAGVisualization:
 
         # Determine node roles
         if node_roles is None:
-            node_roles = self._infer_node_roles(
-                dag, treatment, outcome, highlighted_paths
-            )
+            node_roles = self._infer_node_roles(dag, treatment, outcome, highlighted_paths)
 
         # Build nodes list
         nodes = []
         for node in dag.nodes():
             role = node_roles.get(node, "default")
-            nodes.append({
-                "id": node,
-                "label": node,
-                "role": role,
-                "color": NODE_COLORS.get(role, NODE_COLORS["default"]),
-                "x": positions[node][0],
-                "y": positions[node][1],
-            })
+            nodes.append(
+                {
+                    "id": node,
+                    "label": node,
+                    "role": role,
+                    "color": NODE_COLORS.get(role, NODE_COLORS["default"]),
+                    "x": positions[node][0],
+                    "y": positions[node][1],
+                }
+            )
 
         # Build edges list
         edges = []
@@ -103,12 +103,14 @@ class DAGVisualization:
             if (source, target) in highlighted_edges:
                 edge_type = "highlighted"
 
-            edges.append({
-                "source": source,
-                "target": target,
-                "type": edge_type,
-                "color": EDGE_COLORS.get(edge_type, EDGE_COLORS["default"]),
-            })
+            edges.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "type": edge_type,
+                    "color": EDGE_COLORS.get(edge_type, EDGE_COLORS["default"]),
+                }
+            )
 
         return {
             "nodes": nodes,
@@ -120,7 +122,7 @@ class DAGVisualization:
                 "treatment": treatment,
                 "outcome": outcome,
                 "is_acyclic": nx.is_directed_acyclic_graph(dag),
-            }
+            },
         }
 
     def render_to_dot(
@@ -145,9 +147,7 @@ class DAGVisualization:
             DOT format string
         """
         if node_roles is None:
-            node_roles = self._infer_node_roles(
-                dag, treatment, outcome, highlighted_paths
-            )
+            node_roles = self._infer_node_roles(dag, treatment, outcome, highlighted_paths)
 
         highlighted_edges = self._get_highlighted_edges(highlighted_paths)
 
@@ -169,9 +169,7 @@ class DAGVisualization:
         for source, target in dag.edges():
             if (source, target) in highlighted_edges:
                 color = EDGE_COLORS["highlighted"]
-                lines.append(
-                    f'  "{source}" -> "{target}" [color="{color}", penwidth=2.0];'
-                )
+                lines.append(f'  "{source}" -> "{target}" [color="{color}", penwidth=2.0];')
             else:
                 color = EDGE_COLORS["default"]
                 lines.append(f'  "{source}" -> "{target}" [color="{color}"];')
@@ -436,9 +434,7 @@ class DAGVisualization:
 
         return edges
 
-    def _describe_path(
-        self, path: List[str], treatment: str, outcome: str, path_type: str
-    ) -> str:
+    def _describe_path(self, path: List[str], treatment: str, outcome: str, path_type: str) -> str:
         """
         Generate human-readable path description.
 
@@ -460,8 +456,7 @@ class DAGVisualization:
             )
         elif path_type == "frontdoor":
             return (
-                f"Frontdoor path: {path_str}. "
-                f"Mediator-based identification through this path."
+                f"Frontdoor path: {path_str}. " f"Mediator-based identification through this path."
             )
         elif path_type == "direct":
             return f"Direct causal path: {path_str}. This is the causal effect of interest."
@@ -512,7 +507,7 @@ def visualize_dag(
     treatment: Optional[str] = None,
     outcome: Optional[str] = None,
     format: str = "json",
-    **kwargs,
+    **kwargs: Any,
 ) -> Any:
     """
     Convenience function to visualize a DAG.
@@ -582,6 +577,4 @@ def visualize_strategy(
         Strategy visualization dict
     """
     viz = DAGVisualization()
-    return viz.create_strategy_visualization(
-        dag, treatment, outcome, adjustment_set, strategy_type
-    )
+    return viz.create_strategy_visualization(dag, treatment, outcome, adjustment_set, strategy_type)

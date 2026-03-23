@@ -18,7 +18,7 @@ from src.models.deliberation import (
     HabermasCommonGround,
     MemberPosition,
 )
-from src.services.consensus_generator import ConsensusGenerator as TemplateBasedGenerator
+from src.services.consensus_generator import ConsensusGenerator as TemplateBasedGenerator  # type: ignore[import-untyped]
 from src.services.llm_client import LLMClient
 from src.utils.business_metrics import track_llm_fallback, track_llm_request
 
@@ -124,7 +124,9 @@ class ConsensusGeneratorLLM:
             consensus = ConsensusStatement(
                 statement_id=result.get(
                     "statement_id",
-                    previous_consensus.statement_id if previous_consensus else f"consensus_{uuid.uuid4().hex[:8]}",
+                    previous_consensus.statement_id
+                    if previous_consensus
+                    else f"consensus_{uuid.uuid4().hex[:8]}",
                 ),
                 version=version,
                 text=result["statement_text"],
@@ -153,7 +155,12 @@ class ConsensusGeneratorLLM:
             logger.error(f"Failed to parse LLM consensus response: {e}")
             track_llm_fallback(reason="json_parse_error")
             return self._fallback_consensus(
-                common_ground, positions, previous_consensus, edit_suggestions, decision_context, request_id
+                common_ground,
+                positions,
+                previous_consensus,
+                edit_suggestions,
+                decision_context,
+                request_id,
             )
 
         except ValueError as e:
@@ -164,14 +171,24 @@ class ConsensusGeneratorLLM:
                 logger.error(f"LLM consensus error: {e}")
                 track_llm_fallback(reason="value_error")
             return self._fallback_consensus(
-                common_ground, positions, previous_consensus, edit_suggestions, decision_context, request_id
+                common_ground,
+                positions,
+                previous_consensus,
+                edit_suggestions,
+                decision_context,
+                request_id,
             )
 
         except Exception as e:
             logger.error(f"LLM consensus generation failed: {e}")
             track_llm_fallback(reason="api_error")
             return self._fallback_consensus(
-                common_ground, positions, previous_consensus, edit_suggestions, decision_context, request_id
+                common_ground,
+                positions,
+                previous_consensus,
+                edit_suggestions,
+                decision_context,
+                request_id,
             )
 
     def _build_consensus_messages(
@@ -234,9 +251,7 @@ class ConsensusGeneratorLLM:
 
         # Previous consensus and edits
         if previous_consensus and edit_suggestions:
-            user_parts.append(
-                f"\n**Previous Consensus (v{previous_consensus.version}):**"
-            )
+            user_parts.append(f"\n**Previous Consensus (v{previous_consensus.version}):**")
             user_parts.append(previous_consensus.text)
 
             user_parts.append("\n**Edit Suggestions:**")
@@ -247,13 +262,9 @@ class ConsensusGeneratorLLM:
                 )
                 user_parts.append(f"  Reason: {edit.rationale}")
 
-            user_parts.append(
-                "\nGenerate an improved consensus incorporating these edits."
-            )
+            user_parts.append("\nGenerate an improved consensus incorporating these edits.")
         else:
-            user_parts.append(
-                "\nGenerate a consensus statement reflecting this common ground."
-            )
+            user_parts.append("\nGenerate a consensus statement reflecting this common ground.")
 
         user_parts.append("\nOutput JSON only.")
 
@@ -277,7 +288,7 @@ class ConsensusGeneratorLLM:
             extra={"request_id": request_id},
         )
 
-        return self.fallback.generate_consensus(
+        return self.fallback.generate_consensus(  # type: ignore[no-any-return]
             common_ground=common_ground,
             positions=positions,
             previous_consensus=previous_consensus,

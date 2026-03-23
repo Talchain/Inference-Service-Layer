@@ -11,7 +11,7 @@ which returns a per-request SeededRNG.
 import hashlib
 import json
 import logging
-from typing import Any, Dict, Union
+from typing import Any, Callable, Dict, Union
 
 from src.utils.rng import SeededRNG
 
@@ -91,7 +91,7 @@ def make_deterministic(request_data: Union[Dict[str, Any], list, str]) -> Seeded
 
 
 def verify_determinism(
-    func: callable,
+    func: Callable[[Dict[str, Any]], Any],
     input_data: Dict[str, Any],
     num_trials: int = 3,
 ) -> bool:

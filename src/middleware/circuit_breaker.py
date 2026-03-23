@@ -5,9 +5,9 @@ Stops accepting requests when system resources are constrained.
 """
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
-import psutil
+import psutil  # type: ignore[import-untyped]
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -22,7 +22,7 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
     This prevents cascading failures due to memory exhaustion.
     """
 
-    def __init__(self, app, threshold_percent: float = 85.0):
+    def __init__(self, app: Any, threshold_percent: float = 85.0) -> None:
         """
         Initialize circuit breaker.
 
@@ -32,9 +32,9 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.threshold = threshold_percent
-        self.last_log_time = 0
+        self.last_log_time: float = 0
 
-    async def dispatch(self, request: Request, call_next: Callable):
+    async def dispatch(self, request: Request, call_next: Callable) -> Any:
         """
         Check memory before processing request.
 
@@ -55,10 +55,16 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
         if mem.percent > self.threshold:
             # Extract request ID for correlation
             from src.utils.tracing import get_trace_id
-            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
+            request_id = (
+                request.headers.get("X-Request-Id")
+                or request.headers.get("X-Trace-Id")
+                or get_trace_id()
+            )
 
             # Log periodically (not on every request to avoid log spam)
             import time
+
             now = time.time()
             if now - self.last_log_time > 10:  # Log every 10 seconds
                 logger.warning(
@@ -68,7 +74,7 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
                         "threshold": self.threshold,
                         "available_mb": mem.available / 1024 / 1024,
                         "request_id": request_id,
-                    }
+                    },
                 )
                 self.last_log_time = now
 
@@ -83,7 +89,7 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
                     hints=[
                         "Wait 30 seconds before retrying",
                         "Simplify your request to reduce memory usage",
-                        "Consider reducing batch sizes or complexity"
+                        "Consider reducing batch sizes or complexity",
                     ],
                     suggestion="Retry after 30 seconds when memory usage decreases",
                 ),
@@ -95,7 +101,7 @@ class MemoryCircuitBreaker(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=503,
                 content=error_response.model_dump(exclude_none=True),
-                headers={"Retry-After": "30"}
+                headers={"Retry-After": "30"},
             )
 
         # Memory OK, process request normally
@@ -109,7 +115,7 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
     Rejects requests when dependencies are unhealthy.
     """
 
-    def __init__(self, app, redis_client=None):
+    def __init__(self, app: Any, redis_client: Any = None) -> None:
         """
         Initialize health circuit breaker.
 
@@ -119,10 +125,10 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self.redis_client = redis_client
-        self.last_health_check = 0
+        self.last_health_check: float = 0
         self.is_healthy = True
 
-    async def dispatch(self, request: Request, call_next: Callable):
+    async def dispatch(self, request: Request, call_next: Callable) -> Any:
         """
         Check health before processing request.
 
@@ -139,6 +145,7 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
 
         # Periodic health check (every 30 seconds)
         import time
+
         now = time.time()
         if now - self.last_health_check > 30:
             self.is_healthy = self._check_health()
@@ -147,12 +154,14 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
         if not self.is_healthy:
             # Extract request ID for correlation
             from src.utils.tracing import get_trace_id
-            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
 
-            logger.warning(
-                "circuit_breaker_health_check_failed",
-                extra={"request_id": request_id}
+            request_id = (
+                request.headers.get("X-Request-Id")
+                or request.headers.get("X-Trace-Id")
+                or get_trace_id()
             )
+
+            logger.warning("circuit_breaker_health_check_failed", extra={"request_id": request_id})
 
             # Return 503 with Olumi Error Schema v1.0
             from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
@@ -165,7 +174,7 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
                     hints=[
                         "Wait 30 seconds before retrying",
                         "Check service status page",
-                        "Contact support if issue persists"
+                        "Contact support if issue persists",
                     ],
                     suggestion="Retry after 30 seconds",
                 ),
@@ -177,7 +186,7 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=503,
                 content=error_response.model_dump(exclude_none=True),
-                headers={"Retry-After": "30"}
+                headers={"Retry-After": "30"},
             )
 
         # Health OK, process request
@@ -195,10 +204,7 @@ class HealthCircuitBreaker(BaseHTTPMiddleware):
             try:
                 self.redis_client.ping()
             except Exception as e:
-                logger.error(
-                    "redis_health_check_failed",
-                    extra={"error": str(e)}
-                )
+                logger.error("redis_health_check_failed", extra={"error": str(e)})
                 # Don't fail the circuit breaker for Redis (graceful degradation)
                 # But log the issue
                 pass

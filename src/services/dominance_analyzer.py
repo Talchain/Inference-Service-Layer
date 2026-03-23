@@ -20,9 +20,7 @@ class DominanceAnalyzer:
     """Service for detecting dominance relationships between options."""
 
     def analyze(
-        self,
-        options: List[DominanceOption],
-        criteria: List[str]
+        self, options: List[DominanceOption], criteria: List[str]
     ) -> Tuple[List[DominanceRelation], List[str]]:
         """
         Analyze options for dominance relationships using optimized Skyline algorithm.
@@ -48,10 +46,7 @@ class DominanceAnalyzer:
         """
         logger.info(
             "dominance_analysis_start",
-            extra={
-                "num_options": len(options),
-                "num_criteria": len(criteria)
-            }
+            extra={"num_options": len(options), "num_criteria": len(criteria)},
         )
 
         if not options:
@@ -60,9 +55,7 @@ class DominanceAnalyzer:
         # Step 1: Sort by sum of scores (O(n log n))
         # This heuristic places likely frontier candidates first
         sorted_options = sorted(
-            options,
-            key=lambda opt: sum(opt.scores.get(c, 0) for c in criteria),
-            reverse=True
+            options, key=lambda opt: sum(opt.scores.get(c, 0) for c in criteria), reverse=True
         )
 
         # Step 2: Incrementally build Pareto frontier
@@ -101,12 +94,14 @@ class DominanceAnalyzer:
         # This is necessary to capture all dominance relationships, not just frontier-based ones
         dominance_map: Dict[str, Set[str]] = dominated_by_frontier.copy()
 
-        dominated_options = [opt for opt in sorted_options if opt.option_id in dominated_by_frontier]
+        dominated_options = [
+            opt for opt in sorted_options if opt.option_id in dominated_by_frontier
+        ]
 
         # For dominated options, also check pairwise dominance among themselves
         # This is still faster than full O(n²) because we skip frontier comparisons
         for i, option_a in enumerate(dominated_options):
-            for option_b in dominated_options[i+1:]:
+            for option_b in dominated_options[i + 1 :]:
                 if self._dominates(option_b, option_a, criteria):
                     dominance_map[option_a.option_id].add(option_b.option_id)
                 elif self._dominates(option_a, option_b, criteria):
@@ -123,7 +118,7 @@ class DominanceAnalyzer:
                     dominated_option_id=dominated_id,
                     dominated_option_label=dominated_option.option_label,
                     dominated_by=sorted(list(dominating_ids)),  # Sorted for determinism
-                    degree=len(dominating_ids)
+                    degree=len(dominating_ids),
                 )
             )
 
@@ -137,17 +132,14 @@ class DominanceAnalyzer:
             "dominance_analysis_complete",
             extra={
                 "num_dominated": len(dominated_relations),
-                "frontier_size": len(non_dominated_ids)
-            }
+                "frontier_size": len(non_dominated_ids),
+            },
         )
 
         return dominated_relations, non_dominated_ids
 
     def _dominates(
-        self,
-        option_a: DominanceOption,
-        option_b: DominanceOption,
-        criteria: List[str]
+        self, option_a: DominanceOption, option_b: DominanceOption, criteria: List[str]
     ) -> bool:
         """
         Check if option_a dominates option_b.
@@ -201,7 +193,7 @@ class DominanceAnalyzer:
         self,
         target_option: DominanceOption,
         other_options: List[DominanceOption],
-        criteria: List[str]
+        criteria: List[str],
     ) -> bool:
         """
         Check if a specific option is dominated by any other option.

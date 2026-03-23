@@ -13,7 +13,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from src.models.deliberation import DeliberationRequest, DeliberationResponse
 from src.models.metadata import create_response_metadata
-from src.services.deliberation_orchestrator import DeliberationOrchestrator
+from src.services.deliberation_orchestrator import DeliberationOrchestrator  # type: ignore[import-untyped]
 from src.utils.business_metrics import track_habermas_deliberation
 
 router = APIRouter()
@@ -130,7 +130,7 @@ async def conduct_deliberation(
             },
         )
 
-        return response
+        return response  # type: ignore[no-any-return]
 
     except HTTPException:
         raise
@@ -150,7 +150,7 @@ async def conduct_deliberation(
 async def get_deliberation_session(
     session_id: str,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-):
+) -> dict:
     """
     Get deliberation session details.
 

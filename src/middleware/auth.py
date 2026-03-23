@@ -8,7 +8,7 @@ import hashlib
 import logging
 import os
 import secrets
-from typing import Optional, Set
+from typing import Any, Optional, Set
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -50,7 +50,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         "/redoc",
     )
 
-    def __init__(self, app, api_keys: Optional[str] = None, auth_disabled: bool = False):
+    def __init__(
+        self, app: Any, api_keys: Optional[str] = None, auth_disabled: bool = False
+    ) -> None:
         """
         Initialize the middleware.
 
@@ -61,7 +63,9 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
             auth_disabled: Explicitly disable authentication (for local development only)
         """
         super().__init__(app)
-        self._auth_disabled = auth_disabled or os.getenv("ISL_AUTH_DISABLED", "false").lower() == "true"
+        self._auth_disabled = (
+            auth_disabled or os.getenv("ISL_AUTH_DISABLED", "false").lower() == "true"
+        )
         self._api_keys = self._load_api_keys(api_keys)
         self._auth_enabled = len(self._api_keys) > 0 and not self._auth_disabled
 
@@ -117,7 +121,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
 
         return False
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
         """
         Process the request with API key authentication.
 
@@ -146,7 +150,11 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         client_ip = get_client_ip(request)
 
         # Get request ID for correlation
-        request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+        request_id = (
+            request.headers.get("X-Request-Id")
+            or request.headers.get("X-Trace-Id")
+            or get_trace_id()
+        )
 
         # Validate API key
         if not api_key:
@@ -164,7 +172,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 recovery=RecoveryHints(
                     hints=[
                         "Include X-API-Key header in your request",
-                        "Ensure API key is properly configured"
+                        "Ensure API key is properly configured",
                     ],
                     suggestion="Provide X-API-Key header",
                 ),
@@ -194,10 +202,7 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
                 message="Invalid API key.",
                 reason="invalid_api_key",
                 recovery=RecoveryHints(
-                    hints=[
-                        "Verify your API key is correct",
-                        "Check if your API key has expired"
-                    ],
+                    hints=["Verify your API key is correct", "Check if your API key has expired"],
                     suggestion="Check your API key",
                 ),
                 retryable=False,

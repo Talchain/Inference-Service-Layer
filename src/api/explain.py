@@ -103,9 +103,11 @@ async def generate_contrastive_explanation(
                 "request_id": request_id,
                 "num_interventions": len(result.minimal_interventions),
                 "best_intervention_cost": result.minimal_interventions[0].cost_estimate
-                if result.minimal_interventions else None,
+                if result.minimal_interventions
+                else None,
                 "best_intervention_robustness": result.minimal_interventions[0].robustness.value
-                if result.minimal_interventions else None,
+                if result.minimal_interventions
+                else None,
             },
         )
 
@@ -115,9 +117,7 @@ async def generate_contrastive_explanation(
         raise
     except Exception as e:
         logger.error(
-            "contrastive_explanation_error",
-            extra={"request_id": request_id},
-            exc_info=True
+            "contrastive_explanation_error", extra={"request_id": request_id}, exc_info=True
         )
         raise HTTPException(
             status_code=500,

@@ -294,7 +294,7 @@ async def analyze_robustness_v2(
         alias="X-ISL-Response-Version",
         description="Alternative way to specify response version via header",
     ),
-):
+) -> Any:
     """
     Analyze robustness with dual uncertainty (v2.2 schema).
 
@@ -999,15 +999,15 @@ async def analyze_robustness_unified(
             # Validate and process v2 request
             validated_request = RobustnessRequestV2(**request)
             validated_request.request_id = validated_request.request_id or request_id
-            return await analyze_robustness_v2(
+            return await analyze_robustness_v2(  # type: ignore[no-any-return]
                 validated_request,
                 x_request_id=request_id,
             )
         else:
             # Validate and process v1 request
-            validated_request = RobustnessRequest(**request)
+            validated_v1_request = RobustnessRequest(**request)
             return await analyze_robustness(
-                validated_request,
+                validated_v1_request,
                 x_request_id=request_id,
             )
 

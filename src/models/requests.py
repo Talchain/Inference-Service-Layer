@@ -15,22 +15,10 @@ class CausalValidationRequest(BaseModel):
     """Request model for causal validation endpoint."""
 
     dag: DAGStructure = Field(..., description="Directed acyclic graph structure")
-    treatment: str = Field(
-        ...,
-        description="Treatment variable name",
-        min_length=1,
-        max_length=100
-    )
-    outcome: str = Field(
-        ...,
-        description="Outcome variable name",
-        min_length=1,
-        max_length=100
-    )
+    treatment: str = Field(..., description="Treatment variable name", min_length=1, max_length=100)
+    outcome: str = Field(..., description="Outcome variable name", min_length=1, max_length=100)
     observed: Optional[List[str]] = Field(
-        default=None,
-        description="Optional list of observed variables",
-        max_length=50
+        default=None, description="Optional list of observed variables", max_length=50
     )
 
     model_config = {
@@ -61,10 +49,7 @@ class CounterfactualRequest(BaseModel):
         description="Intervention values mapping variable names to values",
     )
     outcome: str = Field(
-        ...,
-        description="Outcome variable to predict",
-        min_length=1,
-        max_length=100
+        ..., description="Outcome variable to predict", min_length=1, max_length=100
     )
     context: Optional[Dict[str, float]] = Field(
         default=None,
@@ -82,10 +67,11 @@ class CounterfactualRequest(BaseModel):
 
     @field_validator("intervention", "context")
     @classmethod
-    def validate_dict_size(cls, v, info):
+    def validate_dict_size(cls, v: Any, info: Any) -> Any:
         """Validate dictionary sizes."""
         if v is not None:
             from src.utils.security_validators import validate_dict_size
+
             field_name = info.field_name
             validate_dict_size(v, field_name)
         return v
@@ -118,25 +104,12 @@ class TeamPerspective(BaseModel):
     """Individual team member's perspective."""
 
     role: str = Field(
-        ...,
-        description="Role name (e.g., PM, Designer, Engineer)",
-        min_length=1,
-        max_length=100
+        ..., description="Role name (e.g., PM, Designer, Engineer)", min_length=1, max_length=100
     )
-    priorities: List[str] = Field(
-        ...,
-        description="What this role cares about",
-        max_length=20
-    )
-    constraints: List[str] = Field(
-        ...,
-        description="What limits this role",
-        max_length=20
-    )
+    priorities: List[str] = Field(..., description="What this role cares about", max_length=20)
+    constraints: List[str] = Field(..., description="What limits this role", max_length=20)
     preferred_options: Optional[List[str]] = Field(
-        default=None,
-        description="Preferred option IDs",
-        max_length=50
+        default=None, description="Preferred option IDs", max_length=50
     )
 
     model_config = {
@@ -154,18 +127,8 @@ class TeamPerspective(BaseModel):
 class DecisionOption(BaseModel):
     """A decision option to evaluate."""
 
-    id: str = Field(
-        ...,
-        description="Unique option identifier",
-        min_length=1,
-        max_length=100
-    )
-    name: str = Field(
-        ...,
-        description="Human-readable option name",
-        min_length=1,
-        max_length=200
-    )
+    id: str = Field(..., description="Unique option identifier", min_length=1, max_length=100)
+    name: str = Field(..., description="Human-readable option name", min_length=1, max_length=200)
     attributes: Dict[str, Any] = Field(
         ...,
         description="Characteristics of this option",
@@ -173,9 +136,10 @@ class DecisionOption(BaseModel):
 
     @field_validator("attributes")
     @classmethod
-    def validate_attributes_size(cls, v):
+    def validate_attributes_size(cls, v: Any) -> Any:
         """Validate attributes dict size."""
         from src.utils.security_validators import validate_dict_size
+
         validate_dict_size(v, "attributes")
         return v
 
@@ -198,16 +162,10 @@ class TeamAlignmentRequest(BaseModel):
     """Request model for team alignment endpoint."""
 
     perspectives: List[TeamPerspective] = Field(
-        ...,
-        description="Team member perspectives",
-        min_length=2,
-        max_length=20
+        ..., description="Team member perspectives", min_length=2, max_length=20
     )
     options: List[DecisionOption] = Field(
-        ...,
-        description="Decision options to evaluate",
-        min_length=2,
-        max_length=50
+        ..., description="Decision options to evaluate", min_length=2, max_length=50
     )
 
     model_config = {
@@ -247,12 +205,7 @@ class TeamAlignmentRequest(BaseModel):
 class Assumption(BaseModel):
     """An assumption to test in sensitivity analysis."""
 
-    name: str = Field(
-        ...,
-        description="Assumption name",
-        min_length=1,
-        max_length=200
-    )
+    name: str = Field(..., description="Assumption name", min_length=1, max_length=200)
     current_value: Union[str, float, Dict[str, Any]] = Field(
         ...,
         description="Current assumed value",
@@ -261,7 +214,7 @@ class Assumption(BaseModel):
         ...,
         description="Assumption type: parametric, structural, or distributional",
         min_length=1,
-        max_length=50
+        max_length=50,
     )
     variation_range: Optional[Dict[str, float]] = Field(
         default=None,
@@ -286,10 +239,7 @@ class SensitivityAnalysisRequest(BaseModel):
     model: StructuralModel = Field(..., description="Structural causal model")
     baseline_result: float = Field(..., description="Baseline analysis result")
     assumptions: List[Assumption] = Field(
-        ...,
-        description="Assumptions to test",
-        min_length=1,
-        max_length=30
+        ..., description="Assumptions to test", min_length=1, max_length=30
     )
 
     model_config = {
@@ -320,21 +270,13 @@ class InterventionConstraints(BaseModel):
     """Constraints for finding minimal interventions."""
 
     feasible: List[str] = Field(
-        ...,
-        description="Variables that can be changed",
-        min_length=1,
-        max_length=20
+        ..., description="Variables that can be changed", min_length=1, max_length=20
     )
     fixed: Optional[List[str]] = Field(
-        default=None,
-        description="Variables that cannot be changed",
-        max_length=20
+        default=None, description="Variables that cannot be changed", max_length=20
     )
     max_changes: int = Field(
-        default=1,
-        description="Maximum number of variables to change simultaneously",
-        ge=1,
-        le=5
+        default=1, description="Maximum number of variables to change simultaneously", ge=1, le=5
     )
     minimize: str = Field(
         default="change_magnitude",
@@ -347,10 +289,11 @@ class InterventionConstraints(BaseModel):
 
     @field_validator("variable_bounds")
     @classmethod
-    def validate_bounds_size(cls, v):
+    def validate_bounds_size(cls, v: Any) -> Any:
         """Validate variable bounds dict size."""
         if v is not None:
             from src.utils.security_validators import validate_dict_size
+
             validate_dict_size(v, "variable_bounds")
         return v
 
@@ -362,8 +305,8 @@ class InterventionConstraints(BaseModel):
                 "max_changes": 2,
                 "minimize": "cost",
                 "variable_bounds": {
-                    "Price": (30, 100),
-                    "Marketing": (10000, 100000),
+                    "Price": [30, 100],
+                    "Marketing": [10000, 100000],
                 },
             }
         }
@@ -397,10 +340,11 @@ class ContrastiveExplanationRequest(BaseModel):
 
     @field_validator("current_state", "observed_outcome", "target_outcome")
     @classmethod
-    def validate_dict_size(cls, v, info):
+    def validate_dict_size(cls, v: Any, info: Any) -> Any:
         """Validate dictionary sizes."""
         if v is not None:
             from src.utils.security_validators import validate_dict_size
+
             field_name = info.field_name
             validate_dict_size(v, field_name)
         return v
@@ -424,7 +368,7 @@ class ContrastiveExplanationRequest(BaseModel):
                     "Marketing": 30000,
                 },
                 "observed_outcome": {"Revenue": 40000},
-                "target_outcome": {"Revenue": (50000, 55000)},
+                "target_outcome": {"Revenue": [50000, 55000]},
                 "constraints": {
                     "feasible": ["Price", "Marketing"],
                     "fixed": ["Quality"],
@@ -441,26 +385,22 @@ class ScenarioSpec(BaseModel):
     """Specification for a single counterfactual scenario."""
 
     id: str = Field(
-        ...,
-        description="User-defined scenario identifier",
-        min_length=1,
-        max_length=100
+        ..., description="User-defined scenario identifier", min_length=1, max_length=100
     )
     intervention: Dict[str, float] = Field(
         ...,
         description="Intervention values for this scenario",
     )
     label: Optional[str] = Field(
-        default=None,
-        description="Optional human-readable label",
-        max_length=200
+        default=None, description="Optional human-readable label", max_length=200
     )
 
     @field_validator("intervention")
     @classmethod
-    def validate_intervention_size(cls, v):
+    def validate_intervention_size(cls, v: Any) -> Any:
         """Validate intervention dict size."""
         from src.utils.security_validators import validate_dict_size
+
         validate_dict_size(v, "intervention")
         return v
 
@@ -480,16 +420,10 @@ class BatchCounterfactualRequest(BaseModel):
 
     model: StructuralModel = Field(..., description="Structural causal model")
     scenarios: List[ScenarioSpec] = Field(
-        ...,
-        description="List of scenarios to evaluate",
-        min_length=2,
-        max_length=20
+        ..., description="List of scenarios to evaluate", min_length=2, max_length=20
     )
     outcome: str = Field(
-        ...,
-        description="Outcome variable to predict",
-        min_length=1,
-        max_length=100
+        ..., description="Outcome variable to predict", min_length=1, max_length=100
     )
     analyze_interactions: bool = Field(
         default=True,
@@ -525,7 +459,11 @@ class BatchCounterfactualRequest(BaseModel):
                 "scenarios": [
                     {"id": "baseline", "intervention": {"Price": 40}, "label": "Current pricing"},
                     {"id": "increase", "intervention": {"Price": 50}, "label": "10% increase"},
-                    {"id": "combined", "intervention": {"Price": 50, "Quality": 8.5}, "label": "Price + Quality"},
+                    {
+                        "id": "combined",
+                        "intervention": {"Price": 50, "Quality": 8.5},
+                        "label": "Price + Quality",
+                    },
                 ],
                 "outcome": "Revenue",
                 "analyze_interactions": True,
@@ -541,14 +479,10 @@ class DataSummary(BaseModel):
 
     n_samples: int = Field(..., description="Number of samples available", ge=0)
     available_variables: List[str] = Field(
-        ...,
-        description="Variables measured in this domain",
-        max_length=50
+        ..., description="Variables measured in this domain", max_length=50
     )
     notes: List[str] = Field(
-        default_factory=list,
-        description="Additional notes about data availability",
-        max_length=10
+        default_factory=list, description="Additional notes about data availability", max_length=10
     )
 
     model_config = {
@@ -565,12 +499,7 @@ class DataSummary(BaseModel):
 class DomainSpec(BaseModel):
     """Specification for a single domain (e.g., market, region)."""
 
-    name: str = Field(
-        ...,
-        description="Domain name",
-        min_length=1,
-        max_length=100
-    )
+    name: str = Field(..., description="Domain name", min_length=1, max_length=100)
     dag: DAGStructure = Field(..., description="Causal graph structure for this domain")
     data_summary: Optional[DataSummary] = Field(
         default=None,
@@ -599,23 +528,13 @@ class TransportabilityRequest(BaseModel):
     """Request model for transportability analysis."""
 
     source_domain: DomainSpec = Field(..., description="Source domain (where effect is identified)")
-    target_domain: DomainSpec = Field(..., description="Target domain (where effect is transported)")
-    treatment: str = Field(
-        ...,
-        description="Treatment variable",
-        min_length=1,
-        max_length=100
+    target_domain: DomainSpec = Field(
+        ..., description="Target domain (where effect is transported)"
     )
-    outcome: str = Field(
-        ...,
-        description="Outcome variable",
-        min_length=1,
-        max_length=100
-    )
+    treatment: str = Field(..., description="Treatment variable", min_length=1, max_length=100)
+    outcome: str = Field(..., description="Outcome variable", min_length=1, max_length=100)
     selection_variables: Optional[List[str]] = Field(
-        default=None,
-        description="Variables affected by domain selection (if known)",
-        max_length=20
+        default=None, description="Variables affected by domain selection (if known)", max_length=20
     )
 
     model_config = {
@@ -753,18 +672,8 @@ class ValidationStrategyRequest(BaseModel):
     """
 
     dag: DAGStructure = Field(..., description="Directed acyclic graph structure")
-    treatment: str = Field(
-        ...,
-        description="Treatment variable name",
-        min_length=1,
-        max_length=100
-    )
-    outcome: str = Field(
-        ...,
-        description="Outcome variable name",
-        min_length=1,
-        max_length=100
-    )
+    treatment: str = Field(..., description="Treatment variable name", min_length=1, max_length=100)
+    outcome: str = Field(..., description="Outcome variable name", min_length=1, max_length=100)
 
     model_config = {
         "json_schema_extra": {
@@ -794,13 +703,10 @@ class DiscoveryFromDataRequest(BaseModel):
         ...,
         description="Data matrix (rows = samples, columns = variables)",
         min_length=10,
-        max_length=10000
+        max_length=10000,
     )
     variable_names: List[str] = Field(
-        ...,
-        description="Names of variables (must match data columns)",
-        min_length=2,
-        max_length=50
+        ..., description="Names of variables (must match data columns)", min_length=2, max_length=50
     )
     prior_knowledge: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -848,13 +754,10 @@ class DiscoveryFromKnowledgeRequest(BaseModel):
         ...,
         description="Natural language description of the domain",
         min_length=10,
-        max_length=2000
+        max_length=2000,
     )
     variable_names: List[str] = Field(
-        ...,
-        description="Names of variables in the domain",
-        min_length=2,
-        max_length=50
+        ..., description="Names of variables in the domain", min_length=2, max_length=50
     )
     prior_knowledge: Optional[Dict[str, Any]] = Field(
         default=None,
@@ -885,10 +788,7 @@ class BeliefDistribution(BaseModel):
     """Parameter belief distribution for sequential optimization."""
 
     parameter_name: str = Field(..., description="Parameter name")
-    distribution_type: str = Field(
-        ...,
-        description="Distribution type: normal, uniform, beta"
-    )
+    distribution_type: str = Field(..., description="Distribution type: normal, uniform, beta")
     parameters: Dict[str, float] = Field(
         ...,
         description="Distribution parameters (mean/std for normal, low/high for uniform, etc.)",
@@ -909,15 +809,9 @@ class OptimizationObjectiveSpec(BaseModel):
     """Optimization objective specification."""
 
     target_variable: str = Field(
-        ...,
-        description="Variable to optimize",
-        min_length=1,
-        max_length=100
+        ..., description="Variable to optimize", min_length=1, max_length=100
     )
-    goal: str = Field(
-        ...,
-        description="Optimization goal: maximize, minimize, or target"
-    )
+    goal: str = Field(..., description="Optimization goal: maximize, minimize, or target")
     target_value: Optional[float] = Field(
         default=None,
         description="Target value (required if goal=target)",
@@ -937,12 +831,7 @@ class ExperimentConstraintsSpec(BaseModel):
     """Constraints on experiments."""
 
     budget: float = Field(..., description="Total remaining budget", gt=0)
-    time_horizon: int = Field(
-        ...,
-        description="Number of experiments remaining",
-        ge=1,
-        le=100
-    )
+    time_horizon: int = Field(..., description="Number of experiments remaining", ge=1, le=100)
     feasible_interventions: Dict[str, tuple[float, float]] = Field(
         ...,
         description="Feasible ranges for each intervention variable (min, max)",
@@ -954,8 +843,8 @@ class ExperimentConstraintsSpec(BaseModel):
                 "budget": 100000,
                 "time_horizon": 5,
                 "feasible_interventions": {
-                    "Price": (30, 100),
-                    "Marketing": (10000, 100000),
+                    "Price": [30, 100],
+                    "Marketing": [10000, 100000],
                 },
             }
         }
@@ -997,10 +886,7 @@ class ExperimentRecommendationRequest(BaseModel):
     """
 
     beliefs: List[BeliefDistribution] = Field(
-        ...,
-        description="Current beliefs about model parameters",
-        min_length=1,
-        max_length=30
+        ..., description="Current beliefs about model parameters", min_length=1, max_length=30
     )
     objective: OptimizationObjectiveSpec = Field(
         ...,
@@ -1037,7 +923,7 @@ class ExperimentRecommendationRequest(BaseModel):
                     "budget": 100000,
                     "time_horizon": 5,
                     "feasible_interventions": {
-                        "Price": (30, 100),
+                        "Price": [30, 100],
                     },
                 },
                 "history": [
@@ -1063,10 +949,7 @@ class SensitivityDetailedRequest(BaseModel):
 
     graph: GraphV1 = Field(..., description="Decision graph structure")
     timeout: Optional[int] = Field(
-        default=12000,
-        description="Request timeout in milliseconds",
-        ge=1000,
-        le=30000
+        default=12000, description="Request timeout in milliseconds", ge=1000, le=30000
     )
 
     model_config = {
@@ -1078,23 +961,13 @@ class SensitivityDetailedRequest(BaseModel):
                             "id": "n_market_size",
                             "kind": "outcome",
                             "label": "Market Size",
-                            "belief": 0.75
+                            "belief": 0.75,
                         },
-                        {
-                            "id": "n_roi",
-                            "kind": "outcome",
-                            "label": "ROI"
-                        }
+                        {"id": "n_roi", "kind": "outcome", "label": "ROI"},
                     ],
-                    "edges": [
-                        {
-                            "from": "n_market_size",
-                            "to": "n_roi",
-                            "weight": 2.5
-                        }
-                    ]
+                    "edges": [{"from": "n_market_size", "to": "n_roi", "weight": 2.5}],
                 },
-                "timeout": 12000
+                "timeout": 12000,
             }
         }
     }
@@ -1105,15 +978,10 @@ class ContrastiveRequest(BaseModel):
 
     graph: GraphV1 = Field(..., description="Decision graph structure")
     target_outcome: str = Field(
-        ...,
-        description="Desired outcome or node ID to analyze",
-        max_length=100
+        ..., description="Desired outcome or node ID to analyze", max_length=100
     )
     timeout: Optional[int] = Field(
-        default=12000,
-        description="Request timeout in milliseconds",
-        ge=1000,
-        le=30000
+        default=12000, description="Request timeout in milliseconds", ge=1000, le=30000
     )
 
     model_config = {
@@ -1121,27 +989,15 @@ class ContrastiveRequest(BaseModel):
             "example": {
                 "graph": {
                     "nodes": [
-                        {
-                            "id": "n_launch_product",
-                            "kind": "decision",
-                            "label": "Launch Product"
-                        },
-                        {
-                            "id": "n_market_success",
-                            "kind": "outcome",
-                            "label": "Market Success"
-                        }
+                        {"id": "n_launch_product", "kind": "decision", "label": "Launch Product"},
+                        {"id": "n_market_success", "kind": "outcome", "label": "Market Success"},
                     ],
                     "edges": [
-                        {
-                            "from": "n_launch_product",
-                            "to": "n_market_success",
-                            "weight": 2.0
-                        }
-                    ]
+                        {"from": "n_launch_product", "to": "n_market_success", "weight": 2.0}
+                    ],
                 },
                 "target_outcome": "n_market_success",
-                "timeout": 12000
+                "timeout": 12000,
             }
         }
     }
@@ -1151,33 +1007,20 @@ class ConformalRequest(BaseModel):
     """Request model for conformal prediction endpoint."""
 
     graph: GraphV1 = Field(..., description="Decision graph structure")
-    variable: str = Field(
-        ...,
-        description="Variable or outcome to predict",
-        max_length=100
-    )
+    variable: str = Field(..., description="Variable or outcome to predict", max_length=100)
     timeout: Optional[int] = Field(
-        default=12000,
-        description="Request timeout in milliseconds",
-        ge=1000,
-        le=30000
+        default=12000, description="Request timeout in milliseconds", ge=1000, le=30000
     )
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "graph": {
-                    "nodes": [
-                        {
-                            "id": "n_revenue",
-                            "kind": "outcome",
-                            "label": "Revenue"
-                        }
-                    ],
-                    "edges": []
+                    "nodes": [{"id": "n_revenue", "kind": "outcome", "label": "Revenue"}],
+                    "edges": [],
                 },
                 "variable": "n_revenue",
-                "timeout": 12000
+                "timeout": 12000,
             }
         }
     }
@@ -1188,10 +1031,7 @@ class ValidationStrategiesRequest(BaseModel):
 
     graph: GraphV1 = Field(..., description="Decision graph structure")
     timeout: Optional[int] = Field(
-        default=12000,
-        description="Request timeout in milliseconds",
-        ge=1000,
-        le=30000
+        default=12000, description="Request timeout in milliseconds", ge=1000, le=30000
     )
 
     model_config = {
@@ -1199,26 +1039,12 @@ class ValidationStrategiesRequest(BaseModel):
             "example": {
                 "graph": {
                     "nodes": [
-                        {
-                            "id": "n_decision",
-                            "kind": "decision",
-                            "label": "Strategic Decision"
-                        },
-                        {
-                            "id": "n_outcome",
-                            "kind": "outcome",
-                            "label": "Business Outcome"
-                        }
+                        {"id": "n_decision", "kind": "decision", "label": "Strategic Decision"},
+                        {"id": "n_outcome", "kind": "outcome", "label": "Business Outcome"},
                     ],
-                    "edges": [
-                        {
-                            "from": "n_decision",
-                            "to": "n_outcome",
-                            "weight": 1.5
-                        }
-                    ]
+                    "edges": [{"from": "n_decision", "to": "n_outcome", "weight": 1.5}],
                 },
-                "timeout": 12000
+                "timeout": 12000,
             }
         }
     }
@@ -1229,14 +1055,10 @@ class ParameterRecommendationRequest(BaseModel):
 
     graph: GraphV1 = Field(..., description="Decision graph structure")
     timeout: Optional[int] = Field(
-        default=12000,
-        description="Request timeout in milliseconds",
-        ge=1000,
-        le=30000
+        default=12000, description="Request timeout in milliseconds", ge=1000, le=30000
     )
     current_parameters: Optional[Dict[str, float]] = Field(
-        default=None,
-        description="Optional current parameter values to compare against"
+        default=None, description="Optional current parameter values to compare against"
     )
 
     model_config = {
@@ -1248,28 +1070,22 @@ class ParameterRecommendationRequest(BaseModel):
                             "id": "n_decision",
                             "kind": "decision",
                             "label": "Launch Product",
-                            "belief": 0.8
+                            "belief": 0.8,
                         },
                         {
                             "id": "n_outcome",
                             "kind": "outcome",
                             "label": "Market Success",
-                            "belief": 0.6
-                        }
+                            "belief": 0.6,
+                        },
                     ],
-                    "edges": [
-                        {
-                            "from": "n_decision",
-                            "to": "n_outcome",
-                            "weight": 2.0
-                        }
-                    ]
+                    "edges": [{"from": "n_decision", "to": "n_outcome", "weight": 2.0}],
                 },
                 "timeout": 12000,
                 "current_parameters": {
                     "n_decision_to_n_outcome_weight": 2.0,
-                    "n_decision_belief": 0.8
-                }
+                    "n_decision_belief": 0.8,
+                },
             }
         }
     }
@@ -1284,25 +1100,16 @@ class DominanceOption(BaseModel):
     """Single option with scores across multiple criteria."""
 
     option_id: str = Field(
-        ...,
-        description="Unique option identifier",
-        min_length=1,
-        max_length=200
+        ..., description="Unique option identifier", min_length=1, max_length=200
     )
     option_label: str = Field(
-        ...,
-        description="Human-readable option label",
-        min_length=1,
-        max_length=500
+        ..., description="Human-readable option label", min_length=1, max_length=500
     )
-    scores: Dict[str, float] = Field(
-        ...,
-        description="Normalized scores (0-1) by criterion_id"
-    )
+    scores: Dict[str, float] = Field(..., description="Normalized scores (0-1) by criterion_id")
 
     @field_validator("scores")
     @classmethod
-    def validate_scores(cls, v):
+    def validate_scores(cls, v: Any) -> Any:
         """Validate scores are normalized 0-1 and finite."""
         if not v:
             raise ValueError("scores cannot be empty")
@@ -1312,7 +1119,7 @@ class DominanceOption(BaseModel):
                 raise ValueError(f"Score for {criterion_id} must be numeric")
             if not (0.0 <= score <= 1.0):
                 raise ValueError(f"Score for {criterion_id} must be in range [0, 1], got {score}")
-            if not float('-inf') < score < float('inf'):
+            if not float("-inf") < score < float("inf"):
                 raise ValueError(f"Score for {criterion_id} must be finite, got {score}")
 
         return v
@@ -1322,11 +1129,7 @@ class DominanceOption(BaseModel):
             "example": {
                 "option_id": "opt_launch_q1",
                 "option_label": "Launch in Q1 2025",
-                "scores": {
-                    "revenue": 0.85,
-                    "risk": 0.60,
-                    "timeline": 0.90
-                }
+                "scores": {"revenue": 0.85, "risk": 0.60, "timeline": 0.90},
             }
         }
     }
@@ -1336,25 +1139,24 @@ class DominanceRequest(BaseModel):
     """Request model for dominance detection endpoint."""
 
     request_id: Optional[str] = Field(
-        default=None,
-        description="Optional request ID for tracing (auto-generated if not provided)"
+        default=None, description="Optional request ID for tracing (auto-generated if not provided)"
     )
     options: List[DominanceOption] = Field(
         ...,
         description="Options to analyze for dominance relationships",
         min_length=2,
-        max_length=100
+        max_length=100,
     )
     criteria: List[str] = Field(
         ...,
         description="Criterion IDs to consider (must match keys in option scores)",
         min_length=1,
-        max_length=10
+        max_length=10,
     )
 
     @field_validator("options")
     @classmethod
-    def validate_option_consistency(cls, v, info):
+    def validate_option_consistency(cls, v: Any, info: Any) -> Any:
         """Validate all options have scores for all criteria."""
         if len(v) < 2:
             raise ValueError("At least 2 options required for dominance analysis")
@@ -1384,20 +1186,20 @@ class DominanceRequest(BaseModel):
                     {
                         "option_id": "opt_a",
                         "option_label": "Option A: Aggressive Growth",
-                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70},
                     },
                     {
                         "option_id": "opt_b",
                         "option_label": "Option B: Conservative Growth",
-                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90}
+                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90},
                     },
                     {
                         "option_id": "opt_c",
                         "option_label": "Option C: Balanced Approach",
-                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
-                    }
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80},
+                    },
                 ],
-                "criteria": ["revenue", "risk", "timeline"]
+                "criteria": ["revenue", "risk", "timeline"],
             }
         }
     }
@@ -1412,31 +1214,27 @@ class ParetoRequest(BaseModel):
     """Request model for Pareto frontier endpoint."""
 
     request_id: Optional[str] = Field(
-        default=None,
-        description="Optional request ID for tracing (auto-generated if not provided)"
+        default=None, description="Optional request ID for tracing (auto-generated if not provided)"
     )
     options: List[DominanceOption] = Field(
-        ...,
-        description="Options to analyze for Pareto frontier",
-        min_length=2,
-        max_length=100
+        ..., description="Options to analyze for Pareto frontier", min_length=2, max_length=100
     )
     criteria: List[str] = Field(
         ...,
         description="Criterion IDs to consider (must match keys in option scores)",
         min_length=1,
-        max_length=10
+        max_length=10,
     )
     max_frontier_size: Optional[int] = Field(
         default=20,
         description="Maximum number of frontier options to return (for large frontiers)",
         ge=1,
-        le=100
+        le=100,
     )
 
     @field_validator("options")
     @classmethod
-    def validate_option_consistency(cls, v, info):
+    def validate_option_consistency(cls, v: Any, info: Any) -> Any:
         """Validate all options have scores for all criteria."""
         if len(v) < 2:
             raise ValueError("At least 2 options required for Pareto analysis")
@@ -1466,21 +1264,21 @@ class ParetoRequest(BaseModel):
                     {
                         "option_id": "opt_a",
                         "option_label": "Option A: Aggressive Growth",
-                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70}
+                        "scores": {"revenue": 0.90, "risk": 0.40, "timeline": 0.70},
                     },
                     {
                         "option_id": "opt_b",
                         "option_label": "Option B: Conservative Growth",
-                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90}
+                        "scores": {"revenue": 0.60, "risk": 0.80, "timeline": 0.90},
                     },
                     {
                         "option_id": "opt_c",
                         "option_label": "Option C: Balanced Approach",
-                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80}
-                    }
+                        "scores": {"revenue": 0.75, "risk": 0.75, "timeline": 0.80},
+                    },
                 ],
                 "criteria": ["revenue", "risk", "timeline"],
-                "max_frontier_size": 20
+                "max_frontier_size": 20,
             }
         }
     }
@@ -1502,13 +1300,13 @@ class OptionScore(BaseModel):
 
     @field_validator("p10", "p50", "p90")
     @classmethod
-    def validate_scores(cls, v):
+    def validate_scores(cls, v: Any) -> Any:
         """Validate scores are 0-1 and finite."""
         if not isinstance(v, (int, float)):
             raise ValueError("Score must be numeric")
         if not (0.0 <= v <= 1.0):
             raise ValueError(f"Score must be in range [0, 1], got {v}")
-        if not float('-inf') < v < float('inf'):
+        if not float("-inf") < v < float("inf"):
             raise ValueError(f"Score must be finite, got {v}")
         return v
 
@@ -1519,7 +1317,7 @@ class OptionScore(BaseModel):
                 "option_label": "Launch in Q1 2025",
                 "p10": 0.65,
                 "p50": 0.85,
-                "p90": 0.95
+                "p90": 0.95,
             }
         }
     }
@@ -1528,23 +1326,12 @@ class OptionScore(BaseModel):
 class CriterionResult(BaseModel):
     """Results for a single criterion with scores for all options."""
 
-    criterion_id: str = Field(
-        ...,
-        description="Criterion identifier",
-        min_length=1,
-        max_length=100
-    )
+    criterion_id: str = Field(..., description="Criterion identifier", min_length=1, max_length=100)
     criterion_name: str = Field(
-        ...,
-        description="Human-readable criterion name",
-        min_length=1,
-        max_length=200
+        ..., description="Human-readable criterion name", min_length=1, max_length=200
     )
     options: List[OptionScore] = Field(
-        ...,
-        description="Scores for each option on this criterion",
-        min_length=2,
-        max_length=100
+        ..., description="Scores for each option on this criterion", min_length=2, max_length=100
     )
 
     model_config = {
@@ -1558,16 +1345,16 @@ class CriterionResult(BaseModel):
                         "option_label": "Option A",
                         "p10": 0.65,
                         "p50": 0.85,
-                        "p90": 0.95
+                        "p90": 0.95,
                     },
                     {
                         "option_id": "opt_b",
                         "option_label": "Option B",
                         "p10": 0.45,
                         "p50": 0.60,
-                        "p90": 0.75
-                    }
-                ]
+                        "p90": 0.75,
+                    },
+                ],
             }
         }
     }
@@ -1576,46 +1363,36 @@ class CriterionResult(BaseModel):
 class MultiCriteriaRequest(BaseModel):
     """Request model for multi-criteria aggregation endpoint."""
 
-    request_id: Optional[str] = Field(
-        default=None,
-        description="Optional request ID for tracing"
-    )
+    request_id: Optional[str] = Field(default=None, description="Optional request ID for tracing")
     criteria: List[CriterionResult] = Field(
         ...,
         description="Results for each criterion with option scores",
         min_length=1,
-        max_length=10
+        max_length=10,
     )
     aggregation_method: str = Field(
         ...,
         description="Aggregation method to use",
-        pattern="^(weighted_sum|weighted_product|lexicographic)$"
+        pattern="^(weighted_sum|weighted_product|lexicographic)$",
     )
     weights: Dict[str, float] = Field(
-        ...,
-        description="Weights by criterion_id (should sum to 1.0, will auto-normalize if not)"
+        ..., description="Weights by criterion_id (should sum to 1.0, will auto-normalize if not)"
     )
     percentile: Optional[str] = Field(
         default="p50",
         description="Which percentile to use for aggregation",
-        pattern="^(p10|p50|p90)$"
+        pattern="^(p10|p50|p90)$",
     )
     trade_off_threshold: Optional[float] = Field(
-        default=0.05,
-        description="Minimum score difference to report as trade-off",
-        ge=0.0,
-        le=1.0
+        default=0.05, description="Minimum score difference to report as trade-off", ge=0.0, le=1.0
     )
     timeout_ms: Optional[int] = Field(
-        default=5000,
-        description="Request timeout in milliseconds",
-        ge=100,
-        le=30000
+        default=5000, description="Request timeout in milliseconds", ge=100, le=30000
     )
 
     @field_validator("weights")
     @classmethod
-    def validate_weights_positive(cls, v):
+    def validate_weights_positive(cls, v: Any) -> Any:
         """Validate that weights are positive."""
         if not v:
             raise ValueError("weights cannot be empty")
@@ -1625,7 +1402,7 @@ class MultiCriteriaRequest(BaseModel):
                 raise ValueError(f"Weight for {criterion_id} must be numeric")
             if weight < 0:
                 raise ValueError(f"Weight for {criterion_id} must be non-negative, got {weight}")
-            if not float('-inf') < weight < float('inf'):
+            if not float("-inf") < weight < float("inf"):
                 raise ValueError(f"Weight for {criterion_id} must be finite, got {weight}")
 
         total = sum(v.values())
@@ -1643,23 +1420,47 @@ class MultiCriteriaRequest(BaseModel):
                         "criterion_id": "revenue",
                         "criterion_name": "Expected Revenue",
                         "options": [
-                            {"option_id": "opt_a", "option_label": "Option A", "p10": 0.65, "p50": 0.85, "p90": 0.95},
-                            {"option_id": "opt_b", "option_label": "Option B", "p10": 0.45, "p50": 0.60, "p90": 0.75}
-                        ]
+                            {
+                                "option_id": "opt_a",
+                                "option_label": "Option A",
+                                "p10": 0.65,
+                                "p50": 0.85,
+                                "p90": 0.95,
+                            },
+                            {
+                                "option_id": "opt_b",
+                                "option_label": "Option B",
+                                "p10": 0.45,
+                                "p50": 0.60,
+                                "p90": 0.75,
+                            },
+                        ],
                     },
                     {
                         "criterion_id": "risk",
                         "criterion_name": "Risk Level",
                         "options": [
-                            {"option_id": "opt_a", "option_label": "Option A", "p10": 0.30, "p50": 0.40, "p90": 0.55},
-                            {"option_id": "opt_b", "option_label": "Option B", "p10": 0.70, "p50": 0.80, "p90": 0.90}
-                        ]
-                    }
+                            {
+                                "option_id": "opt_a",
+                                "option_label": "Option A",
+                                "p10": 0.30,
+                                "p50": 0.40,
+                                "p90": 0.55,
+                            },
+                            {
+                                "option_id": "opt_b",
+                                "option_label": "Option B",
+                                "p10": 0.70,
+                                "p50": 0.80,
+                                "p90": 0.90,
+                            },
+                        ],
+                    },
                 ],
                 "aggregation_method": "weighted_sum",
                 "weights": {"revenue": 0.6, "risk": 0.4},
                 "percentile": "p50",
-                "trade_off_threshold": 0.05
+                "trade_off_threshold": 0.05,
             }
         }
     }
@@ -1673,65 +1474,47 @@ class MultiCriteriaRequest(BaseModel):
 class RiskOption(BaseModel):
     """Option with uncertainty for risk adjustment."""
 
-    option_id: str = Field(
-        ...,
-        description="Option identifier",
-        min_length=1,
-        max_length=200
-    )
+    option_id: str = Field(..., description="Option identifier", min_length=1, max_length=200)
     option_label: str = Field(
-        ...,
-        description="Human-readable option label",
-        min_length=1,
-        max_length=500
+        ..., description="Human-readable option label", min_length=1, max_length=500
     )
     # Support both mean/std_dev and percentile representations
     mean: Optional[float] = Field(
-        default=None,
-        description="Mean score (for mean-variance representation)"
+        default=None, description="Mean score (for mean-variance representation)"
     )
     std_dev: Optional[float] = Field(
-        default=None,
-        description="Standard deviation (for mean-variance representation)",
-        ge=0.0
+        default=None, description="Standard deviation (for mean-variance representation)", ge=0.0
     )
     p10: Optional[float] = Field(
-        default=None,
-        description="10th percentile score (for percentile representation)"
+        default=None, description="10th percentile score (for percentile representation)"
     )
     p50: Optional[float] = Field(
-        default=None,
-        description="50th percentile score (for percentile representation)"
+        default=None, description="50th percentile score (for percentile representation)"
     )
     p90: Optional[float] = Field(
-        default=None,
-        description="90th percentile score (for percentile representation)"
+        default=None, description="90th percentile score (for percentile representation)"
     )
 
     @field_validator("mean", "std_dev", "p10", "p50", "p90")
     @classmethod
-    def validate_scores_finite(cls, v):
+    def validate_scores_finite(cls, v: Any) -> Any:
         """Validate scores are finite if provided."""
         if v is not None:
             if not isinstance(v, (int, float)):
                 raise ValueError("Score must be numeric")
             if not (0.0 <= v <= 1.0):
                 raise ValueError(f"Score must be in range [0, 1], got {v}")
-            if not float('-inf') < v < float('inf'):
+            if not float("-inf") < v < float("inf"):
                 raise ValueError(f"Score must be finite, got {v}")
         return v
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context: Any) -> None:
         """Validate that either mean/std_dev or percentiles are provided."""
         has_mean_std = self.mean is not None and self.std_dev is not None
-        has_percentiles = (
-            self.p10 is not None and self.p50 is not None and self.p90 is not None
-        )
+        has_percentiles = self.p10 is not None and self.p50 is not None and self.p90 is not None
 
         if not has_mean_std and not has_percentiles:
-            raise ValueError(
-                "Must provide either (mean, std_dev) or (p10, p50, p90)"
-            )
+            raise ValueError("Must provide either (mean, std_dev) or (p10, p50, p90)")
 
         if has_mean_std and has_percentiles:
             raise ValueError(
@@ -1745,15 +1528,15 @@ class RiskOption(BaseModel):
                     "option_id": "opt_a",
                     "option_label": "Option A: High Risk",
                     "mean": 0.75,
-                    "std_dev": 0.15
+                    "std_dev": 0.15,
                 },
                 {
                     "option_id": "opt_b",
                     "option_label": "Option B: Low Risk",
                     "p10": 0.50,
                     "p50": 0.55,
-                    "p90": 0.60
-                }
+                    "p90": 0.60,
+                },
             ]
         }
     }
@@ -1762,42 +1545,30 @@ class RiskOption(BaseModel):
 class RiskAdjustmentRequest(BaseModel):
     """Request model for risk adjustment endpoint."""
 
-    request_id: Optional[str] = Field(
-        default=None,
-        description="Optional request ID for tracing"
-    )
+    request_id: Optional[str] = Field(default=None, description="Optional request ID for tracing")
     options: List[RiskOption] = Field(
-        ...,
-        description="Options with uncertainty to adjust for risk",
-        min_length=2,
-        max_length=100
+        ..., description="Options with uncertainty to adjust for risk", min_length=2, max_length=100
     )
     risk_coefficient: float = Field(
         ...,
         description="Risk coefficient from CEE risk profile (>0 for risk aversion)",
         ge=0.0,
-        le=10.0
+        le=10.0,
     )
     risk_type: str = Field(
-        ...,
-        description="Risk attitude type",
-        pattern="^(risk_averse|risk_neutral|risk_seeking)$"
+        ..., description="Risk attitude type", pattern="^(risk_averse|risk_neutral|risk_seeking)$"
     )
 
     @field_validator("risk_type")
     @classmethod
-    def validate_risk_type_coefficient(cls, v, info):
+    def validate_risk_type_coefficient(cls, v: Any, info: Any) -> Any:
         """Validate risk_type matches coefficient."""
         risk_coefficient = info.data.get("risk_coefficient")
         if risk_coefficient is not None:
             if v == "risk_neutral" and risk_coefficient != 0.0:
-                raise ValueError(
-                    "risk_neutral requires risk_coefficient=0.0"
-                )
+                raise ValueError("risk_neutral requires risk_coefficient=0.0")
             if v in ["risk_averse", "risk_seeking"] and risk_coefficient == 0.0:
-                raise ValueError(
-                    f"{v} requires risk_coefficient > 0.0"
-                )
+                raise ValueError(f"{v} requires risk_coefficient > 0.0")
         return v
 
     model_config = {
@@ -1809,24 +1580,24 @@ class RiskAdjustmentRequest(BaseModel):
                         "option_id": "opt_aggressive",
                         "option_label": "Aggressive Growth Strategy",
                         "mean": 0.80,
-                        "std_dev": 0.20
+                        "std_dev": 0.20,
                     },
                     {
                         "option_id": "opt_conservative",
                         "option_label": "Conservative Growth Strategy",
                         "mean": 0.60,
-                        "std_dev": 0.05
+                        "std_dev": 0.05,
                     },
                     {
                         "option_id": "opt_balanced",
                         "option_label": "Balanced Approach",
                         "p10": 0.55,
                         "p50": 0.70,
-                        "p90": 0.85
-                    }
+                        "p90": 0.85,
+                    },
                 ],
                 "risk_coefficient": 2.0,
-                "risk_type": "risk_averse"
+                "risk_type": "risk_averse",
             }
         }
     }
@@ -1840,33 +1611,22 @@ class RiskAdjustmentRequest(BaseModel):
 class ParameterSweep(BaseModel):
     """Parameter sweep with scores at different parameter values."""
 
-    parameter_id: str = Field(
-        ...,
-        description="Parameter identifier",
-        min_length=1,
-        max_length=200
-    )
+    parameter_id: str = Field(..., description="Parameter identifier", min_length=1, max_length=200)
     parameter_label: str = Field(
-        ...,
-        description="Human-readable parameter label",
-        min_length=1,
-        max_length=500
+        ..., description="Human-readable parameter label", min_length=1, max_length=500
     )
     values: List[float] = Field(
-        ...,
-        description="Parameter values tested (in sweep order)",
-        min_length=2,
-        max_length=1000
+        ..., description="Parameter values tested (in sweep order)", min_length=2, max_length=1000
     )
     scores_by_value: Dict[str, Dict[str, float]] = Field(
         ...,
         description="Scores for each option at each parameter value. "
-                    "Format: {parameter_value: {option_id: score}}"
+        "Format: {parameter_value: {option_id: score}}",
     )
 
     @field_validator("values")
     @classmethod
-    def validate_values_unique(cls, v):
+    def validate_values_unique(cls, v: Any) -> Any:
         """Validate that parameter values are unique."""
         if len(v) != len(set(v)):
             raise ValueError("Parameter values must be unique")
@@ -1874,7 +1634,7 @@ class ParameterSweep(BaseModel):
 
     @field_validator("scores_by_value")
     @classmethod
-    def validate_scores_by_value(cls, v, info):
+    def validate_scores_by_value(cls, v: Any, info: Any) -> Any:
         """Validate that scores_by_value has entries for all values."""
         values = info.data.get("values", [])
         if values:
@@ -1882,9 +1642,7 @@ class ParameterSweep(BaseModel):
             values_str = [str(val) for val in values]
             for val_str in values_str:
                 if val_str not in v:
-                    raise ValueError(
-                        f"scores_by_value missing entry for parameter value {val_str}"
-                    )
+                    raise ValueError(f"scores_by_value missing entry for parameter value {val_str}")
 
             # Check that all score dictionaries have same option_ids
             if v:
@@ -1900,9 +1658,7 @@ class ParameterSweep(BaseModel):
                 for val_str, scores in v.items():
                     for option_id, score in scores.items():
                         if not isinstance(score, (int, float)):
-                            raise ValueError(
-                                f"Score for {option_id} at {val_str} must be numeric"
-                            )
+                            raise ValueError(f"Score for {option_id} at {val_str} must be numeric")
                         if not (0.0 <= score <= 1.0):
                             raise ValueError(
                                 f"Score for {option_id} at {val_str} must be in [0, 1], got {score}"
@@ -1921,8 +1677,8 @@ class ParameterSweep(BaseModel):
                     "40.0": {"opt_a": 0.85, "opt_b": 0.70, "opt_c": 0.75},
                     "50.0": {"opt_a": 0.75, "opt_b": 0.80, "opt_c": 0.70},
                     "60.0": {"opt_a": 0.65, "opt_b": 0.85, "opt_c": 0.65},
-                    "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60}
-                }
+                    "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60},
+                },
             }
         }
     }
@@ -1931,26 +1687,23 @@ class ParameterSweep(BaseModel):
 class ThresholdIdentificationRequest(BaseModel):
     """Request model for threshold identification endpoint."""
 
-    request_id: Optional[str] = Field(
-        default=None,
-        description="Optional request ID for tracing"
-    )
+    request_id: Optional[str] = Field(default=None, description="Optional request ID for tracing")
     parameter_sweeps: List[ParameterSweep] = Field(
         ...,
         description="Parameter sweeps with scores at different values",
         min_length=1,
-        max_length=20
+        max_length=20,
     )
     baseline_ranking: Optional[List[str]] = Field(
         default=None,
         description="Optional baseline ranking (option_ids in rank order). "
-                    "If not provided, uses ranking at first parameter value."
+        "If not provided, uses ranking at first parameter value.",
     )
     confidence_threshold: Optional[float] = Field(
         default=0.1,
         description="Minimum score difference to consider ranking change meaningful",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
 
     model_config = {
@@ -1967,15 +1720,16 @@ class ThresholdIdentificationRequest(BaseModel):
                             "40.0": {"opt_a": 0.85, "opt_b": 0.70, "opt_c": 0.75},
                             "50.0": {"opt_a": 0.75, "opt_b": 0.80, "opt_c": 0.70},
                             "60.0": {"opt_a": 0.65, "opt_b": 0.85, "opt_c": 0.65},
-                            "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60}
-                        }
+                            "70.0": {"opt_a": 0.50, "opt_b": 0.90, "opt_c": 0.60},
+                        },
                     }
                 ],
                 "baseline_ranking": ["opt_a", "opt_c", "opt_b"],
-                "confidence_threshold": 0.1
+                "confidence_threshold": 0.1,
             }
         }
     }
+
 
 # ============================================================================
 # Phase 4: Sequential Decisions & Conditional Recommendations
@@ -1986,27 +1740,18 @@ class RiskMetrics(BaseModel):
     """Risk metrics for an option."""
 
     variance: Optional[float] = Field(
-        default=None,
-        description="Variance of the outcome distribution"
+        default=None, description="Variance of the outcome distribution"
     )
     downside_risk: Optional[float] = Field(
-        default=None,
-        description="Expected loss below a threshold (CVaR/VaR)"
+        default=None, description="Expected loss below a threshold (CVaR/VaR)"
     )
     probability_of_loss: Optional[float] = Field(
-        default=None,
-        description="Probability of negative outcome",
-        ge=0.0,
-        le=1.0
+        default=None, description="Probability of negative outcome", ge=0.0, le=1.0
     )
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "variance": 10000.0,
-                "downside_risk": 5000.0,
-                "probability_of_loss": 0.15
-            }
+            "example": {"variance": 10000.0, "downside_risk": 5000.0, "probability_of_loss": 0.15}
         }
     }
 
@@ -2015,28 +1760,15 @@ class RankedOption(BaseModel):
     """A ranked option for conditional recommendation analysis."""
 
     option_id: str = Field(
-        ...,
-        description="Unique identifier for the option",
-        min_length=1,
-        max_length=100
+        ..., description="Unique identifier for the option", min_length=1, max_length=100
     )
     label: str = Field(
-        ...,
-        description="Human-readable label for the option",
-        min_length=1,
-        max_length=200
+        ..., description="Human-readable label for the option", min_length=1, max_length=200
     )
-    expected_value: float = Field(
-        ...,
-        description="Expected value/utility of this option"
-    )
-    distribution: Distribution = Field(
-        ...,
-        description="Probability distribution of outcomes"
-    )
+    expected_value: float = Field(..., description="Expected value/utility of this option")
+    distribution: Distribution = Field(..., description="Probability distribution of outcomes")
     risk_metrics: Optional[RiskMetrics] = Field(
-        default=None,
-        description="Optional risk metrics for the option"
+        default=None, description="Optional risk metrics for the option"
     )
 
     model_config = {
@@ -2045,15 +1777,12 @@ class RankedOption(BaseModel):
                 "option_id": "option_a",
                 "label": "Launch Product A",
                 "expected_value": 50000.0,
-                "distribution": {
-                    "type": "normal",
-                    "parameters": {"mean": 50000, "std": 10000}
-                },
+                "distribution": {"type": "normal", "parameters": {"mean": 50000, "std": 10000}},
                 "risk_metrics": {
                     "variance": 100000000,
                     "downside_risk": 30000,
-                    "probability_of_loss": 0.1
-                }
+                    "probability_of_loss": 0.1,
+                },
             }
         }
     }
@@ -2063,32 +1792,23 @@ class ConditionalRecommendRequest(BaseModel):
     """Request model for conditional recommendation endpoint."""
 
     run_id: str = Field(
-        ...,
-        description="Unique identifier for this analysis run",
-        min_length=1,
-        max_length=100
+        ..., description="Unique identifier for this analysis run", min_length=1, max_length=100
     )
     ranked_options: List[RankedOption] = Field(
-        ...,
-        description="List of options ranked by expected value",
-        min_length=2,
-        max_length=20
+        ..., description="List of options ranked by expected value", min_length=2, max_length=20
     )
     parameters_to_condition_on: Optional[List[str]] = Field(
         default=None,
         description="Parameters to generate conditions for (auto-detect if None)",
-        max_length=20
+        max_length=20,
     )
     condition_types: List[str] = Field(
         default=["threshold", "dominance", "risk_profile"],
         description="Types of conditions to generate",
-        max_length=5
+        max_length=5,
     )
     max_conditions: int = Field(
-        default=5,
-        description="Maximum number of conditions to return",
-        ge=1,
-        le=20
+        default=5, description="Maximum number of conditions to return", ge=1, le=20
     )
 
     @field_validator("condition_types")
@@ -2110,18 +1830,24 @@ class ConditionalRecommendRequest(BaseModel):
                         "option_id": "option_a",
                         "label": "Aggressive Expansion",
                         "expected_value": 75000.0,
-                        "distribution": {"type": "normal", "parameters": {"mean": 75000, "std": 20000}}
+                        "distribution": {
+                            "type": "normal",
+                            "parameters": {"mean": 75000, "std": 20000},
+                        },
                     },
                     {
                         "option_id": "option_b",
                         "label": "Conservative Growth",
                         "expected_value": 50000.0,
-                        "distribution": {"type": "normal", "parameters": {"mean": 50000, "std": 5000}}
-                    }
+                        "distribution": {
+                            "type": "normal",
+                            "parameters": {"mean": 50000, "std": 5000},
+                        },
+                    },
                 ],
                 "parameters_to_condition_on": ["market_size", "competitor_response"],
                 "condition_types": ["threshold", "risk_profile"],
-                "max_conditions": 5
+                "max_conditions": 5,
             }
         }
     }
@@ -2130,29 +1856,16 @@ class ConditionalRecommendRequest(BaseModel):
 class SequentialGraphNode(BaseModel):
     """Node in a sequential decision graph."""
 
-    id: str = Field(
-        ...,
-        description="Unique node identifier",
-        min_length=1,
-        max_length=100
-    )
+    id: str = Field(..., description="Unique node identifier", min_length=1, max_length=100)
     type: str = Field(
         ...,
         description="Node type: 'decision', 'chance', or 'terminal'",
-        pattern="^(decision|chance|terminal)$"
+        pattern="^(decision|chance|terminal)$",
     )
-    label: str = Field(
-        ...,
-        description="Human-readable label",
-        max_length=200
-    )
-    payoff: Optional[float] = Field(
-        default=None,
-        description="Payoff value (for terminal nodes)"
-    )
+    label: str = Field(..., description="Human-readable label", max_length=200)
+    payoff: Optional[float] = Field(default=None, description="Payoff value (for terminal nodes)")
     probabilities: Optional[Dict[str, float]] = Field(
-        default=None,
-        description="Outcome probabilities (for chance nodes)"
+        default=None, description="Outcome probabilities (for chance nodes)"
     )
 
     model_config = {
@@ -2162,7 +1875,7 @@ class SequentialGraphNode(BaseModel):
                 "type": "decision",
                 "label": "Investment Decision",
                 "payoff": None,
-                "probabilities": None
+                "probabilities": None,
             }
         }
     }
@@ -2171,37 +1884,19 @@ class SequentialGraphNode(BaseModel):
 class SequentialGraphEdge(BaseModel):
     """Edge in a sequential decision graph."""
 
-    from_node: str = Field(
-        ...,
-        alias="from",
-        description="Source node ID",
-        max_length=100
-    )
-    to_node: str = Field(
-        ...,
-        alias="to",
-        description="Target node ID",
-        max_length=100
-    )
+    from_node: str = Field(..., alias="from", description="Source node ID", max_length=100)
+    to_node: str = Field(..., alias="to", description="Target node ID", max_length=100)
     action: Optional[str] = Field(
-        default=None,
-        description="Action label (for decision edges)",
-        max_length=200
+        default=None, description="Action label (for decision edges)", max_length=200
     )
     outcome: Optional[str] = Field(
-        default=None,
-        description="Outcome label (for chance edges)",
-        max_length=200
+        default=None, description="Outcome label (for chance edges)", max_length=200
     )
     probability: Optional[float] = Field(
-        default=None,
-        description="Transition probability",
-        ge=0.0,
-        le=1.0
+        default=None, description="Transition probability", ge=0.0, le=1.0
     )
     immediate_payoff: Optional[float] = Field(
-        default=0.0,
-        description="Immediate payoff for this transition"
+        default=0.0, description="Immediate payoff for this transition"
     )
 
     model_config = {
@@ -2212,9 +1907,9 @@ class SequentialGraphEdge(BaseModel):
                 "to": "market_outcome",
                 "action": "invest",
                 "probability": None,
-                "immediate_payoff": -10000
+                "immediate_payoff": -10000,
             }
-        }
+        },
     }
 
 
@@ -2222,19 +1917,13 @@ class SequentialGraph(BaseModel):
     """Sequential decision graph structure."""
 
     nodes: List[SequentialGraphNode] = Field(
-        ...,
-        description="List of graph nodes",
-        min_length=2,
-        max_length=100
+        ..., description="List of graph nodes", min_length=2, max_length=100
     )
     edges: List[SequentialGraphEdge] = Field(
-        ...,
-        description="List of directed edges",
-        max_length=300
+        ..., description="List of directed edges", max_length=300
     )
     stage_assignments: Dict[str, int] = Field(
-        ...,
-        description="Mapping of node IDs to stage indices"
+        ..., description="Mapping of node IDs to stage indices"
     )
 
     @field_validator("nodes")
@@ -2255,16 +1944,32 @@ class SequentialGraph(BaseModel):
                     {"id": "market", "type": "chance", "label": "Market Outcome"},
                     {"id": "expand", "type": "decision", "label": "Expand Decision"},
                     {"id": "success", "type": "terminal", "label": "Success", "payoff": 100000},
-                    {"id": "failure", "type": "terminal", "label": "Failure", "payoff": -20000}
+                    {"id": "failure", "type": "terminal", "label": "Failure", "payoff": -20000},
                 ],
                 "edges": [
-                    {"from": "start", "to": "market", "action": "invest", "immediate_payoff": -10000},
+                    {
+                        "from": "start",
+                        "to": "market",
+                        "action": "invest",
+                        "immediate_payoff": -10000,
+                    },
                     {"from": "market", "to": "expand", "outcome": "favorable", "probability": 0.6},
-                    {"from": "market", "to": "failure", "outcome": "unfavorable", "probability": 0.4},
+                    {
+                        "from": "market",
+                        "to": "failure",
+                        "outcome": "unfavorable",
+                        "probability": 0.4,
+                    },
                     {"from": "expand", "to": "success", "action": "expand"},
-                    {"from": "expand", "to": "failure", "action": "exit"}
+                    {"from": "expand", "to": "failure", "action": "exit"},
                 ],
-                "stage_assignments": {"start": 0, "market": 1, "expand": 1, "success": 2, "failure": 2}
+                "stage_assignments": {
+                    "start": 0,
+                    "market": 1,
+                    "expand": 1,
+                    "success": 2,
+                    "failure": 2,
+                },
             }
         }
     }
@@ -2273,30 +1978,18 @@ class SequentialGraph(BaseModel):
 class DecisionStage(BaseModel):
     """A stage in a sequential decision problem."""
 
-    stage_index: int = Field(
-        ...,
-        description="Zero-based stage index",
-        ge=0
-    )
-    stage_label: str = Field(
-        ...,
-        description="Human-readable label for the stage",
-        max_length=200
-    )
+    stage_index: int = Field(..., description="Zero-based stage index", ge=0)
+    stage_label: str = Field(..., description="Human-readable label for the stage", max_length=200)
     decision_nodes: List[str] = Field(
-        ...,
-        description="Node IDs that are decisions at this stage",
-        max_length=20
+        ..., description="Node IDs that are decisions at this stage", max_length=20
     )
     resolution_nodes: List[str] = Field(
-        default_factory=list,
-        description="Uncertainty nodes resolved by this stage",
-        max_length=20
+        default_factory=list, description="Uncertainty nodes resolved by this stage", max_length=20
     )
     time_horizon: Optional[str] = Field(
         default=None,
         description="Time horizon: 'immediate', 'short_term', 'long_term'",
-        pattern="^(immediate|short_term|long_term)$"
+        pattern="^(immediate|short_term|long_term)$",
     )
 
     model_config = {
@@ -2306,7 +1999,7 @@ class DecisionStage(BaseModel):
                 "stage_label": "Initial Investment Decision",
                 "decision_nodes": ["invest_decision"],
                 "resolution_nodes": [],
-                "time_horizon": "immediate"
+                "time_horizon": "immediate",
             }
         }
     }
@@ -2315,32 +2008,20 @@ class DecisionStage(BaseModel):
 class SequentialAnalysisRequest(BaseModel):
     """Request model for sequential decision analysis endpoint."""
 
-    graph: SequentialGraph = Field(
-        ...,
-        description="Sequential decision graph"
-    )
+    graph: SequentialGraph = Field(..., description="Sequential decision graph")
     stages: List[DecisionStage] = Field(
-        ...,
-        description="Definition of decision stages",
-        min_length=1,
-        max_length=10
+        ..., description="Definition of decision stages", min_length=1, max_length=10
     )
     discount_factor: float = Field(
-        default=0.95,
-        description="Time preference discount factor (0-1)",
-        gt=0.0,
-        le=1.0
+        default=0.95, description="Time preference discount factor (0-1)", gt=0.0, le=1.0
     )
     risk_tolerance: Optional[str] = Field(
         default="neutral",
         description="Risk tolerance: 'averse', 'neutral', 'seeking'",
-        pattern="^(averse|neutral|seeking)$"
+        pattern="^(averse|neutral|seeking)$",
     )
     monte_carlo_samples: int = Field(
-        default=1000,
-        description="Number of Monte Carlo samples for uncertainty",
-        ge=100,
-        le=10000
+        default=1000, description="Number of Monte Carlo samples for uncertainty", ge=100, le=10000
     )
 
     model_config = {
@@ -2351,16 +2032,41 @@ class SequentialAnalysisRequest(BaseModel):
                         {"id": "invest", "type": "decision", "label": "Invest Decision"},
                         {"id": "market", "type": "chance", "label": "Market Outcome"},
                         {"id": "pricing", "type": "decision", "label": "Pricing Decision"},
-                        {"id": "high_return", "type": "terminal", "label": "High Return", "payoff": 100000},
-                        {"id": "low_return", "type": "terminal", "label": "Low Return", "payoff": 20000},
-                        {"id": "loss", "type": "terminal", "label": "Loss", "payoff": -30000}
+                        {
+                            "id": "high_return",
+                            "type": "terminal",
+                            "label": "High Return",
+                            "payoff": 100000,
+                        },
+                        {
+                            "id": "low_return",
+                            "type": "terminal",
+                            "label": "Low Return",
+                            "payoff": 20000,
+                        },
+                        {"id": "loss", "type": "terminal", "label": "Loss", "payoff": -30000},
                     ],
                     "edges": [
-                        {"from": "invest", "to": "market", "action": "invest", "immediate_payoff": -50000},
-                        {"from": "market", "to": "pricing", "outcome": "favorable", "probability": 0.7},
-                        {"from": "market", "to": "loss", "outcome": "unfavorable", "probability": 0.3},
+                        {
+                            "from": "invest",
+                            "to": "market",
+                            "action": "invest",
+                            "immediate_payoff": -50000,
+                        },
+                        {
+                            "from": "market",
+                            "to": "pricing",
+                            "outcome": "favorable",
+                            "probability": 0.7,
+                        },
+                        {
+                            "from": "market",
+                            "to": "loss",
+                            "outcome": "unfavorable",
+                            "probability": 0.3,
+                        },
                         {"from": "pricing", "to": "high_return", "action": "premium"},
-                        {"from": "pricing", "to": "low_return", "action": "economy"}
+                        {"from": "pricing", "to": "low_return", "action": "economy"},
                     ],
                     "stage_assignments": {
                         "invest": 0,
@@ -2368,17 +2074,22 @@ class SequentialAnalysisRequest(BaseModel):
                         "pricing": 1,
                         "high_return": 2,
                         "low_return": 2,
-                        "loss": 2
-                    }
+                        "loss": 2,
+                    },
                 },
                 "stages": [
                     {"stage_index": 0, "stage_label": "Investment", "decision_nodes": ["invest"]},
-                    {"stage_index": 1, "stage_label": "Pricing", "decision_nodes": ["pricing"], "resolution_nodes": ["market"]},
-                    {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []}
+                    {
+                        "stage_index": 1,
+                        "stage_label": "Pricing",
+                        "decision_nodes": ["pricing"],
+                        "resolution_nodes": ["market"],
+                    },
+                    {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
                 ],
                 "discount_factor": 0.95,
                 "risk_tolerance": "neutral",
-                "monte_carlo_samples": 1000
+                "monte_carlo_samples": 1000,
             }
         }
     }
@@ -2387,26 +2098,15 @@ class SequentialAnalysisRequest(BaseModel):
 class StageSensitivityRequest(BaseModel):
     """Request model for stage-by-stage sensitivity analysis."""
 
-    graph: SequentialGraph = Field(
-        ...,
-        description="Sequential decision graph"
-    )
+    graph: SequentialGraph = Field(..., description="Sequential decision graph")
     stages: List[DecisionStage] = Field(
-        ...,
-        description="Definition of decision stages",
-        min_length=1,
-        max_length=10
+        ..., description="Definition of decision stages", min_length=1, max_length=10
     )
     parameters_to_vary: Optional[List[str]] = Field(
-        default=None,
-        description="Parameters to vary (auto-detect if None)",
-        max_length=20
+        default=None, description="Parameters to vary (auto-detect if None)", max_length=20
     )
     variation_range: float = Field(
-        default=0.2,
-        description="Fractional variation to apply (e.g., 0.2 = ±20%)",
-        gt=0.0,
-        le=1.0
+        default=0.2, description="Fractional variation to apply (e.g., 0.2 = ±20%)", gt=0.0, le=1.0
     )
 
     model_config = {
@@ -2415,19 +2115,17 @@ class StageSensitivityRequest(BaseModel):
                 "graph": {
                     "nodes": [
                         {"id": "decide", "type": "decision", "label": "Decision"},
-                        {"id": "outcome", "type": "terminal", "label": "Outcome", "payoff": 50000}
+                        {"id": "outcome", "type": "terminal", "label": "Outcome", "payoff": 50000},
                     ],
-                    "edges": [
-                        {"from": "decide", "to": "outcome", "action": "proceed"}
-                    ],
-                    "stage_assignments": {"decide": 0, "outcome": 1}
+                    "edges": [{"from": "decide", "to": "outcome", "action": "proceed"}],
+                    "stage_assignments": {"decide": 0, "outcome": 1},
                 },
                 "stages": [
                     {"stage_index": 0, "stage_label": "Decision", "decision_nodes": ["decide"]},
-                    {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []}
+                    {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []},
                 ],
                 "parameters_to_vary": ["market_probability", "payoff"],
-                "variation_range": 0.2
+                "variation_range": 0.2,
             }
         }
     }
@@ -2445,32 +2143,28 @@ class ObjectiveFunction(BaseModel):
         ...,
         description="Variable ID for the objective (outcome to optimize)",
         min_length=1,
-        max_length=100
+        max_length=100,
     )
     direction: str = Field(
         ...,
         description="Optimization direction: 'maximize' or 'minimize'",
-        pattern="^(maximize|minimize)$"
+        pattern="^(maximize|minimize)$",
     )
     coefficients: Dict[str, float] = Field(
-        ...,
-        description="Linear coefficients mapping decision variable IDs to weights"
+        ..., description="Linear coefficients mapping decision variable IDs to weights"
     )
-    constant: float = Field(
-        default=0.0,
-        description="Constant term in objective function"
-    )
+    constant: float = Field(default=0.0, description="Constant term in objective function")
 
     @field_validator("coefficients")
     @classmethod
-    def validate_coefficients(cls, v):
+    def validate_coefficients(cls, v: Any) -> Any:
         """Validate coefficients are finite."""
         if not v:
             raise ValueError("coefficients cannot be empty")
         for var_id, coeff in v.items():
             if not isinstance(coeff, (int, float)):
                 raise ValueError(f"Coefficient for {var_id} must be numeric")
-            if not float('-inf') < coeff < float('inf'):
+            if not float("-inf") < coeff < float("inf"):
                 raise ValueError(f"Coefficient for {var_id} must be finite")
         return v
 
@@ -2480,7 +2174,7 @@ class ObjectiveFunction(BaseModel):
                 "variable_id": "profit",
                 "direction": "maximize",
                 "coefficients": {"price": 100, "quantity": -5, "marketing": 0.5},
-                "constant": -10000
+                "constant": -10000,
             }
         }
     }
@@ -2490,37 +2184,24 @@ class DecisionVariable(BaseModel):
     """Decision variable with bounds for optimization."""
 
     variable_id: str = Field(
-        ...,
-        description="Unique identifier for the decision variable",
-        min_length=1,
-        max_length=100
+        ..., description="Unique identifier for the decision variable", min_length=1, max_length=100
     )
-    lower_bound: float = Field(
-        ...,
-        description="Lower bound for this variable"
-    )
-    upper_bound: float = Field(
-        ...,
-        description="Upper bound for this variable"
-    )
+    lower_bound: float = Field(..., description="Lower bound for this variable")
+    upper_bound: float = Field(..., description="Upper bound for this variable")
     initial_value: Optional[float] = Field(
-        default=None,
-        description="Optional initial value (defaults to midpoint)"
+        default=None, description="Optional initial value (defaults to midpoint)"
     )
     step_size: Optional[float] = Field(
-        default=None,
-        description="Optional custom step size for grid search"
+        default=None, description="Optional custom step size for grid search"
     )
 
     @field_validator("upper_bound")
     @classmethod
-    def validate_bounds(cls, v, info):
+    def validate_bounds(cls, v: Any, info: Any) -> Any:
         """Validate upper_bound >= lower_bound."""
         lower = info.data.get("lower_bound")
         if lower is not None and v < lower:
-            raise ValueError(
-                f"upper_bound ({v}) must be >= lower_bound ({lower})"
-            )
+            raise ValueError(f"upper_bound ({v}) must be >= lower_bound ({lower})")
         return v
 
     model_config = {
@@ -2530,7 +2211,7 @@ class DecisionVariable(BaseModel):
                 "lower_bound": 10.0,
                 "upper_bound": 100.0,
                 "initial_value": 50.0,
-                "step_size": 5.0
+                "step_size": 5.0,
             }
         }
     }
@@ -2540,24 +2221,17 @@ class OptimisationConstraint(BaseModel):
     """Linear constraint for optimization."""
 
     constraint_id: str = Field(
-        ...,
-        description="Unique identifier for the constraint",
-        min_length=1,
-        max_length=100
+        ..., description="Unique identifier for the constraint", min_length=1, max_length=100
     )
     coefficients: Dict[str, float] = Field(
-        ...,
-        description="Coefficients mapping variable IDs to weights"
+        ..., description="Coefficients mapping variable IDs to weights"
     )
     relation: str = Field(
         ...,
         description="Constraint relation: 'le' (<=), 'ge' (>=), or 'eq' (=)",
-        pattern="^(le|ge|eq)$"
+        pattern="^(le|ge|eq)$",
     )
-    rhs: float = Field(
-        ...,
-        description="Right-hand side value"
-    )
+    rhs: float = Field(..., description="Right-hand side value")
 
     model_config = {
         "json_schema_extra": {
@@ -2565,7 +2239,7 @@ class OptimisationConstraint(BaseModel):
                 "constraint_id": "budget_limit",
                 "coefficients": {"price": 1.0, "marketing": 2.0},
                 "relation": "le",
-                "rhs": 1000.0
+                "rhs": 1000.0,
             }
         }
     }
@@ -2575,49 +2249,31 @@ class OptimisationRequest(BaseModel):
     """Request model for continuous optimization endpoint."""
 
     request_id: Optional[str] = Field(
-        default=None,
-        description="Optional request ID for tracing (auto-generated if not provided)"
+        default=None, description="Optional request ID for tracing (auto-generated if not provided)"
     )
-    objective: ObjectiveFunction = Field(
-        ...,
-        description="Objective function to optimize"
-    )
+    objective: ObjectiveFunction = Field(..., description="Objective function to optimize")
     decision_variables: List[DecisionVariable] = Field(
-        ...,
-        description="Decision variables with bounds",
-        min_length=1,
-        max_length=10
+        ..., description="Decision variables with bounds", min_length=1, max_length=10
     )
     constraints: Optional[List[OptimisationConstraint]] = Field(
-        default=None,
-        description="Optional linear constraints",
-        max_length=20
+        default=None, description="Optional linear constraints", max_length=20
     )
     grid_points: int = Field(
-        default=20,
-        description="Number of grid points per dimension",
-        ge=5,
-        le=100
+        default=20, description="Number of grid points per dimension", ge=5, le=100
     )
     confidence_level: float = Field(
-        default=0.95,
-        description="Confidence level for intervals (0.5-0.999)",
-        ge=0.5,
-        le=0.999
+        default=0.95, description="Confidence level for intervals (0.5-0.999)", ge=0.5, le=0.999
     )
     noise_std: Optional[float] = Field(
         default=None,
         description="Optional standard deviation of noise for uncertainty estimation",
-        ge=0.0
+        ge=0.0,
     )
-    seed: Optional[int] = Field(
-        default=None,
-        description="Random seed for reproducibility"
-    )
+    seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
 
     @field_validator("decision_variables")
     @classmethod
-    def validate_unique_variable_ids(cls, v):
+    def validate_unique_variable_ids(cls, v: Any) -> Any:
         """Validate variable IDs are unique."""
         ids = [var.variable_id for var in v]
         if len(ids) != len(set(ids)):
@@ -2633,30 +2289,22 @@ class OptimisationRequest(BaseModel):
                     "variable_id": "profit",
                     "direction": "maximize",
                     "coefficients": {"price": 100, "quantity": -5},
-                    "constant": -10000
+                    "constant": -10000,
                 },
                 "decision_variables": [
-                    {
-                        "variable_id": "price",
-                        "lower_bound": 10.0,
-                        "upper_bound": 100.0
-                    },
-                    {
-                        "variable_id": "quantity",
-                        "lower_bound": 0.0,
-                        "upper_bound": 1000.0
-                    }
+                    {"variable_id": "price", "lower_bound": 10.0, "upper_bound": 100.0},
+                    {"variable_id": "quantity", "lower_bound": 0.0, "upper_bound": 1000.0},
                 ],
                 "constraints": [
                     {
                         "constraint_id": "capacity",
                         "coefficients": {"quantity": 1.0},
                         "relation": "le",
-                        "rhs": 500.0
+                        "rhs": 500.0,
                     }
                 ],
                 "grid_points": 20,
-                "confidence_level": 0.95
+                "confidence_level": 0.95,
             }
         }
     }
@@ -2691,39 +2339,20 @@ class ConstraintRelation(str, Enum):
 class ConstraintNode(BaseModel):
     """A constraint node in the decision graph."""
 
-    id: str = Field(
-        ...,
-        description="Unique constraint identifier",
-        min_length=1,
-        max_length=100
-    )
-    constraint_type: ConstraintType = Field(
-        ...,
-        description="Type of constraint"
-    )
+    id: str = Field(..., description="Unique constraint identifier", min_length=1, max_length=100)
+    constraint_type: ConstraintType = Field(..., description="Type of constraint")
     target_variable: str = Field(
-        ...,
-        description="Variable this constraint applies to",
-        min_length=1,
-        max_length=100
+        ..., description="Variable this constraint applies to", min_length=1, max_length=100
     )
-    relation: ConstraintRelation = Field(
-        ...,
-        description="Relation operator"
-    )
-    threshold: float = Field(
-        ...,
-        description="Threshold value"
-    )
+    relation: ConstraintRelation = Field(..., description="Relation operator")
+    threshold: float = Field(..., description="Threshold value")
     label: Optional[str] = Field(
-        None,
-        description="Human-readable constraint label",
-        max_length=500
+        None, description="Human-readable constraint label", max_length=500
     )
     priority: Optional[str] = Field(
         default="medium",
         description="Constraint priority: hard, soft, medium",
-        pattern="^(hard|soft|medium)$"
+        pattern="^(hard|soft|medium)$",
     )
 
     model_config = {
@@ -2735,7 +2364,7 @@ class ConstraintNode(BaseModel):
                 "relation": "le",
                 "threshold": 100000.0,
                 "label": "Budget must not exceed $100,000",
-                "priority": "hard"
+                "priority": "hard",
             }
         }
     }
@@ -2745,31 +2374,20 @@ class OptionForFeasibility(BaseModel):
     """An option to check for feasibility."""
 
     option_id: str = Field(
-        ...,
-        description="Unique option identifier",
-        min_length=1,
-        max_length=100
+        ..., description="Unique option identifier", min_length=1, max_length=100
     )
-    name: str = Field(
-        ...,
-        description="Human-readable option name",
-        min_length=1,
-        max_length=200
-    )
-    variable_values: Dict[str, float] = Field(
-        ...,
-        description="Variable values for this option"
-    )
+    name: str = Field(..., description="Human-readable option name", min_length=1, max_length=200)
+    variable_values: Dict[str, float] = Field(..., description="Variable values for this option")
     expected_value: Optional[float] = Field(
-        None,
-        description="Expected value/utility of this option"
+        None, description="Expected value/utility of this option"
     )
 
     @field_validator("variable_values")
     @classmethod
-    def validate_variable_values(cls, v):
+    def validate_variable_values(cls, v: Any) -> Any:
         """Validate variable values dict."""
         from src.utils.security_validators import validate_dict_size
+
         validate_dict_size(v, "variable_values")
         return v
 
@@ -2781,9 +2399,9 @@ class OptionForFeasibility(BaseModel):
                 "variable_values": {
                     "total_cost": 85000,
                     "expected_revenue": 200000,
-                    "risk_level": 0.3
+                    "risk_level": 0.3,
                 },
-                "expected_value": 50000
+                "expected_value": 50000,
             }
         }
     }
@@ -2792,25 +2410,15 @@ class OptionForFeasibility(BaseModel):
 class FeasibilityRequest(BaseModel):
     """Request model for feasibility check endpoint."""
 
-    graph: GraphV1 = Field(
-        ...,
-        description="Decision graph with nodes and edges"
-    )
+    graph: GraphV1 = Field(..., description="Decision graph with nodes and edges")
     constraints: List[ConstraintNode] = Field(
-        ...,
-        description="Constraints to check",
-        min_length=1,
-        max_length=50
+        ..., description="Constraints to check", min_length=1, max_length=50
     )
     options: List[OptionForFeasibility] = Field(
-        ...,
-        description="Options to evaluate for feasibility",
-        min_length=1,
-        max_length=100
+        ..., description="Options to evaluate for feasibility", min_length=1, max_length=100
     )
     include_partial_violations: bool = Field(
-        default=True,
-        description="Include soft constraint violations in report"
+        default=True, description="Include soft constraint violations in report"
     )
 
     model_config = {
@@ -2819,9 +2427,9 @@ class FeasibilityRequest(BaseModel):
                 "graph": {
                     "nodes": [
                         {"id": "goal", "kind": "goal", "label": "Maximize Profit"},
-                        {"id": "option_a", "kind": "option", "label": "Option A"}
+                        {"id": "option_a", "kind": "option", "label": "Option A"},
                     ],
-                    "edges": [{"from": "option_a", "to": "goal", "weight": 2.0}]
+                    "edges": [{"from": "option_a", "to": "goal", "weight": 2.0}],
                 },
                 "constraints": [
                     {
@@ -2830,7 +2438,7 @@ class FeasibilityRequest(BaseModel):
                         "target_variable": "total_cost",
                         "relation": "le",
                         "threshold": 100000.0,
-                        "priority": "hard"
+                        "priority": "hard",
                     }
                 ],
                 "options": [
@@ -2838,9 +2446,9 @@ class FeasibilityRequest(BaseModel):
                         "option_id": "option_a",
                         "name": "Option A",
                         "variable_values": {"total_cost": 85000},
-                        "expected_value": 50000
+                        "expected_value": 50000,
                     }
-                ]
+                ],
             }
         }
     }
@@ -2851,33 +2459,18 @@ class FeasibilityRequest(BaseModel):
 # ============================================================================
 
 
-class RankedOption(BaseModel):
+class CoherenceRankedOption(BaseModel):
     """An option with ranking information for coherence analysis."""
 
     option_id: str = Field(
-        ...,
-        description="Unique option identifier",
-        min_length=1,
-        max_length=100
+        ..., description="Unique option identifier", min_length=1, max_length=100
     )
-    name: str = Field(
-        ...,
-        description="Human-readable option name",
-        min_length=1,
-        max_length=200
-    )
-    expected_value: float = Field(
-        ...,
-        description="Expected value/utility of this option"
-    )
+    name: str = Field(..., description="Human-readable option name", min_length=1, max_length=200)
+    expected_value: float = Field(..., description="Expected value/utility of this option")
     confidence_interval: Optional[Tuple[float, float]] = Field(
-        None,
-        description="Confidence interval (lower, upper)"
+        None, description="Confidence interval (lower, upper)"
     )
-    rank: Optional[int] = Field(
-        None,
-        description="Current rank (1 = best)"
-    )
+    rank: Optional[int] = Field(None, description="Current rank (1 = best)")
 
     model_config = {
         "json_schema_extra": {
@@ -2886,7 +2479,7 @@ class RankedOption(BaseModel):
                 "name": "Launch Premium",
                 "expected_value": 50000,
                 "confidence_interval": [40000, 60000],
-                "rank": 1
+                "rank": 1,
             }
         }
     }
@@ -2895,33 +2488,24 @@ class RankedOption(BaseModel):
 class CoherenceAnalysisRequest(BaseModel):
     """Request model for coherence analysis endpoint."""
 
-    graph: GraphV1 = Field(
-        ...,
-        description="Decision graph with nodes and edges"
-    )
-    options: List[RankedOption] = Field(
-        ...,
-        description="Ranked options to analyze for coherence",
-        min_length=2,
-        max_length=100
+    graph: GraphV1 = Field(..., description="Decision graph with nodes and edges")
+    options: List[CoherenceRankedOption] = Field(
+        ..., description="Ranked options to analyze for coherence", min_length=2, max_length=100
     )
     perturbation_magnitude: float = Field(
         default=0.1,
         description="Magnitude of perturbations for stability testing (0-1)",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
     close_race_threshold: float = Field(
         default=0.05,
         description="Threshold for detecting close races (relative difference)",
         ge=0.0,
-        le=0.5
+        le=0.5,
     )
     num_perturbations: int = Field(
-        default=100,
-        description="Number of perturbations for stability analysis",
-        ge=10,
-        le=1000
+        default=100, description="Number of perturbations for stability analysis", ge=10, le=1000
     )
 
     model_config = {
@@ -2931,20 +2515,30 @@ class CoherenceAnalysisRequest(BaseModel):
                     "nodes": [
                         {"id": "goal", "kind": "goal", "label": "Maximize Revenue"},
                         {"id": "option_a", "kind": "option", "label": "Option A"},
-                        {"id": "option_b", "kind": "option", "label": "Option B"}
+                        {"id": "option_b", "kind": "option", "label": "Option B"},
                     ],
                     "edges": [
                         {"from": "option_a", "to": "goal", "weight": 2.0},
-                        {"from": "option_b", "to": "goal", "weight": 1.8}
-                    ]
+                        {"from": "option_b", "to": "goal", "weight": 1.8},
+                    ],
                 },
                 "options": [
-                    {"option_id": "option_a", "name": "Option A", "expected_value": 50000, "rank": 1},
-                    {"option_id": "option_b", "name": "Option B", "expected_value": 48000, "rank": 2}
+                    {
+                        "option_id": "option_a",
+                        "name": "Option A",
+                        "expected_value": 50000,
+                        "rank": 1,
+                    },
+                    {
+                        "option_id": "option_b",
+                        "name": "Option B",
+                        "expected_value": 48000,
+                        "rank": 2,
+                    },
                 ],
                 "perturbation_magnitude": 0.1,
                 "close_race_threshold": 0.05,
-                "num_perturbations": 100
+                "num_perturbations": 100,
             }
         }
     }
@@ -2976,42 +2570,25 @@ class GoalSpecification(BaseModel):
     """Specification for a single goal in utility function."""
 
     goal_id: str = Field(
-        ...,
-        description="Unique identifier for the goal",
-        min_length=1,
-        max_length=100
+        ..., description="Unique identifier for the goal", min_length=1, max_length=100
     )
-    label: str = Field(
-        ...,
-        description="Human-readable goal label",
-        min_length=1,
-        max_length=200
-    )
+    label: str = Field(..., description="Human-readable goal label", min_length=1, max_length=200)
     direction: str = Field(
         default="maximize",
         description="Optimization direction: 'maximize' or 'minimize'",
-        pattern="^(maximize|minimize)$"
+        pattern="^(maximize|minimize)$",
     )
     weight: Optional[float] = Field(
         None,
         description="Goal weight (0-1). If not specified, defaults to equal weighting.",
         ge=0.0,
-        le=1.0
+        le=1.0,
     )
     priority: Optional[int] = Field(
-        None,
-        description="Priority for lexicographic ordering (1 = highest)",
-        ge=1,
-        le=100
+        None, description="Priority for lexicographic ordering (1 = highest)", ge=1, le=100
     )
-    scale_min: Optional[float] = Field(
-        None,
-        description="Minimum value for normalization"
-    )
-    scale_max: Optional[float] = Field(
-        None,
-        description="Maximum value for normalization"
-    )
+    scale_min: Optional[float] = Field(None, description="Minimum value for normalization")
+    scale_max: Optional[float] = Field(None, description="Maximum value for normalization")
 
     model_config = {
         "json_schema_extra": {
@@ -3022,7 +2599,7 @@ class GoalSpecification(BaseModel):
                 "weight": 0.6,
                 "priority": 1,
                 "scale_min": 0,
-                "scale_max": 1000000
+                "scale_max": 1000000,
             }
         }
     }
@@ -3032,29 +2609,24 @@ class UtilityFunctionSpec(BaseModel):
     """Complete utility function specification."""
 
     goals: List[GoalSpecification] = Field(
-        ...,
-        description="List of goals to aggregate",
-        min_length=1,
-        max_length=20
+        ..., description="List of goals to aggregate", min_length=1, max_length=20
     )
     aggregation_method: AggregationMethod = Field(
-        default=AggregationMethod.WEIGHTED_SUM,
-        description="Method for aggregating goal values"
+        default=AggregationMethod.WEIGHTED_SUM, description="Method for aggregating goal values"
     )
     risk_tolerance: RiskTolerance = Field(
-        default=RiskTolerance.RISK_NEUTRAL,
-        description="Risk tolerance for utility computation"
+        default=RiskTolerance.RISK_NEUTRAL, description="Risk tolerance for utility computation"
     )
     risk_coefficient: Optional[float] = Field(
         None,
         description="Risk aversion coefficient (for risk_averse: higher = more averse)",
         ge=0.0,
-        le=10.0
+        le=10.0,
     )
 
     @field_validator("goals")
     @classmethod
-    def validate_unique_goal_ids(cls, v):
+    def validate_unique_goal_ids(cls, v: Any) -> Any:
         """Validate goal IDs are unique."""
         ids = [g.goal_id for g in v]
         if len(ids) != len(set(ids)):
@@ -3067,10 +2639,10 @@ class UtilityFunctionSpec(BaseModel):
             "example": {
                 "goals": [
                     {"goal_id": "revenue", "label": "Revenue", "weight": 0.6},
-                    {"goal_id": "cost", "label": "Cost", "direction": "minimize", "weight": 0.4}
+                    {"goal_id": "cost", "label": "Cost", "direction": "minimize", "weight": 0.4},
                 ],
                 "aggregation_method": "weighted_sum",
-                "risk_tolerance": "risk_neutral"
+                "risk_tolerance": "risk_neutral",
             }
         }
     }
@@ -3080,16 +2652,13 @@ class UtilityValidationRequest(BaseModel):
     """Request model for utility function validation endpoint."""
 
     utility_spec: UtilityFunctionSpec = Field(
-        ...,
-        description="Utility function specification to validate"
+        ..., description="Utility function specification to validate"
     )
     graph: Optional[GraphV1] = Field(
-        None,
-        description="Optional graph to validate goal references against"
+        None, description="Optional graph to validate goal references against"
     )
     strict_mode: bool = Field(
-        default=False,
-        description="If true, require all weights to be specified"
+        default=False, description="If true, require all weights to be specified"
     )
 
     model_config = {
@@ -3098,12 +2667,17 @@ class UtilityValidationRequest(BaseModel):
                 "utility_spec": {
                     "goals": [
                         {"goal_id": "revenue", "label": "Revenue", "weight": 0.6},
-                        {"goal_id": "cost", "label": "Cost", "direction": "minimize", "weight": 0.4}
+                        {
+                            "goal_id": "cost",
+                            "label": "Cost",
+                            "direction": "minimize",
+                            "weight": 0.4,
+                        },
                     ],
                     "aggregation_method": "weighted_sum",
-                    "risk_tolerance": "risk_neutral"
+                    "risk_tolerance": "risk_neutral",
                 },
-                "strict_mode": False
+                "strict_mode": False,
             }
         }
     }
@@ -3118,37 +2692,29 @@ class CorrelationGroup(BaseModel):
     """Specification for a group of correlated factors."""
 
     group_id: str = Field(
-        ...,
-        description="Unique identifier for the correlation group",
-        min_length=1,
-        max_length=100
+        ..., description="Unique identifier for the correlation group", min_length=1, max_length=100
     )
     factors: List[str] = Field(
-        ...,
-        description="List of factor IDs that are correlated",
-        min_length=2,
-        max_length=20
+        ..., description="List of factor IDs that are correlated", min_length=2, max_length=20
     )
     correlation: float = Field(
         ...,
         description="Correlation coefficient (-1 to 1). Positive = move together, negative = inverse",
         ge=-1.0,
-        le=1.0
+        le=1.0,
     )
     label: Optional[str] = Field(
-        None,
-        description="Human-readable description of the correlation",
-        max_length=500
+        None, description="Human-readable description of the correlation", max_length=500
     )
     correlation_type: Optional[str] = Field(
         default="pearson",
         description="Type of correlation: 'pearson', 'spearman', or 'kendall'",
-        pattern="^(pearson|spearman|kendall)$"
+        pattern="^(pearson|spearman|kendall)$",
     )
 
     @field_validator("factors")
     @classmethod
-    def validate_unique_factors(cls, v):
+    def validate_unique_factors(cls, v: Any) -> Any:
         """Validate factor IDs are unique within group."""
         if len(v) != len(set(v)):
             duplicates = [f for f in v if v.count(f) > 1]
@@ -3162,7 +2728,7 @@ class CorrelationGroup(BaseModel):
                 "factors": ["demand", "competition"],
                 "correlation": 0.7,
                 "label": "Demand and competition tend to move together",
-                "correlation_type": "pearson"
+                "correlation_type": "pearson",
             }
         }
     }
@@ -3172,19 +2738,15 @@ class CorrelationMatrix(BaseModel):
     """Full correlation matrix specification for multiple factors."""
 
     factors: List[str] = Field(
-        ...,
-        description="List of factor IDs in matrix order",
-        min_length=2,
-        max_length=50
+        ..., description="List of factor IDs in matrix order", min_length=2, max_length=50
     )
     matrix: List[List[float]] = Field(
-        ...,
-        description="Correlation matrix (symmetric, diagonal = 1)"
+        ..., description="Correlation matrix (symmetric, diagonal = 1)"
     )
 
     @field_validator("matrix")
     @classmethod
-    def validate_correlation_matrix(cls, v, info):
+    def validate_correlation_matrix(cls, v: Any, info: Any) -> Any:
         """Validate correlation matrix properties."""
         if "factors" not in info.data:
             return v
@@ -3216,9 +2778,7 @@ class CorrelationMatrix(BaseModel):
         for i in range(n):
             for j in range(n):
                 if not -1.0 <= v[i][j] <= 1.0:
-                    raise ValueError(
-                        f"Correlation [{i}][{j}]={v[i][j]} must be in [-1, 1]"
-                    )
+                    raise ValueError(f"Correlation [{i}][{j}]={v[i][j]} must be in [-1, 1]")
 
         return v
 
@@ -3226,11 +2786,7 @@ class CorrelationMatrix(BaseModel):
         "json_schema_extra": {
             "example": {
                 "factors": ["demand", "competition", "price_sensitivity"],
-                "matrix": [
-                    [1.0, 0.7, -0.3],
-                    [0.7, 1.0, 0.2],
-                    [-0.3, 0.2, 1.0]
-                ]
+                "matrix": [[1.0, 0.7, -0.3], [0.7, 1.0, 0.2], [-0.3, 0.2, 1.0]],
             }
         }
     }
@@ -3240,36 +2796,29 @@ class CorrelationValidationRequest(BaseModel):
     """Request model for correlation group validation endpoint."""
 
     correlation_groups: Optional[List[CorrelationGroup]] = Field(
-        None,
-        description="List of correlation groups to validate",
-        max_length=50
+        None, description="List of correlation groups to validate", max_length=50
     )
     correlation_matrix: Optional[CorrelationMatrix] = Field(
-        None,
-        description="Full correlation matrix (alternative to groups)"
+        None, description="Full correlation matrix (alternative to groups)"
     )
     graph: Optional[GraphV1] = Field(
-        None,
-        description="Graph to validate factor references against"
+        None, description="Graph to validate factor references against"
     )
     check_positive_definite: bool = Field(
-        default=True,
-        description="Check if implied correlation matrix is positive semi-definite"
+        default=True, description="Check if implied correlation matrix is positive semi-definite"
     )
 
     @field_validator("correlation_groups")
     @classmethod
-    def validate_at_least_one_input(cls, v, info):
+    def validate_at_least_one_input(cls, v: Any, info: Any) -> Any:
         """Validate at least one of groups or matrix is provided."""
         # This validator runs first, we'll check in the model validator
         return v
 
-    def model_post_init(self, __context):
+    def model_post_init(self, __context: Any) -> None:
         """Validate that at least one input method is provided."""
         if self.correlation_groups is None and self.correlation_matrix is None:
-            raise ValueError(
-                "Must provide either correlation_groups or correlation_matrix"
-            )
+            raise ValueError("Must provide either correlation_groups or correlation_matrix")
 
     model_config = {
         "json_schema_extra": {
@@ -3278,15 +2827,15 @@ class CorrelationValidationRequest(BaseModel):
                     {
                         "group_id": "market_conditions",
                         "factors": ["demand", "competition"],
-                        "correlation": 0.7
+                        "correlation": 0.7,
                     },
                     {
                         "group_id": "cost_factors",
                         "factors": ["labor_cost", "material_cost"],
-                        "correlation": 0.5
-                    }
+                        "correlation": 0.5,
+                    },
                 ],
-                "check_positive_definite": True
+                "check_positive_definite": True,
             }
         }
     }
@@ -3306,16 +2855,15 @@ class IdentifiabilityRequest(BaseModel):
     """
 
     graph: GraphV1 = Field(
-        ...,
-        description="Decision graph with typed nodes (must include decision and goal nodes)"
+        ..., description="Decision graph with typed nodes (must include decision and goal nodes)"
     )
     decision_node_id: Optional[str] = Field(
         None,
-        description="Override: specific decision node ID (auto-detected from kind='decision' if not provided)"
+        description="Override: specific decision node ID (auto-detected from kind='decision' if not provided)",
     )
     goal_node_id: Optional[str] = Field(
         None,
-        description="Override: specific goal node ID (auto-detected from kind='goal' if not provided)"
+        description="Override: specific goal node ID (auto-detected from kind='goal' if not provided)",
     )
 
     model_config = {
@@ -3325,13 +2873,13 @@ class IdentifiabilityRequest(BaseModel):
                     "nodes": [
                         {"id": "price", "kind": "decision", "label": "Pricing Strategy"},
                         {"id": "market_segment", "kind": "factor", "label": "Market Segment"},
-                        {"id": "revenue", "kind": "goal", "label": "Revenue Target"}
+                        {"id": "revenue", "kind": "goal", "label": "Revenue Target"},
                     ],
                     "edges": [
                         {"from": "price", "to": "revenue", "weight": 2.0},
                         {"from": "market_segment", "to": "price", "weight": 1.5},
-                        {"from": "market_segment", "to": "revenue", "weight": 1.0}
-                    ]
+                        {"from": "market_segment", "to": "revenue", "weight": 1.0},
+                    ],
                 }
             }
         }
@@ -3346,31 +2894,20 @@ class IdentifiabilityFromDAGRequest(BaseModel):
     """
 
     nodes: List[str] = Field(
-        ...,
-        description="List of node names in the DAG",
-        min_length=2,
-        max_length=50
+        ..., description="List of node names in the DAG", min_length=2, max_length=50
     )
     edges: List[Tuple[str, str]] = Field(
-        ...,
-        description="List of directed edges as (from, to) tuples",
-        max_length=200
+        ..., description="List of directed edges as (from, to) tuples", max_length=200
     )
-    treatment: str = Field(
-        ...,
-        description="Treatment/decision node name"
-    )
-    outcome: str = Field(
-        ...,
-        description="Outcome/goal node name"
-    )
+    treatment: str = Field(..., description="Treatment/decision node name")
+    outcome: str = Field(..., description="Outcome/goal node name")
 
     @field_validator("edges")
     @classmethod
-    def validate_edges_reference_nodes(cls, v, info):
+    def validate_edges_reference_nodes(cls, v: Any, info: Any) -> Any:
         """Validate edges reference existing nodes."""
-        if 'nodes' in info.data:
-            nodes = set(info.data['nodes'])
+        if "nodes" in info.data:
+            nodes = set(info.data["nodes"])
             for from_node, to_node in v:
                 if from_node not in nodes:
                     raise ValueError(f"Edge references non-existent node: {from_node}")
@@ -3380,17 +2917,17 @@ class IdentifiabilityFromDAGRequest(BaseModel):
 
     @field_validator("treatment")
     @classmethod
-    def validate_treatment_in_nodes(cls, v, info):
+    def validate_treatment_in_nodes(cls, v: Any, info: Any) -> Any:
         """Validate treatment is in nodes."""
-        if 'nodes' in info.data and v not in info.data['nodes']:
+        if "nodes" in info.data and v not in info.data["nodes"]:
             raise ValueError(f"Treatment '{v}' not found in nodes")
         return v
 
     @field_validator("outcome")
     @classmethod
-    def validate_outcome_in_nodes(cls, v, info):
+    def validate_outcome_in_nodes(cls, v: Any, info: Any) -> Any:
         """Validate outcome is in nodes."""
-        if 'nodes' in info.data and v not in info.data['nodes']:
+        if "nodes" in info.data and v not in info.data["nodes"]:
             raise ValueError(f"Outcome '{v}' not found in nodes")
         return v
 
@@ -3401,10 +2938,10 @@ class IdentifiabilityFromDAGRequest(BaseModel):
                 "edges": [
                     ["price", "revenue"],
                     ["market_segment", "price"],
-                    ["market_segment", "revenue"]
+                    ["market_segment", "revenue"],
                 ],
                 "treatment": "price",
-                "outcome": "revenue"
+                "outcome": "revenue",
             }
         }
     }

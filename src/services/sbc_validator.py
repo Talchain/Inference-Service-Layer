@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from scipy import stats
+from scipy import stats  # type: ignore[import-untyped]
 
 from src.models.robustness_v2 import (
     EdgeV2,
@@ -184,10 +184,13 @@ def _sample_true_world(
         exists = rng.random() < edge.exists_probability
         true_existence[key] = exists
         if exists:
-            strength = float(np.clip(
-                rng.normal(edge.strength.mean, edge.strength.std),
-                -1.0, 1.0,
-            ))
+            strength = float(
+                np.clip(
+                    rng.normal(edge.strength.mean, edge.strength.std),
+                    -1.0,
+                    1.0,
+                )
+            )
         else:
             strength = 0.0
         true_strengths[key] = strength
@@ -311,7 +314,11 @@ def run_sbc_validation(
         # Step 2: Build frozen graph and compute deterministic ground truth
         frozen_graph = _build_frozen_graph(graph, true_strengths, true_existence)
         ground_truth = _compute_ground_truth(
-            frozen_graph, options, goal_node_id, ref_option_id, trial_seed,
+            frozen_graph,
+            options,
+            goal_node_id,
+            ref_option_id,
+            trial_seed,
         )
 
         # Step 3: Run ISL inference with the original uncertain graph
@@ -367,12 +374,14 @@ def run_sbc_validation(
     for level in ci_levels:
         observed = ci_hits[level] / n_trials if n_trials > 0 else 0.0
         deviation = abs(observed - level)
-        coverage_results.append(CICoverageResult(
-            nominal_level=level,
-            observed_coverage=observed,
-            deviation=deviation,
-            flagged=deviation > _COVERAGE_TOLERANCE,
-        ))
+        coverage_results.append(
+            CICoverageResult(
+                nominal_level=level,
+                observed_coverage=observed,
+                deviation=deviation,
+                flagged=deviation > _COVERAGE_TOLERANCE,
+            )
+        )
 
     # --- Build PIT histogram and chi-squared test ---
     pit_arr = np.array(pit_values) if pit_values else np.array([])

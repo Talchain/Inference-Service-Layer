@@ -23,7 +23,7 @@ class ThresholdIdentifier:
         self,
         parameter_sweeps: List[ParameterSweep],
         baseline_ranking: Optional[List[str]],
-        confidence_threshold: float
+        confidence_threshold: float,
     ) -> Tuple[List[RankingThreshold], List[ParameterSensitivity], int, List[str]]:
         """
         Identify thresholds across all parameter sweeps.
@@ -55,7 +55,7 @@ class ThresholdIdentifier:
             thresholds = self._identify_parameter_thresholds(
                 sweep=sweep,
                 baseline_ranking=baseline_ranking,
-                confidence_threshold=confidence_threshold
+                confidence_threshold=confidence_threshold,
             )
 
             all_thresholds.extend(thresholds)
@@ -74,29 +74,26 @@ class ThresholdIdentifier:
                 threshold_values = [t.threshold_value for t in thresholds]
                 sensitive_range = [min(threshold_values), max(threshold_values)]
 
-            sensitivity_data.append(ParameterSensitivity(
-                parameter_id=sweep.parameter_id,
-                parameter_label=sweep.parameter_label,
-                changes_count=len(thresholds),
-                most_sensitive_range=sensitive_range,
-                sensitivity_score=sensitivity_score
-            ))
+            sensitivity_data.append(
+                ParameterSensitivity(
+                    parameter_id=sweep.parameter_id,
+                    parameter_label=sweep.parameter_label,
+                    changes_count=len(thresholds),
+                    most_sensitive_range=sensitive_range,
+                    sensitivity_score=sensitivity_score,
+                )
+            )
 
         # Sort sensitivity ranking by changes_count (descending)
         sensitivity_data.sort(key=lambda x: x.changes_count, reverse=True)
 
-        return (
-            all_thresholds,
-            sensitivity_data,
-            len(all_thresholds),
-            monotonic_params
-        )
+        return (all_thresholds, sensitivity_data, len(all_thresholds), monotonic_params)
 
     def _identify_parameter_thresholds(
         self,
         sweep: ParameterSweep,
         baseline_ranking: Optional[List[str]],
-        confidence_threshold: float
+        confidence_threshold: float,
     ) -> List[RankingThreshold]:
         """
         Identify thresholds for a single parameter sweep.
@@ -146,34 +143,28 @@ class ThresholdIdentifier:
             # Compare to previous ranking
             if current_ranking != prev_ranking:
                 # Ranking changed - this is a threshold
-                affected_options = self._find_affected_options(
-                    prev_ranking, current_ranking
-                )
+                affected_options = self._find_affected_options(prev_ranking, current_ranking)
 
                 # Compute score gap between most affected options
-                score_gap = self._compute_score_gap(
-                    scores, affected_options
-                )
+                score_gap = self._compute_score_gap(scores, affected_options)
 
-                thresholds.append(RankingThreshold(
-                    parameter_id=sweep.parameter_id,
-                    parameter_label=sweep.parameter_label,
-                    threshold_value=value,
-                    ranking_before=prev_ranking,
-                    ranking_after=current_ranking,
-                    options_affected=affected_options,
-                    score_gap=score_gap
-                ))
+                thresholds.append(
+                    RankingThreshold(
+                        parameter_id=sweep.parameter_id,
+                        parameter_label=sweep.parameter_label,
+                        threshold_value=value,
+                        ranking_before=prev_ranking,
+                        ranking_after=current_ranking,
+                        options_affected=affected_options,
+                        score_gap=score_gap,
+                    )
+                )
 
             prev_ranking = current_ranking
 
         return thresholds
 
-    def _rank_options(
-        self,
-        scores: Dict[str, float],
-        confidence_threshold: float
-    ) -> List[str]:
+    def _rank_options(self, scores: Dict[str, float], confidence_threshold: float) -> List[str]:
         """
         Rank options by score, handling ties with confidence threshold.
 
@@ -189,8 +180,7 @@ class ThresholdIdentifier:
         """
         # Sort by score (descending), then by option_id (for stable tie-breaking)
         sorted_items = sorted(
-            scores.items(),
-            key=lambda x: (-x[1], x[0])  # Negative score for descending
+            scores.items(), key=lambda x: (-x[1], x[0])  # Negative score for descending
         )
 
         # Group options that are within confidence_threshold
@@ -220,9 +210,7 @@ class ThresholdIdentifier:
         return ranked_options
 
     def _find_affected_options(
-        self,
-        ranking_before: List[str],
-        ranking_after: List[str]
+        self, ranking_before: List[str], ranking_after: List[str]
     ) -> List[str]:
         """
         Find which options changed position between rankings.
@@ -252,9 +240,7 @@ class ThresholdIdentifier:
         return affected
 
     def _compute_score_gap(
-        self,
-        scores: Dict[str, float],
-        affected_options: List[str]
+        self, scores: Dict[str, float], affected_options: List[str]
     ) -> Optional[float]:
         """
         Compute score gap between affected options.

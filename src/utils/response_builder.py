@@ -102,9 +102,9 @@ class ResponseBuilder:
         self.options: Optional[List[OptionResultV2]] = None
         self.robustness: Optional[RobustnessResultV2] = None
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
-        self.stability_thresholds = None  # 3C: stability thresholds metadata
+        self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
         self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
-        self.factor_evpi = None  # EVPI per factor (enhancement)
+        self.factor_evpi: Optional[list] = None  # EVPI per factor (enhancement)
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""

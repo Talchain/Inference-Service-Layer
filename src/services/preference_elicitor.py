@@ -11,7 +11,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy.stats import entropy
+from scipy.stats import entropy  # type: ignore[import-untyped]
 
 from src.config import get_settings
 from src.models.phase1_models import (
@@ -67,9 +67,7 @@ class PreferenceElicitor:
             Tuple of (queries, strategy_info)
         """
         # Make computation deterministic
-        rng = make_deterministic(
-            {"context": context.model_dump(), "num_queries": num_queries}
-        )
+        rng = make_deterministic({"context": context.model_dump(), "num_queries": num_queries})
 
         logger.info(
             "query_generation_started",
@@ -262,7 +260,7 @@ class PreferenceElicitor:
         Returns:
             List of scenario pairs
         """
-        scenarios = []
+        scenarios: list = []
 
         # Only create if we have multiple variables
         if len(context.variables) < 2:
@@ -490,7 +488,7 @@ class PreferenceElicitor:
         # Higher uncertainty = higher entropy
         avg_uncertainty = np.mean(list(beliefs.uncertainty_estimates.values()))
         # Map uncertainty (0-1) to entropy (~0-2)
-        return avg_uncertainty * 2.0
+        return float(avg_uncertainty * 2.0)
 
     def _sample_weights(self, beliefs: UserBeliefModel) -> Dict[str, float]:
         """
@@ -617,7 +615,9 @@ class PreferenceElicitor:
 
         if avg_uncertainty > 0.6:
             strategy_type = QueryStrategy.UNCERTAINTY_SAMPLING
-            rationale = "High uncertainty - focusing on areas where your preferences are least clear"
+            rationale = (
+                "High uncertainty - focusing on areas where your preferences are least clear"
+            )
             focus = ["All preference dimensions"]
         elif avg_uncertainty > 0.3:
             strategy_type = QueryStrategy.EXPECTED_IMPROVEMENT

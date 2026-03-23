@@ -11,7 +11,7 @@ Includes weight normalization and trade-off detection.
 
 import logging
 import math
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from src.models.requests import MultiCriteriaRequest, OptionScore
 from src.models.responses import AggregatedRanking, TradeOff, ValidationWarning
@@ -24,8 +24,7 @@ class MultiCriteriaAggregator:
     """Service for aggregating multi-criteria option scores."""
 
     def aggregate(
-        self,
-        request: MultiCriteriaRequest
+        self, request: MultiCriteriaRequest
     ) -> Tuple[List[AggregatedRanking], List[TradeOff], List[ValidationWarning]]:
         """
         Aggregate option scores across multiple criteria.
@@ -41,8 +40,8 @@ class MultiCriteriaAggregator:
             extra={
                 "num_criteria": len(request.criteria),
                 "method": request.aggregation_method,
-                "percentile": request.percentile
-            }
+                "percentile": request.percentile,
+            },
         )
 
         warnings = []
@@ -56,13 +55,13 @@ class MultiCriteriaAggregator:
                 ValidationWarning(
                     code="WEIGHTS_NORMALIZED",
                     message=f"Weights normalized from sum={weight_sum:.4f} to sum=1.0",
-                    affected_items=list(weights.keys())
+                    affected_items=list(weights.keys()),
                 )
             )
             weights = normalized_weights
 
         # Extract scores for selected percentile
-        scores_by_option = self._extract_scores(request.criteria, request.percentile)
+        scores_by_option = self._extract_scores(request.criteria, request.percentile or "p50")
 
         # Apply aggregation method
         if request.aggregation_method == "weighted_sum":
@@ -76,9 +75,7 @@ class MultiCriteriaAggregator:
 
         # Detect trade-offs
         trade_offs = self._detect_trade_offs(
-            rankings,
-            scores_by_option,
-            request.trade_off_threshold
+            rankings, scores_by_option, request.trade_off_threshold or 0.0
         )
 
         logger.info(
@@ -86,16 +83,14 @@ class MultiCriteriaAggregator:
             extra={
                 "num_options": len(rankings),
                 "num_trade_offs": len(trade_offs),
-                "num_warnings": len(warnings)
-            }
+                "num_warnings": len(warnings),
+            },
         )
 
         return rankings, trade_offs, warnings
 
     def _extract_scores(
-        self,
-        criteria: List,
-        percentile: str
+        self, criteria: List, percentile: str
     ) -> Dict[str, Dict[str, Tuple[str, float]]]:
         """
         Extract scores for the selected percentile.
@@ -126,15 +121,13 @@ class MultiCriteriaAggregator:
 
                 scores_by_option[option.option_id][criterion.criterion_id] = (
                     option.option_label,
-                    score
+                    score,
                 )
 
         return scores_by_option
 
     def _weighted_sum(
-        self,
-        scores_by_option: Dict[str, Dict[str, Tuple[str, float]]],
-        weights: Dict[str, float]
+        self, scores_by_option: Dict[str, Dict[str, Tuple[str, float]]], weights: Dict[str, float]
     ) -> List[AggregatedRanking]:
         """
         Weighted sum aggregation: Score = Σ(weight_i × score_i) × 100
@@ -148,17 +141,13 @@ class MultiCriteriaAggregator:
 
             # Compute weighted sum
             aggregated_score = sum(
-                weights.get(crit_id, 0) * score
-                for crit_id, (_, score) in criterion_scores.items()
+                weights.get(crit_id, 0) * score for crit_id, (_, score) in criterion_scores.items()
             )
 
             # Scale to 0-100
             aggregated_score *= 100
 
-            scores_dict = {
-                crit_id: score
-                for crit_id, (_, score) in criterion_scores.items()
-            }
+            scores_dict = {crit_id: score for crit_id, (_, score) in criterion_scores.items()}
 
             rankings.append(
                 AggregatedRanking(
@@ -166,7 +155,7 @@ class MultiCriteriaAggregator:
                     option_label=option_label,
                     rank=0,  # Will be set after sorting
                     aggregated_score=aggregated_score,
-                    scores_by_criterion=scores_dict
+                    scores_by_criterion=scores_dict,
                 )
             )
 
@@ -178,9 +167,7 @@ class MultiCriteriaAggregator:
         return rankings
 
     def _weighted_product(
-        self,
-        scores_by_option: Dict[str, Dict[str, Tuple[str, float]]],
-        weights: Dict[str, float]
+        self, scores_by_option: Dict[str, Dict[str, Tuple[str, float]]], weights: Dict[str, float]
     ) -> List[AggregatedRanking]:
         """
         Weighted product aggregation: Score = ∏(score_i ^ weight_i) × 100
@@ -203,10 +190,7 @@ class MultiCriteriaAggregator:
             # Scale to 0-100
             aggregated_score *= 100
 
-            scores_dict = {
-                crit_id: score
-                for crit_id, (_, score) in criterion_scores.items()
-            }
+            scores_dict = {crit_id: score for crit_id, (_, score) in criterion_scores.items()}
 
             rankings.append(
                 AggregatedRanking(
@@ -214,7 +198,7 @@ class MultiCriteriaAggregator:
                     option_label=option_label,
                     rank=0,
                     aggregated_score=aggregated_score,
-                    scores_by_criterion=scores_dict
+                    scores_by_criterion=scores_dict,
                 )
             )
 
@@ -229,7 +213,7 @@ class MultiCriteriaAggregator:
         self,
         scores_by_option: Dict[str, Dict[str, Tuple[str, float]]],
         weights: Dict[str, float],
-        criterion_order: List[str]
+        criterion_order: List[str],
     ) -> List[AggregatedRanking]:
         """
         Lexicographic aggregation: Sort by criterion_1, then criterion_2, etc.
@@ -238,24 +222,17 @@ class MultiCriteriaAggregator:
         Higher weight = higher priority.
         """
         # Sort criteria by weight (descending) to determine priority order
-        sorted_criteria = sorted(
-            criterion_order,
-            key=lambda c: weights.get(c, 0),
-            reverse=True
-        )
+        sorted_criteria = sorted(criterion_order, key=lambda c: weights.get(c, 0), reverse=True)
 
         # Build list of options with scores
         option_list = []
         for option_id, criterion_scores in scores_by_option.items():
             option_label = next(iter(criterion_scores.values()))[0]
-            scores_dict = {
-                crit_id: score
-                for crit_id, (_, score) in criterion_scores.items()
-            }
+            scores_dict = {crit_id: score for crit_id, (_, score) in criterion_scores.items()}
             option_list.append((option_id, option_label, scores_dict))
 
         # Sort lexicographically
-        def lex_key(item) -> tuple:
+        def lex_key(item: Any) -> tuple:
             _, _, scores = item
             return tuple(scores.get(crit, 0) for crit in sorted_criteria)
 
@@ -275,7 +252,7 @@ class MultiCriteriaAggregator:
                     option_label=option_label,
                     rank=i + 1,
                     aggregated_score=aggregated_score,
-                    scores_by_criterion=scores_dict
+                    scores_by_criterion=scores_dict,
                 )
             )
 
@@ -285,7 +262,7 @@ class MultiCriteriaAggregator:
         self,
         rankings: List[AggregatedRanking],
         scores_by_option: Dict[str, Dict[str, Tuple[str, float]]],
-        threshold: float
+        threshold: float,
     ) -> List[TradeOff]:
         """
         Detect significant trade-offs between top options.
@@ -298,7 +275,7 @@ class MultiCriteriaAggregator:
         top_options = rankings[:5]
 
         for i, opt_a in enumerate(top_options):
-            for opt_b in top_options[i+1:]:
+            for opt_b in top_options[i + 1 :]:
                 a_better = []
                 b_better = []
                 max_diff = 0.0
@@ -326,7 +303,7 @@ class MultiCriteriaAggregator:
                             option_b_label=opt_b.option_label,
                             a_better_on=sorted(a_better),
                             b_better_on=sorted(b_better),
-                            max_difference=max_diff
+                            max_difference=max_diff,
                         )
                     )
 

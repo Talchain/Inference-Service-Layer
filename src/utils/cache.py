@@ -33,7 +33,7 @@ CACHE_STATS_LOG_INTERVAL = 100  # Log stats every N operations
 class CacheStats:
     """Track cache performance statistics."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize cache statistics."""
         self.hits = 0
         self.misses = 0
@@ -41,19 +41,19 @@ class CacheStats:
         self.total_requests = 0
         self.lock = Lock()
 
-    def record_hit(self):
+    def record_hit(self) -> None:
         """Record a cache hit."""
         with self.lock:
             self.hits += 1
             self.total_requests += 1
 
-    def record_miss(self):
+    def record_miss(self) -> None:
         """Record a cache miss."""
         with self.lock:
             self.misses += 1
             self.total_requests += 1
 
-    def record_eviction(self):
+    def record_eviction(self) -> None:
         """Record a cache eviction."""
         with self.lock:
             self.evictions += 1
@@ -61,9 +61,7 @@ class CacheStats:
     def get_stats(self) -> Dict[str, Any]:
         """Get current statistics."""
         with self.lock:
-            hit_rate = (
-                self.hits / self.total_requests if self.total_requests > 0 else 0.0
-            )
+            hit_rate = self.hits / self.total_requests if self.total_requests > 0 else 0.0
             return {
                 "hits": self.hits,
                 "misses": self.misses,
@@ -72,7 +70,7 @@ class CacheStats:
                 "hit_rate": hit_rate,
             }
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset statistics."""
         with self.lock:
             self.hits = 0
@@ -117,7 +115,7 @@ class TTLCache:
                 "cache_name": name,
                 "max_size": max_size,
                 "ttl": ttl,
-            }
+            },
         )
 
     def _compute_key_hash(self, key: Any) -> str:
@@ -145,10 +143,7 @@ class TTLCache:
 
             return hashlib.sha256(key_str.encode()).hexdigest()
         except Exception as e:
-            logger.warning(
-                f"Failed to hash key, using str(): {e}",
-                extra={"cache_name": self.name}
-            )
+            logger.warning(f"Failed to hash key, using str(): {e}", extra={"cache_name": self.name})
             return hashlib.sha256(str(key).encode()).hexdigest()
 
     def _is_expired(self, key_hash: str) -> bool:
@@ -167,7 +162,7 @@ class TTLCache:
         age = time.time() - self._timestamps[key_hash]
         return age > self.ttl
 
-    def _evict_lru(self):
+    def _evict_lru(self) -> None:
         """Evict least recently used entry."""
         if not self._cache:
             return
@@ -184,7 +179,7 @@ class TTLCache:
             extra={
                 "cache_name": self.name,
                 "evicted_key": key_hash[:16],
-            }
+            },
         )
 
     def get(self, key: Any) -> Optional[Any]:
@@ -213,7 +208,7 @@ class TTLCache:
                         extra={
                             "cache_name": self.name,
                             **self.stats.get_stats(),
-                        }
+                        },
                     )
 
                 return self._cache[key_hash]
@@ -227,7 +222,7 @@ class TTLCache:
                 self.stats.record_miss()
                 return None
 
-    def put(self, key: Any, value: Any):
+    def put(self, key: Any, value: Any) -> None:
         """
         Put value in cache.
 
@@ -256,10 +251,10 @@ class TTLCache:
                     "cache_name": self.name,
                     "key": key_hash[:16],
                     "cache_size": len(self._cache),
-                }
+                },
             )
 
-    def invalidate(self, key: Any):
+    def invalidate(self, key: Any) -> None:
         """
         Invalidate cache entry.
 
@@ -279,10 +274,10 @@ class TTLCache:
                 extra={
                     "cache_name": self.name,
                     "key": key_hash[:16],
-                }
+                },
             )
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all cache entries."""
         with self._lock:
             self._cache.clear()
@@ -291,7 +286,7 @@ class TTLCache:
                 f"cache_cleared",
                 extra={
                     "cache_name": self.name,
-                }
+                },
             )
 
     def size(self) -> int:
@@ -309,7 +304,7 @@ class TTLCache:
         }
 
 
-def cached(cache: TTLCache, key_fn: Optional[Callable] = None):
+def cached(cache: TTLCache, key_fn: Optional[Callable[..., Any]] = None) -> Callable[..., Any]:
     """
     Decorator for caching function results.
 
@@ -325,8 +320,8 @@ def cached(cache: TTLCache, key_fn: Optional[Callable] = None):
         ...     return x + y
     """
 
-    def decorator(func: Callable) -> Callable:
-        def wrapper(*args, **kwargs):
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             # Compute cache key
             if key_fn:
                 cache_key = key_fn(*args, **kwargs)
@@ -346,7 +341,7 @@ def cached(cache: TTLCache, key_fn: Optional[Callable] = None):
                     extra={
                         "function": func.__name__,
                         "cache_name": cache.name,
-                    }
+                    },
                 )
                 return result
 
@@ -368,9 +363,7 @@ _global_caches: Dict[str, TTLCache] = {}
 _global_cache_lock = Lock()
 
 
-def get_cache(
-    name: str, max_size: int = DEFAULT_MAX_SIZE, ttl: int = DEFAULT_TTL
-) -> TTLCache:
+def get_cache(name: str, max_size: int = DEFAULT_MAX_SIZE, ttl: int = DEFAULT_TTL) -> TTLCache:
     """
     Get or create a named global cache.
 
@@ -388,7 +381,7 @@ def get_cache(
         return _global_caches[name]
 
 
-def clear_all_caches():
+def clear_all_caches() -> None:
     """Clear all global caches."""
     with _global_cache_lock:
         for cache in _global_caches.values():

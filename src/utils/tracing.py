@@ -15,7 +15,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Generator, Optional, Tuple
+from typing import Any, Callable, Generator, Optional, Tuple
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,11 +24,11 @@ logger = logging.getLogger(__name__)
 
 # Request ID validation constraints
 REQUEST_ID_MAX_LENGTH = 128
-REQUEST_ID_PATTERN = re.compile(r'^[a-zA-Z0-9._:-]+$')
+REQUEST_ID_PATTERN = re.compile(r"^[a-zA-Z0-9._:-]+$")
 
 # Context-local trace ID storage
-trace_id_ctx: ContextVar[Optional[str]] = ContextVar('trace_id', default=None)
-user_id_ctx: ContextVar[Optional[str]] = ContextVar('user_id', default=None)
+trace_id_ctx: ContextVar[Optional[str]] = ContextVar("trace_id", default=None)
+user_id_ctx: ContextVar[Optional[str]] = ContextVar("user_id", default=None)
 
 
 @contextmanager
@@ -57,12 +57,13 @@ def trace_operation(operation_name: str, request_id: str) -> Generator[None, Non
                 "request_id": request_id,
                 "operation": operation_name,
                 "duration_ms": duration_ms,
-                "trace_id": get_trace_id()
-            }
+                "trace_id": get_trace_id(),
+            },
         )
 
 
 # Distributed Tracing Functions
+
 
 def sanitize_request_id(request_id: Optional[str]) -> Tuple[str, bool]:
     """
@@ -94,7 +95,7 @@ def sanitize_request_id(request_id: Optional[str]) -> Tuple[str, bool]:
                 "reason": "too_long",
                 "length": len(request_id),
                 "max_length": REQUEST_ID_MAX_LENGTH,
-            }
+            },
         )
         return generate_trace_id(), False
 
@@ -105,7 +106,7 @@ def sanitize_request_id(request_id: Optional[str]) -> Tuple[str, bool]:
             extra={
                 "reason": "invalid_characters",
                 "request_id_prefix": request_id[:20] if len(request_id) > 20 else request_id,
-            }
+            },
         )
         return generate_trace_id(), False
 
@@ -153,21 +154,18 @@ class TracingMiddleware(BaseHTTPMiddleware):
     Priority: X-Request-Id > X-Trace-Id > generated
     """
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable[..., Any]) -> Any:
         """Process request with tracing."""
         # Extract request ID from headers (priority: X-Request-Id > X-Trace-Id)
         # This aligns with Olumi platform standard while maintaining backward compatibility
-        inbound_id = (
-            request.headers.get('X-Request-Id') or
-            request.headers.get('X-Trace-Id')
-        )
+        inbound_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id")
 
         # Sanitize for security (prevents log injection, header abuse)
         request_id, _ = sanitize_request_id(inbound_id)
         set_trace_id(request_id)
 
         # Extract user ID if present
-        user_id = request.headers.get('X-User-Id')
+        user_id = request.headers.get("X-User-Id")
         if user_id:
             set_user_id(user_id)
 
@@ -176,7 +174,7 @@ class TracingMiddleware(BaseHTTPMiddleware):
 
         # Add correlation IDs to response headers
         # Include both for compatibility during migration
-        response.headers['X-Request-Id'] = request_id
-        response.headers['X-Trace-Id'] = request_id  # Deprecated, for backward compatibility
+        response.headers["X-Request-Id"] = request_id
+        response.headers["X-Trace-Id"] = request_id  # Deprecated, for backward compatibility
 
         return response

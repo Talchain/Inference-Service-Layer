@@ -37,8 +37,12 @@ def detect_degenerate_outcomes(
     if len(computed_options) < 2:
         return None
 
-    # Get p50 (median) values
-    p50_values = [r.outcome.p50 for r in computed_options]
+    # Get p50 (median) values, filtering out None
+    p50_raw = [r.outcome.p50 for r in computed_options]
+    p50_values: List[float] = [v for v in p50_raw if v is not None]
+
+    if len(p50_values) < 2:
+        return None
 
     # Calculate relative spread
     max_abs = max(abs(v) for v in p50_values)

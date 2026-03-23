@@ -106,9 +106,7 @@ class EnhancedCausalValidator:
             return self._create_degraded_response(request, error=e)
 
     def _try_comprehensive_y0_identification(
-        self,
-        request: CausalValidationRequest,
-        nx_graph: nx.DiGraph
+        self, request: CausalValidationRequest, nx_graph: nx.DiGraph
     ) -> Optional[CausalValidationResponse]:
         """
         Try comprehensive Y₀ identification with rich metadata extraction.
@@ -142,22 +140,16 @@ class EnhancedCausalValidator:
                 method = self._determine_y0_method(result, nx_graph, request)
 
                 # Extract adjustment set (for backdoor cases)
-                adjustment_set = self._extract_y0_adjustment_set(
-                    result, nx_graph, request
-                )
+                adjustment_set = self._extract_y0_adjustment_set(result, nx_graph, request)
 
                 # Generate identification formula
-                formula = self._generate_identification_formula(
-                    method, adjustment_set, request
-                )
+                formula = self._generate_identification_formula(method, adjustment_set, request)
 
                 # Extract structured assumptions
                 assumptions = self._extract_assumptions(method, adjustment_set)
 
                 # Check alternative methods
-                alternatives = self._check_alternative_methods(
-                    request, nx_graph
-                )
+                alternatives = self._check_alternative_methods(request, nx_graph)
 
                 # Generate explanation
                 explanation = self.explanation_generator.generate_causal_validation_explanation(
@@ -188,10 +180,7 @@ class EnhancedCausalValidator:
             return None
 
     def _determine_y0_method(
-        self,
-        y0_result: Any,
-        nx_graph: nx.DiGraph,
-        request: CausalValidationRequest
+        self, y0_result: Any, nx_graph: nx.DiGraph, request: CausalValidationRequest
     ) -> str:
         """
         Determine which identification method Y₀ used.
@@ -205,9 +194,7 @@ class EnhancedCausalValidator:
             Method name: "backdoor", "front_door", "instrumental_variables", or "do_calculus"
         """
         # Check if backdoor criterion applies
-        backdoor_paths = find_backdoor_paths(
-            nx_graph, request.treatment, request.outcome
-        )
+        backdoor_paths = find_backdoor_paths(nx_graph, request.treatment, request.outcome)
 
         # If no backdoor paths or we found valid adjustment set, it's backdoor
         if not backdoor_paths or self._find_adjustment_sets(
@@ -220,10 +207,7 @@ class EnhancedCausalValidator:
         return "do_calculus"
 
     def _extract_y0_adjustment_set(
-        self,
-        y0_result: Any,
-        nx_graph: nx.DiGraph,
-        request: CausalValidationRequest
+        self, y0_result: Any, nx_graph: nx.DiGraph, request: CausalValidationRequest
     ) -> List[str]:
         """
         Extract adjustment set from Y₀ result or networkx analysis.
@@ -251,10 +235,7 @@ class EnhancedCausalValidator:
         return []
 
     def _generate_identification_formula(
-        self,
-        method: str,
-        adjustment_set: List[str],
-        request: CausalValidationRequest
+        self, method: str, adjustment_set: List[str], request: CausalValidationRequest
     ) -> str:
         """
         Generate human-readable identification formula.
@@ -287,9 +268,7 @@ class EnhancedCausalValidator:
             return f"P({outcome}|do({treatment})) identifiable via general do-calculus"
 
     def _extract_assumptions(
-        self,
-        method: str,
-        adjustment_set: List[str]
+        self, method: str, adjustment_set: List[str]
     ) -> List[AssumptionDetail]:
         """
         Extract structured assumptions for the identification method.
@@ -304,86 +283,92 @@ class EnhancedCausalValidator:
         assumptions = []
 
         if method == "backdoor":
-            assumptions.extend([
-                AssumptionDetail(
-                    type="no_unmeasured_confounding",
-                    description=(
-                        f"No unmeasured confounders after adjusting for {', '.join(adjustment_set)}"
-                        if adjustment_set
-                        else "No unmeasured confounders between treatment and outcome"
+            assumptions.extend(
+                [
+                    AssumptionDetail(
+                        type="no_unmeasured_confounding",
+                        description=(
+                            f"No unmeasured confounders after adjusting for {', '.join(adjustment_set)}"
+                            if adjustment_set
+                            else "No unmeasured confounders between treatment and outcome"
+                        ),
+                        critical=True,
                     ),
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="positivity",
-                    description="All treatment values possible at all covariate levels",
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="consistency",
-                    description="Well-defined interventions and potential outcomes",
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="causal_structure",
-                    description="DAG correctly represents causal relationships",
-                    critical=True
-                )
-            ])
+                    AssumptionDetail(
+                        type="positivity",
+                        description="All treatment values possible at all covariate levels",
+                        critical=True,
+                    ),
+                    AssumptionDetail(
+                        type="consistency",
+                        description="Well-defined interventions and potential outcomes",
+                        critical=True,
+                    ),
+                    AssumptionDetail(
+                        type="causal_structure",
+                        description="DAG correctly represents causal relationships",
+                        critical=True,
+                    ),
+                ]
+            )
 
         elif method == "front_door":
-            assumptions.extend([
-                AssumptionDetail(
-                    type="mediator_completeness",
-                    description="All causal pathways go through identified mediators",
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="no_confounding_mediator_outcome",
-                    description="No unmeasured confounding between mediator and outcome",
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="causal_structure",
-                    description="DAG correctly represents causal relationships",
-                    critical=True
-                )
-            ])
+            assumptions.extend(
+                [
+                    AssumptionDetail(
+                        type="mediator_completeness",
+                        description="All causal pathways go through identified mediators",
+                        critical=True,
+                    ),
+                    AssumptionDetail(
+                        type="no_confounding_mediator_outcome",
+                        description="No unmeasured confounding between mediator and outcome",
+                        critical=True,
+                    ),
+                    AssumptionDetail(
+                        type="causal_structure",
+                        description="DAG correctly represents causal relationships",
+                        critical=True,
+                    ),
+                ]
+            )
 
         elif method == "instrumental_variables":
-            assumptions.extend([
-                AssumptionDetail(
-                    type="instrument_validity",
-                    description="Instrument affects outcome only through treatment",
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="instrument_relevance",
-                    description="Instrument sufficiently affects treatment",
-                    critical=True
-                )
-            ])
+            assumptions.extend(
+                [
+                    AssumptionDetail(
+                        type="instrument_validity",
+                        description="Instrument affects outcome only through treatment",
+                        critical=True,
+                    ),
+                    AssumptionDetail(
+                        type="instrument_relevance",
+                        description="Instrument sufficiently affects treatment",
+                        critical=True,
+                    ),
+                ]
+            )
 
         else:  # do_calculus
-            assumptions.extend([
-                AssumptionDetail(
-                    type="causal_structure",
-                    description="DAG correctly represents all causal relationships",
-                    critical=True
-                ),
-                AssumptionDetail(
-                    type="markov_property",
-                    description="Conditional independencies implied by DAG hold",
-                    critical=True
-                )
-            ])
+            assumptions.extend(
+                [
+                    AssumptionDetail(
+                        type="causal_structure",
+                        description="DAG correctly represents all causal relationships",
+                        critical=True,
+                    ),
+                    AssumptionDetail(
+                        type="markov_property",
+                        description="Conditional independencies implied by DAG hold",
+                        critical=True,
+                    ),
+                ]
+            )
 
         return assumptions
 
     def _check_alternative_methods(
-        self,
-        request: CausalValidationRequest,
-        nx_graph: nx.DiGraph
+        self, request: CausalValidationRequest, nx_graph: nx.DiGraph
     ) -> List[AlternativeMethod]:
         """
         Check which alternative identification methods are applicable.
@@ -398,36 +383,36 @@ class EnhancedCausalValidator:
         alternatives = []
 
         # Check backdoor
-        backdoor_applicable, backdoor_reason = self._try_backdoor_method(
-            nx_graph, request
+        backdoor_applicable, backdoor_reason = self._try_backdoor_method(nx_graph, request)
+        alternatives.append(
+            AlternativeMethod(
+                method="backdoor", applicable=backdoor_applicable, reason=backdoor_reason
+            )
         )
-        alternatives.append(AlternativeMethod(
-            method="backdoor",
-            applicable=backdoor_applicable,
-            reason=backdoor_reason
-        ))
 
         # Check front-door (simplified heuristic)
         # TODO: Implement proper front-door criterion check
-        alternatives.append(AlternativeMethod(
-            method="front_door",
-            applicable=False,
-            reason="Front-door criterion check not yet implemented"
-        ))
+        alternatives.append(
+            AlternativeMethod(
+                method="front_door",
+                applicable=False,
+                reason="Front-door criterion check not yet implemented",
+            )
+        )
 
         # Check instrumental variables (not typically applicable without explicit IV)
-        alternatives.append(AlternativeMethod(
-            method="instrumental_variables",
-            applicable=False,
-            reason="No instrumental variable specified"
-        ))
+        alternatives.append(
+            AlternativeMethod(
+                method="instrumental_variables",
+                applicable=False,
+                reason="No instrumental variable specified",
+            )
+        )
 
         return alternatives
 
     def _try_backdoor_method(
-        self,
-        nx_graph: nx.DiGraph,
-        request: CausalValidationRequest
+        self, nx_graph: nx.DiGraph, request: CausalValidationRequest
     ) -> Tuple[bool, str]:
         """
         Check if backdoor criterion is applicable.
@@ -453,11 +438,12 @@ class EnhancedCausalValidator:
                 minimal = min(adjustment_sets, key=len)
                 return True, f"Valid adjustment set exists: {{{', '.join(minimal)}}}"
         else:
-            backdoor_paths = find_backdoor_paths(
-                nx_graph, request.treatment, request.outcome
-            )
+            backdoor_paths = find_backdoor_paths(nx_graph, request.treatment, request.outcome)
             if backdoor_paths:
-                return False, "Backdoor paths exist but no valid adjustment set with measured variables"
+                return (
+                    False,
+                    "Backdoor paths exist but no valid adjustment set with measured variables",
+                )
             else:
                 return True, "No backdoor paths to block"
 
@@ -473,9 +459,7 @@ class EnhancedCausalValidator:
 
         (Same implementation as original - kept for backward compatibility)
         """
-        potential_adjusters = [
-            node for node in all_nodes if node not in [treatment, outcome]
-        ]
+        potential_adjusters = [node for node in all_nodes if node not in [treatment, outcome]]
 
         backdoor_paths = find_backdoor_paths(graph, treatment, outcome)
 
@@ -523,14 +507,10 @@ class EnhancedCausalValidator:
         return True
 
     def _get_backdoor_paths(
-        self,
-        nx_graph: nx.DiGraph,
-        request: CausalValidationRequest
+        self, nx_graph: nx.DiGraph, request: CausalValidationRequest
     ) -> Optional[List[str]]:
         """Get formatted backdoor paths."""
-        paths_list = find_backdoor_paths(
-            nx_graph, request.treatment, request.outcome
-        )
+        paths_list = find_backdoor_paths(nx_graph, request.treatment, request.outcome)
         if paths_list:
             return [" → ".join(path) for path in paths_list]
         return None
@@ -545,9 +525,7 @@ class EnhancedCausalValidator:
         minimal_set = min(adjustment_sets, key=len) if adjustment_sets else []
 
         # Generate formula
-        formula = self._generate_identification_formula(
-            "backdoor", minimal_set, request
-        )
+        formula = self._generate_identification_formula("backdoor", minimal_set, request)
 
         # Extract assumptions
         assumptions = self._extract_assumptions("backdoor", minimal_set)
@@ -578,9 +556,7 @@ class EnhancedCausalValidator:
         )
 
     def _create_no_path_response(
-        self,
-        request: CausalValidationRequest,
-        nx_graph: nx.DiGraph
+        self, request: CausalValidationRequest, nx_graph: nx.DiGraph
     ) -> CausalValidationResponse:
         """Create enhanced response when there's no causal path."""
         issue = ValidationIssue(
@@ -593,7 +569,7 @@ class EnhancedCausalValidator:
         suggestions = [
             f"Add edges from {request.treatment} to {request.outcome} or through mediators",
             f"Verify that {request.treatment} actually affects {request.outcome} in your domain",
-            "Review the causal structure - is the treatment-outcome relationship missing?"
+            "Review the causal structure - is the treatment-outcome relationship missing?",
         ]
 
         explanation = self.explanation_generator.generate_causal_validation_explanation(
@@ -614,15 +590,11 @@ class EnhancedCausalValidator:
         )
 
     def _create_cannot_identify_response(
-        self,
-        request: CausalValidationRequest,
-        graph: nx.DiGraph
+        self, request: CausalValidationRequest, graph: nx.DiGraph
     ) -> CausalValidationResponse:
         """Create enhanced response for cannot identify case with diagnosis."""
         # Diagnose why identification failed
-        backdoor_paths_list = find_backdoor_paths(
-            graph, request.treatment, request.outcome
-        )
+        backdoor_paths_list = find_backdoor_paths(graph, request.treatment, request.outcome)
 
         if backdoor_paths_list:
             reason = "unmeasured_confounding"
@@ -630,15 +602,17 @@ class EnhancedCausalValidator:
                 "Add measured confounders to the model to block backdoor paths",
                 "Consider using instrumental variables if available",
                 "Explore front-door criterion if mediators fully capture the pathway",
-                "Collect data on potential confounders"
+                "Collect data on potential confounders",
             ]
-            description = "Backdoor paths exist but no valid adjustment set found with measured variables"
+            description = (
+                "Backdoor paths exist but no valid adjustment set found with measured variables"
+            )
         else:
             reason = "identification_failed"
             suggestions = [
                 "Simplify causal structure if possible",
                 "Verify DAG structure is correct",
-                "Consult with causal inference expert for complex cases"
+                "Consult with causal inference expert for complex cases",
             ]
             description = "Effect cannot be identified with standard methods"
 
@@ -667,9 +641,7 @@ class EnhancedCausalValidator:
         )
 
     def _create_degraded_response(
-        self,
-        request: CausalValidationRequest,
-        error: Exception
+        self, request: CausalValidationRequest, error: Exception
     ) -> CausalValidationResponse:
         """
         Create graceful degraded response when Y₀ errors.
@@ -688,7 +660,7 @@ class EnhancedCausalValidator:
                 "error_type": type(error).__name__,
                 "treatment": request.treatment,
                 "outcome": request.outcome,
-            }
+            },
         )
 
         # Basic fallback: check for direct path
@@ -700,8 +672,9 @@ class EnhancedCausalValidator:
             potential_confounders = []
             for node in request.dag.nodes:
                 if node not in [request.treatment, request.outcome]:
-                    if (nx.has_path(nx_graph, node, request.treatment) and
-                        nx.has_path(nx_graph, node, request.outcome)):
+                    if nx.has_path(nx_graph, node, request.treatment) and nx.has_path(
+                        nx_graph, node, request.outcome
+                    ):
                         potential_confounders.append(node)
 
             fallback_assessment = {
@@ -711,13 +684,13 @@ class EnhancedCausalValidator:
                     "Manual review recommended - advanced analysis unavailable"
                     if direct_path
                     else "No causal path found - treatment may not affect outcome"
-                )
+                ),
             }
         except Exception as fallback_error:
             logger.error(f"fallback_assessment_failed: {fallback_error}")
             fallback_assessment = {
                 "error": "Fallback assessment also failed",
-                "recommendation": "Contact support with error details"
+                "recommendation": "Contact support with error details",
             }
 
         explanation = self.explanation_generator.generate_causal_validation_explanation(
@@ -733,7 +706,7 @@ class EnhancedCausalValidator:
             suggestions=[
                 "Try simplifying the DAG structure",
                 "Verify all node names are valid identifiers",
-                "Contact support if error persists"
+                "Contact support if error persists",
             ],
             attempted_methods=["y0_identification", "fallback_structural_analysis"],
             confidence=ConfidenceLevel.LOW,

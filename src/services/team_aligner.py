@@ -64,9 +64,7 @@ class TeamAligner:
             common_ground = self._find_common_ground(request.perspectives)
 
             # Analyze each option
-            aligned_options = self._analyze_options(
-                request.perspectives, request.options
-            )
+            aligned_options = self._analyze_options(request.perspectives, request.options)
 
             # Identify conflicts
             conflicts = self._identify_conflicts(request.perspectives)
@@ -77,13 +75,11 @@ class TeamAligner:
             )
 
             # Generate explanation
-            explanation = self.explanation_generator.generate_team_alignment_explanation(
+            explanation = self.explanation_generator.generate_team_alignment_explanation(  # type: ignore[attr-defined]
                 num_perspectives=len(request.perspectives),
                 agreement_level=common_ground.agreement_level,
                 top_option=recommendation.top_option,
-                satisfaction_score=aligned_options[0].satisfaction_score
-                if aligned_options
-                else 0,
+                satisfaction_score=aligned_options[0].satisfaction_score if aligned_options else 0,
                 num_conflicts=len(conflicts),
             )
 
@@ -99,9 +95,7 @@ class TeamAligner:
             logger.error("team_alignment_failed", exc_info=True)
             raise
 
-    def _find_common_ground(
-        self, perspectives: List[TeamPerspective]
-    ) -> CommonGround:
+    def _find_common_ground(self, perspectives: List[TeamPerspective]) -> CommonGround:
         """
         Find shared goals and constraints across perspectives.
 
@@ -124,9 +118,7 @@ class TeamAligner:
 
         # Find intersection (shared by all)
         shared_goals = list(set.intersection(*all_priorities)) if all_priorities else []
-        shared_constraints = (
-            list(set.intersection(*all_constraints)) if all_constraints else []
-        )
+        shared_constraints = list(set.intersection(*all_constraints)) if all_constraints else []
 
         # Calculate agreement level
         # (ratio of shared items to total unique items)
@@ -136,9 +128,7 @@ class TeamAligner:
         total_unique = len(all_unique_priorities) + len(all_unique_constraints)
         total_shared = len(shared_goals) + len(shared_constraints)
 
-        agreement_level = (
-            (total_shared / total_unique * 100) if total_unique > 0 else 0.0
-        )
+        agreement_level = (total_shared / total_unique * 100) if total_unique > 0 else 0.0
 
         return CommonGround(
             shared_goals=shared_goals,
@@ -171,17 +161,12 @@ class TeamAligner:
 
             for perspective in perspectives:
                 # Check if this option is in preferred options
-                if (
-                    perspective.preferred_options
-                    and option.id in perspective.preferred_options
-                ):
+                if perspective.preferred_options and option.id in perspective.preferred_options:
                     satisfies_roles.append(perspective.role)
                     total_satisfaction += 100.0
                 else:
                     # Calculate partial satisfaction based on attribute matching
-                    satisfaction = self._calculate_satisfaction(
-                        perspective, option
-                    )
+                    satisfaction = self._calculate_satisfaction(perspective, option)
                     total_satisfaction += satisfaction
 
                     if satisfaction >= 60:  # Threshold for "satisfies"
@@ -193,9 +178,7 @@ class TeamAligner:
                             tradeoffs.append(tradeoff)
 
             # Average satisfaction across all perspectives
-            avg_satisfaction = (
-                total_satisfaction / len(perspectives) if perspectives else 0.0
-            )
+            avg_satisfaction = total_satisfaction / len(perspectives) if perspectives else 0.0
 
             aligned_options.append(
                 AlignedOption(
@@ -232,17 +215,13 @@ class TeamAligner:
             # Check if any attribute name or value contains the priority keyword
             priority_lower = priority.lower()
             for attr_name, attr_value in option.attributes.items():
-                if priority_lower in attr_name.lower() or priority_lower in str(
-                    attr_value
-                ).lower():
+                if priority_lower in attr_name.lower() or priority_lower in str(attr_value).lower():
                     matches += 1
                     break
 
         return (matches / total_priorities * 100) if total_priorities > 0 else 50.0
 
-    def _identify_tradeoff(
-        self, perspective: TeamPerspective, option: DecisionOption
-    ) -> Tradeoff:
+    def _identify_tradeoff(self, perspective: TeamPerspective, option: DecisionOption) -> Tradeoff:
         """
         Identify what a perspective gives up and gets with this option.
 
@@ -274,9 +253,7 @@ class TeamAligner:
             gets=gets,
         )
 
-    def _identify_conflicts(
-        self, perspectives: List[TeamPerspective]
-    ) -> List[Conflict]:
+    def _identify_conflicts(self, perspectives: List[TeamPerspective]) -> List[Conflict]:
         """
         Identify conflicts between perspectives.
 
@@ -371,7 +348,9 @@ class TeamAligner:
         )
 
         if common_ground.agreement_level >= 70:
-            rationale += "There is strong alignment on shared goals, making implementation smoother."
+            rationale += (
+                "There is strong alignment on shared goals, making implementation smoother."
+            )
         elif conflicts:
             rationale += f"However, {len(conflicts)} conflict(s) should be addressed."
 
@@ -383,7 +362,9 @@ class TeamAligner:
             next_steps.append("Review and approve necessary tradeoffs")
         next_steps.append("Define implementation plan with clear milestones")
         if common_ground.shared_goals:
-            next_steps.append(f"Align implementation with shared goals: {', '.join(common_ground.shared_goals[:2])}")
+            next_steps.append(
+                f"Align implementation with shared goals: {', '.join(common_ground.shared_goals[:2])}"
+            )
 
         return Recommendation(
             top_option=top_option.option,

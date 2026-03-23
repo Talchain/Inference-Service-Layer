@@ -83,7 +83,7 @@ class LLMConfig(BaseModel):
         description="Fall back to rule-based if LLM fails/costly",
     )
 
-    model_config = {"env_prefix": "LLM_"}
+    model_config = {"env_prefix": "LLM_"}  # type: ignore[typeddict-unknown-key]
 
 
 @lru_cache()

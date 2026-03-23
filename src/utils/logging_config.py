@@ -30,7 +30,7 @@ class JSONFormatter(logging.Formatter):
             "message": record.getMessage(),
             "module": record.module,
             "function": record.funcName,
-            "line": record.lineno
+            "line": record.lineno,
         }
 
         # Add extra fields
@@ -73,9 +73,9 @@ def configure_logging(level: str = "INFO", json_format: bool = True) -> None:
         handler.setFormatter(JSONFormatter())
     else:
         # Human-readable format for development
-        handler.setFormatter(logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        ))
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
 
     root_logger = logging.getLogger()
     root_logger.addHandler(handler)

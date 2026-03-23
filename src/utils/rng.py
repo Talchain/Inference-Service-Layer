@@ -11,7 +11,7 @@ in inference code. Always use SeededRNG for reproducibility.
 import hashlib
 import json
 import os
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING, Union, overload
 
 import numpy as np
 
@@ -104,7 +104,7 @@ class SeededRNG:
         """
         return self._rng.random() < p
 
-    def choice(self, items: List, size: Optional[int] = None, replace: bool = True):
+    def choice(self, items: List, size: Optional[int] = None, replace: bool = True) -> Any:
         """
         Random choice from items.
 
@@ -145,7 +145,7 @@ class SeededRNG:
         """
         return int(self._rng.integers(low, high))
 
-    def beta(self, a: float, b: float, size: Optional[int] = None):
+    def beta(self, a: float, b: float, size: Optional[int] = None) -> Any:
         """
         Generate beta distribution sample(s).
 
@@ -204,7 +204,15 @@ class SeededRNG:
         """
         return self._rng.beta(a, b, size)
 
-    def spawn(self, n: int = 1) -> "SeededRNG":
+    @overload
+    def spawn(self) -> "SeededRNG":
+        ...
+
+    @overload
+    def spawn(self, n: int) -> Union["SeededRNG", List["SeededRNG"]]:
+        ...
+
+    def spawn(self, n: int = 1) -> Union["SeededRNG", List["SeededRNG"]]:
         """
         Create new independent RNG(s) from this one.
 
@@ -223,9 +231,7 @@ class SeededRNG:
         return [SeededRNG(int(s)) for s in seeds]
 
 
-def compute_seed_from_graph(
-    graph: "GraphV2", *, version: Optional[int] = None
-) -> int:
+def compute_seed_from_graph(graph: "GraphV2", *, version: Optional[int] = None) -> int:
     """
     Compute deterministic seed from graph structure.
 

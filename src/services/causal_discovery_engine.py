@@ -14,12 +14,7 @@ import numpy as np
 
 from src.utils.cache import get_cache
 from src.services.advanced_discovery_algorithms import AdvancedCausalDiscovery
-from src.utils.error_recovery import (
-    CircuitBreaker,
-    with_fallback,
-    FallbackStrategy,
-    health_monitor
-)
+from src.utils.error_recovery import CircuitBreaker, with_fallback, FallbackStrategy, health_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +51,18 @@ class CausalDiscoveryEngine:
         self.enable_advanced = enable_advanced
 
         # Initialize cache for expensive discovery operations
+        self._discovery_cache: Optional[Any] = None
         if enable_caching:
             self._discovery_cache = get_cache(
                 "causal_discovery", max_size=CACHE_MAX_SIZE, ttl=CACHE_TTL
             )
             logger.info("caching_enabled", extra={"service": "CausalDiscoveryEngine"})
-        else:
-            self._discovery_cache = None
 
         # Initialize advanced algorithms if enabled
+        self._advanced_discovery: Optional[AdvancedCausalDiscovery] = None
         if enable_advanced:
             self._advanced_discovery = AdvancedCausalDiscovery()
             logger.info("advanced_algorithms_enabled", extra={"service": "CausalDiscoveryEngine"})
-        else:
-            self._advanced_discovery = None
 
     def _create_data_cache_key(
         self,
@@ -140,9 +133,9 @@ class CausalDiscoveryEngine:
                     extra={
                         "n_variables": len(variable_names),
                         "n_samples": data.shape[0],
-                    }
+                    },
                 )
-                return cached_result
+                return cached_result  # type: ignore[no-any-return]
 
         # Set random seed for reproducibility
         if seed is not None:
@@ -169,9 +162,7 @@ class CausalDiscoveryEngine:
 
         # Check minimum sample size
         if n < 10:
-            logger.warning(
-                f"Small sample size ({n} < 10). Results may be unreliable."
-            )
+            logger.warning(f"Small sample size ({n} < 10). Results may be unreliable.")
 
         # Compute correlation matrix
         corr_matrix = np.corrcoef(data, rowvar=False)
@@ -197,7 +188,7 @@ class CausalDiscoveryEngine:
                 extra={
                     "required_edges": len(prior_knowledge.get("required_edges", [])),
                     "forbidden_edges": len(prior_knowledge.get("forbidden_edges", [])),
-                }
+                },
             )
             self._apply_prior_knowledge(dag, prior_knowledge)
 
@@ -211,7 +202,7 @@ class CausalDiscoveryEngine:
                 "n_edges": len(dag.edges()),
                 "confidence": confidence,
                 "is_acyclic": nx.is_directed_acyclic_graph(dag),
-            }
+            },
         )
 
         # Cache the result
@@ -225,7 +216,7 @@ class CausalDiscoveryEngine:
         data: np.ndarray,
         variable_names: List[str],
         algorithm: str = "notears",
-        **kwargs,
+        **kwargs: Any,
     ) -> Tuple[nx.DiGraph, float]:
         """
         Discover DAG structure using advanced algorithms (NOTEARS, PC).
@@ -250,8 +241,7 @@ class CausalDiscoveryEngine:
         if not self.enable_advanced or self._advanced_discovery is None:
             # Fall back to simple discovery
             logger.warning(
-                "advanced_discovery_not_enabled_fallback",
-                extra={"algorithm": algorithm}
+                "advanced_discovery_not_enabled_fallback", extra={"algorithm": algorithm}
             )
             return self.discover_from_data(data, variable_names)
 
@@ -261,7 +251,7 @@ class CausalDiscoveryEngine:
                 "algorithm": algorithm,
                 "n_samples": data.shape[0],
                 "n_variables": data.shape[1],
-            }
+            },
         )
 
         try:
@@ -277,7 +267,7 @@ class CausalDiscoveryEngine:
                                 "best_algorithm": best_algorithm,
                                 "n_edges": len(best_dag.edges()),
                                 "score": best_score,
-                            }
+                            },
                         )
                         health_monitor.record_success("advanced_discovery")
                         return best_dag, best_score
@@ -285,10 +275,7 @@ class CausalDiscoveryEngine:
                         # All advanced algorithms failed, fall back
                         raise RuntimeError("All advanced algorithms failed")
                 except Exception as e:
-                    logger.warning(
-                        "auto_discovery_failed_fallback",
-                        extra={"error": str(e)}
-                    )
+                    logger.warning("auto_discovery_failed_fallback", extra={"error": str(e)})
                     health_monitor.record_fallback("advanced_discovery")
                     return self._fallback_to_simple_discovery(data, variable_names)
 
@@ -296,8 +283,7 @@ class CausalDiscoveryEngine:
                 # Use NOTEARS with circuit breaker
                 try:
                     dag, score = _notears_breaker.call(
-                        self._advanced_discovery.discover,
-                        data, variable_names, algorithm, **kwargs
+                        self._advanced_discovery.discover, data, variable_names, algorithm, **kwargs
                     )
                     logger.info(
                         "advanced_discovery_complete",
@@ -305,17 +291,14 @@ class CausalDiscoveryEngine:
                             "algorithm": algorithm,
                             "n_edges": len(dag.edges()),
                             "score": score,
-                        }
+                        },
                     )
                     health_monitor.record_success("advanced_discovery")
                     return dag, score
                 except Exception as e:
                     logger.warning(
                         "notears_failed_fallback",
-                        extra={
-                            "error": str(e),
-                            "circuit_state": _notears_breaker.state.value
-                        }
+                        extra={"error": str(e), "circuit_state": _notears_breaker.state.value},
                     )
                     health_monitor.record_fallback("advanced_discovery")
                     return self._fallback_to_simple_discovery(data, variable_names)
@@ -324,8 +307,7 @@ class CausalDiscoveryEngine:
                 # Use PC algorithm with circuit breaker
                 try:
                     dag, score = _pc_breaker.call(
-                        self._advanced_discovery.discover,
-                        data, variable_names, algorithm, **kwargs
+                        self._advanced_discovery.discover, data, variable_names, algorithm, **kwargs
                     )
                     logger.info(
                         "advanced_discovery_complete",
@@ -333,27 +315,21 @@ class CausalDiscoveryEngine:
                             "algorithm": algorithm,
                             "n_edges": len(dag.edges()),
                             "score": score,
-                        }
+                        },
                     )
                     health_monitor.record_success("advanced_discovery")
                     return dag, score
                 except Exception as e:
                     logger.warning(
                         "pc_failed_fallback",
-                        extra={
-                            "error": str(e),
-                            "circuit_state": _pc_breaker.state.value
-                        }
+                        extra={"error": str(e), "circuit_state": _pc_breaker.state.value},
                     )
                     health_monitor.record_fallback("advanced_discovery")
                     return self._fallback_to_simple_discovery(data, variable_names)
 
             else:
                 # Unknown algorithm, use safe default
-                logger.warning(
-                    f"unknown_algorithm_fallback",
-                    extra={"algorithm": algorithm}
-                )
+                logger.warning(f"unknown_algorithm_fallback", extra={"algorithm": algorithm})
                 health_monitor.record_fallback("advanced_discovery")
                 return self._fallback_to_simple_discovery(data, variable_names)
 
@@ -361,19 +337,14 @@ class CausalDiscoveryEngine:
             # Ultimate fallback: Always return simple correlation-based discovery
             logger.error(
                 "advanced_discovery_failed_ultimate_fallback",
-                extra={
-                    "error": str(e),
-                    "error_type": type(e).__name__
-                },
-                exc_info=True
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
             )
             health_monitor.record_failure("advanced_discovery")
             return self._fallback_to_simple_discovery(data, variable_names)
 
     def _fallback_to_simple_discovery(
-        self,
-        data: np.ndarray,
-        variable_names: List[str]
+        self, data: np.ndarray, variable_names: List[str]
     ) -> Tuple[nx.DiGraph, float]:
         """
         Fallback to simple correlation-based discovery.
@@ -389,33 +360,23 @@ class CausalDiscoveryEngine:
         """
         logger.info(
             "using_simple_discovery_fallback",
-            extra={
-                "n_samples": data.shape[0],
-                "n_variables": data.shape[1]
-            }
+            extra={"n_samples": data.shape[0], "n_variables": data.shape[1]},
         )
 
         try:
             # Use standard correlation-based discovery
-            dag, confidence = self.discover_from_data(
-                data, variable_names, threshold=0.3
-            )
+            dag, confidence = self.discover_from_data(data, variable_names, threshold=0.3)
             logger.info("simple_discovery_fallback_success")
             return dag, confidence
 
         except Exception as e:
             # Even simple discovery failed - return minimal DAG
             logger.error(
-                "simple_discovery_failed_minimal_fallback",
-                extra={"error": str(e)},
-                exc_info=True
+                "simple_discovery_failed_minimal_fallback", extra={"error": str(e)}, exc_info=True
             )
             return self._minimal_dag_fallback(variable_names)
 
-    def _minimal_dag_fallback(
-        self,
-        variable_names: List[str]
-    ) -> Tuple[nx.DiGraph, float]:
+    def _minimal_dag_fallback(self, variable_names: List[str]) -> Tuple[nx.DiGraph, float]:
         """
         Ultimate fallback: Return minimal valid DAG when all discovery fails.
 
@@ -430,10 +391,7 @@ class CausalDiscoveryEngine:
         """
         logger.warning(
             "using_minimal_dag_fallback",
-            extra={
-                "n_variables": len(variable_names),
-                "reason": "All discovery methods failed"
-            }
+            extra={"n_variables": len(variable_names), "reason": "All discovery methods failed"},
         )
 
         # Create minimal DAG with nodes only (safest option)
@@ -445,11 +403,7 @@ class CausalDiscoveryEngine:
 
         logger.info(
             "minimal_dag_created",
-            extra={
-                "n_nodes": len(dag.nodes()),
-                "n_edges": 0,
-                "confidence": confidence
-            }
+            extra={"n_nodes": len(dag.nodes()), "n_edges": 0, "confidence": confidence},
         )
 
         return dag, confidence

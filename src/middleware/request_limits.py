@@ -10,10 +10,11 @@ Supports per-endpoint timeout configuration for computation-heavy operations.
 
 import asyncio
 import logging
-from typing import Dict, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import get_settings
@@ -31,21 +32,17 @@ ENDPOINT_TIMEOUTS: Dict[str, int] = {
     "/api/v1/validation/": 30,
     "/api/v1/utility/": 30,
     "/api/v1/outcomes/": 30,
-
     # Moderate endpoints (60s) - moderate computation
     "/api/v1/explain/": 60,
     "/api/v1/teaching/": 60,
     "/api/v1/team/": 60,
     "/api/v1/aggregation/": 60,
-
     # Heavy endpoints (90s) - significant computation
     "/api/v1/causal/": 90,
     "/api/v1/robustness/": 90,
-
     # Very heavy endpoints (120s) - Monte Carlo, sensitivity analysis
     # Includes: sensitivity, dominance, risk, threshold, phase4, identifiability, decision-robustness
     "/api/v1/analysis/": 120,
-
     # Batch endpoints (180s) - multiple sequential computations
     "/api/v1/batch/": 180,
 }
@@ -61,7 +58,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
     # Endpoints exempt from size limits (typically file uploads, if any)
     EXEMPT_PATHS: Set[str] = set()
 
-    def __init__(self, app, max_size_mb: int = None):
+    def __init__(self, app: Any, max_size_mb: Optional[int] = None) -> None:
         """
         Initialize the middleware.
 
@@ -76,10 +73,10 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
         logger.info(
             "Request size limit configured",
-            extra={"max_size_mb": self.max_size_bytes / (1024 * 1024)}
+            extra={"max_size_mb": self.max_size_bytes / (1024 * 1024)},
         )
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
         """
         Process request with size checking.
 
@@ -92,7 +89,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         """
         # Skip check for exempt paths
         if request.url.path in self.EXEMPT_PATHS:
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # Check Content-Length header if present
         content_length = request.headers.get("content-length")
@@ -107,9 +104,13 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                             "path": request.url.path,
                             "content_length": length,
                             "max_size": self.max_size_bytes,
-                        }
+                        },
                     )
-                    request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+                    request_id = (
+                        request.headers.get("X-Request-Id")
+                        or request.headers.get("X-Trace-Id")
+                        or get_trace_id()
+                    )
                     max_mb = int(self.max_size_bytes / (1024 * 1024))
                     error_response = ErrorResponse(
                         code=ErrorCode.REQUEST_TOO_LARGE.value,
@@ -133,7 +134,7 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 pass  # Invalid Content-Length, let it through for validation
 
-        return await call_next(request)
+        return await call_next(request)  # type: ignore[no-any-return]
 
 
 class RequestTimeoutMiddleware(BaseHTTPMiddleware):
@@ -147,7 +148,12 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
     # Endpoints exempt from timeout (for long-running operations)
     EXEMPT_PATHS: Set[str] = {"/health", "/ready", "/metrics"}
 
-    def __init__(self, app, timeout_seconds: int = None, endpoint_timeouts: Dict[str, int] = None):
+    def __init__(
+        self,
+        app: Any,
+        timeout_seconds: Optional[int] = None,
+        endpoint_timeouts: Optional[Dict[str, int]] = None,
+    ) -> None:
         """
         Initialize the middleware.
 
@@ -168,7 +174,7 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
             extra={
                 "default_timeout_seconds": self.default_timeout,
                 "endpoint_specific_timeouts": len(self.endpoint_timeouts),
-            }
+            },
         )
 
     def _get_timeout_for_path(self, path: str) -> int:
@@ -195,7 +201,7 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
 
         return best_match if best_match is not None else self.default_timeout
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Response:
         """
         Process request with timeout enforcement.
 
@@ -210,16 +216,13 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
         """
         # Skip timeout for exempt paths
         if request.url.path in self.EXEMPT_PATHS:
-            return await call_next(request)
+            return await call_next(request)  # type: ignore[no-any-return]
 
         # Get endpoint-specific timeout
         timeout = self._get_timeout_for_path(request.url.path)
 
         try:
-            return await asyncio.wait_for(
-                call_next(request),
-                timeout=timeout
-            )
+            return await asyncio.wait_for(call_next(request), timeout=timeout)
         except asyncio.TimeoutError:
             logger.error(
                 "Request timeout exceeded",
@@ -228,9 +231,13 @@ class RequestTimeoutMiddleware(BaseHTTPMiddleware):
                     "method": request.method,
                     "timeout_seconds": timeout,
                     "is_endpoint_specific": timeout != self.default_timeout,
-                }
+                },
             )
-            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+            request_id = (
+                request.headers.get("X-Request-Id")
+                or request.headers.get("X-Trace-Id")
+                or get_trace_id()
+            )
             error_response = ErrorResponse(
                 code=ErrorCode.TIMEOUT.value,
                 message=f"Request processing timed out after {timeout} seconds.",

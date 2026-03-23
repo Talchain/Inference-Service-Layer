@@ -16,12 +16,14 @@ from typing import Any, Dict, List, Optional
 
 try:
     import anthropic
+
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
 try:
     import openai
+
     OPENAI_AVAILABLE = True
 except ImportError:
     OPENAI_AVAILABLE = False
@@ -45,7 +47,7 @@ class CostTracker:
         "claude-3-sonnet": {"input": 0.003, "output": 0.015},
     }
 
-    def __init__(self, redis_client=None) -> None:
+    def __init__(self, redis_client: Any = None) -> None:
         """Initialize cost tracker."""
         self.redis = redis_client or get_redis_client()
 
@@ -74,7 +76,7 @@ class CostTracker:
         key = f"isl:llm_cost:{session_id}"
 
         try:
-            current = float(self.redis.get(key) or 0.0)
+            current = float(self.redis.get(key) or 0.0)  # type: ignore[arg-type]
             new_total = current + cost
             self.redis.setex(key, 86400, str(new_total))  # 24h TTL
 
@@ -99,7 +101,7 @@ class CostTracker:
 
         key = f"isl:llm_cost:{session_id}"
         try:
-            return float(self.redis.get(key) or 0.0)
+            return float(self.redis.get(key) or 0.0)  # type: ignore[arg-type]
         except Exception:
             return 0.0
 
@@ -126,8 +128,8 @@ class LLMClient:
         self,
         config: Optional[LLMConfig] = None,
         cost_tracker: Optional[CostTracker] = None,
-        redis_client=None,
-        memory_cache=None,
+        redis_client: Any = None,
+        memory_cache: Any = None,
     ) -> None:
         """Initialize LLM client."""
         self.config = config or get_llm_config()
@@ -149,10 +151,8 @@ class LLMClient:
                 raise ImportError("anthropic package not installed")
             if not self.config.anthropic_api_key:
                 raise ValueError("Anthropic API key not configured")
-            self.anthropic_client = anthropic.Anthropic(
-                api_key=self.config.anthropic_api_key
-            )
-            self.openai = None
+            self.anthropic_client = anthropic.Anthropic(api_key=self.config.anthropic_api_key)
+            self.openai = None  # type: ignore[assignment]
 
         else:
             raise ValueError(f"Unknown provider: {self.config.provider}")
@@ -291,7 +291,7 @@ class LLMClient:
         """Call OpenAI API."""
         response = self.openai.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=messages,  # type: ignore[arg-type]
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -299,8 +299,8 @@ class LLMClient:
         return {
             "content": response.choices[0].message.content,
             "usage": {
-                "input_tokens": response.usage.prompt_tokens,
-                "output_tokens": response.usage.completion_tokens,
+                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "output_tokens": response.usage.completion_tokens if response.usage else 0,
             },
         }
 
@@ -322,12 +322,13 @@ class LLMClient:
             else:
                 user_msgs.append(msg)
 
+        assert self.anthropic_client is not None
         response = self.anthropic_client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
-            system=system_msg,
-            messages=user_msgs,
+            system=system_msg or "",
+            messages=user_msgs,  # type: ignore[arg-type]
         )
 
         return {
@@ -349,7 +350,8 @@ class LLMClient:
             cached = self.memory_cache.get(cache_key)
             if cached:
                 logger.debug(f"Memory cache hit for {cache_key}")
-                return cached
+                result: Dict[Any, Any] = cached
+                return result
 
         # Fall back to Redis (slower, but shared across instances)
         if self.redis:
@@ -357,7 +359,7 @@ class LLMClient:
             try:
                 data = self.redis.get(key)
                 if data:
-                    response = json.loads(data)
+                    response: Dict[Any, Any] = json.loads(str(data))
 
                     # Populate memory cache for next time
                     if self.memory_cache:
@@ -388,9 +390,7 @@ class LLMClient:
         # Cache in memory (always, fast)
         if self.memory_cache:
             try:
-                self.memory_cache.set(
-                    cache_key, cacheable, ttl=self.config.cache_ttl_seconds
-                )
+                self.memory_cache.set(cache_key, cacheable, ttl=self.config.cache_ttl_seconds)
                 logger.debug(f"Cached response in memory for {cache_key}")
             except Exception as e:
                 logger.warning(f"Memory cache write failed: {e}")
@@ -399,9 +399,7 @@ class LLMClient:
         if self.redis:
             key = f"isl:llm_cache:{cache_key}"
             try:
-                self.redis.setex(
-                    key, self.config.cache_ttl_seconds, json.dumps(cacheable)
-                )
+                self.redis.setex(key, self.config.cache_ttl_seconds, json.dumps(cacheable))
                 logger.debug(f"Cached response in Redis for {cache_key}")
             except Exception as e:
                 logger.warning(f"Redis cache write failed: {e}")

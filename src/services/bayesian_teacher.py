@@ -11,7 +11,7 @@ import logging
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy.stats import entropy as scipy_entropy
+from scipy.stats import entropy as scipy_entropy  # type: ignore[import-untyped]
 
 from src.config import get_settings
 from src.models.phase1_models import (
@@ -116,9 +116,7 @@ class BayesianTeacher:
             target_concept = "trade_offs"
 
         # Generate candidate examples
-        candidates = self._generate_candidate_examples(
-            target_concept, context, current_beliefs
-        )
+        candidates = self._generate_candidate_examples(target_concept, context, current_beliefs)
 
         logger.info(
             "generated_teaching_candidates",
@@ -126,9 +124,7 @@ class BayesianTeacher:
         )
 
         # Rank by teaching value
-        ranked_examples = self._rank_by_teaching_value(
-            candidates, target_concept, current_beliefs
-        )
+        ranked_examples = self._rank_by_teaching_value(candidates, target_concept, current_beliefs)
 
         # Select top examples
         selected_examples = ranked_examples[:max_examples]
@@ -139,9 +135,7 @@ class BayesianTeacher:
         )
 
         # Define learning objectives
-        learning_objectives = self._define_learning_objectives(
-            target_concept, selected_examples
-        )
+        learning_objectives = self._define_learning_objectives(target_concept, selected_examples)
 
         # Estimate learning time
         estimated_time = self._estimate_learning_time(target_concept, max_examples)
@@ -151,9 +145,7 @@ class BayesianTeacher:
             extra={
                 "concept": target_concept,
                 "num_examples": len(selected_examples),
-                "avg_teaching_value": np.mean(
-                    [ex.information_value for ex in selected_examples]
-                ),
+                "avg_teaching_value": np.mean([ex.information_value for ex in selected_examples]),
             },
         )
 
@@ -203,9 +195,7 @@ class BayesianTeacher:
             var1, var2 = context.variables[0], context.variables[1]
             scenario = Scenario(
                 description=f"Scenario showing potential confounding between {var1} and {var2}",
-                outcomes={
-                    var: np.random.uniform(0, 100) for var in context.variables
-                },
+                outcomes={var: np.random.uniform(0, 100) for var in context.variables},
                 trade_offs=[
                     f"Apparent correlation between {var1} and {var2}",
                     "May be driven by hidden common cause",
@@ -226,9 +216,7 @@ class BayesianTeacher:
             var1, var2, var3 = context.variables[:3]
             scenario = Scenario(
                 description=f"Comparing scenarios with/without controlling for {var3}",
-                outcomes={
-                    var: np.random.uniform(0, 100) for var in context.variables
-                },
+                outcomes={var: np.random.uniform(0, 100) for var in context.variables},
                 trade_offs=[
                     f"Relationship between {var1} and {var2} changes when considering {var3}",
                     "Illustrates Simpson's paradox",
@@ -416,9 +404,7 @@ class BayesianTeacher:
         """
         # Compute teaching value for each candidate
         for example in candidates:
-            example.information_value = self._compute_teaching_value(
-                example, concept, beliefs
-            )
+            example.information_value = self._compute_teaching_value(example, concept, beliefs)
 
         # Sort by teaching value (descending)
         return sorted(candidates, key=lambda x: x.information_value, reverse=True)
@@ -458,9 +444,7 @@ class BayesianTeacher:
 
         return float(teaching_value)
 
-    def _compute_novelty(
-        self, example: TeachingExample, beliefs: UserBeliefModel
-    ) -> float:
+    def _compute_novelty(self, example: TeachingExample, beliefs: UserBeliefModel) -> float:
         """Compute novelty of example given beliefs."""
         # Compare example outcomes to user's expected values
         differences = []
@@ -499,9 +483,7 @@ class BayesianTeacher:
 
         return float(clarity)
 
-    def _compute_relevance(
-        self, example: TeachingExample, beliefs: UserBeliefModel
-    ) -> float:
+    def _compute_relevance(self, example: TeachingExample, beliefs: UserBeliefModel) -> float:
         """Compute relevance of example to user's concerns."""
         # Relevance based on whether example involves variables user cares about
         relevance_scores = []

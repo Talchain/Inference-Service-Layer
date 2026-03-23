@@ -13,7 +13,7 @@ from typing import List, Optional
 
 from src.models.deliberation import ConcernStatement, MemberPosition, ValueStatement
 from src.services.llm_client import LLMClient
-from src.services.value_extractor import ValueExtractor as RuleBasedExtractor
+from src.services.value_extractor import ValueExtractor as RuleBasedExtractor  # type: ignore[import-untyped]
 from src.utils.business_metrics import track_llm_fallback, track_llm_request
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,9 @@ class ValueExtractorLLM:
     - Invalid JSON responses
     """
 
-    def __init__(self, llm_client: LLMClient, fallback_extractor: Optional[RuleBasedExtractor] = None):
+    def __init__(
+        self, llm_client: LLMClient, fallback_extractor: Optional[RuleBasedExtractor] = None
+    ):
         """
         Initialize with LLM client.
 
@@ -169,9 +171,7 @@ class ValueExtractorLLM:
             return self._fallback_extraction(position_text, member_id, context, request_id)
 
         except Exception as e:
-            logger.error(
-                f"LLM extraction failed: {e}", extra={"request_id": request_id}
-            )
+            logger.error(f"LLM extraction failed: {e}", extra={"request_id": request_id})
             track_llm_fallback(reason="api_error")
             return self._fallback_extraction(position_text, member_id, context, request_id)
 
@@ -243,7 +243,7 @@ Extract values and concerns. Output JSON only."""
             extra={"request_id": request_id, "member_id": member_id},
         )
 
-        return self.fallback.extract_values_and_concerns(
+        return self.fallback.extract_values_and_concerns(  # type: ignore[no-any-return]
             position_text=position_text,
             member_id=member_id,
             context=context,

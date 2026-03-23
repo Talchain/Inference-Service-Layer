@@ -12,7 +12,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -120,7 +120,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             else:
                 logger.debug(
                     "Skipping response hash - body exceeded size limit during streaming",
-                    extra={"path": request.url.path, "body_size": len(response_body)}
+                    extra={"path": request.url.path, "body_size": len(response_body)},
                 )
 
             # Recreate the response with the consumed body
@@ -142,7 +142,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             response_hash=response_hash,
         )
 
-        return response
+        return response  # type: ignore[no-any-return]
 
     def _should_hash_response(self, request: Request, response: Response) -> bool:
         """Check if response should be hashed."""
@@ -162,7 +162,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 if int(content_length) > MAX_RESPONSE_HASH_SIZE:
                     logger.debug(
                         "Skipping response hash - body too large",
-                        extra={"path": request.url.path, "content_length": content_length}
+                        extra={"path": request.url.path, "content_length": content_length},
                     )
                     return False
             except ValueError:
@@ -170,9 +170,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 
         return True
 
-    def _compute_response_hash(
-        self, body: bytes, request: Request
-    ) -> Optional[str]:
+    def _compute_response_hash(self, body: bytes, request: Request) -> Optional[str]:
         """Compute canonical hash of response body."""
         if not body:
             return None
@@ -183,12 +181,11 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         except json.JSONDecodeError as e:
             logger.warning(
                 "Failed to parse response JSON for hashing",
-                extra={"error": str(e), "path": request.url.path}
+                extra={"error": str(e), "path": request.url.path},
             )
         except Exception as e:
             logger.warning(
-                "Failed to compute response hash",
-                extra={"error": str(e), "path": request.url.path}
+                "Failed to compute response hash", extra={"error": str(e), "path": request.url.path}
             )
         return None
 
@@ -205,7 +202,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         # Use unified IP extraction for consistency with rate limiting/auth
         client_ip = get_client_ip(request)
 
-        log_extra = {
+        log_extra: Dict[str, Any] = {
             "event": "boundary.request",
             "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "request_id": request_id,

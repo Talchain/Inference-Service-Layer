@@ -84,7 +84,7 @@ def suggest_backdoor_fixes(
     Returns:
         List of suggestions for blocking backdoor paths
     """
-    suggestions = []
+    suggestions: List[ValidationSuggestion] = []
 
     # Safety check: ensure treatment and outcome are in graph
     if not graph.has_node(treatment) or not graph.has_node(outcome):
@@ -140,9 +140,7 @@ def suggest_backdoor_fixes(
                 ValidationSuggestion(
                     type="add_confounder",
                     description=f"Measure {confounder} to control confounding",
-                    technical_detail=(
-                        f"Add {confounder} node to block backdoor path: {path_str}"
-                    ),
+                    technical_detail=(f"Add {confounder} node to block backdoor path: {path_str}"),
                     priority="critical",
                     action=SuggestionAction(
                         add_node=confounder,
@@ -197,7 +195,7 @@ def suggest_mediator_additions(
     Returns:
         List of mediator addition suggestions
     """
-    suggestions = []
+    suggestions: List[ValidationSuggestion] = []
 
     # Safety check: ensure treatment and outcome are in graph
     if not graph.has_node(treatment) or not graph.has_node(outcome):
@@ -271,7 +269,7 @@ def suggest_edge_reversals(
     Returns:
         List of edge reversal suggestions
     """
-    suggestions = []
+    suggestions: List[ValidationSuggestion] = []
 
     # Safety check: ensure treatment and outcome are in graph
     if not graph.has_node(treatment) or not graph.has_node(outcome):
@@ -351,7 +349,7 @@ def _is_confounder(
     has_path_to_treatment = nx.has_path(graph, node, treatment)
     has_path_to_outcome = nx.has_path(graph, node, outcome)
 
-    return has_path_to_treatment and has_path_to_outcome
+    return bool(has_path_to_treatment and has_path_to_outcome)
 
 
 def _infer_confounder_edges(

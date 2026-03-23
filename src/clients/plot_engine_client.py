@@ -76,7 +76,7 @@ class PLoTEngineClient:
                 "base_url": base_url,
                 "timeout": timeout,
                 "max_retries": max_retries,
-            }
+            },
         )
 
     async def run(self, request: RunRequest) -> RunResponse:
@@ -98,14 +98,11 @@ class PLoTEngineClient:
             extra={
                 "idempotency_key": request.idempotency_key,
                 "timeout_ms": request.timeout_ms,
-            }
+            },
         )
 
         try:
-            response_data = await self._post(
-                "/v1/run",
-                data=asdict(request)
-            )
+            response_data = await self._post("/v1/run", data=asdict(request))
 
             # Parse response
             run_response = self._parse_run_response(response_data)
@@ -119,23 +116,18 @@ class PLoTEngineClient:
                 extra={
                     "run_id": run_response.run_id,
                     "status": run_response.status,
-                }
+                },
             )
 
             return run_response
 
         except IdempotencyMismatchError:
             logger.warning(
-                "plot_run_idempotency_mismatch",
-                extra={"idempotency_key": request.idempotency_key}
+                "plot_run_idempotency_mismatch", extra={"idempotency_key": request.idempotency_key}
             )
             raise
         except Exception as e:
-            logger.error(
-                "plot_run_error",
-                extra={"error": str(e)},
-                exc_info=True
-            )
+            logger.error("plot_run_error", extra={"error": str(e)}, exc_info=True)
             raise
 
     async def compare(self, request: CompareRequest) -> CompareResponse:
@@ -158,14 +150,11 @@ class PLoTEngineClient:
                 "idempotency_key": request.idempotency_key,
                 "num_scenarios": len(request.scenarios),
                 "timeout_ms": request.timeout_ms,
-            }
+            },
         )
 
         try:
-            response_data = await self._post(
-                "/v1/compare",
-                data=asdict(request)
-            )
+            response_data = await self._post("/v1/compare", data=asdict(request))
 
             # Parse response
             compare_response = self._parse_compare_response(response_data)
@@ -180,7 +169,7 @@ class PLoTEngineClient:
                             "outcome_delta": option.change_attribution.outcome_delta,
                             "summary": option.change_attribution.summary,
                             "num_drivers": len(option.change_attribution.primary_drivers),
-                        }
+                        },
                     )
 
             # Log evidence quality if available
@@ -193,7 +182,7 @@ class PLoTEngineClient:
                     "compare_id": compare_response.compare_id,
                     "status": compare_response.status,
                     "num_options": len(compare_response.options),
-                }
+                },
             )
 
             return compare_response
@@ -201,15 +190,11 @@ class PLoTEngineClient:
         except IdempotencyMismatchError:
             logger.warning(
                 "plot_compare_idempotency_mismatch",
-                extra={"idempotency_key": request.idempotency_key}
+                extra={"idempotency_key": request.idempotency_key},
             )
             raise
         except Exception as e:
-            logger.error(
-                "plot_compare_error",
-                extra={"error": str(e)},
-                exc_info=True
-            )
+            logger.error("plot_compare_error", extra={"error": str(e)}, exc_info=True)
             raise
 
     async def _post(self, endpoint: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -241,14 +226,15 @@ class PLoTEngineClient:
                     if error_data.get("code") == "IDEMPOTENCY_MISMATCH":
                         raise IdempotencyMismatchError(
                             error_data.get("message", "Idempotency key mismatch"),
-                            idempotency_key=data.get("idempotency_key")
+                            idempotency_key=data.get("idempotency_key"),
                         )
 
                 # Raise for other HTTP errors
                 response.raise_for_status()
 
                 # Return successful response
-                return response.json()
+                result: Dict[str, Any] = response.json()
+                return result
 
             except IdempotencyMismatchError:
                 # Never retry 409 errors
@@ -261,7 +247,7 @@ class PLoTEngineClient:
                             "endpoint": endpoint,
                             "attempt": attempt,
                             "error": str(e),
-                        }
+                        },
                     )
                     raise
 
@@ -273,12 +259,17 @@ class PLoTEngineClient:
                         "attempt": attempt,
                         "max_retries": self.max_retries,
                         "error": str(e),
-                    }
+                    },
                 )
 
                 # Exponential backoff: 2s, 4s, 8s
                 import asyncio
-                await asyncio.sleep(2 ** attempt)
+
+                await asyncio.sleep(2**attempt)
+
+        raise RuntimeError(
+            f"Failed to complete request to {endpoint} after {self.max_retries} attempts"
+        )
 
     def _parse_run_response(self, data: Dict[str, Any]) -> RunResponse:
         """Parse /v1/run response data."""
@@ -290,7 +281,7 @@ class PLoTEngineClient:
             status=data["status"],
             result=data.get("result"),
             model_card=model_card,
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
         )
 
     def _parse_compare_response(self, data: Dict[str, Any]) -> CompareResponse:
@@ -310,7 +301,7 @@ class PLoTEngineClient:
                 label=opt_data["label"],
                 outcome_value=opt_data["outcome_value"],
                 change_attribution=change_attr,
-                metadata=opt_data.get("metadata", {})
+                metadata=opt_data.get("metadata", {}),
             )
             options.append(option)
 
@@ -319,7 +310,7 @@ class PLoTEngineClient:
             status=data["status"],
             options=options,
             model_card=model_card,
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
         )
 
     def _parse_model_card(self, data: Dict[str, Any]) -> ModelCard:
@@ -332,7 +323,7 @@ class PLoTEngineClient:
                 with_timestamp=fresh_data["with_timestamp"],
                 oldest_days=fresh_data.get("oldest_days"),
                 newest_days=fresh_data.get("newest_days"),
-                buckets=fresh_data.get("buckets", {})
+                buckets=fresh_data.get("buckets", {}),
             )
 
         return ModelCard(
@@ -340,7 +331,7 @@ class PLoTEngineClient:
             version=data.get("version"),
             created_at=data.get("created_at"),
             evidence_freshness=evidence_fresh,
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
         )
 
     def _parse_change_attribution(self, data: Dict[str, Any]) -> ChangeAttribution:
@@ -352,19 +343,21 @@ class PLoTEngineClient:
                 description=driver_data["description"],
                 contribution_to_delta=driver_data["contribution_to_delta"],
                 contribution_pct=driver_data["contribution_pct"],
-                affected_nodes=driver_data.get("affected_nodes", [])
+                affected_nodes=driver_data.get("affected_nodes", []),
             )
             drivers.append(driver)
 
         return ChangeAttribution(
             outcome_delta=data["outcome_delta"],
             primary_drivers=drivers,
-            summary=data.get("summary", "")
+            summary=data.get("summary", ""),
         )
 
     def _log_evidence_quality(self, evidence: EvidenceFreshness) -> None:
         """Log evidence freshness metrics."""
-        freshness_pct = (evidence.with_timestamp / evidence.total * 100) if evidence.total > 0 else 0
+        freshness_pct = (
+            (evidence.with_timestamp / evidence.total * 100) if evidence.total > 0 else 0
+        )
 
         logger.info(
             "plot_evidence_quality",
@@ -375,24 +368,21 @@ class PLoTEngineClient:
                 "oldest_days": evidence.oldest_days,
                 "newest_days": evidence.newest_days,
                 "buckets": evidence.buckets,
-            }
+            },
         )
 
         # Warn if evidence is stale
         if evidence.oldest_days and evidence.oldest_days > 365:
-            logger.warning(
-                "plot_stale_evidence",
-                extra={"oldest_days": evidence.oldest_days}
-            )
+            logger.warning("plot_stale_evidence", extra={"oldest_days": evidence.oldest_days})
 
-    async def close(self):
+    async def close(self) -> None:
         """Close the HTTP client."""
         await self.client.aclose()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "PLoTEngineClient":
         """Async context manager entry."""
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.close()

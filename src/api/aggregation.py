@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 async def aggregate_multi_criteria(
     request: MultiCriteriaRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-    aggregator: MultiCriteriaAggregator = Depends(get_multi_criteria_aggregator)
+    aggregator: MultiCriteriaAggregator = Depends(get_multi_criteria_aggregator),
 ) -> MultiCriteriaResponse:
     """
     Aggregate option scores across multiple criteria.
@@ -123,10 +123,7 @@ async def aggregate_multi_criteria(
             "aggregation_validation_error",
             extra={"request_id": request_id, "error": str(e)},
         )
-        raise HTTPException(
-            status_code=400,
-            detail=f"Validation error: {str(e)}"
-        )
+        raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
 
     except HTTPException:
         raise
@@ -139,5 +136,5 @@ async def aggregate_multi_criteria(
         )
         raise HTTPException(
             status_code=500,
-            detail="Failed to perform multi-criteria aggregation. Check logs for details."
+            detail="Failed to perform multi-criteria aggregation. Check logs for details.",
         )

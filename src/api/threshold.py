@@ -23,8 +23,8 @@ router = APIRouter()
 async def identify_thresholds(
     request: ThresholdIdentificationRequest,
     x_request_id: Optional[str] = Header(None),
-    threshold_identifier: ThresholdIdentifier = Depends(get_threshold_identifier)
-):
+    threshold_identifier: ThresholdIdentifier = Depends(get_threshold_identifier),
+) -> ThresholdIdentificationResponse:
     """
     Identify parameter thresholds where option rankings change.
 
@@ -68,12 +68,15 @@ async def identify_thresholds(
     metadata_builder = MetadataBuilder(request_id)
 
     # Identify thresholds
-    thresholds, sensitivity_ranking, total_thresholds, monotonic_params = (
-        threshold_identifier.identify(
-            parameter_sweeps=request.parameter_sweeps,
-            baseline_ranking=request.baseline_ranking,
-            confidence_threshold=request.confidence_threshold
-        )
+    (
+        thresholds,
+        sensitivity_ranking,
+        total_thresholds,
+        monotonic_params,
+    ) = threshold_identifier.identify(
+        parameter_sweeps=request.parameter_sweeps,
+        baseline_ranking=request.baseline_ranking,
+        confidence_threshold=request.confidence_threshold or 0.0,
     )
 
     # Build response
@@ -81,12 +84,10 @@ async def identify_thresholds(
         thresholds=thresholds,
         sensitivity_ranking=sensitivity_ranking,
         total_thresholds=total_thresholds,
-        monotonic_parameters=monotonic_params
+        monotonic_parameters=monotonic_params,
     )
 
     # Add metadata
-    response.metadata = metadata_builder.build(
-        algorithm="sequential_ranking_comparison"
-    )
+    response.metadata = metadata_builder.build(algorithm="sequential_ranking_comparison")
 
     return response

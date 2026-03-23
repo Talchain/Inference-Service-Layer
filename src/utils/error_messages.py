@@ -20,7 +20,7 @@ class EnhancedError(Exception):
         message: str,
         suggestions: List[str],
         documentation: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize enhanced error.
@@ -53,12 +53,13 @@ class EnhancedError(Exception):
                 "message": self.message,
                 "suggestions": self.suggestions,
                 "documentation": self.documentation,
-                "context": self.context
+                "context": self.context,
             }
         }
 
 
 # Pre-defined enhanced errors
+
 
 class CausalNotIdentifiableError(EnhancedError):
     """Causal effect cannot be identified from the DAG."""
@@ -72,10 +73,10 @@ class CausalNotIdentifiableError(EnhancedError):
                 "Include measurements of confounding variables",
                 "Check for unmeasured common causes",
                 "Verify the causal structure is correctly specified",
-                f"Reason: {reason}" if reason else "Use frontdoor or instrumental variable methods"
+                f"Reason: {reason}" if reason else "Use frontdoor or instrumental variable methods",
             ],
             documentation="https://docs.olumi.com/causal-identification",
-            context={"treatment": treatment, "outcome": outcome, "reason": reason}
+            context={"treatment": treatment, "outcome": outcome, "reason": reason},
         )
 
 
@@ -90,10 +91,10 @@ class InvalidDAGCyclicError(EnhancedError):
                 f"Remove edges that create the cycle: {' → '.join(cycle_nodes)}",
                 "Check that edge directions are correct",
                 "Use topological sort to verify acyclicity",
-                "Consider using a feedback loop representation instead"
+                "Consider using a feedback loop representation instead",
             ],
             documentation="https://docs.olumi.com/dag-validation",
-            context={"cycle_nodes": cycle_nodes}
+            context={"cycle_nodes": cycle_nodes},
         )
 
 
@@ -108,14 +109,10 @@ class BatchSizeExceededError(EnhancedError):
                 f"Split into multiple batches of {max_size} requests each",
                 f"Maximum for {endpoint}: {max_size} requests per batch",
                 "Use pagination or chunking for larger datasets",
-                "Consider using streaming endpoints for very large batches"
+                "Consider using streaming endpoints for very large batches",
             ],
             documentation="https://docs.olumi.com/batch-endpoints",
-            context={
-                "batch_size": batch_size,
-                "max_size": max_size,
-                "endpoint": endpoint
-            }
+            context={"batch_size": batch_size, "max_size": max_size, "endpoint": endpoint},
         )
 
 
@@ -131,14 +128,10 @@ class EquationEvaluationError(EnhancedError):
                 "Verify all referenced variables exist in the model",
                 "Use only whitelisted functions: sqrt, exp, log, abs, sin, cos, tan",
                 f"Problematic equation: {equation}",
-                "Ensure variables are defined before use (topological order)"
+                "Ensure variables are defined before use (topological order)",
             ],
             documentation="https://docs.olumi.com/structural-equations",
-            context={
-                "equation": equation,
-                "variable": variable,
-                "reason": reason
-            }
+            context={"equation": equation, "variable": variable, "reason": reason},
         )
 
 
@@ -153,13 +146,10 @@ class MissingVariableError(EnhancedError):
                 f"Add '{variable}' to the variables list",
                 f"Available variables: {', '.join(available_variables)}",
                 "Check for typos in variable names",
-                "Ensure variable is defined before use in equations"
+                "Ensure variable is defined before use in equations",
             ],
             documentation="https://docs.olumi.com/variable-definitions",
-            context={
-                "missing_variable": variable,
-                "available_variables": available_variables
-            }
+            context={"missing_variable": variable, "available_variables": available_variables},
         )
 
 
@@ -175,13 +165,10 @@ class MonteCarloConvergenceError(EnhancedError):
                 "Check for high-variance distributions in the model",
                 "Consider using importance sampling for better convergence",
                 "Verify distribution parameters are reasonable",
-                "Use narrower prior distributions if possible"
+                "Use narrower prior distributions if possible",
             ],
             documentation="https://docs.olumi.com/monte-carlo",
-            context={
-                "iterations": iterations,
-                "variance": variance
-            }
+            context={"iterations": iterations, "variance": variance},
         )
 
 
@@ -197,13 +184,10 @@ class RateLimitExceededError(EnhancedError):
                 "Implement exponential backoff in your client",
                 "Use batch endpoints to reduce number of requests",
                 "Contact support to increase rate limits if needed",
-                "Cache responses to reduce redundant requests"
+                "Cache responses to reduce redundant requests",
             ],
             documentation="https://docs.olumi.com/rate-limits",
-            context={
-                "limit": limit,
-                "retry_after": retry_after
-            }
+            context={"limit": limit, "retry_after": retry_after},
         )
 
 
@@ -220,13 +204,10 @@ class InvalidDistributionError(EnhancedError):
                 "Normal: requires mean and std (std > 0)",
                 "Uniform: requires min and max (min < max)",
                 "Beta: requires alpha and beta (both > 0)",
-                "Exponential: requires scale (scale > 0)"
+                "Exponential: requires scale (scale > 0)",
             ],
             documentation="https://docs.olumi.com/distributions",
-            context={
-                "distribution_type": dist_type,
-                "reason": reason
-            }
+            context={"distribution_type": dist_type, "reason": reason},
         )
 
 
@@ -242,13 +223,10 @@ class MemoryLimitError(EnhancedError):
                 "Simplify the structural model (fewer variables/equations)",
                 "Use adaptive sampling to reduce memory usage",
                 "Process data in smaller chunks",
-                "Contact support for higher memory limits"
+                "Contact support for higher memory limits",
             ],
             documentation="https://docs.olumi.com/resource-limits",
-            context={
-                "used_mb": used_mb,
-                "limit_mb": limit_mb
-            }
+            context={"used_mb": used_mb, "limit_mb": limit_mb},
         )
 
 
@@ -264,11 +242,8 @@ class TimeoutError(EnhancedError):
                 "Reduce Monte Carlo iterations for faster results",
                 "Use adaptive sampling for automatic convergence",
                 "Split large batch requests into smaller chunks",
-                "Increase timeout limit if operation is expected to be slow"
+                "Increase timeout limit if operation is expected to be slow",
             ],
             documentation="https://docs.olumi.com/timeouts",
-            context={
-                "timeout_seconds": timeout_seconds,
-                "operation": operation
-            }
+            context={"timeout_seconds": timeout_seconds, "operation": operation},
         )

@@ -150,8 +150,8 @@ def verify_test_vectors() -> bool:
         True if all vectors pass, raises AssertionError otherwise
     """
     for i, vector in enumerate(TEST_VECTORS):
-        canonical = canonical_json_string(vector["input"])
-        computed_hash = canonical_json_hash(vector["input"])
+        canonical = canonical_json_string(vector["input"])  # type: ignore[arg-type]
+        computed_hash = canonical_json_hash(vector["input"])  # type: ignore[arg-type]
 
         # Verify canonical form
         if canonical != vector["canonical"]:

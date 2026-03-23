@@ -69,9 +69,7 @@ class OutcomeLogger:
             response_hash=request.response_hash,
             chosen_option=request.chosen_option,
             recommendation_option=request.recommendation_option,
-            recommendation_followed=(
-                request.chosen_option == request.recommendation_option
-            ),
+            recommendation_followed=(request.chosen_option == request.recommendation_option),
             timestamp=datetime.utcnow(),
             user_id=request.user_id,
             tenant_id=request.tenant_id,

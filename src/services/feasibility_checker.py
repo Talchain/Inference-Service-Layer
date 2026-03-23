@@ -48,9 +48,7 @@ class FeasibilityChecker:
             FeasibilityResponse with validation and feasibility results
         """
         # Step 1: Validate constraint specifications
-        constraint_validation = self._validate_constraints(
-            request.constraints, request.options
-        )
+        constraint_validation = self._validate_constraints(request.constraints, request.options)
 
         # Step 2: Check feasibility of each option
         feasible_options: List[str] = []
@@ -67,9 +65,7 @@ class FeasibilityChecker:
                         option_id=option.option_id,
                         violated_constraints=[v.constraint_id for v in violations],
                         violation_details=violations,
-                        total_violation_magnitude=sum(
-                            v.violation_magnitude for v in violations
-                        ),
+                        total_violation_magnitude=sum(v.violation_magnitude for v in violations),
                     )
                 )
             else:
@@ -115,7 +111,7 @@ class FeasibilityChecker:
         results = []
 
         # Collect all variable names from options
-        all_variables = set()
+        all_variables: set[str] = set()
         for option in options:
             all_variables.update(option.variable_values.keys())
 
@@ -138,7 +134,14 @@ class FeasibilityChecker:
 
             # Check 3: Constraint type is supported
             # (Already validated by Pydantic, but double-check)
-            supported_types = ["threshold", "budget", "capacity", "dependency", "exclusion", "requirement"]
+            supported_types = [
+                "threshold",
+                "budget",
+                "capacity",
+                "dependency",
+                "exclusion",
+                "requirement",
+            ]
             if constraint.constraint_type.value not in supported_types:
                 issues.append(f"Unsupported constraint type: {constraint.constraint_type}")
 
@@ -271,13 +274,13 @@ class FeasibilityChecker:
         # Warning if any constraints are invalid
         invalid_constraints = [r for r in validation_results if not r.is_valid]
         if invalid_constraints:
-            warnings.append(
-                f"{len(invalid_constraints)} constraint(s) have validation issues"
-            )
+            warnings.append(f"{len(invalid_constraints)} constraint(s) have validation issues")
 
         # Warning if no feasible options
         if not feasible:
-            warnings.append("No feasible options found - all options violate at least one constraint")
+            warnings.append(
+                "No feasible options found - all options violate at least one constraint"
+            )
 
         # Warning if all options are feasible (constraints may be too loose)
         if not infeasible and len(feasible) > 1:

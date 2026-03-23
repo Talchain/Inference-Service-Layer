@@ -22,7 +22,7 @@ class EvidenceFreshness:
     newest_days: Optional[int] = None
     buckets: Dict[str, int] = field(default_factory=dict)  # FRESH, AGING, STALE, UNKNOWN
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate evidence freshness data."""
         if self.total < 0:
             raise ValueError("total must be non-negative")
@@ -44,7 +44,7 @@ class ChangeDriver:
     contribution_pct: float
     affected_nodes: List[Dict[str, Any]] = field(default_factory=list)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate change driver data."""
         if not 0 <= self.contribution_pct <= 100:
             raise ValueError("contribution_pct must be between 0 and 100")
@@ -62,7 +62,7 @@ class ChangeAttribution:
     primary_drivers: List[ChangeDriver] = field(default_factory=list)
     summary: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate change attribution data."""
         if self.primary_drivers:
             total_pct = sum(driver.contribution_pct for driver in self.primary_drivers)

@@ -64,9 +64,7 @@ def validate_criteria_count(criteria: List[Any], context: str = "criteria") -> N
 
 
 def validate_option_scores(
-    option_scores: Dict[str, Dict[str, float]],
-    min_options: int = 2,
-    require_complete: bool = True
+    option_scores: Dict[str, Dict[str, float]], min_options: int = 2, require_complete: bool = True
 ) -> None:
     """
     Validate option scores dictionary for multi-criteria analysis.
@@ -80,9 +78,7 @@ def validate_option_scores(
         ValueError: If validation fails
     """
     if len(option_scores) < min_options:
-        raise ValueError(
-            f"At least {min_options} options required, got {len(option_scores)}"
-        )
+        raise ValueError(f"At least {min_options} options required, got {len(option_scores)}")
 
     validate_option_count(list(option_scores.keys()), "options")
 
@@ -90,7 +86,7 @@ def validate_option_scores(
         return
 
     # Collect all criteria
-    all_criteria = set()
+    all_criteria: set[str] = set()
     for scores in option_scores.values():
         all_criteria.update(scores.keys())
 
@@ -102,14 +98,12 @@ def validate_option_scores(
             missing_criteria = all_criteria - set(scores.keys())
             if missing_criteria:
                 raise ValueError(
-                    f"Option '{opt_id}' missing scores for criteria: "
-                    f"{sorted(missing_criteria)}"
+                    f"Option '{opt_id}' missing scores for criteria: " f"{sorted(missing_criteria)}"
                 )
 
 
 def validate_criterion_results(
-    criterion_results: List[Any],
-    max_options_per_criterion: int = RequestSizeLimits.MAX_OPTIONS
+    criterion_results: List[Any], max_options_per_criterion: int = RequestSizeLimits.MAX_OPTIONS
 ) -> None:
     """
     Validate criterion results for aggregation.
@@ -124,7 +118,7 @@ def validate_criterion_results(
     validate_criteria_count(criterion_results, "criterion results")
 
     for cr in criterion_results:
-        if hasattr(cr, 'option_scores'):
+        if hasattr(cr, "option_scores"):
             option_count = len(cr.option_scores)
             if option_count > max_options_per_criterion:
                 raise ValueError(
@@ -157,10 +151,7 @@ def validate_graph_size(num_nodes: int, num_edges: int) -> None:
         )
 
 
-def check_uniform_scores(
-    scores: List[float],
-    tolerance: float = 1e-9
-) -> bool:
+def check_uniform_scores(scores: List[float], tolerance: float = 1e-9) -> bool:
     """
     Check if all scores are uniform (identical).
 
@@ -179,9 +170,7 @@ def check_uniform_scores(
 
 
 def validate_weights_sum(
-    weights: Dict[str, float],
-    target: float = 1.0,
-    tolerance: float = 0.001
+    weights: Dict[str, float], target: float = 1.0, tolerance: float = 0.001
 ) -> tuple[bool, float]:
     """
     Validate that weights sum to target value.

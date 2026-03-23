@@ -73,7 +73,7 @@ class CausalTransporter:
 
             if transportable:
                 # Extract assumptions
-                assumptions = self._extract_assumptions(request, method)
+                assumptions = self._extract_assumptions(request, method or "")
 
                 # Assess robustness
                 robustness = self._assess_robustness(assumptions, request)
@@ -147,9 +147,7 @@ class CausalTransporter:
                 detail=f"Transportability analysis failed: {str(e)}",
             )
 
-    def _build_selection_diagram(
-        self, request: TransportabilityRequest
-    ) -> nx.DiGraph:
+    def _build_selection_diagram(self, request: TransportabilityRequest) -> nx.DiGraph:
         """
         Build selection diagram from source and target DAGs.
 
@@ -172,9 +170,7 @@ class CausalTransporter:
         selection_diagram = source_graph.copy()
 
         # Identify selection variables (variables that differ between domains)
-        selection_vars = request.selection_variables or self._infer_selection_variables(
-            request
-        )
+        selection_vars = request.selection_variables or self._infer_selection_variables(request)
 
         # Add selection nodes (S_X for each selection variable X)
         for var in selection_vars:
@@ -194,9 +190,7 @@ class CausalTransporter:
 
         return selection_diagram
 
-    def _infer_selection_variables(
-        self, request: TransportabilityRequest
-    ) -> List[str]:
+    def _infer_selection_variables(self, request: TransportabilityRequest) -> List[str]:
         """
         Infer which variables are selection variables.
 
@@ -217,10 +211,7 @@ class CausalTransporter:
         common_vars = source_vars.intersection(target_vars)
 
         # Exclude treatment and outcome (we're interested in confounders)
-        selection_vars = [
-            v for v in common_vars
-            if v not in [request.treatment, request.outcome]
-        ]
+        selection_vars = [v for v in common_vars if v not in [request.treatment, request.outcome]]
 
         logger.debug(
             "selection_variables_inferred",
@@ -282,9 +273,7 @@ class CausalTransporter:
         # Simplified transportability assessment:
         # If structures are identical and selection variables are identified,
         # effect is transportable via re-weighting
-        selection_vars = request.selection_variables or self._infer_selection_variables(
-            request
-        )
+        selection_vars = request.selection_variables or self._infer_selection_variables(request)
 
         if selection_vars:
             # Transportable via selection diagram method
@@ -341,18 +330,14 @@ class CausalTransporter:
             assumptions.append(
                 TransportAssumption(
                     type="no_selection_bias",
-                    description=(
-                        "Selection into domains doesn't affect the causal mechanism"
-                    ),
+                    description=("Selection into domains doesn't affect the causal mechanism"),
                     critical=True,
                     testable=True,
                 )
             )
 
             # Need measured selection variables
-            selection_vars = request.selection_variables or self._infer_selection_variables(
-                request
-            )
+            selection_vars = request.selection_variables or self._infer_selection_variables(request)
             assumptions.append(
                 TransportAssumption(
                     type="measured_selection",
@@ -394,9 +379,7 @@ class CausalTransporter:
             Robustness level: robust, moderate, or fragile
         """
         # Count critical untestable assumptions
-        critical_untestable = sum(
-            1 for a in assumptions if a.critical and not a.testable
-        )
+        critical_untestable = sum(1 for a in assumptions if a.critical and not a.testable)
 
         if critical_untestable == 0:
             return "robust"
@@ -427,11 +410,11 @@ class CausalTransporter:
         testable_ratio = sum(1 for a in assumptions if a.testable) / len(assumptions)
 
         if has_data and testable_ratio > 0.5:
-            return "high"
+            return ConfidenceLevel.HIGH
         elif has_data or testable_ratio > 0.3:
-            return "medium"
+            return ConfidenceLevel.MEDIUM
         else:
-            return "low"
+            return ConfidenceLevel.LOW
 
     def _determine_failure_reason(self, request: TransportabilityRequest) -> str:
         """
@@ -466,9 +449,7 @@ class CausalTransporter:
 
         return "unknown"
 
-    def _generate_suggestions(
-        self, request: TransportabilityRequest, reason: str
-    ) -> List[str]:
+    def _generate_suggestions(self, request: TransportabilityRequest, reason: str) -> List[str]:
         """
         Generate suggestions for non-transportable effects.
 
@@ -482,24 +463,30 @@ class CausalTransporter:
         suggestions = []
 
         if reason == "different_mechanisms":
-            suggestions.extend([
-                f"Investigate structural differences between {request.source_domain.name} and {request.target_domain.name}",
-                f"Consider if {request.treatment}→{request.outcome} mechanism differs due to context",
-                "Collect data in target domain to estimate effect directly",
-                "Explore domain-stratified analysis",
-            ])
+            suggestions.extend(
+                [
+                    f"Investigate structural differences between {request.source_domain.name} and {request.target_domain.name}",
+                    f"Consider if {request.treatment}→{request.outcome} mechanism differs due to context",
+                    "Collect data in target domain to estimate effect directly",
+                    "Explore domain-stratified analysis",
+                ]
+            )
         elif reason in ["no_source_path", "no_target_path"]:
-            suggestions.extend([
-                "Verify DAG structure is correct",
-                f"Check if {request.treatment} actually affects {request.outcome}",
-                "Consider indirect pathways through mediators",
-            ])
+            suggestions.extend(
+                [
+                    "Verify DAG structure is correct",
+                    f"Check if {request.treatment} actually affects {request.outcome}",
+                    "Consider indirect pathways through mediators",
+                ]
+            )
         else:
-            suggestions.extend([
-                "Collect more data about domain differences",
-                "Identify selection variables that differ between domains",
-                "Consider experimental validation in target domain",
-            ])
+            suggestions.extend(
+                [
+                    "Collect more data about domain differences",
+                    "Identify selection variables that differ between domains",
+                    "Consider experimental validation in target domain",
+                ]
+            )
 
         return suggestions
 
@@ -555,9 +542,7 @@ class CausalTransporter:
 
             technical_basis = f"Y₀ transportability analysis via {method} method"
 
-            assumption_strs = [
-                a.description for a in (assumptions or []) if a.critical
-            ]
+            assumption_strs = [a.description for a in (assumptions or []) if a.critical]
         else:
             # Non-transportable case
             summary = (
@@ -575,7 +560,7 @@ class CausalTransporter:
                 "unknown": "Transportability conditions not satisfied",
             }
 
-            reasoning = reason_map.get(reason, "Transportability assessment failed")
+            reasoning = reason_map.get(reason or "unknown", "Transportability assessment failed")
             technical_basis = "Y₀ transportability analysis - no valid transport formula found"
             assumption_strs = ["DAG structures correct", "Selection variables identified"]
 

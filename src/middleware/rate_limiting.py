@@ -10,7 +10,7 @@ import logging
 import time
 import uuid
 from collections import defaultdict
-from typing import Dict, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -69,8 +69,7 @@ class RateLimiter:
 
         # Remove old requests (older than 1 minute)
         self.requests[identifier] = [
-            req_time for req_time in self.requests[identifier]
-            if req_time > minute_ago
+            req_time for req_time in self.requests[identifier] if req_time > minute_ago
         ]
 
         # Check if over limit
@@ -98,15 +97,12 @@ class RateLimiter:
         minute_ago = now - 60
 
         # Count requests in last minute
-        current_requests = sum(
-            1 for req_time in self.requests[identifier]
-            if req_time > minute_ago
-        )
+        current_requests = sum(1 for req_time in self.requests[identifier] if req_time > minute_ago)
 
         return {
             "current_requests": current_requests,
             "limit": self.requests_per_minute,
-            "remaining": max(0, self.requests_per_minute - current_requests)
+            "remaining": max(0, self.requests_per_minute - current_requests),
         }
 
 
@@ -120,10 +116,10 @@ class RedisRateLimiter:
 
     def __init__(
         self,
-        redis_client,
+        redis_client: Any,
         requests_per_minute: int = 100,
-        fallback: Optional[RateLimiter] = None
-    ):
+        fallback: Optional[RateLimiter] = None,
+    ) -> None:
         """
         Initialize Redis rate limiter.
 
@@ -193,7 +189,9 @@ class RedisRateLimiter:
         except Exception as e:
             logger.warning(
                 f"Redis rate limit check failed, using fallback: {e}",
-                extra={"identifier": identifier[:16] + "..." if len(identifier) > 16 else identifier}
+                extra={
+                    "identifier": identifier[:16] + "..." if len(identifier) > 16 else identifier
+                },
             )
             return self.fallback.check_rate_limit(identifier)
 
@@ -226,7 +224,7 @@ class RedisRateLimiter:
             return {
                 "current_requests": current_requests,
                 "limit": self.requests_per_minute,
-                "remaining": max(0, self.requests_per_minute - current_requests)
+                "remaining": max(0, self.requests_per_minute - current_requests),
             }
         except Exception:
             return self.fallback.get_stats(identifier)
@@ -257,11 +255,12 @@ def get_rate_limiter() -> RedisRateLimiter:
         # Try to get Redis client
         try:
             from src.infrastructure.redis_client import get_redis_client
+
             redis_client = get_redis_client()
             _rate_limiter = RedisRateLimiter(
                 redis_client=redis_client,
                 requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
-                fallback=_in_memory_limiter
+                fallback=_in_memory_limiter,
             )
             if redis_client:
                 logger.info("Rate limiter using Redis backend")
@@ -288,7 +287,7 @@ def get_rate_limiter() -> RedisRateLimiter:
             _rate_limiter = RedisRateLimiter(
                 redis_client=None,
                 requests_per_minute=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
-                fallback=_in_memory_limiter
+                fallback=_in_memory_limiter,
             )
 
     return _rate_limiter
@@ -304,7 +303,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     # Endpoints exempt from rate limiting
     EXEMPT_PATHS: Set[str] = {"/health", "/ready", "/metrics"}
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
         """
         Process request with rate limiting.
 
@@ -339,7 +338,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if not allowed:
             # Extract request ID for correlation
             from src.utils.tracing import get_trace_id
-            request_id = request.headers.get("X-Request-Id") or request.headers.get("X-Trace-Id") or get_trace_id()
+
+            request_id = (
+                request.headers.get("X-Request-Id")
+                or request.headers.get("X-Trace-Id")
+                or get_trace_id()
+            )
 
             # Record metrics
             rate_limit_hits.labels(identifier_type=identifier_type).inc()
@@ -350,13 +354,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
             # Log rate limit violation via security audit logger
             settings = get_settings()
-            security_audit.log_rate_limit_exceeded(
+            security_audit.log_rate_limit_exceeded(  # type: ignore[call-arg]
                 client_ip=client_ip,
                 identifier=identifier,
                 limit=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,
                 window_seconds=60,
                 path=request.url.path,
-                request_id=request_id
+                request_id=request_id,
             )
 
             # Return 429 Too Many Requests with Olumi Error Schema v1.0
@@ -370,7 +374,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     hints=[
                         f"Wait {retry_after} seconds before retrying",
                         "Reduce request frequency",
-                        "Consider implementing client-side rate limiting"
+                        "Consider implementing client-side rate limiting",
                     ],
                     suggestion=f"Retry after {retry_after} seconds",
                 ),
@@ -382,7 +386,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=429,
                 content=error_response.model_dump(exclude_none=True),
-                headers={"Retry-After": str(retry_after)}
+                headers={"Retry-After": str(retry_after)},
             )
 
         # Record allowed request

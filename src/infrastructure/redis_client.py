@@ -13,7 +13,7 @@ import logging
 import os
 import ssl
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 import redis
 from prometheus_client import Counter, Gauge
@@ -86,7 +86,7 @@ class RedisHealthCheck:
             return {"status": "disconnected", "error": "No client configured"}
 
         try:
-            info = self.client.info("server")
+            info: Any = self.client.info("server")
             return {
                 "status": "connected",
                 "redis_version": info.get("redis_version", "unknown"),
@@ -198,7 +198,7 @@ def get_redis_client() -> Optional[redis.Redis]:
             logger.info("Redis TLS enabled")
 
         # Create client
-        _redis_client = redis.Redis(**connection_kwargs)
+        _redis_client = redis.Redis(**connection_kwargs)  # type: ignore[arg-type]
 
         # Test connection
         _redis_client.ping()
@@ -209,7 +209,7 @@ def get_redis_client() -> Optional[redis.Redis]:
                 "host": settings.REDIS_HOST,
                 "port": settings.REDIS_PORT,
                 "tls_enabled": ssl_context is not None,
-            }
+            },
         )
 
         redis_client_status.set(1)
@@ -223,7 +223,7 @@ def get_redis_client() -> Optional[redis.Redis]:
             extra={
                 "host": settings.REDIS_HOST,
                 "port": settings.REDIS_PORT,
-            }
+            },
         )
         redis_client_status.set(0)
         redis_client_ops.labels(operation="connect", status="error").inc()
@@ -235,7 +235,7 @@ def get_redis_client() -> Optional[redis.Redis]:
             extra={
                 "host": settings.REDIS_HOST,
                 "port": settings.REDIS_PORT,
-            }
+            },
         )
         redis_client_status.set(0)
         redis_client_ops.labels(operation="connect", status="error").inc()
@@ -247,7 +247,7 @@ def get_redis_client() -> Optional[redis.Redis]:
             extra={
                 "host": settings.REDIS_HOST,
                 "port": settings.REDIS_PORT,
-            }
+            },
         )
         redis_client_status.set(0)
         redis_client_ops.labels(operation="connect", status="error").inc()

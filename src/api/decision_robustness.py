@@ -243,17 +243,13 @@ def _validate_request(request: RobustnessRequest) -> None:
     node_ids = {n.id for n in request.graph.nodes}
 
     if request.utility.goal_node_id not in node_ids:
-        raise ValueError(
-            f"Goal node '{request.utility.goal_node_id}' not found in graph"
-        )
+        raise ValueError(f"Goal node '{request.utility.goal_node_id}' not found in graph")
 
     # Check additional goals exist
     if request.utility.additional_goals:
         for goal in request.utility.additional_goals:
             if goal not in node_ids:
-                raise ValueError(
-                    f"Additional goal '{goal}' not found in graph"
-                )
+                raise ValueError(f"Additional goal '{goal}' not found in graph")
 
     # Check intervention nodes exist
     for option in request.options:

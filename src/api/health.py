@@ -150,18 +150,18 @@ async def service_health() -> Dict[str, Any]:
         health = health_monitor.get_health(service_name)
 
         service_status[service_name] = {
-            "status": health.status.value,
-            "success_rate_percent": round(health.success_rate * 100, 2),
-            "total_requests": health.total_requests,
-            "successes": health.successes,
-            "failures": health.failures,
-            "fallbacks": health.fallbacks,
-            "uptime_seconds": round(health.uptime, 2),
-            "last_check": health.last_check.isoformat() + "Z" if health.last_check else None,
+            "status": health.status.value,  # type: ignore[attr-defined]
+            "success_rate_percent": round(health.success_rate * 100, 2),  # type: ignore[attr-defined]
+            "total_requests": health.total_requests,  # type: ignore[attr-defined]
+            "successes": health.successes,  # type: ignore[attr-defined]
+            "failures": health.failures,  # type: ignore[attr-defined]
+            "fallbacks": health.fallbacks,  # type: ignore[attr-defined]
+            "uptime_seconds": round(health.uptime, 2),  # type: ignore[attr-defined]
+            "last_check": health.last_check.isoformat() + "Z" if health.last_check else None,  # type: ignore[attr-defined]
         }
 
         # Mark overall as unhealthy if any service is failing
-        if health.status.value == "FAILING":
+        if health.status.value == "FAILING":  # type: ignore[attr-defined]
             overall_healthy = False
 
     return {
@@ -222,9 +222,7 @@ async def circuit_breaker_status() -> Dict[str, Any]:
             "success_threshold": breaker.success_threshold,
             "timeout_seconds": breaker.timeout,
             "last_failure_time": (
-                breaker.last_failure_time.isoformat() + "Z"
-                if breaker.last_failure_time
-                else None
+                breaker.last_failure_time.isoformat() + "Z" if breaker.last_failure_time else None
             ),
         }
 

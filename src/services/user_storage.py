@@ -12,7 +12,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import redis
 
@@ -58,17 +58,14 @@ class UserStorage:
 
             # Test connection
             self.redis_client.ping()
-            logger.info(
-                "redis_connected",
-                extra={"pool_size": pool.max_connections}
-            )
+            logger.info("redis_connected", extra={"pool_size": pool.max_connections})
         except Exception as e:
             logger.warning(
                 "redis_connection_failed",
                 extra={"error": str(e)},
             )
             self.redis_enabled = False
-            self.fallback_storage: Dict[str, any] = {}
+            self.fallback_storage: Dict[str, Any] = {}
 
     def store_beliefs(
         self,
@@ -108,7 +105,9 @@ class UserStorage:
             else:
                 # Fallback to in-memory storage
                 self.fallback_storage[key] = beliefs
-                logger.info("beliefs_stored_fallback", extra={"user_id": self._hash_user_id(user_id)})
+                logger.info(
+                    "beliefs_stored_fallback", extra={"user_id": self._hash_user_id(user_id)}
+                )
 
         except Exception as e:
             logger.error(
@@ -138,7 +137,7 @@ class UserStorage:
                     self.redis_client.expire(key, 24 * 3600)
 
                     # Deserialize
-                    beliefs = UserBeliefModel.model_validate_json(beliefs_json)
+                    beliefs = UserBeliefModel.model_validate_json(str(beliefs_json))
 
                     logger.info(
                         "beliefs_retrieved",
@@ -154,10 +153,12 @@ class UserStorage:
                     return None
             else:
                 # Fallback storage
-                beliefs = self.fallback_storage.get(key)
-                if beliefs:
-                    logger.info("beliefs_retrieved_fallback", extra={"user_id": self._hash_user_id(user_id)})
-                return beliefs
+                fallback_beliefs: Optional[UserBeliefModel] = self.fallback_storage.get(key)
+                if fallback_beliefs:
+                    logger.info(
+                        "beliefs_retrieved_fallback", extra={"user_id": self._hash_user_id(user_id)}
+                    )
+                return fallback_beliefs
 
         except Exception as e:
             logger.error(
@@ -218,7 +219,10 @@ class UserStorage:
                 )
             else:
                 # Fallback - just log
-                logger.info("query_added_to_history_fallback", extra={"user_id": self._hash_user_id(user_id)})
+                logger.info(
+                    "query_added_to_history_fallback",
+                    extra={"user_id": self._hash_user_id(user_id)},
+                )
 
         except Exception as e:
             logger.error(
@@ -241,8 +245,8 @@ class UserStorage:
 
         try:
             if self.redis_enabled:
-                count = self.redis_client.zcard(key)
-                return count if count else 0
+                count: Any = self.redis_client.zcard(key)
+                return int(count) if count else 0
             else:
                 return 0
 
@@ -274,8 +278,8 @@ class UserStorage:
         try:
             if self.redis_enabled:
                 # Get most recent queries (highest scores first)
-                query_ids = self.redis_client.zrevrange(key, 0, limit - 1)
-                return list(query_ids)
+                query_ids: Any = self.redis_client.zrevrange(key, 0, limit - 1)
+                return [str(qid) for qid in query_ids]
             else:
                 return []
 

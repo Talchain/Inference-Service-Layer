@@ -45,7 +45,8 @@ team_aligner = TeamAligner()
         500: {"description": "Internal computation error"},
     },
 )
-async def align_team(request: TeamAlignmentRequest,
+async def align_team(
+    request: TeamAlignmentRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
 ) -> TeamAlignmentResponse:
     """

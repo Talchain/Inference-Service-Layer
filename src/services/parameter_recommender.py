@@ -47,7 +47,9 @@ def recommend_edge_weight(
     if is_critical:
         # Critical path edges need strong weights
         recommended_range = [1.2, 1.8]
-        rationale = "Critical path edge connecting decision to outcome - requires strong causal influence"
+        rationale = (
+            "Critical path edge connecting decision to outcome - requires strong causal influence"
+        )
         confidence = "high"
         importance = 0.9
     elif from_centrality > 0.6 or to_centrality > 0.6:
@@ -189,9 +191,7 @@ def generate_parameter_recommendations(
         from_centrality = centralities.get(edge.from_, 0.5)
         to_centrality = centralities.get(edge.to, 0.5)
 
-        rec = recommend_edge_weight(
-            edge, is_critical, from_centrality, to_centrality, graph
-        )
+        rec = recommend_edge_weight(edge, is_critical, from_centrality, to_centrality, graph)
         recommendations.append(rec)
 
     # Generate node belief recommendations
@@ -225,9 +225,7 @@ def generate_parameter_recommendations(
     graph_characteristics = {
         "num_critical_edges": len(critical_edges),
         "max_path_length": max_path_length,
-        "avg_centrality": (
-            sum(centralities.values()) / len(centralities) if centralities else 0
-        ),
+        "avg_centrality": (sum(centralities.values()) / len(centralities) if centralities else 0),
         "num_nodes": len(graph.nodes),
         "num_edges": len(graph.edges),
         "is_connected": nx.is_weakly_connected(G),

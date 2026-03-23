@@ -140,21 +140,15 @@ class UtilityValidator:
 
         # Extract node IDs and goal nodes from graph
         node_ids = {node.id for node in graph.nodes}
-        goal_nodes = {
-            node.id for node in graph.nodes if node.kind == NodeKind.GOAL
-        }
+        goal_nodes = {node.id for node in graph.nodes if node.kind == NodeKind.GOAL}
 
         for goal in goals:
             # Check if goal_id references a node
             if goal.goal_id not in node_ids:
-                issues.append(
-                    f"Goal '{goal.goal_id}' does not reference any node in the graph"
-                )
+                issues.append(f"Goal '{goal.goal_id}' does not reference any node in the graph")
             elif goal.goal_id not in goal_nodes:
                 # Warning if it references a non-goal node
-                issues.append(
-                    f"Goal '{goal.goal_id}' references a node that is not of type 'goal'"
-                )
+                issues.append(f"Goal '{goal.goal_id}' references a node that is not of type 'goal'")
 
         return issues
 
@@ -222,18 +216,14 @@ class UtilityValidator:
                 per_unspecified = remaining / len(unspecified)
                 for goal_id in unspecified:
                     raw_weights[goal_id] = per_unspecified
-                defaults_applied.append(
-                    f"Unspecified weights assigned {per_unspecified:.4f} each"
-                )
+                defaults_applied.append(f"Unspecified weights assigned {per_unspecified:.4f} each")
             else:
                 # All weight already allocated - use minimum
                 for goal_id in unspecified:
                     raw_weights[goal_id] = self.MIN_WEIGHT
-                defaults_applied.append(
-                    f"Unspecified weights assigned minimum ({self.MIN_WEIGHT})"
-                )
+                defaults_applied.append(f"Unspecified weights assigned minimum ({self.MIN_WEIGHT})")
 
-            weights = raw_weights
+            weights = raw_weights  # type: ignore[assignment]
         else:
             # All weights specified
             weights = specified_weights
@@ -323,9 +313,7 @@ class UtilityValidator:
                     "Using default coefficient of 1.0"
                 )
             elif spec.risk_coefficient == 0:
-                issues.append(
-                    "Risk coefficient of 0 effectively means risk_neutral behaviour"
-                )
+                issues.append("Risk coefficient of 0 effectively means risk_neutral behaviour")
             elif spec.risk_coefficient > 5.0:
                 issues.append(
                     f"High risk coefficient ({spec.risk_coefficient}) may cause "

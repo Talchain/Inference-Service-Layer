@@ -30,7 +30,7 @@ class ConsensusGenerator:
     Current implementation: Template-based (can be upgraded to LLM)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize consensus generator."""
         pass
 
@@ -247,9 +247,7 @@ class ConsensusGenerator:
         # Check if significant (held by >1 person)
         for value_name in unshared_values:
             count = sum(
-                1
-                for pos in positions
-                if any(v.value_name == value_name for v in pos.values)
+                1 for pos in positions if any(v.value_name == value_name for v in pos.values)
             )
 
             if count >= 2:  # At least 2 people care

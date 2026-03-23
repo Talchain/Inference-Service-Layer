@@ -55,9 +55,7 @@ class AdvancedModelValidator:
         structural_model: Optional[Dict[str, Any]],
         context: Optional[Dict[str, Any]],
         validation_level: ValidationLevel,
-    ) -> Tuple[
-        QualityLevel, float, ValidationResults, List[ModelSuggestion], List[BestPractice]
-    ]:
+    ) -> Tuple[QualityLevel, float, ValidationResults, List[ModelSuggestion], List[BestPractice]]:
         """
         Perform comprehensive model validation.
 
@@ -91,9 +89,7 @@ class AdvancedModelValidator:
 
         # Perform validations
         structural_validation = self._validate_structural(dag, validation_level)
-        statistical_validation = self._validate_statistical(
-            structural_model, validation_level
-        )
+        statistical_validation = self._validate_statistical(structural_model, validation_level)
         domain_validation = self._validate_domain(dag, context, validation_level)
 
         validation_results = ValidationResults(
@@ -153,9 +149,7 @@ class AdvancedModelValidator:
             checks.append(
                 ValidationCheck(
                     name="connectivity_check",
-                    status=ValidationStatus.PASS
-                    if weakly_connected
-                    else ValidationStatus.WARNING,
+                    status=ValidationStatus.PASS if weakly_connected else ValidationStatus.WARNING,
                     description="Graph is connected"
                     if weakly_connected
                     else "Graph has disconnected components",
@@ -349,9 +343,7 @@ class AdvancedModelValidator:
 
         return DomainValidation(checks=checks)
 
-    def _check_structural_patterns(
-        self, G: nx.DiGraph, checks: List[ValidationCheck]
-    ) -> None:
+    def _check_structural_patterns(self, G: nx.DiGraph, checks: List[ValidationCheck]) -> None:
         """Check for common structural patterns and anti-patterns."""
         # Check for v-structures (colliders)
         num_colliders = 0
@@ -396,11 +388,7 @@ class AdvancedModelValidator:
         suggestions = []
 
         # Collect all failed/warning checks
-        all_checks = (
-            results.structural.checks
-            + results.statistical.checks
-            + results.domain.checks
-        )
+        all_checks = results.structural.checks + results.statistical.checks + results.domain.checks
 
         failed_checks = [c for c in all_checks if c.status == ValidationStatus.FAIL]
         warning_checks = [c for c in all_checks if c.status == ValidationStatus.WARNING]
@@ -423,7 +411,7 @@ class AdvancedModelValidator:
             if "isolated" in check.name:
                 suggestions.append(
                     ModelSuggestion(
-                        type=SuggestionType.REMOVE_NODE,
+                        type=SuggestionType.REMOVE_NODE,  # type: ignore[attr-defined]
                         description=f"Remove isolated nodes or add edges to connect them",
                         rationale="Isolated nodes don't contribute to causal inference",
                         confidence=0.8,
@@ -509,15 +497,9 @@ class AdvancedModelValidator:
 
         return practices
 
-    def _compute_quality(
-        self, results: ValidationResults
-    ) -> Tuple[QualityLevel, float]:
+    def _compute_quality(self, results: ValidationResults) -> Tuple[QualityLevel, float]:
         """Compute overall quality score and level."""
-        all_checks = (
-            results.structural.checks
-            + results.statistical.checks
-            + results.domain.checks
-        )
+        all_checks = results.structural.checks + results.statistical.checks + results.domain.checks
 
         if not all_checks:
             return QualityLevel.ACCEPTABLE, 50.0

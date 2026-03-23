@@ -31,8 +31,8 @@ class InterventionRegion(BaseModel):
         "json_schema_extra": {
             "example": {
                 "variable_ranges": {
-                    "price": (52.0, 58.0),
-                    "quality_score": (7.5, 8.5),
+                    "price": [52.0, 58.0],
+                    "quality_score": [7.5, 8.5],
                 }
             }
         }
@@ -99,8 +99,7 @@ class InterventionRegion(BaseModel):
             Dict mapping each variable to its midpoint value
         """
         return {
-            var: (min_val + max_val) / 2
-            for var, (min_val, max_val) in self.variable_ranges.items()
+            var: (min_val + max_val) / 2 for var, (min_val, max_val) in self.variable_ranges.items()
         }
 
 
@@ -214,9 +213,7 @@ class FACETRobustnessAnalysis(BaseModel):
         "json_schema_extra": {
             "example": {
                 "status": "robust",
-                "robust_regions": [
-                    {"variable_ranges": {"price": (52.0, 58.0)}}
-                ],
+                "robust_regions": [{"variable_ranges": {"price": [52.0, 58.0]}}],
                 "outcome_guarantees": {
                     "revenue": {
                         "outcome_variable": "revenue",
@@ -296,7 +293,7 @@ class RobustnessRequest(BaseModel):
                     "edges": [["price", "demand"], ["demand", "revenue"]],
                 },
                 "intervention_proposal": {"price": 55.0},
-                "target_outcome": {"revenue": (95000.0, 105000.0)},
+                "target_outcome": {"revenue": [95000.0, 105000.0]},
                 "perturbation_radius": 0.1,
                 "min_samples": 100,
                 "confidence_level": 0.95,

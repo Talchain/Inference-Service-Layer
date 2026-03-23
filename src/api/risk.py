@@ -23,8 +23,8 @@ router = APIRouter()
 async def adjust_for_risk(
     request: RiskAdjustmentRequest,
     x_request_id: Optional[str] = Header(None),
-    risk_adjuster: RiskAdjuster = Depends(get_risk_adjuster)
-):
+    risk_adjuster: RiskAdjuster = Depends(get_risk_adjuster),
+) -> RiskAdjustmentResponse:
     """
     Apply risk adjustment to option scores based on risk profile.
 
@@ -64,12 +64,10 @@ async def adjust_for_risk(
     metadata_builder = MetadataBuilder(request_id)
 
     # Perform risk adjustment
-    adjusted_scores, rankings_changed, ranking_changes, interpretation = (
-        risk_adjuster.adjust(
-            options=request.options,
-            risk_coefficient=request.risk_coefficient,
-            risk_type=request.risk_type
-        )
+    adjusted_scores, rankings_changed, ranking_changes, interpretation = risk_adjuster.adjust(
+        options=request.options,
+        risk_coefficient=request.risk_coefficient,
+        risk_type=request.risk_type,
     )
 
     # Build algorithm name for metadata
@@ -80,7 +78,7 @@ async def adjust_for_risk(
         adjusted_scores=adjusted_scores,
         rankings_changed=rankings_changed,
         ranking_changes=ranking_changes if rankings_changed else None,
-        risk_interpretation=interpretation
+        risk_interpretation=interpretation,
     )
 
     # Add metadata

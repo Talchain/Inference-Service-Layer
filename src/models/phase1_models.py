@@ -29,13 +29,9 @@ class DecisionContext(BaseModel):
         ...,
         description="Decision domain (e.g., 'pricing', 'feature_prioritization')",
         min_length=1,
-        max_length=100
+        max_length=100,
     )
-    variables: List[str] = Field(
-        ...,
-        description="Relevant decision variables",
-        max_length=50
-    )
+    variables: List[str] = Field(..., description="Relevant decision variables", max_length=50)
     constraints: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Domain-specific constraints",
@@ -43,10 +39,11 @@ class DecisionContext(BaseModel):
 
     @field_validator("constraints")
     @classmethod
-    def validate_constraints_size(cls, v):
+    def validate_constraints_size(cls, v: Any) -> Any:
         """Validate constraints dict size."""
         if v is not None:
             from src.utils.security_validators import validate_dict_size
+
             validate_dict_size(v, "constraints")
         return v
 
@@ -96,23 +93,16 @@ class UserBeliefModel(BaseModel):
 class Scenario(BaseModel):
     """A decision scenario for comparison."""
 
-    description: str = Field(
-        ...,
-        description="Natural language description",
-        max_length=10000
-    )
+    description: str = Field(..., description="Natural language description", max_length=10000)
     outcomes: Dict[str, float] = Field(..., description="Predicted outcomes")
-    trade_offs: List[str] = Field(
-        ...,
-        description="What's gained vs lost",
-        max_length=20
-    )
+    trade_offs: List[str] = Field(..., description="What's gained vs lost", max_length=20)
 
     @field_validator("outcomes")
     @classmethod
-    def validate_outcomes_size(cls, v):
+    def validate_outcomes_size(cls, v: Any) -> Any:
         """Validate outcomes dict size."""
         from src.utils.security_validators import validate_dict_size
+
         validate_dict_size(v, "outcomes")
         return v
 
@@ -146,24 +136,12 @@ class QueryStrategyInfo(BaseModel):
 class CounterfactualQuery(BaseModel):
     """A counterfactual query for preference elicitation."""
 
-    id: str = Field(
-        ...,
-        description="Unique query identifier",
-        min_length=1,
-        max_length=100
-    )
-    question: str = Field(
-        ...,
-        description="Natural language question",
-        max_length=5000
-    )
+    id: str = Field(..., description="Unique query identifier", min_length=1, max_length=100)
+    question: str = Field(..., description="Natural language question", max_length=5000)
     scenario_a: Scenario = Field(..., description="First scenario option")
     scenario_b: Scenario = Field(..., description="Second scenario option")
     information_gain: float = Field(
-        ...,
-        description="Expected reduction in uncertainty",
-        ge=0.0,
-        le=1.0
+        ..., description="Expected reduction in uncertainty", ge=0.0, le=1.0
     )
 
     model_config = {
@@ -195,7 +173,7 @@ class PreferenceElicitationRequest(BaseModel):
         description="User identifier",
         min_length=1,
         max_length=100,
-        pattern=r'^[a-zA-Z0-9_\-]+$'
+        pattern=r"^[a-zA-Z0-9_\-]+$",
     )
     context: DecisionContext = Field(..., description="Decision context")
     current_beliefs: Optional[UserBeliefModel] = Field(
@@ -227,9 +205,7 @@ class PreferenceElicitationResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
 
@@ -249,14 +225,9 @@ class PreferenceUpdateRequest(BaseModel):
         description="User identifier",
         min_length=1,
         max_length=100,
-        pattern=r'^[a-zA-Z0-9_\-]+$'
+        pattern=r"^[a-zA-Z0-9_\-]+$",
     )
-    query_id: str = Field(
-        ...,
-        description="Query being responded to",
-        min_length=1,
-        max_length=100
-    )
+    query_id: str = Field(..., description="Query being responded to", min_length=1, max_length=100)
     response: PreferenceChoice = Field(..., description="User's choice")
     confidence: float = Field(
         default=1.0,
@@ -292,9 +263,7 @@ class PreferenceUpdateResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
 
@@ -320,14 +289,14 @@ class BayesianTeachingRequest(BaseModel):
         description="User identifier",
         min_length=1,
         max_length=100,
-        pattern=r'^[a-zA-Z0-9_\-]+$'
+        pattern=r"^[a-zA-Z0-9_\-]+$",
     )
     current_beliefs: UserBeliefModel = Field(..., description="Current user beliefs")
     target_concept: str = Field(
         ...,
         description="Concept to teach (e.g., 'confounding', 'trade_offs')",
         min_length=1,
-        max_length=100
+        max_length=100,
     )
     context: DecisionContext = Field(..., description="Decision context")
     max_examples: int = Field(
@@ -348,9 +317,7 @@ class BayesianTeachingResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
 
@@ -495,7 +462,5 @@ class AdvancedValidationResponse(BaseModel):
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
-        default=None,
-        description="Metadata for determinism verification",
-        alias="_metadata"
+        default=None, description="Metadata for determinism verification", alias="_metadata"
     )

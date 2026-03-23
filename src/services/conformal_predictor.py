@@ -11,7 +11,7 @@ References:
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from fastapi import HTTPException
@@ -29,11 +29,7 @@ from src.models.responses import (
 from src.models.shared import SensitivityRange
 from src.services.counterfactual_engine import CounterfactualEngine
 from src.utils.determinism import canonical_hash, make_deterministic
-from src.utils.error_recovery import (
-    with_fallback,
-    FallbackStrategy,
-    health_monitor
-)
+from src.utils.error_recovery import with_fallback, FallbackStrategy, health_monitor
 from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
@@ -100,8 +96,8 @@ class ConformalPredictor:
                     extra={
                         "reason": "insufficient_calibration",
                         "calibration_points": n_calib,
-                        "required": MIN_CALIBRATION_DEGRADED
-                    }
+                        "required": MIN_CALIBRATION_DEGRADED,
+                    },
                 )
                 health_monitor.record_fallback("conformal_prediction")
                 result = self._fallback_to_monte_carlo(request)
@@ -110,10 +106,7 @@ class ConformalPredictor:
                 # Degraded conformal: Use available data with warning
                 logger.warning(
                     "conformal_degraded_mode",
-                    extra={
-                        "calibration_points": n_calib,
-                        "recommended": MIN_CALIBRATION_POINTS
-                    }
+                    extra={"calibration_points": n_calib, "recommended": MIN_CALIBRATION_POINTS},
                 )
                 health_monitor.record_fallback("conformal_prediction")
                 result = self._degraded_conformal(request)
@@ -149,11 +142,8 @@ class ConformalPredictor:
             # Enterprise-grade error recovery: NEVER return 500, always return partial result
             logger.error(
                 "conformal_prediction_failed_fallback",
-                extra={
-                    "error": str(e),
-                    "error_type": type(e).__name__
-                },
-                exc_info=True
+                extra={"error": str(e), "error_type": type(e).__name__},
+                exc_info=True,
             )
             health_monitor.record_failure("conformal_prediction")
 
@@ -167,11 +157,8 @@ class ConformalPredictor:
                 # Even fallback failed - log and raise 400 (not 500)
                 logger.error(
                     "all_fallbacks_failed",
-                    extra={
-                        "primary_error": str(e),
-                        "fallback_error": str(fallback_error)
-                    },
-                    exc_info=True
+                    extra={"primary_error": str(e), "fallback_error": str(fallback_error)},
+                    exc_info=True,
                 )
                 raise HTTPException(
                     status_code=400,
@@ -179,7 +166,7 @@ class ConformalPredictor:
                         f"Conformal prediction unavailable. "
                         f"Primary error: {str(e)}. "
                         "Please check your request parameters and try again."
-                    )
+                    ),
                 )
 
     def _split_conformal(
@@ -202,6 +189,7 @@ class ConformalPredictor:
             Conformal prediction response
         """
         # Split calibration data
+        assert request.calibration_data is not None, "calibration_data is required"
         calib_data = request.calibration_data
         n = len(calib_data)
         split_idx = int(n * 0.5)
@@ -221,9 +209,7 @@ class ConformalPredictor:
             )
 
         # Compute conformity scores (residuals) on calibration set
-        conformity_scores = self._compute_conformity_scores(
-            request, calib_data_split
-        )
+        conformity_scores = self._compute_conformity_scores(request, calib_data_split)
 
         # Get quantile for desired coverage
         alpha = 1 - request.confidence_level
@@ -265,18 +251,14 @@ class ConformalPredictor:
         )
 
         # Calibration quality metrics
-        calibration_metrics = self._assess_calibration_quality(
-            conformity_scores, calib_data_split
-        )
+        calibration_metrics = self._assess_calibration_quality(conformity_scores, calib_data_split)
 
         # Compare to standard Monte Carlo
         mc_interval = self._monte_carlo_interval(
             scm, request.intervention, request.confidence_level, request.samples
         )
 
-        comparison = self._compare_intervals(
-            conformal_interval, mc_interval, outcome_var
-        )
+        comparison = self._compare_intervals(conformal_interval, mc_interval, outcome_var)
 
         # Generate explanation
         explanation = self._generate_explanation(
@@ -334,9 +316,7 @@ class ConformalPredictor:
 
         return np.array(residuals)
 
-    def _get_point_prediction(
-        self, scm: any, intervention: Dict[str, float]
-    ) -> Dict[str, float]:
+    def _get_point_prediction(self, scm: Any, intervention: Dict[str, float]) -> Dict[str, float]:
         """
         Get point prediction from structural causal model.
 
@@ -404,9 +384,7 @@ class ConformalPredictor:
                 "mean": float(np.mean(scores)),
                 "std": float(np.std(scores)),
                 "median": float(np.median(scores)),
-                "iqr": float(
-                    np.percentile(scores, 75) - np.percentile(scores, 25)
-                ),
+                "iqr": float(np.percentile(scores, 75) - np.percentile(scores, 25)),
             },
             interval_adaptivity=self._compute_adaptivity(scores),
         )
@@ -432,7 +410,7 @@ class ConformalPredictor:
 
     def _monte_carlo_interval(
         self,
-        scm: any,
+        scm: Any,
         intervention: Dict[str, float],
         confidence_level: float,
         samples: int,
@@ -607,10 +585,7 @@ class ConformalPredictor:
         """
         from src.services.structural_model_parser import StructuralModelParser
 
-        logger.info(
-            "using_monte_carlo_fallback",
-            extra={"reason": "insufficient_calibration"}
-        )
+        logger.info("using_monte_carlo_fallback", extra={"reason": "insufficient_calibration"})
 
         parser = StructuralModelParser()
         scm = parser.parse(request.model)
@@ -651,7 +626,7 @@ class ConformalPredictor:
             assumptions=[
                 "Monte Carlo fallback used (calibration data insufficient)",
                 "Asymptotic coverage only (not finite-sample valid)",
-                "Model assumptions must hold for validity"
+                "Model assumptions must hold for validity",
             ],
         )
 
@@ -664,7 +639,11 @@ class ConformalPredictor:
 
         # Comparison (same as MC since we're using MC)
         comparison = ComparisonMetrics(
-            monte_carlo_interval={outcome_var: ConfidenceInterval(lower=lower, upper=upper, confidence_level=request.confidence_level)},
+            monte_carlo_interval={
+                outcome_var: ConfidenceInterval(
+                    lower=lower, upper=upper, confidence_level=request.confidence_level
+                )
+            },
             conformal_interval={outcome_var: (lower, upper)},
             width_ratio={outcome_var: 1.0},
             interpretation="Using Monte Carlo fallback due to insufficient calibration data. Conformal guarantees not available.",
@@ -706,12 +685,13 @@ class ConformalPredictor:
         Returns:
             Conformal response with degraded quality warning
         """
+        assert request.calibration_data is not None, "calibration_data is required"
         logger.info(
             "using_degraded_conformal",
             extra={
                 "calibration_points": len(request.calibration_data),
-                "recommended": MIN_CALIBRATION_POINTS
-            }
+                "recommended": MIN_CALIBRATION_POINTS,
+            },
         )
 
         # Use standard split conformal but with warning
@@ -720,6 +700,7 @@ class ConformalPredictor:
 
         # Note: No random operations in degraded mode - using all calibration data
         from src.services.structural_model_parser import StructuralModelParser
+
         parser = StructuralModelParser()
         scm = parser.parse(request.model)
 
@@ -758,23 +739,19 @@ class ConformalPredictor:
             assumptions=[
                 f"WARNING: Only {n} calibration points (recommended: {MIN_CALIBRATION_POINTS}+)",
                 "Coverage guarantee is valid but interval may be wide",
-                "Exchangeability of calibration and test points"
+                "Exchangeability of calibration and test points",
             ],
         )
 
         # Calibration metrics
-        calibration_metrics = self._assess_calibration_quality(
-            conformity_scores, calib_data
-        )
+        calibration_metrics = self._assess_calibration_quality(conformity_scores, calib_data)
 
         # Monte Carlo comparison
         mc_interval = self._monte_carlo_interval(
             scm, request.intervention, request.confidence_level, request.samples
         )
 
-        comparison = self._compare_intervals(
-            conformal_interval, mc_interval, outcome_var
-        )
+        comparison = self._compare_intervals(conformal_interval, mc_interval, outcome_var)
 
         # Explanation with warning
         explanation = ExplanationMetadata(

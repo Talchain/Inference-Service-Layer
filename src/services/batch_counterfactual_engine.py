@@ -214,7 +214,7 @@ class BatchCounterfactualEngine:
             scenario_map[var_set] = result
 
         # Get all variables
-        all_vars = set()
+        all_vars: set[str] = set()
         for scenario in scenarios:
             all_vars.update(scenario.intervention.keys())
 
@@ -422,10 +422,7 @@ class BatchCounterfactualEngine:
             RobustnessLevel.FRAGILE: 1,
         }
 
-        most_robust = max(
-            results,
-            key=lambda r: robustness_scores.get(r.robustness.score, 0)
-        )
+        most_robust = max(results, key=lambda r: robustness_scores.get(r.robustness.score, 0))
 
         # Compute marginal gains (assume first scenario is baseline)
         baseline_outcome = results[0].prediction.point_estimate
@@ -486,7 +483,9 @@ class BatchCounterfactualEngine:
         reasoning = " ".join(reasoning_parts)
 
         # Technical basis
-        technical_basis = "Batch counterfactual analysis with shared exogenous samples for determinism"
+        technical_basis = (
+            "Batch counterfactual analysis with shared exogenous samples for determinism"
+        )
         if interactions:
             technical_basis += "; interaction detection via additive decomposition"
 

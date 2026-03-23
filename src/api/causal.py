@@ -11,7 +11,7 @@ import uuid
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from src.models.metadata import create_response_metadata
 from src.models.requests import (
@@ -73,7 +73,7 @@ MAX_DATA_SAMPLES = 10000
 MAX_DATA_VARIABLES = 50
 
 
-def validate_dag_structure(dag_structure, request_id: str):
+def validate_dag_structure(dag_structure: Any, request_id: str) -> Any:
     """
     Validate DAG structure for common issues.
 
@@ -90,14 +90,11 @@ def validate_dag_structure(dag_structure, request_id: str):
     if len(dag_structure.nodes) > MAX_DAG_NODES:
         raise HTTPException(
             status_code=400,
-            detail=f"DAG too large: {len(dag_structure.nodes)} nodes exceeds limit of {MAX_DAG_NODES}"
+            detail=f"DAG too large: {len(dag_structure.nodes)} nodes exceeds limit of {MAX_DAG_NODES}",
         )
 
     if len(dag_structure.nodes) == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="DAG has no nodes"
-        )
+        raise HTTPException(status_code=400, detail="DAG has no nodes")
 
     # Convert to NetworkX and check for cycles
     dag = nx.DiGraph()
@@ -111,13 +108,12 @@ def validate_dag_structure(dag_structure, request_id: str):
             cycle_str = " -> ".join([str(edge[0]) for edge in cycle])
             raise HTTPException(
                 status_code=400,
-                detail=f"Graph contains cycle: {cycle_str}. Please provide a valid DAG (Directed Acyclic Graph)."
+                detail=f"Graph contains cycle: {cycle_str}. Please provide a valid DAG (Directed Acyclic Graph).",
             )
         except nx.NetworkXNoCycle:
             # Shouldn't happen, but handle gracefully
             raise HTTPException(
-                status_code=400,
-                detail="Graph is not a valid DAG (contains cycles)"
+                status_code=400, detail="Graph is not a valid DAG (contains cycles)"
             )
 
     logger.info(
@@ -126,7 +122,7 @@ def validate_dag_structure(dag_structure, request_id: str):
             "request_id": request_id,
             "num_nodes": len(dag_structure.nodes),
             "num_edges": len(dag_structure.edges),
-        }
+        },
     )
 
     return dag
@@ -372,11 +368,7 @@ async def analyze_batch_counterfactual(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "batch_counterfactual_error",
-            extra={"request_id": request_id},
-            exc_info=True
-        )
+        logger.error("batch_counterfactual_error", extra={"request_id": request_id}, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to perform batch counterfactual analysis. Check logs for details.",
@@ -464,7 +456,7 @@ async def conformal_counterfactual_prediction(
                     "Ensure intervention values are not null",
                     "This endpoint requires an intervention - use observational endpoints for non-interventional queries",
                 ],
-                suggestion="Provide at least one variable/value pair, e.g. { \"Price\": 50 }",
+                suggestion='Provide at least one variable/value pair, e.g. { "Price": 50 }',
             ),
             retryable=False,
             source="isl",
@@ -482,7 +474,9 @@ async def conformal_counterfactual_prediction(
                 "request_id": request_id,
                 "method": request.method,
                 "confidence_level": request.confidence_level,
-                "calibration_size": len(request.calibration_data) if request.calibration_data else 0,
+                "calibration_size": len(request.calibration_data)
+                if request.calibration_data
+                else 0,
             },
         )
 
@@ -506,9 +500,7 @@ async def conformal_counterfactual_prediction(
         raise
     except Exception as e:
         logger.error(
-            "conformal_counterfactual_error",
-            extra={"request_id": request_id},
-            exc_info=True
+            "conformal_counterfactual_error", extra={"request_id": request_id}, exc_info=True
         )
         raise HTTPException(
             status_code=500,
@@ -594,11 +586,7 @@ async def analyze_transportability(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "transportability_error",
-            extra={"request_id": request_id},
-            exc_info=True
-        )
+        logger.error("transportability_error", extra={"request_id": request_id}, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to perform transportability analysis. Check logs for details.",
@@ -670,13 +658,13 @@ async def get_validation_strategies(
         if request.treatment not in dag.nodes():
             raise HTTPException(
                 status_code=400,
-                detail=f"Treatment variable '{request.treatment}' not found in DAG nodes"
+                detail=f"Treatment variable '{request.treatment}' not found in DAG nodes",
             )
 
         if request.outcome not in dag.nodes():
             raise HTTPException(
                 status_code=400,
-                detail=f"Outcome variable '{request.outcome}' not found in DAG nodes"
+                detail=f"Outcome variable '{request.outcome}' not found in DAG nodes",
             )
 
         # Get strategies and path analysis
@@ -688,7 +676,11 @@ async def get_validation_strategies(
         )
 
         # Convert to response models
-        from src.models.responses import AdjustmentStrategyDetail, PathAnalysisDetail, ExplanationMetadata
+        from src.models.responses import (
+            AdjustmentStrategyDetail,
+            PathAnalysisDetail,
+            ExplanationMetadata,
+        )
         from src.models.shared import ExplanationMetadata as ExplanationMetadataShared
 
         strategy_details = []
@@ -749,11 +741,7 @@ async def get_validation_strategies(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "validation_strategy_error",
-            extra={"request_id": request_id},
-            exc_info=True
-        )
+        logger.error("validation_strategy_error", extra={"request_id": request_id}, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to generate validation strategies. Check logs for details.",
@@ -811,13 +799,13 @@ async def discover_from_data(
         if len(request.data) > MAX_DATA_SAMPLES:
             raise HTTPException(
                 status_code=400,
-                detail=f"Too many data samples: {len(request.data)} exceeds limit of {MAX_DATA_SAMPLES}"
+                detail=f"Too many data samples: {len(request.data)} exceeds limit of {MAX_DATA_SAMPLES}",
             )
 
         if len(request.variable_names) > MAX_DATA_VARIABLES:
             raise HTTPException(
                 status_code=400,
-                detail=f"Too many variables: {len(request.variable_names)} exceeds limit of {MAX_DATA_VARIABLES}"
+                detail=f"Too many variables: {len(request.variable_names)} exceeds limit of {MAX_DATA_VARIABLES}",
             )
 
         logger.info(
@@ -832,6 +820,7 @@ async def discover_from_data(
 
         # Convert data to numpy array
         import numpy as np
+
         data_array = np.array(request.data)
 
         # Discover DAG
@@ -883,11 +872,7 @@ async def discover_from_data(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "discovery_from_data_error",
-            extra={"request_id": request_id},
-            exc_info=True
-        )
+        logger.error("discovery_from_data_error", extra={"request_id": request_id}, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to discover causal structure from data. Check logs for details.",
@@ -948,7 +933,7 @@ async def discover_from_knowledge(
         )
 
         # Discover DAGs from knowledge
-        dags = causal_discovery_engine.discover_from_knowledge(
+        dags = causal_discovery_engine.discover_from_knowledge(  # type: ignore[call-arg]
             domain_description=request.domain_description,
             variable_names=request.variable_names,
             prior_knowledge=request.prior_knowledge,
@@ -999,9 +984,7 @@ async def discover_from_knowledge(
         raise
     except Exception as e:
         logger.error(
-            "discovery_from_knowledge_error",
-            extra={"request_id": request_id},
-            exc_info=True
+            "discovery_from_knowledge_error", extra={"request_id": request_id}, exc_info=True
         )
         raise HTTPException(
             status_code=500,
@@ -1101,18 +1084,20 @@ async def recommend_experiment(
         history = []
         if request.history:
             for h in request.history:
-                history.append({
-                    "intervention": h.intervention,
-                    "outcome": h.outcome,
-                    "cost": h.cost,
-                })
+                history.append(
+                    {
+                        "intervention": h.intervention,
+                        "outcome": h.outcome,
+                        "cost": h.cost,
+                    }
+                )
 
         # Get recommendation
         recommendation = sequential_optimizer.recommend_next_experiment(
             beliefs=beliefs,
             objective=objective,
             constraints=constraints,
-            history=history if history else None,
+            history=history if history else None,  # type: ignore[arg-type]
             seed=request.seed,
         )
 
@@ -1129,7 +1114,9 @@ async def recommend_experiment(
             exploration_vs_exploitation=recommendation.exploration_vs_exploitation,
         )
 
-        exploration_type = "explore" if recommendation.exploration_vs_exploitation > 0.5 else "exploit"
+        exploration_type = (
+            "explore" if recommendation.exploration_vs_exploitation > 0.5 else "exploit"
+        )
         explanation = ExplanationMetadataShared(
             summary=f"Recommend {exploration_type} strategy: {recommendation.rationale}",
             reasoning=f"Information gain: {recommendation.expected_information_gain:.2f}, Cost: {recommendation.cost_estimate:.0f}",
@@ -1160,9 +1147,7 @@ async def recommend_experiment(
         raise
     except Exception as e:
         logger.error(
-            "experiment_recommendation_error",
-            extra={"request_id": request_id},
-            exc_info=True
+            "experiment_recommendation_error", extra={"request_id": request_id}, exc_info=True
         )
         raise HTTPException(
             status_code=500,
@@ -1249,9 +1234,7 @@ async def recommend_parameters(
             extra={"request_id": request_id, "error": str(e)},
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=500, detail=f"Parameter recommendation failed: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Parameter recommendation failed: {str(e)}")
 
 
 @router.post(
@@ -1337,11 +1320,7 @@ async def analyze_detailed_sensitivity(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "sensitivity_analysis_error",
-            extra={"request_id": request_id},
-            exc_info=True
-        )
+        logger.error("sensitivity_analysis_error", extra={"request_id": request_id}, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to perform sensitivity analysis. Check logs for details.",
@@ -1382,7 +1361,7 @@ async def analyze_detailed_sensitivity(
 async def extract_causal_factors(
     request: FactorExtractionRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-):
+) -> Any:
     """
     Extract causal factors from unstructured data.
 
@@ -1418,7 +1397,7 @@ async def extract_causal_factors(
             domain_hints=[request.domain] if request.domain else None,
             n_factors=request.n_factors,
             min_cluster_size=request.min_cluster_size,
-            outcome_variable=request.outcome_variable
+            outcome_variable=request.outcome_variable,
         )
 
         # Convert to response models
@@ -1428,9 +1407,9 @@ async def extract_causal_factors(
         dag_structure = None
         if suggested_dag:
             from src.models.shared import DAGStructure
+
             dag_structure = DAGStructure(
-                nodes=suggested_dag["nodes"],
-                edges=[tuple(e) for e in suggested_dag["edges"]]
+                nodes=suggested_dag["nodes"], edges=[tuple(e) for e in suggested_dag["edges"]]
             )
 
         # Create summary
@@ -1446,7 +1425,7 @@ async def extract_causal_factors(
             suggested_dag=dag_structure,
             confidence=confidence,
             method="Sentence embedding + clustering",
-            summary=summary
+            summary=summary,
         )
 
         # Inject metadata
@@ -1466,11 +1445,7 @@ async def extract_causal_factors(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            "factor_extraction_error",
-            extra={"request_id": request_id},
-            exc_info=True
-        )
+        logger.error("factor_extraction_error", extra={"request_id": request_id}, exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to extract causal factors. Check logs for details.",

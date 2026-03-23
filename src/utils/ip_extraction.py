@@ -62,7 +62,7 @@ def get_client_ip(request: Request) -> str:
                 logger.warning(
                     "X-Forwarded-For contains multiple IPs but no trusted proxies configured. "
                     "Configure TRUSTED_PROXIES to prevent IP spoofing.",
-                    extra={"x_forwarded_for": forwarded_for}
+                    extra={"x_forwarded_for": forwarded_for},
                 )
             return ips[0]
 
@@ -131,9 +131,7 @@ def validate_trusted_proxies_config() -> None:
                 "to prevent IP spoofing attacks."
             )
     else:
-        logger.info(
-            f"Trusted proxies configured: {len(trusted_proxies)} entries"
-        )
+        logger.info(f"Trusted proxies configured: {len(trusted_proxies)} entries")
 
         # Validate each entry
         for proxy in trusted_proxies:
@@ -143,6 +141,4 @@ def validate_trusted_proxies_config() -> None:
                 else:
                     ipaddress.ip_address(proxy)
             except ValueError as e:
-                logger.error(
-                    f"Invalid trusted proxy entry: {proxy}. Error: {e}"
-                )
+                logger.error(f"Invalid trusted proxy entry: {proxy}. Error: {e}")
