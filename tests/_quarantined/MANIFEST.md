@@ -1,7 +1,7 @@
 # Quarantined Test Manifest
 
-**Generated:** 2026-02-27
-**Total quarantined:** 554 tests (524 FAILED + 30 ERROR)
+**Updated:** 2026-03-23
+**Total quarantined:** 662 tests (632 FAILED + 30 ERROR)
 **Mechanism:** Tests listed in `tests/_quarantined/known_failures.txt` are auto-skipped
 via the `pytest_collection_modifyitems` hook in `tests/conftest.py`. They receive the
 `@pytest.mark.quarantined` marker and are skipped with the reason
@@ -19,11 +19,12 @@ fixed or removed in a dedicated cleanup effort.
 | Category | Files | Tests | Failure Reason |
 |----------|------:|------:|----------------|
 | Integration: endpoint tests (TestClient/ASGI) | 28 | 411 | HTTP 500/422/assertion errors or require running server |
+| Integration: disabled routes (404) | 14 | 149 | Routers commented out in main.py (attack surface reduction); tests hit 404 |
 | Smoke: production health checks | 1 | 14 | `pytest.ini` injects `--base-url`/`--api-key` CLI args; collection ERROR when run from root |
 | Unit: service implementation mismatches | 17 | 93 | StructuralModel API drift, mock mismatches, fixture errors, assertion drift |
 | Unit: duplicate files (accidental copies) | 6 | 32 | Files with space in name (`"file 2.py"`, `"file 3.py"`); duplicates of originals |
 | Property: weight normalization | 1 | 4 | Hypothesis-based tests with service API drift |
-| **TOTAL** | **53** | **554** | |
+| **TOTAL** | **67** | **662** | |
 
 ---
 

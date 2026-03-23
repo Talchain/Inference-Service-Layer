@@ -115,6 +115,12 @@ STABILITY_THRESHOLDS = load_stability_thresholds()
 # Pending scientific calibration from pilot data (Neil gate 1).
 # These values are NOT research-validated — they are operational defaults.
 # provisional: true
+#
+# NOTE: These values (0.9/0.6/0.3/0.1) are *factor-sensitivity confidence scores*
+# derived from bootstrap stability classification — NOT robustness-level thresholds.
+# Robustness-level classification uses ROBUST_THRESHOLD (0.7 win probability) in
+# robustness_analyzer_v2.py combined with overall confidence to produce
+# high/moderate/low/very_low levels.
 STABILITY_CONFIDENCE_MAP = {
     "high": 0.9,
     "moderate": 0.6,

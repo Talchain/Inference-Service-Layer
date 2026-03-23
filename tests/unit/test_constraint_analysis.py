@@ -120,12 +120,7 @@ class TestGoalConstraintModel:
 
     def test_valid_ge_constraint(self):
         """Test valid >= constraint."""
-        gc = GoalConstraint(
-            node_id="revenue",
-            operator=">=",
-            value=100.0,
-            label="Min Revenue"
-        )
+        gc = GoalConstraint(node_id="revenue", operator=">=", value=100.0, label="Min Revenue")
         assert gc.node_id == "revenue"
         assert gc.operator == ">="
         assert gc.value == 100.0
@@ -134,78 +129,45 @@ class TestGoalConstraintModel:
 
     def test_valid_le_constraint(self):
         """Test valid <= constraint."""
-        gc = GoalConstraint(
-            node_id="cost",
-            operator="<=",
-            value=50.0,
-            label="Max Cost"
-        )
+        gc = GoalConstraint(node_id="cost", operator="<=", value=50.0, label="Max Cost")
         assert gc.node_id == "cost"
         assert gc.operator == "<="
         assert gc.value == 50.0
 
     def test_constraint_without_label(self):
         """Test constraint without optional label."""
-        gc = GoalConstraint(
-            node_id="revenue",
-            operator=">=",
-            value=100.0
-        )
+        gc = GoalConstraint(node_id="revenue", operator=">=", value=100.0)
         assert gc.label is None
 
     def test_invalid_operator_rejected(self):
         """Test that invalid operators are rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(
-                node_id="revenue",
-                operator=">",
-                value=100.0
-            )
+            GoalConstraint(node_id="revenue", operator=">", value=100.0)
 
     def test_invalid_operator_less_than(self):
         """Test that < operator is rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(
-                node_id="revenue",
-                operator="<",
-                value=100.0
-            )
+            GoalConstraint(node_id="revenue", operator="<", value=100.0)
 
     def test_nan_threshold_rejected(self):
         """Test that NaN value is rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(
-                node_id="revenue",
-                operator=">=",
-                value=float("nan")
-            )
+            GoalConstraint(node_id="revenue", operator=">=", value=float("nan"))
 
     def test_inf_threshold_rejected(self):
         """Test that infinite value is rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(
-                node_id="revenue",
-                operator=">=",
-                value=float("inf")
-            )
+            GoalConstraint(node_id="revenue", operator=">=", value=float("inf"))
 
     def test_negative_threshold_allowed(self):
         """Test that negative values are allowed."""
-        gc = GoalConstraint(
-            node_id="profit",
-            operator=">=",
-            value=-10.0
-        )
+        gc = GoalConstraint(node_id="profit", operator=">=", value=-10.0)
         assert gc.value == -10.0
         assert gc.threshold == -10.0  # property alias
 
     def test_zero_threshold_allowed(self):
         """Test that zero value is allowed."""
-        gc = GoalConstraint(
-            node_id="balance",
-            operator=">=",
-            value=0.0
-        )
+        gc = GoalConstraint(node_id="balance", operator=">=", value=0.0)
         assert gc.value == 0.0
 
     def test_value_field_matches_v27_contract(self):
@@ -265,13 +227,15 @@ class TestRequestWithGoalConstraints:
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=50.0),
                 GoalConstraint(node_id="cost", operator="<=", value=100.0),
-            ]
+            ],
         )
         assert len(request.goal_constraints) == 2
         assert request.goal_constraints[0].node_id == "revenue"
         assert request.goal_constraints[1].node_id == "cost"
 
-    def test_request_without_constraints_backward_compat(self, multi_outcome_graph, multi_outcome_options):
+    def test_request_without_constraints_backward_compat(
+        self, multi_outcome_graph, multi_outcome_options
+    ):
         """Test request without constraints still works (backward compatibility)."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -281,7 +245,9 @@ class TestRequestWithGoalConstraints:
         )
         assert request.goal_constraints is None
 
-    def test_request_rejects_nonexistent_constraint_node(self, multi_outcome_graph, multi_outcome_options):
+    def test_request_rejects_nonexistent_constraint_node(
+        self, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that constraints referencing non-existent nodes are rejected."""
         with pytest.raises(ValueError, match="GoalConstraint references non-existent node"):
             RobustnessRequestV2(
@@ -291,7 +257,7 @@ class TestRequestWithGoalConstraints:
                 n_samples=100,
                 goal_constraints=[
                     GoalConstraint(node_id="nonexistent", operator=">=", value=50.0),
-                ]
+                ],
             )
 
 
@@ -303,7 +269,9 @@ class TestRequestWithGoalConstraints:
 class TestConstraintProbabilityComputation:
     """Test per-constraint and joint probability computation."""
 
-    def test_single_constraint_probability(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_single_constraint_probability(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test probability computation with single constraint."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -313,7 +281,7 @@ class TestConstraintProbabilityComputation:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=10.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -325,10 +293,14 @@ class TestConstraintProbabilityComputation:
             # With value=10 and typical outcomes, should have high satisfaction
             assert 0.0 <= result.constraint_analysis.constraints[0].prob_satisfied <= 1.0
             # Joint probability equals per-constraint with single constraint
-            assert result.constraint_analysis.joint_probability == \
-                result.constraint_analysis.constraints[0].prob_satisfied
+            assert (
+                result.constraint_analysis.joint_probability
+                == result.constraint_analysis.constraints[0].prob_satisfied
+            )
 
-    def test_multiple_constraints_joint_probability(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_multiple_constraints_joint_probability(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test joint probability with multiple constraints."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -339,7 +311,7 @@ class TestConstraintProbabilityComputation:
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=10.0, label="Min Revenue"),
                 GoalConstraint(node_id="cost", operator="<=", value=200.0, label="Max Cost"),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -360,7 +332,9 @@ class TestConstraintProbabilityComputation:
             assert ca.constraints[0].threshold == 10.0
             assert ca.constraints[0].label == "Min Revenue"
 
-    def test_impossible_constraint_zero_probability(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_impossible_constraint_zero_probability(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test constraint that's impossible to satisfy has ~0 probability."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -371,7 +345,7 @@ class TestConstraintProbabilityComputation:
             goal_constraints=[
                 # Extremely high threshold that can't be met
                 GoalConstraint(node_id="revenue", operator=">=", value=1000000.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -382,7 +356,9 @@ class TestConstraintProbabilityComputation:
             # Should be 0 or very close to 0
             assert ca.constraints[0].prob_satisfied < 0.01
 
-    def test_always_satisfied_constraint(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_always_satisfied_constraint(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test constraint that's always satisfied has ~1.0 probability."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -393,7 +369,7 @@ class TestConstraintProbabilityComputation:
             goal_constraints=[
                 # Very low value that's always met
                 GoalConstraint(node_id="revenue", operator=">=", value=-1000000.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -413,7 +389,9 @@ class TestConstraintProbabilityComputation:
 class TestConditionalProbabilities:
     """Test pairwise conditional probability computation."""
 
-    def test_conditional_probabilities_computed(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_conditional_probabilities_computed(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that conditional probabilities are computed for 2+ constraints."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -424,7 +402,7 @@ class TestConditionalProbabilities:
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=10.0),
                 GoalConstraint(node_id="cost", operator="<=", value=200.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -445,7 +423,9 @@ class TestConditionalProbabilities:
             assert 0.0 <= ca.conditional_probabilities["0"]["1"] <= 1.0
             assert 0.0 <= ca.conditional_probabilities["1"]["0"] <= 1.0
 
-    def test_no_conditional_probabilities_single_constraint(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_no_conditional_probabilities_single_constraint(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that conditional probabilities are None for single constraint."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -455,7 +435,7 @@ class TestConditionalProbabilities:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=10.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -465,7 +445,9 @@ class TestConditionalProbabilities:
             assert ca is not None
             # No conditional probabilities for single constraint
 
-    def test_conditional_probability_undefined_when_zero_satisfaction(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_conditional_probability_undefined_when_zero_satisfaction(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that P(C_j | C_i) is omitted (not 0.0) when P(C_i) = 0.
 
         When a constraint is never satisfied, P(C_j | C_i) is mathematically
@@ -482,7 +464,7 @@ class TestConditionalProbabilities:
                 GoalConstraint(node_id="revenue", operator=">=", value=1000000.0),
                 # Constraint 1: Easy to satisfy
                 GoalConstraint(node_id="cost", operator="<=", value=1000000.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -515,7 +497,9 @@ class TestConditionalProbabilities:
 class TestNearMissDiagnostics:
     """Test near-miss diagnostic computation."""
 
-    def test_binding_constraint_detection(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_binding_constraint_detection(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that borderline constraints are marked as binding."""
         # We need to find a threshold that gives ~50% satisfaction
         # This requires some trial and error with the model
@@ -527,7 +511,7 @@ class TestNearMissDiagnostics:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=30.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -540,7 +524,9 @@ class TestNearMissDiagnostics:
             # binding should be boolean
             assert isinstance(ca.constraints[0].binding, bool)
 
-    def test_failure_margin_computed_when_failures_exist(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_failure_margin_computed_when_failures_exist(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test failure_margin_median is computed when there are failures."""
         # Use a threshold that will have some failures
         request = RobustnessRequestV2(
@@ -551,7 +537,7 @@ class TestNearMissDiagnostics:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=50.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -566,7 +552,9 @@ class TestNearMissDiagnostics:
                 # For >= constraint, margin should be positive when failing
                 assert constraint.failure_margin_median >= 0
 
-    def test_near_miss_fraction_computed(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_near_miss_fraction_computed(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test near_miss_fraction is computed when there are failures."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -576,7 +564,7 @@ class TestNearMissDiagnostics:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=50.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -599,7 +587,9 @@ class TestNearMissDiagnostics:
 class TestConstraintAnalysisIntegration:
     """Integration tests for constraint analysis with full analysis pipeline."""
 
-    def test_constraint_analysis_with_probability_of_goal(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_constraint_analysis_with_probability_of_goal(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test constraint analysis works alongside probability_of_goal.
 
         Note: probability_of_goal is computed AFTER auto-scaled noise is applied,
@@ -615,7 +605,7 @@ class TestConstraintAnalysisIntegration:
             goal_threshold=25.0,  # Legacy single threshold
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=25.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -631,12 +621,17 @@ class TestConstraintAnalysisIntegration:
 
             # With same threshold, they should be in the same ballpark
             # (within 15% of each other due to auto-scaled noise on outcome nodes)
-            assert abs(
-                result.probability_of_goal -
-                result.constraint_analysis.constraints[0].prob_satisfied
-            ) < 0.15
+            assert (
+                abs(
+                    result.probability_of_goal
+                    - result.constraint_analysis.constraints[0].prob_satisfied
+                )
+                < 0.15
+            )
 
-    def test_constraint_analysis_deterministic(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_constraint_analysis_deterministic(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that constraint analysis is deterministic with same seed."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -647,7 +642,7 @@ class TestConstraintAnalysisIntegration:
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=30.0),
                 GoalConstraint(node_id="cost", operator="<=", value=100.0),
-            ]
+            ],
         )
 
         response1 = analyzer.analyze(request)
@@ -661,7 +656,9 @@ class TestConstraintAnalysisIntegration:
             for c1, c2 in zip(ca1.constraints, ca2.constraints):
                 assert c1.prob_satisfied == c2.prob_satisfied
 
-    def test_options_can_have_different_constraint_results(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_options_can_have_different_constraint_results(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that different options can have different constraint satisfaction rates."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -672,7 +669,7 @@ class TestConstraintAnalysisIntegration:
             goal_constraints=[
                 # Cost constraint - high_marketing should have higher cost
                 GoalConstraint(node_id="cost", operator="<=", value=60.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -690,10 +687,14 @@ class TestConstraintAnalysisIntegration:
         low_marketing_ca = results_by_option["low_marketing"].constraint_analysis
 
         # low_marketing should have higher satisfaction (lower cost)
-        assert low_marketing_ca.constraints[0].prob_satisfied > \
-            high_marketing_ca.constraints[0].prob_satisfied
+        assert (
+            low_marketing_ca.constraints[0].prob_satisfied
+            > high_marketing_ca.constraints[0].prob_satisfied
+        )
 
-    def test_no_constraint_analysis_without_constraints(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_no_constraint_analysis_without_constraints(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test that no constraint analysis is present when no constraints provided."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -727,7 +728,7 @@ class TestConstraintAnalysisEdgeCases:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="cost", operator="<=", value=100.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -738,7 +739,9 @@ class TestConstraintAnalysisEdgeCases:
             assert ca.constraints[0].operator == "<="
             assert 0.0 <= ca.constraints[0].prob_satisfied <= 1.0
 
-    def test_same_node_different_thresholds(self, analyzer, multi_outcome_graph, multi_outcome_options):
+    def test_same_node_different_thresholds(
+        self, analyzer, multi_outcome_graph, multi_outcome_options
+    ):
         """Test multiple constraints on same node with different thresholds."""
         request = RobustnessRequestV2(
             graph=multi_outcome_graph,
@@ -749,7 +752,7 @@ class TestConstraintAnalysisEdgeCases:
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=10.0, label="Min"),
                 GoalConstraint(node_id="revenue", operator="<=", value=100.0, label="Max"),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -775,7 +778,7 @@ class TestConstraintAnalysisEdgeCases:
             seed=42,
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=20.0),
-            ]
+            ],
         )
 
         response = analyzer.analyze(request)
@@ -800,7 +803,12 @@ class TestInferenceWarningsDefaultBase:
         """Graph where fac_churn is a non-root factor (has incoming edge)."""
         return GraphV2(
             nodes=[
-                NodeV2(id="fac_retention", kind="factor", label="Retention"),
+                NodeV2(
+                    id="fac_retention",
+                    kind="factor",
+                    label="Retention",
+                    observed_state=ObservedState(value=0.4),
+                ),
                 NodeV2(
                     id="fac_churn",
                     kind="factor",
@@ -865,8 +873,7 @@ class TestInferenceWarningsDefaultBase:
 
         # Assert CritiqueV2 also emitted (visible in V2 response path)
         constraint_critiques = [
-            c for c in response.critiques
-            if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+            c for c in response.critiques if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
         ]
         assert len(constraint_critiques) == 1
         assert constraint_critiques[0].severity == "warning"
@@ -915,9 +922,7 @@ class TestInferenceWarningsDefaultBase:
         assert response.inference_warnings == []
 
         # No CONSTRAINT_NODE_DEFAULT_BASE critique
-        assert not any(
-            c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques
-        )
+        assert not any(c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques)
 
     def test_no_warning_when_all_options_intervene_on_node(self, caplog):
         """No false positive when every option directly intervenes on the node."""
@@ -951,15 +956,18 @@ class TestInferenceWarningsDefaultBase:
 
         # No warning — intervention overrides base for every option
         assert response.inference_warnings == []
-        assert not any(
-            c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques
-        )
+        assert not any(c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques)
 
     def test_warning_with_multiple_constraint_nodes(self, caplog):
         """Warning emitted for each non-root node missing ParameterUncertainty."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="fac_spend", kind="factor", label="Spend"),
+                NodeV2(
+                    id="fac_spend",
+                    kind="factor",
+                    label="Spend",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(
                     id="fac_churn",
                     kind="factor",
@@ -1027,7 +1035,6 @@ class TestInferenceWarningsDefaultBase:
 
         # Both should have corresponding critiques
         constraint_critiques = [
-            c for c in response.critiques
-            if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+            c for c in response.critiques if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
         ]
         assert len(constraint_critiques) == 2

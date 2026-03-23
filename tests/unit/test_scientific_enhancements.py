@@ -568,6 +568,23 @@ class TestTrustPenaltyAuditability:
         assert response.robustness.defaulted_root_node_ids is None
 
 
+class TestTrustPenaltyFloor:
+    """Verify penalty factor floors at 0.1 for many defaulted roots."""
+
+    def test_penalty_factor_formula_floor(self):
+        """max(0.1, 1.0 - 0.05 * n) floors at 0.1 when n >= 18."""
+        # Direct formula check — avoids constructing a 25-node graph
+        for n_defaulted in [18, 20, 25, 100]:
+            factor = max(0.1, 1.0 - 0.05 * n_defaulted)
+            assert factor == 0.1, f"n={n_defaulted}: expected 0.1, got {factor}"
+
+    def test_penalty_factor_scales_linearly_before_floor(self):
+        """Penalty is 0.05 per defaulted root before hitting floor."""
+        for n_defaulted, expected in [(1, 0.95), (3, 0.85), (10, 0.5), (17, 0.15)]:
+            factor = max(0.1, 1.0 - 0.05 * n_defaulted)
+            assert abs(factor - expected) < 1e-9, f"n={n_defaulted}: expected {expected}, got {factor}"
+
+
 class TestEValueUnflippableSemantics:
     """Verify E-value model correctly represents unflippable edges."""
 

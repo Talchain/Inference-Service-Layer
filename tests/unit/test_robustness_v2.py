@@ -103,12 +103,8 @@ def complex_graph():
 def simple_options():
     """Create simple intervention options."""
     return [
-        InterventionOption(
-            id="low_price", label="Low price", interventions={"price": 0.3}
-        ),
-        InterventionOption(
-            id="high_price", label="High price", interventions={"price": 0.7}
-        ),
+        InterventionOption(id="low_price", label="Low price", interventions={"price": 0.3}),
+        InterventionOption(id="high_price", label="High price", interventions={"price": 0.7}),
     ]
 
 
@@ -165,12 +161,7 @@ class TestObservedState:
 
     def test_valid_observed_state_full(self):
         """Test valid observed state with all fields."""
-        state = ObservedState(
-            value=59.0,
-            baseline=49.0,
-            unit="£k",
-            source="brief_extraction"
-        )
+        state = ObservedState(value=59.0, baseline=49.0, unit="£k", source="brief_extraction")
         assert state.value == 59.0
         assert state.baseline == 49.0
         assert state.unit == "£k"
@@ -229,12 +220,7 @@ class TestObservedState:
 
     def test_from_dict(self):
         """Test creating observed state from dictionary."""
-        data = {
-            "value": 59.0,
-            "baseline": 49.0,
-            "unit": "£k",
-            "source": "user_input"
-        }
+        data = {"value": 59.0, "baseline": 49.0, "unit": "£k", "source": "user_input"}
         state = ObservedState(**data)
         assert state.value == 59.0
         assert state.source == "user_input"
@@ -264,11 +250,8 @@ class TestNodeV2WithObservedState:
             kind="factor",
             label="Marketing Spend",
             observed_state=ObservedState(
-                value=100000.0,
-                baseline=75000.0,
-                unit="$",
-                source="brief_extraction"
-            )
+                value=100000.0, baseline=75000.0, unit="$", source="brief_extraction"
+            ),
         )
         assert node.id == "marketing-spend"
         assert node.observed_state is not None
@@ -283,11 +266,7 @@ class TestNodeV2WithObservedState:
             "id": "revenue",
             "kind": "outcome",
             "label": "Total Revenue",
-            "observed_state": {
-                "value": 59.0,
-                "baseline": 49.0,
-                "unit": "£k"
-            }
+            "observed_state": {"value": 59.0, "baseline": 49.0, "unit": "£k"},
         }
         node = NodeV2(**data)
         assert node.observed_state is not None
@@ -299,7 +278,7 @@ class TestNodeV2WithObservedState:
             id="sales",
             kind="factor",
             label="Sales Volume",
-            observed_state=ObservedState(value=1500.0, unit="units")
+            observed_state=ObservedState(value=1500.0, unit="units"),
         )
         assert node.observed_state.value == 1500.0
         assert node.observed_state.unit == "units"
@@ -311,7 +290,7 @@ class TestNodeV2WithObservedState:
             id="price",
             kind="decision",
             label="Price Point",
-            observed_state=ObservedState(value=49.99)
+            observed_state=ObservedState(value=49.99),
         )
         data = node.model_dump()
         assert "observed_state" in data
@@ -763,9 +742,9 @@ class TestDualUncertaintySampler:
         configs = sampler.sample_n_configurations(10000)
         strengths = [c[("a", "b")] for c in configs]
 
-        assert all(-1.0 <= s <= 1.0 for s in strengths), (
-            f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
-        )
+        assert all(
+            -1.0 <= s <= 1.0 for s in strengths
+        ), f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
 
     def test_edge_strength_clamped_negative_tail(self):
         """B5.27: Sampled strengths must be bounded to [-1, 1] (negative tail)."""
@@ -782,9 +761,9 @@ class TestDualUncertaintySampler:
         configs = sampler.sample_n_configurations(10000)
         strengths = [c[("a", "b")] for c in configs]
 
-        assert all(-1.0 <= s <= 1.0 for s in strengths), (
-            f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
-        )
+        assert all(
+            -1.0 <= s <= 1.0 for s in strengths
+        ), f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
 
     def test_edge_strength_clamp_preserves_low_variance(self):
         """B5.27: Clamping should not materially alter well-centred distributions."""
@@ -823,12 +802,8 @@ class TestDualUncertaintySampler:
             ],
         )
         options = [
-            InterventionOption(
-                id="opt_a", label="Option A", interventions={"input": 1.0}
-            ),
-            InterventionOption(
-                id="opt_b", label="Option B", interventions={"input": 0.5}
-            ),
+            InterventionOption(id="opt_a", label="Option A", interventions={"input": 1.0}),
+            InterventionOption(id="opt_b", label="Option B", interventions={"input": 0.5}),
         ]
         request = RobustnessRequestV2(
             request_id="b527-clamp-test",
@@ -1009,9 +984,7 @@ class TestRobustnessAnalyzerV2:
             request_id="filter-test",
             graph=graph,
             options=[
-                InterventionOption(
-                    id="opt1", label="Option 1", interventions={"factor": 1.0}
-                )
+                InterventionOption(id="opt1", label="Option 1", interventions={"factor": 1.0})
             ],
             goal_node_id="outcome",
             n_samples=100,
@@ -1095,7 +1068,12 @@ class TestRobustnessAnalyzerV2:
         """Test graph with certain edges has high stability."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="price", kind="factor", label="Price"),
+                NodeV2(
+                    id="price",
+                    kind="factor",
+                    label="Price",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="revenue", kind="outcome", label="Revenue"),
             ],
             edges=[
@@ -1460,9 +1438,7 @@ class TestRobustnessV2Integration:
             ],
         )
 
-        options = [
-            InterventionOption(id="opt1", label="Option 1", interventions={"a": 1.0})
-        ]
+        options = [InterventionOption(id="opt1", label="Option 1", interventions={"a": 1.0})]
 
         request_low = RobustnessRequestV2(
             request_id="low",
@@ -1524,9 +1500,9 @@ class TestMagnitudeSensitivityIsolation:
                 edges, edge_never_exists, shift=0.5, rng=rng
             )
             # Target edge should ALWAYS exist (non-zero strength)
-            assert config[("a", "b")] != 0.0, (
-                "Target edge should be forced to exist in _sample_with_shifted_mean"
-            )
+            assert (
+                config[("a", "b")] != 0.0
+            ), "Target edge should be forced to exist in _sample_with_shifted_mean"
 
     def test_magnitude_sensitivity_with_low_existence_still_computed(self):
         """
@@ -1554,16 +1530,14 @@ class TestMagnitudeSensitivityIsolation:
                     **{"from": "b", "to": "c"},
                     exists_probability=0.1,  # Rarely exists
                     strength=StrengthDistribution(mean=2.0, std=0.5),  # Large std
-                )
+                ),
             ],
         )
 
         request = RobustnessRequestV2(
             request_id="test",
             graph=graph,
-            options=[
-                InterventionOption(id="opt1", label="Opt1", interventions={"a": 1.0})
-            ],
+            options=[InterventionOption(id="opt1", label="Opt1", interventions={"a": 1.0})],
             goal_node_id="c",
             n_samples=500,
             seed=42,
@@ -1575,16 +1549,17 @@ class TestMagnitudeSensitivityIsolation:
 
         # Find magnitude sensitivity for the low-probability edge
         mag_sens = next(
-            s for s in response.sensitivity
+            s
+            for s in response.sensitivity
             if s.sensitivity_type == "magnitude" and s.edge_from == "b"
         )
 
         # Even though edge rarely exists in normal sampling,
         # magnitude sensitivity should be computed (edge forced to exist)
         # The exact value doesn't matter, just that it's non-zero
-        assert mag_sens.elasticity != 0.0, (
-            "Magnitude sensitivity should be computed even for low-probability edges"
-        )
+        assert (
+            mag_sens.elasticity != 0.0
+        ), "Magnitude sensitivity should be computed even for low-probability edges"
 
     def test_other_edges_still_sampled_normally_in_magnitude_sensitivity(self):
         """
@@ -1612,9 +1587,7 @@ class TestMagnitudeSensitivityIsolation:
         # Sample with shifted mean on TARGET edge
         configs = []
         for _ in range(100):
-            config = analyzer._sample_with_shifted_mean(
-                edges, target_edge, shift=0.5, rng=rng
-            )
+            config = analyzer._sample_with_shifted_mean(edges, target_edge, shift=0.5, rng=rng)
             configs.append(config)
 
         # Target edge should ALWAYS exist
@@ -1643,17 +1616,14 @@ class TestObservedStateIntegration:
                     kind="factor",
                     label="Marketing Spend",
                     observed_state=ObservedState(
-                        value=100000.0,
-                        baseline=75000.0,
-                        unit="$",
-                        source="brief_extraction"
-                    )
+                        value=100000.0, baseline=75000.0, unit="$", source="brief_extraction"
+                    ),
                 ),
                 NodeV2(
                     id="revenue",
                     kind="outcome",
                     label="Revenue",
-                    observed_state=ObservedState(value=500000.0)
+                    observed_state=ObservedState(value=500000.0),
                 ),
             ],
             edges=[
@@ -1670,14 +1640,10 @@ class TestObservedStateIntegration:
             graph=graph,
             options=[
                 InterventionOption(
-                    id="increase",
-                    label="Increase Marketing",
-                    interventions={"marketing": 1.5}
+                    id="increase", label="Increase Marketing", interventions={"marketing": 1.5}
                 ),
                 InterventionOption(
-                    id="maintain",
-                    label="Maintain Marketing",
-                    interventions={"marketing": 1.0}
+                    id="maintain", label="Maintain Marketing", interventions={"marketing": 1.0}
                 ),
             ],
             goal_node_id="revenue",
@@ -1697,7 +1663,7 @@ class TestObservedStateIntegration:
                     id="price",
                     kind="factor",
                     label="Price",
-                    observed_state=ObservedState(value=49.0, baseline=39.0, unit="£")
+                    observed_state=ObservedState(value=49.0, baseline=39.0, unit="£"),
                 ),
                 NodeV2(
                     id="revenue",
@@ -1742,7 +1708,7 @@ class TestObservedStateIntegration:
                     id="a",
                     kind="factor",
                     label="A",
-                    observed_state=ObservedState(value=42.0, source="test")
+                    observed_state=ObservedState(value=42.0, source="test"),
                 ),
                 NodeV2(id="b", kind="outcome", label="B"),
             ],
@@ -1772,7 +1738,7 @@ class TestObservedStateIntegration:
                     id="marketing",
                     kind="factor",
                     label="Marketing",
-                    observed_state=ObservedState(value=100.0)  # Has observed_state
+                    observed_state=ObservedState(value=100.0),  # Has observed_state
                 ),
                 NodeV2(
                     id="price",
@@ -1784,7 +1750,7 @@ class TestObservedStateIntegration:
                     id="revenue",
                     kind="outcome",
                     label="Revenue",
-                    observed_state=ObservedState(value=500.0, unit="$")  # Has observed_state
+                    observed_state=ObservedState(value=500.0, unit="$"),  # Has observed_state
                 ),
             ],
             edges=[
@@ -1805,9 +1771,7 @@ class TestObservedStateIntegration:
             request_id="mixed-test",
             graph=graph,
             options=[
-                InterventionOption(
-                    id="opt1", label="Option 1", interventions={"price": 0.5}
-                ),
+                InterventionOption(id="opt1", label="Option 1", interventions={"price": 0.5}),
             ],
             goal_node_id="revenue",
             n_samples=100,
@@ -2023,7 +1987,9 @@ class TestParameterUncertaintiesInRequest:
                 request_id="test",
                 graph=graph,
                 options=[
-                    InterventionOption(id="opt1", label="Option 1", interventions={"marketing": 1.0})
+                    InterventionOption(
+                        id="opt1", label="Option 1", interventions={"marketing": 1.0}
+                    )
                 ],
                 goal_node_id="revenue",
                 n_samples=100,
@@ -2054,9 +2020,7 @@ class TestFactorSampler:
                 observed_state=ObservedState(value=100.0),
             )
         ]
-        uncertainties = [
-            ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)
-        ]
+        uncertainties = [ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)]
 
         rng = SeededRNG(42)
         sampler = FactorSampler(nodes, uncertainties, rng)
@@ -2123,9 +2087,7 @@ class TestFactorSampler:
                 observed_state=ObservedState(value=100.0),
             )
         ]
-        uncertainties = [
-            ParameterUncertainty(node_id="marketing", distribution="point_mass")
-        ]
+        uncertainties = [ParameterUncertainty(node_id="marketing", distribution="point_mass")]
 
         rng = SeededRNG(42)
         sampler = FactorSampler(nodes, uncertainties, rng)
@@ -2148,9 +2110,7 @@ class TestFactorSampler:
                 # No observed_state
             )
         ]
-        uncertainties = [
-            ParameterUncertainty(node_id="marketing", distribution="normal", std=1.0)
-        ]
+        uncertainties = [ParameterUncertainty(node_id="marketing", distribution="normal", std=1.0)]
 
         rng = SeededRNG(42)
         sampler = FactorSampler(nodes, uncertainties, rng)
@@ -2180,9 +2140,7 @@ class TestFactorSampler:
         assert not sampler_empty2.has_uncertainties()
 
         # With uncertainties
-        uncertainties = [
-            ParameterUncertainty(node_id="a", distribution="point_mass")
-        ]
+        uncertainties = [ParameterUncertainty(node_id="a", distribution="point_mass")]
         sampler_with = FactorSampler(nodes, uncertainties, rng)
         assert sampler_with.has_uncertainties()
 
@@ -2199,9 +2157,7 @@ class TestFactorSampler:
                 observed_state=ObservedState(value=100.0),
             )
         ]
-        uncertainties = [
-            ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)
-        ]
+        uncertainties = [ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0)]
 
         rng1 = SeededRNG(42)
         rng2 = SeededRNG(42)
@@ -2569,7 +2525,9 @@ class TestFactorSamplingIntegration:
             analysis_types=["sensitivity"],
             parameter_uncertainties=[
                 ParameterUncertainty(node_id="marketing", distribution="normal", std=10.0),
-                ParameterUncertainty(node_id="price", distribution="uniform", range_min=40.0, range_max=60.0),
+                ParameterUncertainty(
+                    node_id="price", distribution="uniform", range_min=40.0, range_max=60.0
+                ),
             ],
         )
 
@@ -2924,10 +2882,7 @@ class TestFactorSensitivityNormalizationMath:
         # Apply normalization formula (same as in robustness.py)
         max_abs_elasticity = max(abs(fs.elasticity) for fs in factors)
 
-        normalized_scores = [
-            min(1.0, abs(fs.elasticity) / max_abs_elasticity)
-            for fs in factors
-        ]
+        normalized_scores = [min(1.0, abs(fs.elasticity) / max_abs_elasticity) for fs in factors]
 
         # Verify: factor_1 has max elasticity → score = 1.0
         assert normalized_scores[0] == pytest.approx(1.0)
@@ -2989,8 +2944,7 @@ class TestFactorSensitivityNormalizationMath:
 
         # Apply formula
         importance_scores = [
-            1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1)
-            for fs in factors
+            1.0 - (fs.importance_rank - 1) / max(n_factors - 1, 1) for fs in factors
         ]
 
         # Verify: rank 1 → 1.0 - (1-1)/(4-1) = 1.0 - 0/3 = 1.0
@@ -3021,8 +2975,7 @@ class TestFactorSensitivityNormalizationMath:
 
         # Apply formula with single factor case
         importance_score = (
-            1.0 - (factors[0].importance_rank - 1) / max(n_factors - 1, 1)
-            if n_factors > 1 else 1.0
+            1.0 - (factors[0].importance_rank - 1) / max(n_factors - 1, 1) if n_factors > 1 else 1.0
         )
 
         # Single factor always gets 1.0
@@ -3083,10 +3036,7 @@ class TestFactorSensitivityNormalizationMath:
 
         # When all elasticities are zero, max would be 0
         # The code uses 1e-10 threshold and falls back to 1.0
-        max_abs_elasticity = max(
-            (abs(fs.elasticity) for fs in factors),
-            default=1.0
-        )
+        max_abs_elasticity = max((abs(fs.elasticity) for fs in factors), default=1.0)
         if max_abs_elasticity < 1e-10:
             max_abs_elasticity = 1.0
 
@@ -3110,10 +3060,7 @@ class TestFactorSensitivityNormalizationMath:
             ),
         ]
 
-        max_abs_elasticity = max(
-            (abs(fs.elasticity) for fs in factors),
-            default=1.0
-        )
+        max_abs_elasticity = max((abs(fs.elasticity) for fs in factors), default=1.0)
         # 1e-15 < 1e-10, so should use fallback
         if max_abs_elasticity < 1e-10:
             max_abs_elasticity = 1.0
@@ -3186,9 +3133,9 @@ class TestZeroBaselineFactorSensitivity:
 
         # Key assertion: elasticity should NOT be zero despite zero baseline
         # The epsilon-stabilised denominator should produce a meaningful value
-        assert fs.elasticity != 0.0, (
-            "Binary factor with observed_state.value=0 should have non-zero elasticity"
-        )
+        assert (
+            fs.elasticity != 0.0
+        ), "Binary factor with observed_state.value=0 should have non-zero elasticity"
 
         # Should have interpretation (not just "robust" due to zero elasticity)
         assert fs.interpretation is not None
@@ -3256,13 +3203,11 @@ class TestZeroBaselineFactorSensitivity:
         high_impact_fs = next(
             fs for fs in response.factor_sensitivity if fs.node_id == "high_impact"
         )
-        low_impact_fs = next(
-            fs for fs in response.factor_sensitivity if fs.node_id == "low_impact"
-        )
+        low_impact_fs = next(fs for fs in response.factor_sensitivity if fs.node_id == "low_impact")
 
-        assert abs(high_impact_fs.elasticity) > abs(low_impact_fs.elasticity), (
-            "Higher edge strength should result in higher elasticity"
-        )
+        assert abs(high_impact_fs.elasticity) > abs(
+            low_impact_fs.elasticity
+        ), "Higher edge strength should result in higher elasticity"
 
         # High impact should be ranked first (importance_rank=1)
         assert high_impact_fs.importance_rank == 1
@@ -3282,7 +3227,12 @@ class TestGoalThresholdProbability:
         """Create a graph with deterministic edges for predictable outcomes."""
         return GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -3385,7 +3335,12 @@ class TestGoalThresholdProbability:
         # Create a graph that produces exactly 100.0 (deterministic)
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -3507,14 +3462,21 @@ class TestGoalThresholdProbability:
         # and adjusted intervention values to maintain clear separation around threshold.
         graph = GraphV2(
             nodes=[
-                NodeV2(id="investment", kind="factor", label="Investment", observed_state=ObservedState(value=0.0)),
+                NodeV2(
+                    id="investment",
+                    kind="factor",
+                    label="Investment",
+                    observed_state=ObservedState(value=0.0),
+                ),
                 NodeV2(id="revenue", kind="outcome", label="Revenue"),
             ],
             edges=[
                 EdgeV2(
                     **{"from": "investment", "to": "revenue"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.01),  # 1x multiplier (within bounds)
+                    strength=StrengthDistribution(
+                        mean=1.0, std=0.01
+                    ),  # 1x multiplier (within bounds)
                 )
             ],
         )
@@ -3523,8 +3485,12 @@ class TestGoalThresholdProbability:
             request_id="multi-option",
             graph=graph,
             options=[
-                InterventionOption(id="low", label="Low Investment", interventions={"investment": 50.0}),
-                InterventionOption(id="high", label="High Investment", interventions={"investment": 250.0}),
+                InterventionOption(
+                    id="low", label="Low Investment", interventions={"investment": 50.0}
+                ),
+                InterventionOption(
+                    id="high", label="High Investment", interventions={"investment": 250.0}
+                ),
             ],
             goal_node_id="revenue",
             n_samples=100,
@@ -3547,7 +3513,12 @@ class TestGoalThresholdProbability:
         """Test probability_of_goal reflects actual sample distribution."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -3612,7 +3583,12 @@ class TestSCMEvaluatorV2Intercept:
         """Test that intercept is added to the node's computed value."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=0.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=0.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output", intercept=100.0),
             ],
             edges=[
@@ -3638,7 +3614,12 @@ class TestSCMEvaluatorV2Intercept:
         """Test intercept is added to parent contribution."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=0.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=0.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output", intercept=50.0),
             ],
             edges=[
@@ -3702,14 +3683,21 @@ class TestAutoScaledNoise:
         """Test that noise is applied to outcome node samples."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.1),  # Some variance for noise to match
+                    strength=StrengthDistribution(
+                        mean=1.0, std=0.1
+                    ),  # Some variance for noise to match
                 )
             ],
         )
@@ -3739,7 +3727,12 @@ class TestAutoScaledNoise:
         """Test that noise is applied to risk node samples."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="exposure", kind="factor", label="Exposure", observed_state=ObservedState(value=50.0)),
+                NodeV2(
+                    id="exposure",
+                    kind="factor",
+                    label="Exposure",
+                    observed_state=ObservedState(value=50.0),
+                ),
                 NodeV2(id="risk", kind="risk", label="Risk Level"),
             ],
             edges=[
@@ -3773,7 +3766,12 @@ class TestAutoScaledNoise:
         """Test that noise is NOT applied when goal is a factor node."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
             ],
             edges=[],
         )
@@ -3801,7 +3799,12 @@ class TestAutoScaledNoise:
         """Test that noise application is deterministic with same seed."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -3829,14 +3832,25 @@ class TestAutoScaledNoise:
         response2 = analyzer.analyze(request)
 
         # Same seed should produce identical results
-        assert response1.results[0].outcome_distribution.mean == response2.results[0].outcome_distribution.mean
-        assert response1.results[0].outcome_distribution.std == response2.results[0].outcome_distribution.std
+        assert (
+            response1.results[0].outcome_distribution.mean
+            == response2.results[0].outcome_distribution.mean
+        )
+        assert (
+            response1.results[0].outcome_distribution.std
+            == response2.results[0].outcome_distribution.std
+        )
 
     def test_noise_skipped_when_zero_std(self):
         """Test that noise is skipped when samples have near-zero std."""
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=100.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=100.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -3931,8 +3945,7 @@ class TestDegenerateOptionZeroVariance:
 
         # Should have DEGENERATE_OPTION_ZERO_VARIANCE critique
         zero_var_critiques = [
-            c for c in response.critiques
-            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+            c for c in response.critiques if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
         ]
         assert len(zero_var_critiques) >= 1
 
@@ -3975,8 +3988,7 @@ class TestDegenerateOptionZeroVariance:
 
         # Should NOT have zero variance critique
         zero_var_critiques = [
-            c for c in response.critiques
-            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+            c for c in response.critiques if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
         ]
         assert len(zero_var_critiques) == 0
 
@@ -4035,8 +4047,7 @@ class TestDegenerateOptionZeroVariance:
 
         # Should trigger the zero variance critique
         zero_var_critiques = [
-            c for c in response.critiques
-            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+            c for c in response.critiques if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
         ]
         assert len(zero_var_critiques) >= 1
 
@@ -4081,8 +4092,7 @@ class TestDegenerateOptionZeroVariance:
 
         # Should NOT trigger zero variance critique - variance is small but real
         zero_var_critiques = [
-            c for c in response.critiques
-            if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+            c for c in response.critiques if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
         ]
         assert len(zero_var_critiques) == 0
 
@@ -4130,10 +4140,7 @@ class TestHighTieRateCritique:
         response = analyzer.analyze(request)
 
         # Should have HIGH_TIE_RATE critique
-        tie_rate_critiques = [
-            c for c in response.critiques
-            if c.code == "HIGH_TIE_RATE"
-        ]
+        tie_rate_critiques = [c for c in response.critiques if c.code == "HIGH_TIE_RATE"]
         assert len(tie_rate_critiques) == 1
 
         critique = tie_rate_critiques[0]
@@ -4175,10 +4182,7 @@ class TestHighTieRateCritique:
         response = analyzer.analyze(request)
 
         # Should NOT have HIGH_TIE_RATE critique
-        tie_rate_critiques = [
-            c for c in response.critiques
-            if c.code == "HIGH_TIE_RATE"
-        ]
+        tie_rate_critiques = [c for c in response.critiques if c.code == "HIGH_TIE_RATE"]
         assert len(tie_rate_critiques) == 0
 
 
@@ -4268,7 +4272,7 @@ class TestFairTieBreaking:
 
         # All three should have approximately 33.3% win probability
         for result in response.results:
-            assert result.win_probability == pytest.approx(1/3, abs=0.01)
+            assert result.win_probability == pytest.approx(1 / 3, abs=0.01)
 
         # Sum should equal 1.0
         total = sum(r.win_probability for r in response.results)
@@ -4477,13 +4481,8 @@ class TestOptionIdPreservation:
 
         # Verify we can look up each result by its original ID
         for original_id in custom_option_ids:
-            result = next(
-                (r for r in response.results if r.option_id == original_id),
-                None
-            )
-            assert result is not None, (
-                f"Could not find result for option ID '{original_id}'"
-            )
+            result = next((r for r in response.results if r.option_id == original_id), None)
+            assert result is not None, f"Could not find result for option ID '{original_id}'"
 
         # Verify recommended_option_id is also one of the original IDs
         assert response.recommended_option_id in custom_option_ids, (
@@ -4550,7 +4549,12 @@ class TestCyclicGraphHandling:
         # Create a graph with a cycle: A -> B -> C -> A
         graph = GraphV2(
             nodes=[
-                NodeV2(id="node_a", kind="factor", label="Node A", observed_state=ObservedState(value=10.0)),
+                NodeV2(
+                    id="node_a",
+                    kind="factor",
+                    label="Node A",
+                    observed_state=ObservedState(value=10.0),
+                ),
                 NodeV2(id="node_b", kind="factor", label="Node B"),
                 NodeV2(id="node_c", kind="outcome", label="Node C"),
             ],
@@ -4642,8 +4646,7 @@ class TestAllEdgesFilteredScenario:
 
         # Should have logged a warning about filtering
         filter_warnings = [
-            r for r in caplog.records
-            if "robustness_v2_filtered_non_inference_nodes" in r.message
+            r for r in caplog.records if "robustness_v2_filtered_non_inference_nodes" in r.message
         ]
         assert len(filter_warnings) > 0, "Expected warning about filtered nodes"
 
@@ -4702,7 +4705,12 @@ class TestExtremeNumericalValues:
         std_value = max(scale * 0.1, 0.0011)  # Ensure std > 0.001
         graph = GraphV2(
             nodes=[
-                NodeV2(id="input", kind="factor", label="Input", observed_state=ObservedState(value=1.0)),
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=1.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -4779,8 +4787,18 @@ class TestExtremeNumericalValues:
         # Note: std must be > 0.001 per schema v2.6 D.4
         graph = GraphV2(
             nodes=[
-                NodeV2(id="tiny", kind="factor", label="Tiny", observed_state=ObservedState(value=0.001)),
-                NodeV2(id="huge", kind="factor", label="Huge", observed_state=ObservedState(value=1000.0)),
+                NodeV2(
+                    id="tiny",
+                    kind="factor",
+                    label="Tiny",
+                    observed_state=ObservedState(value=0.001),
+                ),
+                NodeV2(
+                    id="huge",
+                    kind="factor",
+                    label="Huge",
+                    observed_state=ObservedState(value=1000.0),
+                ),
                 NodeV2(id="output", kind="outcome", label="Output"),
             ],
             edges=[
@@ -4792,7 +4810,9 @@ class TestExtremeNumericalValues:
                 EdgeV2(
                     **{"from": "huge", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=0.001, std=0.0011),  # Scale down huge (min std)
+                    strength=StrengthDistribution(
+                        mean=0.001, std=0.0011
+                    ),  # Scale down huge (min std)
                 ),
             ],
         )
@@ -4833,7 +4853,12 @@ class TestStructuralInfluence:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="intermediate", kind="chance", label="Intermediate"),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
@@ -4882,8 +4907,18 @@ class TestStructuralInfluence:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
-                NodeV2(id="factor2", kind="factor", label="Factor 2 (disconnected)", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(
+                    id="factor2",
+                    kind="factor",
+                    label="Factor 2 (disconnected)",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -4924,6 +4959,7 @@ class TestStructuralInfluence:
         assert disconnected.influence_score == 0.0
         # And should have DISCONNECTED as zero_reason
         from src.models.response_v2 import ZeroSensitivityReason
+
         assert disconnected.zero_reason == ZeroSensitivityReason.DISCONNECTED
 
         # Connected factor should have non-zero influence
@@ -4935,7 +4971,12 @@ class TestStructuralInfluence:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="intermediate1", kind="chance", label="Path 1"),
                 NodeV2(id="intermediate2", kind="chance", label="Path 2"),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
@@ -4999,7 +5040,12 @@ class TestZeroReasonClassification:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5032,6 +5078,7 @@ class TestZeroReasonClassification:
         fs = response.factor_sensitivity[0]
 
         from src.models.response_v2 import ZeroSensitivityReason
+
         assert fs.elasticity == 0.0
         assert fs.zero_reason == ZeroSensitivityReason.POINT_MASS
 
@@ -5041,7 +5088,12 @@ class TestZeroReasonClassification:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5075,6 +5127,7 @@ class TestZeroReasonClassification:
         fs = response.factor_sensitivity[0]
 
         from src.models.response_v2 import ZeroSensitivityReason
+
         # Since factor1 is overridden by intervention, sensitivity should be ~0
         # and zero_reason should be INTERVENTION_OVERRIDE
         assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
@@ -5085,7 +5138,12 @@ class TestZeroReasonClassification:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5119,6 +5177,7 @@ class TestZeroReasonClassification:
         fs = response.factor_sensitivity[0]
 
         from src.models.response_v2 import ZeroSensitivityReason
+
         assert fs.elasticity == 0.0
         assert fs.zero_reason == ZeroSensitivityReason.ZERO_DELTA
 
@@ -5132,7 +5191,12 @@ class TestFactorSensitivityFieldSerialization:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1", observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5502,10 +5566,18 @@ class TestBootstrapStability:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="high_impact", kind="factor", label="High Impact",
-                       observed_state=ObservedState(value=0.5)),
-                NodeV2(id="low_impact", kind="factor", label="Low Impact",
-                       observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="high_impact",
+                    kind="factor",
+                    label="High Impact",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(
+                    id="low_impact",
+                    kind="factor",
+                    label="Low Impact",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5582,8 +5654,12 @@ class TestBootstrapStability:
 
         graph = GraphV2(
             nodes=[
-                NodeV2(id="negligible", kind="factor", label="Negligible",
-                       observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="negligible",
+                    kind="factor",
+                    label="Negligible",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5622,8 +5698,12 @@ class TestBootstrapStability:
         # Low-variance scenario: edge std=0.002 → very stable elasticity
         graph_stable = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1",
-                       observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
@@ -5654,8 +5734,12 @@ class TestBootstrapStability:
         # High-variance scenario: edge std=0.45 + exists_probability=0.5 → unstable
         graph_unstable = GraphV2(
             nodes=[
-                NodeV2(id="factor1", kind="factor", label="Factor 1",
-                       observed_state=ObservedState(value=0.5)),
+                NodeV2(
+                    id="factor1",
+                    kind="factor",
+                    label="Factor 1",
+                    observed_state=ObservedState(value=0.5),
+                ),
                 NodeV2(id="goal", kind="outcome", label="Goal"),
             ],
             edges=[
