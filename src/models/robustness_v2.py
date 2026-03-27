@@ -369,6 +369,14 @@ class NodeV2(BaseModel):
         description="Node intercept term (constant added to structural equation). "
         "Represents the baseline value when all parent contributions are zero.",
     )
+    epsilon_std: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Per-node noise standard deviation. When > 0, adds N(0, epsilon_std) "
+        "noise to the structural equation output each MC sample, representing "
+        "unexplained variance (measurement error, omitted variables). "
+        "Uses dedicated RNG stream (seed+3) for determinism.",
+    )
     # CIL: preserve CEE node categorisation for downstream consumers (ISL-5)
     category: Optional[str] = Field(
         None,
@@ -394,6 +402,7 @@ class NodeV2(BaseModel):
                 "kind": "outcome",
                 "label": "Total Revenue",
                 "intercept": 0.0,
+                "epsilon_std": 0.0,
                 "category": "financial",
                 "factor_type": "market",
                 "observed_state": {"value": 59.0, "baseline": 49.0, "unit": "£k"},

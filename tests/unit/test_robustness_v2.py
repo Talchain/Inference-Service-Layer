@@ -3347,7 +3347,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.0011),  # Very tight around 1.0
+                    strength=StrengthDistribution(mean=0.5, std=0.0011),  # Well within [-1,1]
                 )
             ],
         )
@@ -3361,15 +3361,15 @@ class TestGoalThresholdProbability:
             goal_node_id="output",
             n_samples=100,
             seed=42,
-            goal_threshold=100.0,  # Exactly at expected outcome
+            goal_threshold=50.0,  # Exactly at expected outcome (100 * 0.5 = 50)
         )
 
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
 
-        # With >= semantics, samples at exactly 100 should count
-        # Most samples should be very close to 100, so probability should be ~0.5
-        # (half above, half below due to normal distribution around 100)
+        # With >= semantics, samples at exactly 50 should count
+        # Most samples should be very close to 50, so probability should be ~0.5
+        # (half above, half below due to normal distribution around 50)
         assert response.results[0].probability_of_goal is not None
         assert 0.3 <= response.results[0].probability_of_goal <= 0.7
 
@@ -3525,7 +3525,7 @@ class TestGoalThresholdProbability:
                 EdgeV2(
                     **{"from": "input", "to": "output"},
                     exists_probability=1.0,
-                    strength=StrengthDistribution(mean=1.0, std=0.2),  # High variance
+                    strength=StrengthDistribution(mean=0.5, std=0.2),  # Well within [-1,1]
                 )
             ],
         )
@@ -3539,7 +3539,7 @@ class TestGoalThresholdProbability:
             goal_node_id="output",
             n_samples=1000,  # More samples for stable estimate
             seed=42,
-            goal_threshold=100.0,  # At mean
+            goal_threshold=50.0,  # At expected mean (100 * 0.5 = 50)
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3674,6 +3674,152 @@ class TestSCMEvaluatorV2Intercept:
             goal_node="c",
         )
         assert result == 35.0
+
+
+class TestEpsilonNoise:
+    """Test per-node epsilon noise in structural equations (seed+3 stream)."""
+
+    def _make_simple_graph(self, epsilon_std: float = 0.0) -> GraphV2:
+        return GraphV2(
+            nodes=[
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(
+                    id="output",
+                    kind="outcome",
+                    label="Output",
+                    epsilon_std=epsilon_std,
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.5, std=0.0011),
+                )
+            ],
+        )
+
+    def test_epsilon_zero_matches_no_epsilon(self) -> None:
+        """epsilon_std=0.0 must produce identical results to no epsilon RNG."""
+        graph = self._make_simple_graph(epsilon_std=0.0)
+        evaluator_no_eps = SCMEvaluatorV2(graph)
+        evaluator_with_eps = SCMEvaluatorV2(graph, epsilon_rng=SeededRNG(100))
+
+        result_no = evaluator_no_eps.evaluate(
+            edge_strengths={("input", "output"): 0.5},
+            interventions={"input": 0.5},
+            goal_node="output",
+        )
+        result_with = evaluator_with_eps.evaluate(
+            edge_strengths={("input", "output"): 0.5},
+            interventions={"input": 0.5},
+            goal_node="output",
+        )
+        assert result_no == result_with
+
+    def test_epsilon_adds_variance(self) -> None:
+        """epsilon_std > 0 must produce varying outcomes across MC samples."""
+        graph = self._make_simple_graph(epsilon_std=0.1)
+        rng = SeededRNG(42)
+        evaluator = SCMEvaluatorV2(graph, epsilon_rng=rng)
+
+        results = [
+            evaluator.evaluate(
+                edge_strengths={("input", "output"): 0.5},
+                interventions={"input": 0.5},
+                goal_node="output",
+            )
+            for _ in range(100)
+        ]
+        # Without epsilon, all results would be identical (0 + 0 + 0.5*0.5 = 0.25)
+        # With epsilon, they should vary
+        assert len(set(results)) > 1, "Epsilon noise should produce varying outcomes"
+        assert np.std(results) > 0.01, "Epsilon noise std=0.1 should produce measurable spread"
+
+    def test_epsilon_deterministic_with_seed(self) -> None:
+        """Same seed+3 must produce identical epsilon noise sequences."""
+        graph = self._make_simple_graph(epsilon_std=0.1)
+
+        def run_sequence() -> list:
+            evaluator = SCMEvaluatorV2(graph, epsilon_rng=SeededRNG(42))
+            return [
+                evaluator.evaluate(
+                    edge_strengths={("input", "output"): 0.5},
+                    interventions={"input": 0.5},
+                    goal_node="output",
+                )
+                for _ in range(50)
+            ]
+
+        assert run_sequence() == run_sequence()
+
+    def test_epsilon_values_clamped_to_unit_interval(self) -> None:
+        """After epsilon noise, node values must be clamped to [0, 1]."""
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="input",
+                    kind="factor",
+                    label="Input",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(
+                    id="output",
+                    kind="outcome",
+                    label="Output",
+                    epsilon_std=0.5,  # Large noise — likely to push outside [0, 1]
+                ),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "input", "to": "output"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.9, std=0.0011),
+                )
+            ],
+        )
+
+        evaluator = SCMEvaluatorV2(graph, epsilon_rng=SeededRNG(42))
+        results = [
+            evaluator.evaluate(
+                edge_strengths={("input", "output"): 0.9},
+                interventions={"input": 0.9},
+                goal_node="output",
+            )
+            for _ in range(1000)
+        ]
+        assert all(0.0 <= r <= 1.0 for r in results), "All values must be in [0, 1]"
+
+    def test_negative_epsilon_std_rejected(self) -> None:
+        """Pydantic must reject negative epsilon_std."""
+        with pytest.raises(Exception):
+            NodeV2(id="x", kind="factor", label="X", epsilon_std=-0.1)
+
+    def test_no_epsilon_rng_when_all_zero(self) -> None:
+        """When all nodes have epsilon_std=0.0, no seed+3 RNG should be created."""
+        graph = self._make_simple_graph(epsilon_std=0.0)
+        has_epsilon = any(n.epsilon_std > 0 for n in graph.nodes)
+        assert not has_epsilon
+
+    def test_epsilon_in_evaluate_multi(self) -> None:
+        """Epsilon noise must also apply in evaluate_multi()."""
+        graph = self._make_simple_graph(epsilon_std=0.1)
+        evaluator = SCMEvaluatorV2(graph, epsilon_rng=SeededRNG(42))
+
+        results = [
+            evaluator.evaluate_multi(
+                edge_strengths={("input", "output"): 0.5},
+                interventions={"input": 0.5},
+                target_nodes=["output"],
+            )["output"]
+            for _ in range(100)
+        ]
+        assert len(set(results)) > 1, "evaluate_multi should also apply epsilon noise"
 
 
 class TestAutoScaledNoise:

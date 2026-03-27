@@ -162,6 +162,37 @@ class SeededRNG:
             return float(result)
         return result
 
+    def truncated_normal(
+        self,
+        mean: float,
+        std: float,
+        lo: float = -1.0,
+        hi: float = 1.0,
+        max_attempts: int = 100,
+    ) -> float:
+        """
+        Rejection-sample from Normal(mean, std) truncated to [lo, hi].
+
+        Draws from Normal(mean, std) and rejects samples outside [lo, hi].
+        After max_attempts without a valid sample, falls back to
+        np.clip(mean, lo, hi) — never returns an out-of-bounds value.
+
+        Args:
+            mean: Mean of the underlying normal distribution
+            std: Standard deviation of the underlying normal distribution
+            lo: Lower bound (inclusive)
+            hi: Upper bound (inclusive)
+            max_attempts: Maximum rejection-sampling attempts before fallback
+
+        Returns:
+            Float in [lo, hi] sampled from the truncated distribution
+        """
+        for _ in range(max_attempts):
+            sample = self._rng.normal(mean, std)
+            if lo <= sample <= hi:
+                return float(sample)
+        return float(np.clip(mean, lo, hi))
+
     def normal_array(self, mean: float, std: float, size: int) -> np.ndarray:
         """
         Generate array of normal distribution samples.

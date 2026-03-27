@@ -172,12 +172,15 @@ class DualUncertaintySampler:
             # Structural uncertainty: does edge exist?
             if self.rng.bernoulli(edge.exists_probability):
                 # Parametric uncertainty: what's the effect size?
-                strength = self.rng.normal(edge.strength.mean, edge.strength.std)
-                # Clip to schema bounds [-1, 1] for consistency with marginal analysis.
-                # This is a clipped normal, not a true truncated normal — it shifts
-                # effective mean and reduces variance at distribution tails. Acceptable
-                # for PoC; truncated normal sampling is a post-pilot refinement.
-                strength = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
+                # Truncated normal via rejection sampling — avoids three-mode
+                # artefacts (probability mass spikes at boundaries) that np.clip
+                # would introduce.  Falls back to clamped mean after 100 attempts.
+                strength = self.rng.truncated_normal(
+                    edge.strength.mean,
+                    edge.strength.std,
+                    EDGE_STRENGTH_MIN,
+                    EDGE_STRENGTH_MAX,
+                )
                 config[edge_key] = strength
                 self._existence_counts[edge_key] += 1
             else:
@@ -374,14 +377,19 @@ class SCMEvaluatorV2:
     - Providing value-aware robustness analysis
     """
 
-    def __init__(self, graph: GraphV2):
+    def __init__(self, graph: GraphV2, epsilon_rng: Optional[SeededRNG] = None):
         """
         Initialize evaluator.
 
         Args:
             graph: Causal graph structure (nodes may include observed_state)
+            epsilon_rng: Optional dedicated RNG (seed+3) for per-node epsilon
+                noise.  When provided and a node has epsilon_std > 0, adds
+                N(0, epsilon_std) after computing the structural equation.
+                Node values are clamped to [0, 1] after epsilon noise.
         """
         self.graph = graph
+        self._epsilon_rng = epsilon_rng
         self._node_order = self._compute_topological_order()
         self._children: Dict[str, List[str]] = defaultdict(list)
         self._parents: Dict[str, List[str]] = defaultdict(list)
@@ -507,6 +515,14 @@ class SCMEvaluatorV2:
 
                 node_values[node_id] = base + intercept + parents_contribution
 
+                # Per-node epsilon noise: unexplained variance (measurement
+                # error, omitted variables).  Only applied when epsilon_rng is
+                # provided and the node has epsilon_std > 0.  Clamp to [0, 1]
+                # to keep normalised node values in valid range.
+                if self._epsilon_rng and node and node.epsilon_std > 0:
+                    node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
+                    node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
+
         return node_values.get(goal_node, 0.0)
 
     def evaluate_multi(
@@ -578,6 +594,11 @@ class SCMEvaluatorV2:
                 intercept = getattr(node, "intercept", 0.0) if node else 0.0
 
                 node_values[node_id] = base + intercept + parents_contribution
+
+                # Per-node epsilon noise (same logic as evaluate())
+                if self._epsilon_rng and node and node.epsilon_std > 0:
+                    node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
+                    node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
 
         # Return only the requested target nodes
         return {node_id: node_values.get(node_id, 0.0) for node_id in target_nodes}
@@ -674,7 +695,12 @@ class RobustnessAnalyzerV2:
         factor_sampler = FactorSampler(
             request.graph.nodes, request.parameter_uncertainties, rng_factor
         )
-        evaluator = SCMEvaluatorV2(request.graph)
+        # Dedicated RNG stream (seed+3) for per-node epsilon noise.
+        # Only instantiated when at least one node has epsilon_std > 0,
+        # so existing graphs with default epsilon_std=0.0 are unaffected.
+        has_epsilon = any(n.epsilon_std > 0 for n in request.graph.nodes)
+        rng_epsilon = SeededRNG(seed + 3) if has_epsilon else None
+        evaluator = SCMEvaluatorV2(request.graph, epsilon_rng=rng_epsilon)
 
         self.logger.info(
             "robustness_v2_analysis_started",
@@ -793,6 +819,11 @@ class RobustnessAnalyzerV2:
         ) = self._run_monte_carlo(
             request, sampler, factor_sampler, evaluator, constraint_target_nodes
         )
+
+        # Disable epsilon noise for post-MC structural analyses
+        # (sensitivity, counterfactual, robustness) — these compare structural
+        # differences and should not include stochastic per-sample noise.
+        evaluator._epsilon_rng = None
 
         # Compute tie rate
         tie_rate = tie_count / request.n_samples
@@ -1085,6 +1116,7 @@ class RobustnessAnalyzerV2:
         goal_node_id: str,
         graph_nodes: List,
         rng: "SeededRNG",
+        noise_multiplier: float = 1.0,
     ) -> Tuple[Dict[str, List[float]], bool]:
         """
         Apply auto-scaled noise to outcome/risk node samples.
@@ -1118,6 +1150,9 @@ class RobustnessAnalyzerV2:
             goal_node_id: The goal node being measured
             graph_nodes: List of graph nodes to check node kind
             rng: Seeded RNG for determinism
+            noise_multiplier: Scale factor for noise std (default 1.0).
+                0.0 disables noise entirely.  Used by calibration diagnostics
+                to compare different noise levels without changing the API.
 
         Returns:
             Tuple of (modified option_outcomes, noise_applied flag)
@@ -1135,6 +1170,10 @@ class RobustnessAnalyzerV2:
         # Only apply noise to outcome and risk nodes
         node_kind = getattr(goal_node, "kind", "").lower()
         if node_kind not in ("outcome", "risk"):
+            return option_outcomes, False
+
+        # noise_multiplier=0 disables noise entirely
+        if noise_multiplier <= 0:
             return option_outcomes, False
 
         # Apply noise to each option's samples
@@ -1163,7 +1202,9 @@ class RobustnessAnalyzerV2:
             # WARNING: Changing this constant factor affects ALL downstream percentile
             # and confidence computations.  Any change requires re-validation of the
             # full calibration suite.
-            noise = np.array([rng.normal(0, outcome_std) for _ in range(len(samples))])
+            noise = np.array(
+                [rng.normal(0, outcome_std * noise_multiplier) for _ in range(len(samples))]
+            )
             option_outcomes[option_id] = (samples_array + noise).tolist()
             any_noise_added = True
 
@@ -1459,15 +1500,23 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # Force this edge's existence
                 if exists:
-                    strength = rng.normal(edge.strength.mean, edge.strength.std)
-                    config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
+                    config[edge_key] = rng.truncated_normal(
+                        edge.strength.mean,
+                        edge.strength.std,
+                        EDGE_STRENGTH_MIN,
+                        EDGE_STRENGTH_MAX,
+                    )
                 else:
                     config[edge_key] = 0.0
             else:
                 # Sample normally
                 if rng.bernoulli(edge.exists_probability):
-                    strength = rng.normal(edge.strength.mean, edge.strength.std)
-                    config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
+                    config[edge_key] = rng.truncated_normal(
+                        edge.strength.mean,
+                        edge.strength.std,
+                        EDGE_STRENGTH_MIN,
+                        EDGE_STRENGTH_MAX,
+                    )
                 else:
                     config[edge_key] = 0.0
 
@@ -1495,13 +1544,21 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # TARGET EDGE: Force to exist and apply shifted mean
                 # This isolates magnitude sensitivity from existence sensitivity
-                strength = rng.normal(edge.strength.mean + shift, edge.strength.std)
-                config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
+                config[edge_key] = rng.truncated_normal(
+                    edge.strength.mean + shift,
+                    edge.strength.std,
+                    EDGE_STRENGTH_MIN,
+                    EDGE_STRENGTH_MAX,
+                )
             else:
                 # OTHER EDGES: Sample normally (both existence and strength)
                 if rng.bernoulli(edge.exists_probability):
-                    strength = rng.normal(edge.strength.mean, edge.strength.std)
-                    config[edge_key] = np.clip(strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
+                    config[edge_key] = rng.truncated_normal(
+                        edge.strength.mean,
+                        edge.strength.std,
+                        EDGE_STRENGTH_MIN,
+                        EDGE_STRENGTH_MAX,
+                    )
                 else:
                     config[edge_key] = 0.0
 
@@ -2942,7 +2999,7 @@ class RobustnessAnalyzerV2:
         # Deterministic seed: SHA256 (process-safe, NOT Python hash())
         edge_seed_str = f"{global_seed}:{from_id}->{to_id}"
         edge_seed = int(hashlib.sha256(edge_seed_str.encode()).hexdigest()[:8], 16)
-        rng = np.random.default_rng(edge_seed)
+        rng = SeededRNG(edge_seed)
 
         # Get target edge's parameters
         edge = next((e for e in request.graph.edges if (e.from_, e.to) == edge_key), None)
@@ -2976,15 +3033,19 @@ class RobustnessAnalyzerV2:
 
         for _ in range(k_samples):
             # Sample existence (Bernoulli)
-            exists = rng.random() < edge.exists_probability
+            exists = rng.bernoulli(edge.exists_probability)
 
             if not exists:
                 # Edge doesn't exist in this sample → effective strength is 0
                 sampled_strength = 0.0
             else:
-                # Sample strength from Normal(mean, std), clamped to schema bounds
-                sampled_strength = rng.normal(edge.strength.mean, edge.strength.std)
-                sampled_strength = np.clip(sampled_strength, EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX)
+                # Truncated normal — rejection sampling within schema bounds
+                sampled_strength = rng.truncated_normal(
+                    edge.strength.mean,
+                    edge.strength.std,
+                    EDGE_STRENGTH_MIN,
+                    EDGE_STRENGTH_MAX,
+                )
 
             # Build counterfactual config: this edge sampled, others at baseline
             counterfactual_config = baseline_config.copy()

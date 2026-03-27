@@ -27,30 +27,25 @@ class TestNoiseConstantGuard:
     """Golden-fixture test that locks the noise heuristic."""
 
     def test_noise_uses_outcome_std_directly(self) -> None:
-        """Noise is N(0, outcome_std) — factor is 1.0× (not scaled)."""
+        """Noise is N(0, outcome_std * noise_multiplier) — default multiplier is 1.0×."""
         from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
         source = inspect.getsource(RobustnessAnalyzerV2._apply_auto_scaled_noise)
-        # The noise line should contain: rng.normal(0, outcome_std)
-        # This catches if someone changes the multiplier (e.g. 0.5 * outcome_std)
-        assert "rng.normal(0, outcome_std)" in source, (
-            f"Expected noise generation to use rng.normal(0, outcome_std) "
-            f"with implicit 1.0x factor.  {_CHANGE_MSG}"
+        # The noise line should contain: rng.normal(0, outcome_std * noise_multiplier)
+        # noise_multiplier defaults to 1.0 (no scaling by default)
+        assert "rng.normal(0, outcome_std * noise_multiplier)" in source, (
+            f"Expected noise generation to use rng.normal(0, outcome_std * noise_multiplier) "
+            f"with default noise_multiplier=1.0.  {_CHANGE_MSG}"
         )
 
-    def test_noise_factor_not_scaled(self) -> None:
-        """The noise std is not multiplied by any factor before passing to rng.normal."""
+    def test_noise_multiplier_defaults_to_one(self) -> None:
+        """The noise_multiplier parameter must default to 1.0 (no scaling)."""
         from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
         source = inspect.getsource(RobustnessAnalyzerV2._apply_auto_scaled_noise)
-        lines = source.split("\n")
-        noise_lines = [l.strip() for l in lines if "rng.normal(0," in l]
-        assert len(noise_lines) >= 1, "Could not find noise generation line"
-        # The argument should be exactly outcome_std, not something like 0.5*outcome_std
-        for line in noise_lines:
-            assert "outcome_std)" in line, (
-                f"Noise std argument appears modified: {line}.  {_CHANGE_MSG}"
-            )
+        assert "noise_multiplier: float = 1.0" in source, (
+            f"Expected noise_multiplier default to be 1.0.  {_CHANGE_MSG}"
+        )
 
     def test_noise_variance_doubling_documented(self) -> None:
         """The √2 spread widening rationale must remain documented."""

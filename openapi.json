@@ -2208,6 +2208,7 @@
         "description": "Node in the v2 causal graph.",
         "example": {
           "category": "financial",
+          "epsilon_std": 0.0,
           "factor_type": "market",
           "id": "revenue",
           "intercept": 0.0,
@@ -2244,6 +2245,13 @@
             ],
             "description": "Node category from CEE (e.g., 'market', 'operational'). Passthrough only \u2014 not used by ISL computation.",
             "title": "Category"
+          },
+          "epsilon_std": {
+            "default": 0.0,
+            "description": "Per-node noise standard deviation. When > 0, adds N(0, epsilon_std) noise to the structural equation output each MC sample, representing unexplained variance (measurement error, omitted variables). Uses dedicated RNG stream (seed+3) for determinism.",
+            "minimum": 0.0,
+            "title": "Epsilon Std",
+            "type": "number"
           },
           "factor_type": {
             "anyOf": [
