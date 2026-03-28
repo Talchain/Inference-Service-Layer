@@ -26,14 +26,10 @@ chmod +x "$SCRIPT_PATH"
 pass "scripts/pre-push-validate.sh is executable"
 
 # Create or update pre-push hook
-# Hook runs in --lenient mode by default (pre-existing mypy/test issues).
-# Remove --lenient once pre-existing issues are resolved for strict enforcement.
 HOOK_CONTENT='#!/usr/bin/env bash
 # Pre-push hook — runs ISL validation gate
 # Installed by scripts/install-hooks.sh
-# Using --lenient until pre-existing mypy/test issues are resolved.
-# Remove --lenient for strict enforcement.
-exec bash "$(git rev-parse --show-toplevel)/scripts/pre-push-validate.sh" --lenient'
+exec bash "$(git rev-parse --show-toplevel)/scripts/pre-push-validate.sh"'
 
 if [ -f "$PRE_PUSH_HOOK" ]; then
     if grep -q "pre-push-validate.sh" "$PRE_PUSH_HOOK"; then
@@ -74,4 +70,4 @@ fi
 header "Verification complete"
 printf '  Hook path: %s\n' "$PRE_PUSH_HOOK"
 printf '  Script:    %s\n' "$SCRIPT_PATH"
-printf '  Mode:      --lenient (remove flag in hook for strict enforcement)\n'
+printf '  Mode:      strict (failures block push)\n'
