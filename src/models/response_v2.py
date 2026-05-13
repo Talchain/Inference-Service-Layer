@@ -668,6 +668,17 @@ class ISLResponseV2(BaseModel):
         "removing this factor's uncertainty improve the decision metric?",
     )
 
+    # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can
+    # surface the disclosure without reading the internal V1 metadata envelope.
+    # None when the analyser cannot determine the flag (e.g. error or partial responses
+    # where metadata was not built). False must serialise as false, not be dropped.
+    auto_noise_applied: Optional[bool] = Field(
+        None,
+        description="Whether auto-scaled noise (√2 variance inflation) was applied to "
+        "outcome distributions. Mirrors V1 _metadata.auto_noise_applied. "
+        "None when the analyser cannot determine the flag.",
+    )
+
     # Correlation
     request_id: str = Field(..., description="Request ID for correlation")
     processing_time_ms: int = Field(..., description="Processing time in milliseconds")
@@ -728,6 +739,7 @@ class ISLResponseV2(BaseModel):
                     "level": "high",
                     "confidence": 0.92,
                 },
+                "auto_noise_applied": False,
                 "request_id": "req_abc123",
                 "processing_time_ms": 150,
                 "seed_used": "42",

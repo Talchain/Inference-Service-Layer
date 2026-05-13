@@ -977,6 +977,51 @@ class TestResponseBuilder:
 
         assert response.processing_time_ms >= 10
 
+    # B3 auto-noise propagation: V2 envelope must carry the flag PLoT reads.
+    # Three cases — True/False/None — pin the contract: False must survive
+    # serialisation (not collapse to None), and None must stay None when the
+    # flag was never set (e.g. paths that bypass the V1 metadata).
+
+    def test_build_propagates_auto_noise_applied_true(self, request_echo):
+        """auto_noise_applied=True propagates to ISLResponseV2 envelope (B3)."""
+        builder = ResponseBuilder("req_123", request_echo)
+        builder.set_auto_noise_applied(True)
+
+        response = builder.build()
+
+        assert response.auto_noise_applied is True
+
+    def test_build_propagates_auto_noise_applied_false(self, request_echo):
+        """auto_noise_applied=False survives as False (must not become None)."""
+        builder = ResponseBuilder("req_123", request_echo)
+        builder.set_auto_noise_applied(False)
+
+        response = builder.build()
+
+        assert response.auto_noise_applied is False
+
+    def test_build_auto_noise_applied_defaults_to_none(self, request_echo):
+        """auto_noise_applied is None when builder was never told the flag."""
+        builder = ResponseBuilder("req_123", request_echo)
+
+        response = builder.build()
+
+        assert response.auto_noise_applied is None
+
+    def test_build_error_response_omits_auto_noise_applied(self, request_echo):
+        """Error responses omit auto_noise_applied — analyser metadata is not trusted
+        on failed/blocked/error paths, so the flag stays absent (None) rather than
+        risking a misleading default. PLoT's extractor handles missing/null
+        conservatively, so this is the safer contract."""
+        builder = ResponseBuilder("req_123", request_echo)
+        # Even if a caller set the flag before the error, the error response
+        # should not surface it: at error time the analyser state is suspect.
+        builder.set_auto_noise_applied(True)
+
+        response = builder.build_error_response(ValueError("Test error"))
+
+        assert response.auto_noise_applied is None
+
 
 class TestBuildRequestEcho:
     """Test request echo builder."""

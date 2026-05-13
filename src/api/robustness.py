@@ -849,6 +849,13 @@ async def _analyze_robustness_v2_enhanced(
             factor_evpi=v1_response.factor_evpi,
         )
 
+        # B3: surface auto-noise disclosure on the V2 envelope so PLoT can read it
+        # without consulting V1 _metadata. metadata is a required field on
+        # RobustnessResponseV2, so this is always a concrete bool here; the
+        # Optional on the V2 envelope covers error paths where build() runs
+        # without metadata having been populated.
+        builder.set_auto_noise_applied(v1_response.metadata.auto_noise_applied)
+
         # Convert conditional winners (V1 -> V2)
         if v1_response.conditional_winners is not None:
             conditional_winners_v2 = [

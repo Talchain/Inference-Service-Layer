@@ -1750,6 +1750,7 @@
         "description": "Enhanced response with explicit status fields and diagnostics.",
         "example": {
           "analysis_status": "computed",
+          "auto_noise_applied": false,
           "critiques": [],
           "endpoint_version": "analyze/v2",
           "engine_version": "1.0.0",
@@ -1802,6 +1803,18 @@
             ],
             "title": "Analysis Status",
             "type": "string"
+          },
+          "auto_noise_applied": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether auto-scaled noise (\u221a2 variance inflation) was applied to outcome distributions. Mirrors V1 _metadata.auto_noise_applied. None when the analyser cannot determine the flag.",
+            "title": "Auto Noise Applied"
           },
           "build": {
             "anyOf": [

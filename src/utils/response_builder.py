@@ -105,6 +105,9 @@ class ResponseBuilder:
         self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
         self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
         self.factor_evpi: Optional[list] = None  # EVPI per factor (enhancement)
+        # Auto-noise disclosure (B3): None until explicitly set from V1 metadata.
+        # Preserves False as False; never coerced to None on the path through the route.
+        self.auto_noise_applied: Optional[bool] = None
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -142,6 +145,10 @@ class ResponseBuilder:
     ) -> None:
         """Set conditional winner analysis results."""
         self.conditional_winners = conditional_winners
+
+    def set_auto_noise_applied(self, flag: Optional[bool]) -> None:
+        """Set the auto-noise disclosure flag for the V2 envelope (B3)."""
+        self.auto_noise_applied = flag
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -230,6 +237,7 @@ class ResponseBuilder:
             conditional_winners=self.conditional_winners,
             stability_thresholds=self.stability_thresholds,  # 3C
             factor_evpi=self.factor_evpi,
+            auto_noise_applied=self.auto_noise_applied,
             request_id=self.request_id,
             processing_time_ms=processing_time,
             seed_used=self.seed_used,
@@ -271,6 +279,12 @@ class ResponseBuilder:
         # Return sanitised critique
         self.critiques.append(INTERNAL_ERROR.build())
 
+        # Intentionally omit auto_noise_applied from error responses: on
+        # failed / blocked / error paths the analyser may not have populated
+        # the metadata flag, so emitting it here would risk surfacing a
+        # default (False) that wasn't actually computed. Defaulting to None
+        # leaves the field absent under exclude_none=True, which PLoT's
+        # extractor already handles conservatively.
         return ISLResponseV2(
             endpoint_version="analyze/v2",
             engine_version=engine_version,

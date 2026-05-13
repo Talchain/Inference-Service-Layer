@@ -1192,3 +1192,100 @@ class TestFactorConfidence:
         confidences2 = [f["confidence"] for f in factors2]
 
         assert confidences1 == confidences2, f"Confidence not deterministic: {confidences1} != {confidences2}"
+
+
+class TestAutoNoiseAppliedEnvelope:
+    """B3: auto_noise_applied must appear at top level of ISLResponseV2 on /analyze/v2.
+
+    PLoT B3 disclosure reads this directly from the V2 envelope (not from V1 _metadata).
+    These tests pin the wire contract: the field is present with a boolean value, and
+    both True (outcome/risk goals) and False (non-outcome goals) survive serialisation
+    under exclude_none=True. A unit-only test of ResponseBuilder is not enough — this
+    catches regressions in the route → builder → JSON serialisation chain.
+    """
+
+    def test_auto_noise_applied_true_for_outcome_goal(self, client):
+        """outcome goal → auto-noise applied → response carries auto_noise_applied: true."""
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1"},
+                    {"id": "goal", "kind": "outcome", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.6, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor1": 0.3}},
+                {"id": "opt2", "label": "Option 2", "interventions": {"factor1": 0.7}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        assert "auto_noise_applied" in data, (
+            "Missing 'auto_noise_applied' at top level of ISLResponseV2 — "
+            "PLoT B3 disclosure depends on this field being present"
+        )
+        assert data["auto_noise_applied"] is True, (
+            f"Expected True for outcome goal, got {data['auto_noise_applied']!r}"
+        )
+
+    def test_auto_noise_applied_false_survives_exclude_none(self, client):
+        """non-outcome goal → False (not None) → field must serialise as false, not be dropped."""
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "factor1", "kind": "factor", "label": "Factor 1"},
+                    # kind="goal" is NOT in {outcome, risk} — auto-noise will not apply
+                    {"id": "goal", "kind": "goal", "label": "Goal"},
+                ],
+                "edges": [
+                    {
+                        "from": "factor1",
+                        "to": "goal",
+                        "exists_probability": 1.0,
+                        "strength": {"mean": 0.6, "std": 0.1},
+                    }
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Option 1", "interventions": {"factor1": 0.3}},
+                {"id": "opt2", "label": "Option 2", "interventions": {"factor1": 0.7}},
+            ],
+            "goal_node_id": "goal",
+            "seed": 42,
+            "n_samples": 100,
+        }
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=request,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+
+        assert "auto_noise_applied" in data, (
+            "Missing 'auto_noise_applied' — exclude_none=True must NOT drop a False value"
+        )
+        assert data["auto_noise_applied"] is False, (
+            f"Expected False (not None, not absent), got {data['auto_noise_applied']!r}"
+        )
