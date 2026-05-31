@@ -27,6 +27,7 @@ Covers the Brief A test matrix:
  16. structural, NOT intervention-magnitude-weighted (explicit non-scaling contract)
 """
 
+import math
 import time
 
 import pytest
@@ -99,25 +100,32 @@ def _analyzer() -> RobustnessAnalyzerV2:
     return RobustnessAnalyzerV2()
 
 
-def _layered_graph(width: int, layers: int) -> GraphV2:
-    """Fully-connected layered DAG: src -> L1(width) -> ... -> L{layers}(width) -> goal.
+def _layered_graph_widths(widths: list) -> GraphV2:
+    """Fully-connected layered DAG: src -> L0(widths[0]) -> ... -> goal.
 
-    Number of simple src->goal paths is width**layers (combinatorial via shared mediators),
-    exercising the worst case for path enumeration. Stays within the 50-node/200-edge schema
-    limits for modest width/layers (e.g. width=5, layers=7 -> 37 nodes, 160 edges).
+    Number of simple src->goal paths is the product of widths (combinatorial via shared
+    mediators), exercising the worst case for path enumeration. Variable per-layer widths
+    let a test hit an exact path count (e.g. [5,5,5,5,4,4,2] -> 20,000) within the
+    50-node/200-edge schema limits.
     """
     nodes = [_node("src")]
-    for layer in range(layers):
-        nodes.extend(_node(f"n{layer}_{w}") for w in range(width))
+    for i, w in enumerate(widths):
+        nodes.extend(_node(f"n{i}_{j}") for j in range(w))
     nodes.append(_node("goal", kind="outcome"))
 
-    edges = [_edge("src", f"n0_{w}", mean=0.5) for w in range(width)]
-    for layer in range(layers - 1):
-        for a in range(width):
-            for b in range(width):
-                edges.append(_edge(f"n{layer}_{a}", f"n{layer + 1}_{b}", mean=0.5))
-    edges.extend(_edge(f"n{layers - 1}_{w}", "goal", mean=0.5) for w in range(width))
+    edges = [_edge("src", f"n0_{j}", mean=0.5) for j in range(widths[0])]
+    for i in range(len(widths) - 1):
+        for a in range(widths[i]):
+            for b in range(widths[i + 1]):
+                edges.append(_edge(f"n{i}_{a}", f"n{i + 1}_{b}", mean=0.5))
+    last = len(widths) - 1
+    edges.extend(_edge(f"n{last}_{j}", "goal", mean=0.5) for j in range(widths[last]))
     return GraphV2(nodes=nodes, edges=edges)
+
+
+def _layered_graph(width: int, layers: int) -> GraphV2:
+    """Uniform-width fully-connected layered DAG: width**layers simple paths."""
+    return _layered_graph_widths([width] * layers)
 
 
 # =============================================================================
@@ -387,6 +395,33 @@ def test_combinatorial_over_cap_truncates_fast_and_deterministically():
     # Truncation is deterministic (count-based, not wall-clock): identical result twice.
     dec2 = analyzer._compute_path_decomposition(request, "opt_a", graph)
     assert dec == dec2
+
+
+# =============================================================================
+# 7d. Boundary: EXACTLY the path budget -> not truncated, exact top-3
+# =============================================================================
+
+
+def test_exact_cap_boundary_is_not_truncated():
+    # 5*5*5*5*4*4*2 == 20,000 == MAX_DECOMPOSITION_PATHS exactly. Reaching the budget is
+    # not exceeding it: the graph is fully enumerable and must produce an exact top-3,
+    # not a truncated/empty result. Regression for the >= vs > off-by-one.
+    widths = [5, 5, 5, 5, 4, 4, 2]
+    assert math.prod(widths) == MAX_DECOMPOSITION_PATHS
+    graph = _layered_graph_widths(widths)
+    assert len(graph.nodes) <= 50 and len(graph.edges) <= 200
+    options = [InterventionOption(id="opt_a", label="A", interventions={"src": 0.5})]
+    request = _request(graph, options, "goal")
+    analyzer = _analyzer()
+
+    t0 = time.perf_counter()
+    dec = analyzer._compute_path_decomposition(request, "opt_a", graph)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+
+    assert dec.truncated is False  # reached the budget but did NOT exceed it
+    assert dec.path_count == MAX_DECOMPOSITION_PATHS  # exact count, equal to the cap
+    assert len(dec.paths) == 3  # exact top-3 still produced
+    assert elapsed_ms < 500, f"exact-cap took {elapsed_ms:.1f}ms (>500ms)"
 
 
 # =============================================================================

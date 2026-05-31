@@ -1228,9 +1228,11 @@ class PathDecomposition(BaseModel):
     )
     truncated: bool = Field(
         default=False,
-        description="True if the number of simple paths exceeded the safety budget, so no "
-        "top-3 ranking was produced and paths is empty. Distinct from an empty result with "
-        "truncated=False, which means no reachable path from the retained intervention targets.",
+        description="True when the number of simple paths exceeded the safety budget, so the "
+        "top-3 pathway ranking was suppressed for performance and paths is empty. This does "
+        "NOT mean the modelled effect is zero — only that individual pathways were too "
+        "numerous to rank. Distinct from an empty result with truncated=False, which means no "
+        "reachable path from the retained intervention targets.",
     )
     path_count: int = Field(
         default=0,

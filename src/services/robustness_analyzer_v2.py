@@ -2489,6 +2489,11 @@ class RobustnessAnalyzerV2:
         # early and total work is capped; this yields the same per-edge products as the
         # recursive enumerator in _compute_structural_influence. The visited set excludes
         # cycles and parallel edges branch via the adjacency list.
+        #
+        # Truncate only once a path BEYOND the budget is discovered (len > cap, i.e. at
+        # most cap+1 paths enumerated). A graph with exactly MAX_DECOMPOSITION_PATHS paths
+        # is therefore fully ranked, not truncated — matching the "exceeded the budget"
+        # contract on PathDecomposition.truncated.
         all_paths: List[Tuple[List[str], float]] = []
         truncated = False
 
@@ -2498,7 +2503,7 @@ class RobustnessAnalyzerV2:
                 return
             if node == goal:
                 all_paths.append((path_so_far, effect_so_far))
-                if len(all_paths) >= MAX_DECOMPOSITION_PATHS:
+                if len(all_paths) > MAX_DECOMPOSITION_PATHS:
                     truncated = True
                 return
             if node in visited or node not in adjacency:
@@ -2524,19 +2529,20 @@ class RobustnessAnalyzerV2:
                 continue
             walk(entry, 1.0, [entry], set())
 
-        path_count = len(all_paths)
-
         if truncated:
-            # Too many simple paths to rank a meaningful top-3 within budget; degrade
-            # gracefully (no paths emitted) rather than spend unbounded time. truncated=True
-            # is deterministic and distinct from the no-reachable-path case below.
+            # More simple paths than the budget allows (a path beyond the cap was found).
+            # Degrade gracefully (no ranked paths) rather than spend unbounded time; report
+            # the cap as path_count — the true count is higher. truncated=True is
+            # deterministic and distinct from the no-reachable-path case below.
             return PathDecomposition(
                 recommended_option_id=recommended_option_id,
                 entry_nodes=entry_nodes,
                 truncated=True,
-                path_count=path_count,
+                path_count=MAX_DECOMPOSITION_PATHS,
                 paths=[],
             )
+
+        path_count = len(all_paths)  # exact; 0 <= path_count <= MAX_DECOMPOSITION_PATHS
 
         if not all_paths:
             return PathDecomposition(
