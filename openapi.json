@@ -2963,6 +2963,96 @@
         "title": "ParameterUncertainty",
         "type": "object"
       },
+      "PathContribution": {
+        "description": "One causal path's signed structural contribution to the modelled effect.\n\nA path is a simple directed sequence of node IDs from a retained intervention\ntarget to the goal.  ``path_effect`` is the signed product of per-edge\ncoefficients (``strength.mean * exists_probability``) along the path \u2014 the\nsame per-edge semantics ISL uses for structural influence \u2014 and is NOT scaled\nby the intervention magnitude.  This is a structural decomposition of the\nmodelled effect, not a real-world causal claim.",
+        "properties": {
+          "mechanism": {
+            "description": "Human-readable modelled-pathway-contribution statement. Describes modelled structure only; not a real-world causal claim.",
+            "title": "Mechanism",
+            "type": "string"
+          },
+          "path": {
+            "description": "Node IDs from the retained intervention target to the goal, in causal order.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "path_effect": {
+            "description": "Signed product of per-edge coefficients (strength.mean * exists_probability) along this path. Structural only \u2014 not scaled by the intervention magnitude.",
+            "title": "Path Effect",
+            "type": "number"
+          },
+          "signed_contribution": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "path_effect / total_effect when the net modelled effect is non-negligible; omitted when indeterminate. May be negative or exceed 1 when paths oppose.",
+            "title": "Signed Contribution"
+          },
+          "status": {
+            "description": "'computed' when |total_effect| >= 1e-10; 'indeterminate' when the net modelled effect is near zero and a relative share is not well defined.",
+            "enum": [
+              "computed",
+              "indeterminate"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_effect": {
+            "description": "Signed sum of path_effect across all enumerated intervention-target-to-goal paths. Identical on every entry, for auditability.",
+            "title": "Total Effect",
+            "type": "number"
+          }
+        },
+        "required": [
+          "path",
+          "path_effect",
+          "total_effect",
+          "status",
+          "mechanism"
+        ],
+        "title": "PathContribution",
+        "type": "object"
+      },
+      "PathDecomposition": {
+        "description": "Structural pathway decomposition for the recommended option's retained\nintervention targets.\n\nThe recommended option is carried as context/metadata via\n``recommended_option_id``; it is never itself a path node.  Computed paths\nstart at the retained intervention target/factor nodes (those that survived\ninference-graph filtering).  This decomposes the modelled structural effect,\nnot the option-level causal effect size, and is not weighted by intervention\nmagnitude.",
+        "properties": {
+          "entry_nodes": {
+            "description": "Retained intervention target node IDs the paths start from (intervention targets that survived inference-graph filtering).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Entry Nodes",
+            "type": "array"
+          },
+          "paths": {
+            "description": "Top-3 intervention-target-to-goal paths, ranked by absolute path_effect.",
+            "items": {
+              "$ref": "#/components/schemas/PathContribution"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "recommended_option_id": {
+            "description": "The recommended option this decomposition explains (context/metadata; not a path node).",
+            "title": "Recommended Option Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recommended_option_id",
+          "entry_nodes"
+        ],
+        "title": "PathDecomposition",
+        "type": "object"
+      },
       "RequestEchoV2": {
         "description": "Echo of request parameters for debugging (no sensitive data).",
         "properties": {
@@ -3421,6 +3511,12 @@
             "title": "Include E Values",
             "type": "boolean"
           },
+          "include_path_decomposition": {
+            "default": false,
+            "description": "Compute a structural pathway decomposition for the recommended option's retained intervention targets: the top-3 simple directed paths to the goal, each with its signed structural contribution (analytic path tracing). Gated; off by default. This is a structural decomposition of the modelled effect, not a real-world causal claim, and is not weighted by intervention magnitude.",
+            "title": "Include Path Decomposition",
+            "type": "boolean"
+          },
           "include_voi": {
             "default": false,
             "description": "Compute Expected Value of Perfect Information (EVPI) per factor. Requires parameter_uncertainties.",
@@ -3654,6 +3750,17 @@
             },
             "title": "Inference Warnings",
             "type": "array"
+          },
+          "path_decomposition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PathDecomposition"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Structural pathway decomposition for the recommended option's retained intervention targets: top-3 simple directed paths to the goal with signed structural contributions. Structural decomposition of the modelled effect, not a causal claim about realised outcomes. Gated by include_path_decomposition."
           },
           "recommendation_confidence": {
             "description": "Confidence in recommendation",
