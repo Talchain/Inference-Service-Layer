@@ -2964,7 +2964,7 @@
         "type": "object"
       },
       "PathContribution": {
-        "description": "One causal path's signed structural contribution to the modelled effect.\n\nA path is a simple directed sequence of node IDs from a retained intervention\ntarget to the goal.  ``path_effect`` is the signed product of per-edge\ncoefficients (``strength.mean * exists_probability``) along the path \u2014 the\nsame per-edge semantics ISL uses for structural influence \u2014 and is NOT scaled\nby the intervention magnitude.  This is a structural decomposition of the\nmodelled effect, not a real-world causal claim.",
+        "description": "One modelled pathway's signed structural contribution to the goal.\n\nA pathway is a simple directed sequence of node IDs from a retained intervention\ntarget to the goal.  ``path_effect`` is the signed product of per-edge\ncoefficients (``strength.mean * exists_probability``) along the pathway \u2014 the\nsame per-edge semantics ISL uses for structural influence \u2014 and is NOT scaled\nby the intervention magnitude.  This is a structural decomposition of the\nmodelled effect, not a real-world causal claim.",
         "properties": {
           "mechanism": {
             "description": "Human-readable modelled-pathway-contribution statement. Describes modelled structure only; not a real-world causal claim.",
@@ -2972,7 +2972,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Node IDs from the retained intervention target to the goal, in causal order.",
+            "description": "Node IDs from the retained intervention target to the goal, in directed path order.",
             "items": {
               "type": "string"
             },
@@ -3032,6 +3032,12 @@
             "title": "Entry Nodes",
             "type": "array"
           },
+          "path_count": {
+            "default": 0,
+            "description": "Number of simple intervention-target-to-goal paths enumerated. When truncated is True this equals the budget cap and the true count is higher.",
+            "title": "Path Count",
+            "type": "integer"
+          },
           "paths": {
             "description": "Top-3 intervention-target-to-goal paths, ranked by absolute path_effect.",
             "items": {
@@ -3044,6 +3050,12 @@
             "description": "The recommended option this decomposition explains (context/metadata; not a path node).",
             "title": "Recommended Option Id",
             "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "description": "True if the number of simple paths exceeded the safety budget, so no top-3 ranking was produced and paths is empty. Distinct from an empty result with truncated=False, which means no reachable path from the retained intervention targets.",
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "required": [
