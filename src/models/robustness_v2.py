@@ -1160,11 +1160,11 @@ class ConditionalWinner(BaseModel):
 
 class PathContribution(BaseModel):
     """
-    One causal path's signed structural contribution to the modelled effect.
+    One modelled pathway's signed structural contribution to the goal.
 
-    A path is a simple directed sequence of node IDs from a retained intervention
+    A pathway is a simple directed sequence of node IDs from a retained intervention
     target to the goal.  ``path_effect`` is the signed product of per-edge
-    coefficients (``strength.mean * exists_probability``) along the path — the
+    coefficients (``strength.mean * exists_probability``) along the pathway — the
     same per-edge semantics ISL uses for structural influence — and is NOT scaled
     by the intervention magnitude.  This is a structural decomposition of the
     modelled effect, not a real-world causal claim.
@@ -1172,7 +1172,7 @@ class PathContribution(BaseModel):
 
     path: List[str] = Field(
         ...,
-        description="Node IDs from the retained intervention target to the goal, in causal order.",
+        description="Node IDs from the retained intervention target to the goal, in directed path order.",
     )
     path_effect: float = Field(
         ...,
@@ -1225,6 +1225,17 @@ class PathDecomposition(BaseModel):
         ...,
         description="Retained intervention target node IDs the paths start from "
         "(intervention targets that survived inference-graph filtering).",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True if the number of simple paths exceeded the safety budget, so no "
+        "top-3 ranking was produced and paths is empty. Distinct from an empty result with "
+        "truncated=False, which means no reachable path from the retained intervention targets.",
+    )
+    path_count: int = Field(
+        default=0,
+        description="Number of simple intervention-target-to-goal paths enumerated. When "
+        "truncated is True this equals the budget cap and the true count is higher.",
     )
     paths: List[PathContribution] = Field(
         default_factory=list,

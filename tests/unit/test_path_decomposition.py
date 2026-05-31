@@ -41,7 +41,10 @@ from src.models.robustness_v2 import (
     RobustnessRequestV2,
     StrengthDistribution,
 )
-from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.services.robustness_analyzer_v2 import (
+    MAX_DECOMPOSITION_PATHS,
+    RobustnessAnalyzerV2,
+)
 
 
 # =============================================================================
@@ -96,6 +99,27 @@ def _analyzer() -> RobustnessAnalyzerV2:
     return RobustnessAnalyzerV2()
 
 
+def _layered_graph(width: int, layers: int) -> GraphV2:
+    """Fully-connected layered DAG: src -> L1(width) -> ... -> L{layers}(width) -> goal.
+
+    Number of simple src->goal paths is width**layers (combinatorial via shared mediators),
+    exercising the worst case for path enumeration. Stays within the 50-node/200-edge schema
+    limits for modest width/layers (e.g. width=5, layers=7 -> 37 nodes, 160 edges).
+    """
+    nodes = [_node("src")]
+    for layer in range(layers):
+        nodes.extend(_node(f"n{layer}_{w}") for w in range(width))
+    nodes.append(_node("goal", kind="outcome"))
+
+    edges = [_edge("src", f"n0_{w}", mean=0.5) for w in range(width)]
+    for layer in range(layers - 1):
+        for a in range(width):
+            for b in range(width):
+                edges.append(_edge(f"n{layer}_{a}", f"n{layer + 1}_{b}", mean=0.5))
+    edges.extend(_edge(f"n{layers - 1}_{w}", "goal", mean=0.5) for w in range(width))
+    return GraphV2(nodes=nodes, edges=edges)
+
+
 # =============================================================================
 # 1. Single path -> signed_contribution == 1.0
 # =============================================================================
@@ -114,6 +138,8 @@ def test_single_path_contribution_is_one():
     assert isinstance(dec, PathDecomposition)
     assert dec.recommended_option_id == "opt_a"
     assert dec.entry_nodes == ["price"]
+    assert dec.truncated is False
+    assert dec.path_count == 1
     assert len(dec.paths) == 1
     p = dec.paths[0]
     assert p.path == ["price", "revenue"]
@@ -308,6 +334,59 @@ def test_performance_10_factor_multipath_under_500ms():
 
     assert len(dec.paths) == 3  # three distinct chains, top-3
     assert elapsed_ms < 500, f"path decomposition took {elapsed_ms:.2f}ms (>500ms)"
+
+
+# =============================================================================
+# 7b. Combinatorial layered DAG UNDER the path budget -> exact, fast
+# =============================================================================
+
+
+def test_combinatorial_under_cap_exact_and_fast():
+    # width=5, layers=6 -> 5**6 = 15,625 simple paths (combinatorial shared mediators),
+    # below MAX_DECOMPOSITION_PATHS. 32 nodes / 135 edges, within schema limits.
+    graph = _layered_graph(width=5, layers=6)
+    assert len(graph.nodes) <= 50 and len(graph.edges) <= 200
+    options = [InterventionOption(id="opt_a", label="A", interventions={"src": 0.5})]
+    request = _request(graph, options, "goal")
+    analyzer = _analyzer()
+
+    t0 = time.perf_counter()
+    dec = analyzer._compute_path_decomposition(request, "opt_a", graph)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+
+    assert dec.truncated is False
+    assert dec.path_count == 5**6  # all paths enumerated exactly
+    assert len(dec.paths) == 3  # top-3 of the combinatorial set
+    assert elapsed_ms < 500, f"combinatorial under-cap took {elapsed_ms:.1f}ms (>500ms)"
+
+
+# =============================================================================
+# 7c. Combinatorial layered DAG OVER the path budget -> graceful truncation, fast
+# =============================================================================
+
+
+def test_combinatorial_over_cap_truncates_fast_and_deterministically():
+    # width=5, layers=7 -> 5**7 = 78,125 simple paths, exceeding the budget.
+    # 37 nodes / 160 edges, within schema limits. Must degrade gracefully AND stay fast.
+    graph = _layered_graph(width=5, layers=7)
+    assert len(graph.nodes) <= 50 and len(graph.edges) <= 200
+    options = [InterventionOption(id="opt_a", label="A", interventions={"src": 0.5})]
+    request = _request(graph, options, "goal")
+    analyzer = _analyzer()
+
+    t0 = time.perf_counter()
+    dec = analyzer._compute_path_decomposition(request, "opt_a", graph)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+
+    assert dec.truncated is True
+    assert dec.paths == []  # no misleading partial top-3
+    assert dec.path_count == MAX_DECOMPOSITION_PATHS  # stopped at the budget
+    assert dec.entry_nodes == ["src"]  # option metadata still reported
+    assert elapsed_ms < 500, f"combinatorial over-cap took {elapsed_ms:.1f}ms (>500ms)"
+
+    # Truncation is deterministic (count-based, not wall-clock): identical result twice.
+    dec2 = analyzer._compute_path_decomposition(request, "opt_a", graph)
+    assert dec == dec2
 
 
 # =============================================================================

@@ -73,6 +73,13 @@ logger = logging.getLogger(__name__)
 # Safety net: nodes that must not participate in inference
 NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
 
+# Path-decomposition safety budget: maximum number of simple intervention-target-to-goal
+# paths to enumerate. A layered DAG valid under the 50-node/200-edge schema limits can have
+# hundreds of thousands of simple paths; without this cap, enumeration would blow the
+# sub-500ms budget. The bound is a path COUNT (not wall-clock) so truncation is deterministic
+# — the same graph always truncates identically, preserving the determinism guarantee.
+MAX_DECOMPOSITION_PATHS = 20000
+
 # Edge strength bounds from schema v2.6
 EDGE_STRENGTH_MIN = -1.0
 EDGE_STRENGTH_MAX = 1.0
@@ -2440,6 +2447,12 @@ class RobustnessAnalyzerV2:
         therefore already absent from the interior; bidirected edges are skipped
         defensively as well.  The recommended option is carried as context/metadata;
         computed paths start at the retained intervention target/factor nodes.
+
+        Path enumeration is bounded by ``MAX_DECOMPOSITION_PATHS``: a layered DAG valid
+        under the schema's node/edge limits can have hundreds of thousands of simple paths,
+        so if the budget is exceeded the result is returned with ``truncated=True`` and no
+        ranked paths.  The bound is a path count (not wall-clock), so truncation is
+        deterministic for a given graph.
         """
         option = next((o for o in request.options if o.id == recommended_option_id), None)
         if option is None:
@@ -2471,41 +2484,66 @@ class RobustnessAnalyzerV2:
             coeff = edge.strength.mean * edge.exists_probability
             adjacency.setdefault(edge.from_, []).append((edge.to, coeff))
 
-        def enumerate_paths(start: str, visited: set) -> List[Tuple[List[str], float]]:
-            """All simple paths start->goal as (node_sequence, signed_effect).
+        # Enumerate simple intervention-target-to-goal paths, bounded by a path-count
+        # budget (MAX_DECOMPOSITION_PATHS). Accumulate top-down so enumeration can stop
+        # early and total work is capped; this yields the same per-edge products as the
+        # recursive enumerator in _compute_structural_influence. The visited set excludes
+        # cycles and parallel edges branch via the adjacency list.
+        all_paths: List[Tuple[List[str], float]] = []
+        truncated = False
 
-            Mirrors the recursive enumerator inside _compute_structural_influence so
-            parallel edges branch identically; the visited set excludes cycles.
-            """
-            if start == goal:
-                return [([goal], 1.0)]
-            if start in visited or start not in adjacency:
-                return []
-            visited = visited | {start}
-            results: List[Tuple[List[str], float]] = []
-            for next_node, coeff in adjacency[start]:
+        def walk(node: str, effect_so_far: float, path_so_far: List[str], visited: set) -> None:
+            nonlocal truncated
+            if truncated:
+                return
+            if node == goal:
+                all_paths.append((path_so_far, effect_so_far))
+                if len(all_paths) >= MAX_DECOMPOSITION_PATHS:
+                    truncated = True
+                return
+            if node in visited or node not in adjacency:
+                return
+            visited = visited | {node}
+            for next_node, coeff in adjacency[node]:
+                if truncated:
+                    return
                 # Never route THROUGH an organisational decision/option/constraint node
                 # in the interior (already removed from the post-filter graph; this keeps
-                # the guarantee explicit and robust to direct calls). Entry nodes are
-                # allowed to be any kind; the goal is never non-inference.
+                # the guarantee explicit and robust to direct calls). Entry nodes may be
+                # any kind; the goal is never non-inference.
                 if next_node != goal and node_kind.get(next_node) in NON_INFERENCE_KINDS:
                     continue
-                for sub_path, sub_effect in enumerate_paths(next_node, visited):
-                    results.append(([start] + sub_path, coeff * sub_effect))
-            return results
+                walk(next_node, effect_so_far * coeff, path_so_far + [next_node], visited)
 
-        all_paths: List[Tuple[List[str], float]] = []
         for entry in entry_nodes:
+            if truncated:
+                break
             if entry == goal:
                 # Skip the trivial zero-length path (an intervention target that is the
                 # goal contributes no pathway structure).
                 continue
-            all_paths.extend(enumerate_paths(entry, set()))
+            walk(entry, 1.0, [entry], set())
+
+        path_count = len(all_paths)
+
+        if truncated:
+            # Too many simple paths to rank a meaningful top-3 within budget; degrade
+            # gracefully (no paths emitted) rather than spend unbounded time. truncated=True
+            # is deterministic and distinct from the no-reachable-path case below.
+            return PathDecomposition(
+                recommended_option_id=recommended_option_id,
+                entry_nodes=entry_nodes,
+                truncated=True,
+                path_count=path_count,
+                paths=[],
+            )
 
         if not all_paths:
             return PathDecomposition(
                 recommended_option_id=recommended_option_id,
                 entry_nodes=entry_nodes,
+                truncated=False,
+                path_count=0,
                 paths=[],
             )
 
@@ -2545,6 +2583,8 @@ class RobustnessAnalyzerV2:
         return PathDecomposition(
             recommended_option_id=recommended_option_id,
             entry_nodes=entry_nodes,
+            truncated=False,
+            path_count=path_count,
             paths=contributions,
         )
 
