@@ -498,6 +498,26 @@ class FactorSensitivityV2(BaseModel):
     interpretation: Optional[str] = Field(
         None, description="Human-readable explanation of sensitivity"
     )
+    # Provenance echo (Track S — value-origin passthrough for DecisionConfidencePanel).
+    # Echo-only: ISL surfaces where the factor's value came from but does NOT consume
+    # these in inference. Named value_* to avoid confusion with confidence_source
+    # (which describes how the confidence figure was computed, not value origin).
+    value_source: Optional[str] = Field(
+        None,
+        description="Echo of the factor node's observed_state.source — where the value "
+        "came from (e.g. 'brief_extraction', 'user_input', 'computed'). Omitted when absent.",
+    )
+    value_extraction_type: Optional[str] = Field(
+        None,
+        description="Echo of the factor node's observed_state.extractionType "
+        "(e.g. 'explicit', 'inferred'), when supplied by CEE. Omitted when absent.",
+    )
+    value_defaulted: Optional[bool] = Field(
+        None,
+        description="True when the factor's value was defaulted (no observed value was "
+        "provided, so it fell back to 0.0). Omitted when an observed value was supplied. "
+        "Derived from the same observed-value check as the ROOT_NODE_DEFAULT_VALUE warning.",
+    )
     # Debug fields (always serialised for debugging)
     zero_reason: Optional[ZeroSensitivityReason] = Field(
         None, description="Debug: explains why sensitivity is zero (when elasticity ≈ 0)"
