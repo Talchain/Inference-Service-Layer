@@ -1409,6 +1409,42 @@
             "description": "Method used: 'bootstrap_20' or 'bootstrap_10'",
             "title": "Stability Method"
           },
+          "value_defaulted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when the factor's value was defaulted (no observed value was provided, so it fell back to 0.0). Omitted when an observed value was supplied. Derived from the same observed-value check as the ROOT_NODE_DEFAULT_VALUE warning.",
+            "title": "Value Defaulted"
+          },
+          "value_extraction_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the factor node's observed_state.extractionType (e.g. 'explicit', 'inferred'), when supplied by CEE. Omitted when absent.",
+            "title": "Value Extraction Type"
+          },
+          "value_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Echo of the factor node's observed_state.source \u2014 where the value came from (e.g. 'brief_extraction', 'user_input', 'computed'). Omitted when absent.",
+            "title": "Value Source"
+          },
           "zero_reason": {
             "anyOf": [
               {

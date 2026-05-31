@@ -789,6 +789,11 @@ async def _analyze_robustness_v2_enhanced(
 
             n_factors = len(v1_response.factor_sensitivity)
 
+            # Track S: per-factor provenance echo. Look up source nodes so we can
+            # surface where each factor's value came from. Echo-only — not consumed
+            # in inference.
+            nodes_by_id = {n.id: n for n in request.graph.nodes}
+
             factor_sensitivity = []
             for fs in v1_response.factor_sensitivity:
                 # Confidence: prefer bootstrap-derived, fall back to graph-structural
@@ -806,6 +811,19 @@ async def _analyze_robustness_v2_enhanced(
                     # Kept as a safety net for future code paths that may bypass bootstrap.
                     confidence_val = compute_graph_structural_confidence(fs.influence_score)
                     confidence_src = "graph_structural"
+
+                # Track S: echo where the factor's value came from. Pure passthrough
+                # of request-supplied provenance; ISL does not consume it in inference.
+                node = nodes_by_id.get(fs.node_id)
+                obs = node.observed_state if node is not None else None
+                value_source = obs.source if obs is not None else None
+                value_extraction_type = obs.extractionType if obs is not None else None
+                # Defaulted when no observed value was supplied (mean falls back to 0.0).
+                # Same observed-value check as the ROOT_NODE_DEFAULT_VALUE warning logic.
+                has_observed_value = obs is not None and obs.value is not None
+                value_defaulted: Optional[bool] = (
+                    True if (node is not None and not has_observed_value) else None
+                )
 
                 factor_sensitivity.append(
                     FactorSensitivityV2(
@@ -838,6 +856,10 @@ async def _analyze_robustness_v2_enhanced(
                         attribution_stability=fs.attribution_stability,
                         rank_flip_rate=fs.rank_flip_rate,
                         stability_method=fs.stability_method,
+                        # Provenance echo (Track S)
+                        value_source=value_source,
+                        value_extraction_type=value_extraction_type,
+                        value_defaulted=value_defaulted,
                     )
                 )
 
