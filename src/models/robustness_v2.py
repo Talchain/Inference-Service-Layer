@@ -672,6 +672,14 @@ class RobustnessRequestV2(BaseModel):
         description="Compute Expected Value of Perfect Information (EVPI) per factor. "
         "Requires parameter_uncertainties.",
     )
+    include_path_decomposition: bool = Field(
+        default=False,
+        description="Compute a structural pathway decomposition for the recommended "
+        "option's retained intervention targets: the top-3 simple directed paths to the "
+        "goal, each with its signed structural contribution (analytic path tracing). "
+        "Gated; off by default. This is a structural decomposition of the modelled effect, "
+        "not a real-world causal claim, and is not weighted by intervention magnitude.",
+    )
 
     # Multi-constraint goal analysis (Phase 2)
     goal_constraints: Optional[List[GoalConstraint]] = Field(
@@ -1150,6 +1158,95 @@ class ConditionalWinner(BaseModel):
     )
 
 
+class PathContribution(BaseModel):
+    """
+    One modelled pathway's signed structural contribution to the goal.
+
+    A pathway is a simple directed sequence of node IDs from a retained intervention
+    target to the goal.  ``path_effect`` is the signed product of per-edge
+    coefficients (``strength.mean * exists_probability``) along the pathway — the
+    same per-edge semantics ISL uses for structural influence — and is NOT scaled
+    by the intervention magnitude.  This is a structural decomposition of the
+    modelled effect, not a real-world causal claim.
+    """
+
+    path: List[str] = Field(
+        ...,
+        description="Node IDs from the retained intervention target to the goal, in directed path order.",
+    )
+    path_effect: float = Field(
+        ...,
+        description="Signed product of per-edge coefficients (strength.mean * exists_probability) "
+        "along this path. Structural only — not scaled by the intervention magnitude.",
+    )
+    total_effect: float = Field(
+        ...,
+        description="Signed sum of path_effect across all enumerated intervention-target-to-goal "
+        "paths. Identical on every entry, for auditability.",
+    )
+    signed_contribution: Optional[float] = Field(
+        None,
+        description="path_effect / total_effect when the net modelled effect is non-negligible; "
+        "omitted when indeterminate. May be negative or exceed 1 when paths oppose.",
+    )
+    status: Literal["computed", "indeterminate"] = Field(
+        ...,
+        description="'computed' when |total_effect| >= 1e-10; 'indeterminate' when the net "
+        "modelled effect is near zero and a relative share is not well defined.",
+    )
+    mechanism: str = Field(
+        ...,
+        description="Human-readable modelled-pathway-contribution statement. Describes modelled "
+        "structure only; not a real-world causal claim.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
+class PathDecomposition(BaseModel):
+    """
+    Structural pathway decomposition for the recommended option's retained
+    intervention targets.
+
+    The recommended option is carried as context/metadata via
+    ``recommended_option_id``; it is never itself a path node.  Computed paths
+    start at the retained intervention target/factor nodes (those that survived
+    inference-graph filtering).  This decomposes the modelled structural effect,
+    not the option-level causal effect size, and is not weighted by intervention
+    magnitude.
+    """
+
+    recommended_option_id: str = Field(
+        ...,
+        description="The recommended option this decomposition explains (context/metadata; "
+        "not a path node).",
+    )
+    entry_nodes: List[str] = Field(
+        ...,
+        description="Retained intervention target node IDs the paths start from "
+        "(intervention targets that survived inference-graph filtering).",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when the number of simple paths exceeded the safety budget, so the "
+        "top-3 pathway ranking was suppressed for performance and paths is empty. This does "
+        "NOT mean the modelled effect is zero — only that individual pathways were too "
+        "numerous to rank. Distinct from an empty result with truncated=False, which means no "
+        "reachable path from the retained intervention targets.",
+    )
+    path_count: int = Field(
+        default=0,
+        description="Number of simple intervention-target-to-goal paths enumerated. When "
+        "truncated is True this equals the budget cap and the true count is higher.",
+    )
+    paths: List[PathContribution] = Field(
+        default_factory=list,
+        description="Top-3 intervention-target-to-goal paths, ranked by absolute path_effect.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
 class RobustnessResponseV2(BaseModel):
     """V2.2 robustness analysis response."""
 
@@ -1217,6 +1314,15 @@ class RobustnessResponseV2(BaseModel):
         None,
         description="Expected Value of Perfect Information per factor: how much does "
         "removing this factor's uncertainty improve P(joint_goal)?",
+    )
+
+    # Path decomposition (enhancement — optional, gated by include_path_decomposition flag)
+    path_decomposition: Optional[PathDecomposition] = Field(
+        None,
+        description="Structural pathway decomposition for the recommended option's retained "
+        "intervention targets: top-3 simple directed paths to the goal with signed structural "
+        "contributions. Structural decomposition of the modelled effect, not a causal claim "
+        "about realised outcomes. Gated by include_path_decomposition.",
     )
 
     model_config = {

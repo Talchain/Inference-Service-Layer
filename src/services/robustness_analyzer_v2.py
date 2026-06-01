@@ -38,6 +38,8 @@ from src.models.robustness_v2 import (
     OptionResult,
     OutcomeDistribution,
     ParameterUncertainty,
+    PathContribution,
+    PathDecomposition,
     ResponseMetadataV2,
     RobustnessRequestV2,
     RobustnessResponseV2,
@@ -70,6 +72,13 @@ logger = logging.getLogger(__name__)
 
 # Safety net: nodes that must not participate in inference
 NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+
+# Path-decomposition safety budget: maximum number of simple intervention-target-to-goal
+# paths to enumerate. A layered DAG valid under the 50-node/200-edge schema limits can have
+# hundreds of thousands of simple paths; without this cap, enumeration would blow the
+# sub-500ms budget. The bound is a path COUNT (not wall-clock) so truncation is deterministic
+# — the same graph always truncates identically, preserving the determinism guarantee.
+MAX_DECOMPOSITION_PATHS = 20000
 
 # Edge strength bounds from schema v2.6
 EDGE_STRENGTH_MIN = -1.0
@@ -923,6 +932,16 @@ class RobustnessAnalyzerV2:
                 request, sampler, factor_sampler, evaluator, seed, recommended_option_id
             )
 
+        # Compute structural pathway decomposition for the recommended option if requested.
+        # Pass evaluator.graph — the post-filter graph the SCM actually computed on
+        # (filter_inference_graph was applied before the evaluator was constructed), so the
+        # decomposition explains exactly the structure the analysis used, not raw request.graph.
+        path_decomposition = None
+        if request.include_path_decomposition:
+            path_decomposition = self._compute_path_decomposition(
+                request, recommended_option_id, evaluator.graph
+            )
+
         execution_time = int((time.time() - start_time) * 1000)
 
         # Include stability thresholds when bootstrap stability was computed
@@ -967,6 +986,7 @@ class RobustnessAnalyzerV2:
             stability_thresholds=stability_thresholds,
             edge_e_values=edge_e_values,
             factor_evpi=factor_evpi,
+            path_decomposition=path_decomposition,
         )
 
         self.logger.info(
@@ -2378,6 +2398,201 @@ class RobustnessAnalyzerV2:
             return {node_id: 0.0 for node_id in factor_node_ids}
 
         return {node_id: raw_influences[node_id] / max_influence for node_id in factor_node_ids}
+
+    @staticmethod
+    def _format_path_mechanism(
+        status: str,
+        chain: str,
+        path_effect: float,
+        total_effect: float,
+        share: Optional[float],
+    ) -> str:
+        """
+        Build the user-facing mechanism string for a path contribution.
+
+        Uses "modelled pathway contribution" framing; never asserts real-world
+        causation and never expresses a percentage.
+        """
+        if status == "computed" and share is not None:
+            return (
+                f"Modelled pathway contribution along {chain}: signed path coefficient "
+                f"{path_effect:+.3f} of total {total_effect:+.3f} (relative share {share:+.2f})."
+            )
+        return (
+            f"Modelled pathway contribution along {chain}: signed path coefficient "
+            f"{path_effect:+.3f}. Net modelled effect is near zero ({total_effect:+.3g}); "
+            f"relative share is not defined."
+        )
+
+    def _compute_path_decomposition(
+        self,
+        request: RobustnessRequestV2,
+        recommended_option_id: str,
+        graph: GraphV2,
+    ) -> PathDecomposition:
+        """
+        Structural pathway decomposition for the recommended option's retained
+        intervention targets (analytic path tracing).
+
+        Decomposes the modelled structural effect on the goal into the top-3 simple
+        directed paths.  Per-edge coefficient and path strength match
+        ``_compute_structural_influence`` exactly: ``strength.mean * exists_probability``
+        (signed) multiplied along the path.  Unlike that function, the totals here stay
+        SIGNED (no abs, no normalization) so opposing paths can cancel.  Path effects are
+        NOT scaled by intervention magnitude — this is structural, not an option-level
+        effect-size estimate.
+
+        ``graph`` must be the post-filter graph the SCM computed on (pass
+        ``evaluator.graph``): decision/option/constraint nodes and bidirected edges are
+        therefore already absent from the interior; bidirected edges are skipped
+        defensively as well.  The recommended option is carried as context/metadata;
+        computed paths start at the retained intervention target/factor nodes.
+
+        Path enumeration is bounded by ``MAX_DECOMPOSITION_PATHS``: a layered DAG valid
+        under the schema's node/edge limits can have hundreds of thousands of simple paths,
+        so if the budget is exceeded the result is returned with ``truncated=True`` and no
+        ranked paths.  The bound is a path count (not wall-clock), so truncation is
+        deterministic for a given graph.
+        """
+        option = next((o for o in request.options if o.id == recommended_option_id), None)
+        if option is None:
+            # Defensive: recommended_option_id always names a real option in practice.
+            return PathDecomposition(
+                recommended_option_id=recommended_option_id, entry_nodes=[], paths=[]
+            )
+
+        node_ids = {node.id for node in graph.nodes}
+        node_label = {node.id: (node.label or node.id) for node in graph.nodes}
+        node_kind = {node.id: node.kind.lower() for node in graph.nodes}
+        goal = request.goal_node_id
+
+        # Retained intervention targets the paths start from (sorted for stable output).
+        entry_nodes = sorted(n for n in option.interventions if n in node_ids)
+        if not entry_nodes:
+            # Every intervention target was filtered out — the model computed no effect
+            # through them; report the option as context with no paths (honest signal).
+            return PathDecomposition(
+                recommended_option_id=recommended_option_id, entry_nodes=[], paths=[]
+            )
+
+        # Build adjacency exactly like _compute_structural_influence (signed coeff,
+        # list-valued to preserve parallel edges), skipping bidirected/confounding edges.
+        adjacency: Dict[str, List[Tuple[str, float]]] = {}
+        for edge in graph.edges:
+            if getattr(edge, "edge_type", None) == "bidirected":
+                continue
+            coeff = edge.strength.mean * edge.exists_probability
+            adjacency.setdefault(edge.from_, []).append((edge.to, coeff))
+
+        # Enumerate simple intervention-target-to-goal paths, bounded by a path-count
+        # budget (MAX_DECOMPOSITION_PATHS). Accumulate top-down so enumeration can stop
+        # early and total work is capped; this yields the same per-edge products as the
+        # recursive enumerator in _compute_structural_influence. The visited set excludes
+        # cycles and parallel edges branch via the adjacency list.
+        #
+        # Truncate only once a path BEYOND the budget is discovered (len > cap, i.e. at
+        # most cap+1 paths enumerated). A graph with exactly MAX_DECOMPOSITION_PATHS paths
+        # is therefore fully ranked, not truncated — matching the "exceeded the budget"
+        # contract on PathDecomposition.truncated.
+        all_paths: List[Tuple[List[str], float]] = []
+        truncated = False
+
+        def walk(node: str, effect_so_far: float, path_so_far: List[str], visited: set) -> None:
+            nonlocal truncated
+            if truncated:
+                return
+            if node == goal:
+                all_paths.append((path_so_far, effect_so_far))
+                if len(all_paths) > MAX_DECOMPOSITION_PATHS:
+                    truncated = True
+                return
+            if node in visited or node not in adjacency:
+                return
+            visited = visited | {node}
+            for next_node, coeff in adjacency[node]:
+                if truncated:
+                    return
+                # Never route THROUGH an organisational decision/option/constraint node
+                # in the interior (already removed from the post-filter graph; this keeps
+                # the guarantee explicit and robust to direct calls). Entry nodes may be
+                # any kind; the goal is never non-inference.
+                if next_node != goal and node_kind.get(next_node) in NON_INFERENCE_KINDS:
+                    continue
+                walk(next_node, effect_so_far * coeff, path_so_far + [next_node], visited)
+
+        for entry in entry_nodes:
+            if truncated:
+                break
+            if entry == goal:
+                # Skip the trivial zero-length path (an intervention target that is the
+                # goal contributes no pathway structure).
+                continue
+            walk(entry, 1.0, [entry], set())
+
+        if truncated:
+            # More simple paths than the budget allows (a path beyond the cap was found).
+            # Degrade gracefully (no ranked paths) rather than spend unbounded time; report
+            # the cap as path_count — the true count is higher. truncated=True is
+            # deterministic and distinct from the no-reachable-path case below.
+            return PathDecomposition(
+                recommended_option_id=recommended_option_id,
+                entry_nodes=entry_nodes,
+                truncated=True,
+                path_count=MAX_DECOMPOSITION_PATHS,
+                paths=[],
+            )
+
+        path_count = len(all_paths)  # exact; 0 <= path_count <= MAX_DECOMPOSITION_PATHS
+
+        if not all_paths:
+            return PathDecomposition(
+                recommended_option_id=recommended_option_id,
+                entry_nodes=entry_nodes,
+                truncated=False,
+                path_count=0,
+                paths=[],
+            )
+
+        total_effect = sum(effect for _, effect in all_paths)
+        # Near-zero guard epsilon: matches the structural-influence near-zero guard above
+        # (line ~2376) and the elasticity/E-value guards in this module — the established
+        # "structurally negligible" threshold.
+        epsilon = 1e-10
+        indeterminate = abs(total_effect) < epsilon
+
+        # Deterministic order: largest absolute effect first; full node tuple and signed
+        # effect break ties (incl. parallel edges sharing a node sequence).
+        all_paths.sort(key=lambda pe: (-abs(pe[1]), tuple(pe[0]), pe[1]))
+
+        contributions: List[PathContribution] = []
+        for path, effect in all_paths[:3]:
+            if indeterminate:
+                status = "indeterminate"
+                share: Optional[float] = None
+            else:
+                status = "computed"
+                share = effect / total_effect
+            chain = " → ".join(node_label.get(n, n) for n in path)
+            contributions.append(
+                PathContribution(
+                    path=path,
+                    path_effect=effect,
+                    total_effect=total_effect,
+                    signed_contribution=share,
+                    status=status,
+                    mechanism=self._format_path_mechanism(
+                        status, chain, effect, total_effect, share
+                    ),
+                )
+            )
+
+        return PathDecomposition(
+            recommended_option_id=recommended_option_id,
+            entry_nodes=entry_nodes,
+            truncated=False,
+            path_count=path_count,
+            paths=contributions,
+        )
 
     def _compute_robustness(
         self,
