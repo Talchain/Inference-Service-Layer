@@ -588,6 +588,12 @@ async def _analyze_robustness_v2_enhanced(
         # Run analysis
         v1_response = robustness_analyzer_v2.analyze(request)
 
+        # Reproducibility hardening: the envelope must report the seed the
+        # analyzer actually used. Both derive from compute_effective_seed, so
+        # this is normally a no-op — but syncing from the analysis result
+        # guarantees seed_used can never drift from the RNG streams again.
+        builder.seed_used = str(v1_response.metadata.seed_used)
+
         # Task 3: Build option label lookup for propagation to V2 response
         option_label_map = {opt.id: opt.label for opt in request.options}
 

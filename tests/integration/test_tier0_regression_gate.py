@@ -293,6 +293,38 @@ class TestSeedReporting:
         filter_warnings = [r for r in caplog.records if "filtered_non_inference" in r.message]
         assert len(filter_warnings) == 1, "Analyzer must emit the filter warning exactly once"
 
+    def test_all_organisational_graph_does_not_crash_seed_derivation(self, client):
+        """A schema-valid graph whose every node is organisational empties the
+        inference filter. Seed derivation must fall back to the raw-graph hash
+        instead of raising, and the route must return a structured ISLV2
+        response (envelope shape, request-ID header), never an unhandled 500
+        in the generic error schema."""
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "g", "kind": "decision", "label": "G"},
+                    {"id": "d2", "kind": "option", "label": "D2"},
+                ],
+                "edges": [{"from": "d2", "to": "g", "strength": {"mean": 0.5, "std": 0.1}}],
+            },
+            "options": [{"id": "a", "label": "A", "interventions": {"d2": 1.0}}],
+            "goal_node_id": "g",
+            "n_samples": 100,
+        }
+
+        # Helper level: no raise, raw-graph fallback hash
+        parsed = RobustnessRequestV2(**request)
+        seed, source = compute_effective_seed(parsed)
+        assert source == "server_computed"
+        assert seed == compute_seed_from_graph(parsed.graph)
+
+        # Route level: structured envelope error, not a bare crash
+        response = client.post(f"{V2_URL}?response_version=2", json=request)
+        assert response.status_code in (422, 500)
+        body = response.json()
+        assert "analysis_status" in body, f"Expected ISLV2 envelope shape, got: {sorted(body)}"
+        assert response.headers.get("X-Request-Id")
+
 
 # =============================================================================
 # 3. Cyclic graphs fail closed on all live paths

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
+from pydantic import ValidationError as PydanticValidationError
 
 from src.models.robustness_v2 import (
     BucketResult,
@@ -146,10 +147,15 @@ def compute_effective_seed(
         return int(request.seed), "client_provided"
     # log=False: the analyzer's own filter logs the filtered-nodes warning;
     # this auxiliary filter exists only to hash the same graph.
-    return (
-        compute_seed_from_graph(filter_inference_graph(request.graph, log=False)),
-        "server_computed",
-    )
+    try:
+        graph = filter_inference_graph(request.graph, log=False)
+    except PydanticValidationError:
+        # Filtering removed every node (all-organisational graph), so the
+        # filtered GraphV2 cannot be constructed. Analysis fails closed
+        # downstream anyway; hash the raw graph so seed derivation itself
+        # never crashes a route outside its envelope error handling.
+        graph = request.graph
+    return compute_seed_from_graph(graph), "server_computed"
 
 
 # =============================================================================
