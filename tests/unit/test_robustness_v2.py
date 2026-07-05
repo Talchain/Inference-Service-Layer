@@ -4690,8 +4690,14 @@ class TestOptionIdPreservation:
 class TestCyclicGraphHandling:
     """Test behavior when graph contains cycles."""
 
-    def test_cyclic_graph_logs_warning_and_continues(self, caplog):
-        """Test that cyclic graphs log a warning but analysis continues."""
+    def test_cyclic_graph_fails_closed(self):
+        """Cyclic graphs must be rejected, never silently analysed.
+
+        Tier 0 remediation: the previous behaviour (log a warning, fall back
+        to an arbitrary topological order, and return plausible-looking
+        results) was a verified defect on the legacy/V1 path. analyze() now
+        raises GRAPH_CYCLE_DETECTED for any cyclic graph.
+        """
         # Create a graph with a cycle: A -> B -> C -> A
         graph = GraphV2(
             nodes=[
@@ -4736,16 +4742,8 @@ class TestCyclicGraphHandling:
         )
 
         analyzer = RobustnessAnalyzerV2()
-        with caplog.at_level(logging.WARNING):
-            response = analyzer.analyze(request)
-
-        # Should have logged a warning about cycles
-        cycle_warnings = [r for r in caplog.records if "cycle" in r.message.lower()]
-        assert len(cycle_warnings) > 0, "Expected warning about graph cycles"
-
-        # Analysis should still complete (graceful degradation)
-        assert response is not None
-        assert len(response.results) == 2
+        with pytest.raises(ValueError, match="GRAPH_CYCLE_DETECTED"):
+            analyzer.analyze(request)
 
 
 class TestAllEdgesFilteredScenario:

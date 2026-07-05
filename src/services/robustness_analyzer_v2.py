@@ -17,7 +17,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 
@@ -61,6 +61,7 @@ from src.models.critique import (
 )
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
+from src.validation.request_validator import detect_graph_cycle
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
 from src.config.stability_thresholds import (
@@ -115,6 +116,27 @@ def filter_inference_graph(graph: GraphV2) -> GraphV2:
     )
 
     return GraphV2(nodes=filtered_nodes, edges=filtered_edges)
+
+
+def compute_effective_seed(
+    request: RobustnessRequestV2,
+) -> Tuple[int, Literal["client_provided", "server_computed"]]:
+    """Single source of truth for the analysis seed.
+
+    A client-provided seed always wins. Otherwise the seed is derived from
+    the POST-FILTER inference graph — the same graph the analyzer samples
+    on — so the seed reported in responses always matches the RNG streams
+    actually used. (Deriving from the raw graph would diverge whenever
+    organisational decision/option/constraint nodes get filtered out.)
+
+    Idempotent with respect to filtering: filter_inference_graph on an
+    already-filtered graph is a no-op, so this may be called before or
+    after the analyzer applies the filter.
+    """
+    if request.seed is not None:
+        # Explicit None check: seed=0 is a valid explicit seed.
+        return int(request.seed), "client_provided"
+    return compute_seed_from_graph(filter_inference_graph(request.graph)), "server_computed"
 
 
 # =============================================================================
@@ -692,12 +714,23 @@ class RobustnessAnalyzerV2:
                         },
                     )
 
+        # Fail closed on cyclic graphs on EVERY path. The V2-enhanced route
+        # also blocks cycles pre-analysis via RequestValidator; this guard
+        # covers the legacy/V1 route and direct analyzer calls, where a cycle
+        # would otherwise fall through to an arbitrary topological order and
+        # produce plausible-looking but meaningless results.
+        if detect_graph_cycle([{"from_": e.from_, "to": e.to} for e in request.graph.edges]):
+            raise ValueError(
+                "GRAPH_CYCLE_DETECTED: graph contains a cycle - "
+                "robustness analysis requires a directed acyclic graph"
+            )
+
         # Setup - use separate RNG streams for edge and factor sampling
-        # to prevent fragile determinism coupling
-        # Use explicit None check: seed=0 is a valid explicit seed and must not
-        # be treated as falsy (the old `or` expression would discard it).
-        seed = request.seed if request.seed is not None else compute_seed_from_graph(request.graph)
-        seed = int(seed)
+        # to prevent fragile determinism coupling.
+        # compute_effective_seed is the single seed-derivation path shared
+        # with the API layer, so the reported seed_used always matches the
+        # RNG streams used here.
+        seed, _ = compute_effective_seed(request)
         rng_edge = SeededRNG(seed)
         rng_factor = SeededRNG(seed + 1)
         sampler = DualUncertaintySampler(request.graph.edges, rng_edge)
@@ -846,6 +879,37 @@ class RobustnessAnalyzerV2:
             request.graph.nodes,
             rng_noise,
         )
+
+        # Keep constraint probabilities on the same sample semantics as
+        # probability_of_goal for the goal node: a constraint on the goal node
+        # must be evaluated against the exact same (possibly noised) goal
+        # series, otherwise "P(goal >= x)" and "P(constraint goal >= x)" give
+        # two different answers in one response. Non-goal constraint nodes
+        # keep model-only (un-noised) samples; when that mixes with a noised
+        # goal, the mix is disclosed via an inference warning rather than
+        # silently changing the noise doctrine (deferred to Lane C review).
+        if constraint_node_values is not None:
+            mixed_noise_nodes = self._align_goal_constraint_samples(
+                constraint_node_values,
+                option_outcomes,
+                request.goal_node_id,
+                auto_noise_applied,
+            )
+            if mixed_noise_nodes:
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="CONSTRAINT_SAMPLES_UNNOISED",
+                        field="goal_constraints",
+                        detail={
+                            "node_ids": mixed_noise_nodes,
+                            "message": (
+                                "Auto-scaled noise was applied to the goal node "
+                                "samples but not to these constraint node samples; "
+                                "their probabilities reflect model-only variance."
+                            ),
+                        },
+                    )
+                )
 
         # Compute results (including constraint analysis if goal_constraints provided)
         results = self._compute_option_results(
@@ -1229,6 +1293,42 @@ class RobustnessAnalyzerV2:
             any_noise_added = True
 
         return option_outcomes, any_noise_added
+
+    def _align_goal_constraint_samples(
+        self,
+        constraint_node_values: Dict[str, Dict[str, List[float]]],
+        option_outcomes: Dict[str, List[float]],
+        goal_node_id: str,
+        auto_noise_applied: bool,
+    ) -> List[str]:
+        """
+        Make goal-node constraint samples identical to the goal samples.
+
+        The MC loop records constraint node values BEFORE auto-scaled noise is
+        applied to the goal series. When the goal node itself is a constraint
+        target, that leaves two different sample sets answering the same
+        question: probability_of_goal (noised) vs the constraint's
+        prob_satisfied (un-noised). This method replaces the goal node's
+        constraint series with the exact goal series (noised or not), so both
+        probabilities are computed from identical samples.
+
+        Mutates constraint_node_values in place.
+
+        Returns:
+            Sorted list of non-goal constraint node IDs whose samples remain
+            un-noised while the goal series was noised (empty when the goal
+            received no noise). Callers surface this as an inference warning
+            so the mixed variance semantics is disclosed, not silent.
+        """
+        mixed_nodes: set = set()
+        for option_id, node_series in constraint_node_values.items():
+            for node_id in node_series:
+                if node_id == goal_node_id:
+                    # Copy so later mutation of one list cannot alias the other.
+                    node_series[node_id] = list(option_outcomes[option_id])
+                elif auto_noise_applied:
+                    mixed_nodes.add(node_id)
+        return sorted(mixed_nodes)
 
     def _compute_option_results(
         self,

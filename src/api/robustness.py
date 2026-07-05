@@ -16,7 +16,7 @@ import logging
 import math
 import os
 import uuid
-from typing import Any, Dict, Literal, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -51,7 +51,7 @@ from src.models.robustness_v2 import (
     detect_schema_version,
 )
 from src.services.robustness_analyzer import RobustnessAnalyzer
-from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2, compute_effective_seed
 from src.config.stability_thresholds import (
     compute_factor_confidence,
     compute_graph_structural_confidence,
@@ -64,7 +64,6 @@ from src.utils.response_builder import (
     hash_node_id,
 )
 from src.utils.numerical_stability import validate_mc_samples
-from src.utils.rng import compute_seed_from_graph
 from src.utils.tracing import sanitize_request_id
 from src.validation.degenerate_detector import detect_degenerate_outcomes
 from src.validation.path_validator import PathValidationConfig
@@ -429,6 +428,16 @@ async def _analyze_robustness_v2_legacy(
         raise HTTPException(status_code=422, detail=e.errors())
     except HTTPException:
         raise
+    except ValueError as e:
+        # Analyzer-level input rejections (e.g. GRAPH_CYCLE_DETECTED, goal
+        # node filtered out) are client errors, not internal failures.
+        # Fail closed with 422 so cyclic graphs never surface as 500s or,
+        # worse, as plausible-looking results on this legacy path.
+        logger.warning(
+            "robustness_v2_invalid_input",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error("robustness_v2_analysis_error", exc_info=True)
         raise HTTPException(
@@ -454,16 +463,13 @@ async def _analyze_robustness_v2_enhanced(
         include_diagnostics=include_diagnostics,
     )
 
-    # P2-ISL-1: Compute effective seed (single source of truth)
-    # Must match analyzer's logic: request.seed or compute_seed_from_graph()
-    client_provided_seed = request.seed is not None
-    effective_seed = (
-        request.seed if client_provided_seed else compute_seed_from_graph(request.graph)
-    )
+    # P2-ISL-1: Compute effective seed (single source of truth).
+    # compute_effective_seed is the same derivation the analyzer uses: it
+    # hashes the POST-FILTER inference graph, so the reported seed_used is
+    # the seed the RNG streams actually consume even when organisational
+    # nodes are filtered out before sampling.
+    effective_seed, seed_source = compute_effective_seed(request)
     seed_str = str(effective_seed)
-    seed_source: Literal["client_provided", "server_computed"] = (
-        "client_provided" if client_provided_seed else "server_computed"
-    )
     builder = ResponseBuilder(
         request_id=request_id,
         request_echo=request_echo,

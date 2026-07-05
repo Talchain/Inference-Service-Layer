@@ -864,9 +864,14 @@ class TestInferenceWarningsDefaultBase:
             if r.levelname == "WARNING"
         ), "Expected structured warning log for defaulted constraint node"
 
-        # Assert inference_warnings populated on response (InferenceWarning objects)
-        assert len(response.inference_warnings) == 1
-        w = response.inference_warnings[0]
+        # Assert inference_warnings populated on response (InferenceWarning objects).
+        # Filter by code: other warning codes (e.g. CONSTRAINT_SAMPLES_UNNOISED)
+        # may legitimately coexist.
+        default_base_warnings = [
+            w for w in response.inference_warnings if w.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        ]
+        assert len(default_base_warnings) == 1
+        w = default_base_warnings[0]
         assert w.code == "CONSTRAINT_NODE_DEFAULT_BASE"
         assert "fac_churn" in w.field or "fac_churn" in str(w.detail)
         assert w.detail.get("defaulted_to") == 0.0
@@ -918,8 +923,10 @@ class TestInferenceWarningsDefaultBase:
             if r.levelname == "WARNING"
         ), "Should NOT emit warning when ParameterUncertainty is present"
 
-        # inference_warnings should be empty
-        assert response.inference_warnings == []
+        # No CONSTRAINT_NODE_DEFAULT_BASE warning (other codes may coexist)
+        assert not any(
+            w.code == "CONSTRAINT_NODE_DEFAULT_BASE" for w in response.inference_warnings
+        )
 
         # No CONSTRAINT_NODE_DEFAULT_BASE critique
         assert not any(c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques)
@@ -954,8 +961,11 @@ class TestInferenceWarningsDefaultBase:
         with caplog.at_level("WARNING"):
             response = analyzer.analyze(request)
 
-        # No warning — intervention overrides base for every option
-        assert response.inference_warnings == []
+        # No default-base warning — intervention overrides base for every option
+        # (other codes, e.g. CONSTRAINT_SAMPLES_UNNOISED, may coexist)
+        assert not any(
+            w.code == "CONSTRAINT_NODE_DEFAULT_BASE" for w in response.inference_warnings
+        )
         assert not any(c.code == "CONSTRAINT_NODE_DEFAULT_BASE" for c in response.critiques)
 
     def test_warning_with_multiple_constraint_nodes(self, caplog):
@@ -1028,9 +1038,13 @@ class TestInferenceWarningsDefaultBase:
         with caplog.at_level("WARNING"):
             response = analyzer.analyze(request)
 
-        # Both non-root nodes should trigger warnings (InferenceWarning objects)
-        assert len(response.inference_warnings) == 2
-        warned_nodes = {w.detail.get("node_id") for w in response.inference_warnings}
+        # Both non-root nodes should trigger default-base warnings
+        # (filter by code: other warning codes may coexist)
+        default_base_warnings = [
+            w for w in response.inference_warnings if w.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        ]
+        assert len(default_base_warnings) == 2
+        warned_nodes = {w.detail.get("node_id") for w in default_base_warnings}
         assert warned_nodes == {"fac_churn", "fac_nps"}
 
         # Both should have corresponding critiques
