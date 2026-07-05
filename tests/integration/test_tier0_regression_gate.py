@@ -272,6 +272,27 @@ class TestSeedReporting:
         filtered = parsed.model_copy(update={"graph": filter_inference_graph(parsed.graph)})
         assert compute_effective_seed(filtered)[0] == seed
 
+    def test_seed_derivation_does_not_duplicate_filter_warning(self, caplog):
+        """The helper's auxiliary filter is silent; only the analyzer's
+        authoritative filter emits the filtered-nodes warning (once)."""
+        import logging
+
+        request = with_organisational_node(outcome_goal_request())
+        del request["seed"]
+        parsed = RobustnessRequestV2(**request)
+
+        with caplog.at_level(logging.WARNING):
+            compute_effective_seed(parsed)
+        assert not any(
+            "filtered_non_inference" in r.message for r in caplog.records
+        ), "Seed derivation must not emit the filter warning"
+
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            RobustnessAnalyzerV2().analyze(parsed)
+        filter_warnings = [r for r in caplog.records if "filtered_non_inference" in r.message]
+        assert len(filter_warnings) == 1, "Analyzer must emit the filter warning exactly once"
+
 
 # =============================================================================
 # 3. Cyclic graphs fail closed on all live paths

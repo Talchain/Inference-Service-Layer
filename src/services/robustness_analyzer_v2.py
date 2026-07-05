@@ -89,8 +89,15 @@ EDGE_STRENGTH_MAX = 1.0
 MARGINAL_K_SAMPLES = 100
 
 
-def filter_inference_graph(graph: GraphV2) -> GraphV2:
-    """Filter out non-inference nodes and incident edges as a safety net."""
+def filter_inference_graph(graph: GraphV2, *, log: bool = True) -> GraphV2:
+    """Filter out non-inference nodes and incident edges as a safety net.
+
+    Args:
+        graph: Graph to filter.
+        log: Emit the filtered-nodes warning. Pass False for auxiliary calls
+            (e.g. seed derivation) so the warning fires once per request,
+            from the analyzer's authoritative filter.
+    """
     filtered_nodes = [node for node in graph.nodes if node.kind.lower() not in NON_INFERENCE_KINDS]
     removed_nodes = len(graph.nodes) - len(filtered_nodes)
 
@@ -104,16 +111,17 @@ def filter_inference_graph(graph: GraphV2) -> GraphV2:
     removed_edges = len(graph.edges) - len(filtered_edges)
     removed_node_ids = [node.id for node in graph.nodes if node.kind.lower() in NON_INFERENCE_KINDS]
 
-    logger.warning(
-        "robustness_v2_filtered_non_inference_nodes",
-        extra={
-            "removed_node_count": removed_nodes,
-            "removed_edge_count": removed_edges,
-            "removed_node_ids": removed_node_ids,
-            "remaining_node_count": len(filtered_nodes),
-            "remaining_edge_count": len(filtered_edges),
-        },
-    )
+    if log:
+        logger.warning(
+            "robustness_v2_filtered_non_inference_nodes",
+            extra={
+                "removed_node_count": removed_nodes,
+                "removed_edge_count": removed_edges,
+                "removed_node_ids": removed_node_ids,
+                "remaining_node_count": len(filtered_nodes),
+                "remaining_edge_count": len(filtered_edges),
+            },
+        )
 
     return GraphV2(nodes=filtered_nodes, edges=filtered_edges)
 
@@ -136,7 +144,12 @@ def compute_effective_seed(
     if request.seed is not None:
         # Explicit None check: seed=0 is a valid explicit seed.
         return int(request.seed), "client_provided"
-    return compute_seed_from_graph(filter_inference_graph(request.graph)), "server_computed"
+    # log=False: the analyzer's own filter logs the filtered-nodes warning;
+    # this auxiliary filter exists only to hash the same graph.
+    return (
+        compute_seed_from_graph(filter_inference_graph(request.graph, log=False)),
+        "server_computed",
+    )
 
 
 # =============================================================================

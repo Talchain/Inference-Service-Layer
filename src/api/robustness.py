@@ -437,7 +437,7 @@ async def _analyze_robustness_v2_legacy(
             "robustness_v2_invalid_input",
             extra={"request_id": request_id, "error": str(e)},
         )
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error("robustness_v2_analysis_error", exc_info=True)
         raise HTTPException(
