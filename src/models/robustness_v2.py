@@ -457,6 +457,28 @@ class GraphV2(BaseModel):
                 raise ValueError(f"Self-loop detected on node: {edge.from_}")
         return v
 
+    @field_validator("edges")
+    @classmethod
+    def validate_no_duplicate_edges(cls, v: List[EdgeV2]) -> List[EdgeV2]:
+        """Reject exact duplicate directed edges.
+
+        Two edges with the same (from, to) pair and the same edge_type would
+        double-count the same causal effect in the linear SCM (both are
+        sampled and both contribute parent_value * strength). Edges sharing
+        endpoints but differing in edge_type (directed vs bidirected
+        confounder) are semantically distinct and remain allowed.
+        """
+        seen: set = set()
+        duplicates: List[str] = []
+        for edge in v:
+            key = (edge.from_, edge.to, edge.edge_type or "directed")
+            if key in seen:
+                duplicates.append(f"{edge.from_}->{edge.to}")
+            seen.add(key)
+        if duplicates:
+            raise ValueError(f"Duplicate edges found: {sorted(set(duplicates))}")
+        return v
+
     def collect_parse_warnings(self) -> List[InferenceWarning]:
         """
         Return all InferenceWarnings generated during graph parsing.
