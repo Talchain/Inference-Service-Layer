@@ -48,11 +48,13 @@ class TestNOTEARSDiscovery:
         notears = NOTEARSDiscovery()
 
         # Acyclic matrix
-        W = np.array([
-            [0, 1, 0],
-            [0, 0, 1],
-            [0, 0, 0],
-        ])
+        W = np.array(
+            [
+                [0, 1, 0],
+                [0, 0, 1],
+                [0, 0, 0],
+            ]
+        )
 
         h = notears._h_function(W)
 
@@ -63,10 +65,12 @@ class TestNOTEARSDiscovery:
         """Test soft-thresholding operator."""
         notears = NOTEARSDiscovery()
 
-        W = np.array([
-            [0.5, -0.3],
-            [0.1, 0.8],
-        ])
+        W = np.array(
+            [
+                [0.5, -0.3],
+                [0.1, 0.8],
+            ]
+        )
 
         W_thresholded = notears._soft_threshold(W, threshold=0.2)
 
@@ -80,11 +84,13 @@ class TestNOTEARSDiscovery:
         """Test conversion of weight matrix to DAG."""
         notears = NOTEARSDiscovery()
 
-        W = np.array([
-            [0, 0.5, 0],
-            [0, 0, 0.8],
-            [0, 0, 0],
-        ])
+        W = np.array(
+            [
+                [0, 0.5, 0],
+                [0, 0, 0.8],
+                [0, 0, 0],
+            ]
+        )
 
         variable_names = ["X", "Y", "Z"]
 
@@ -281,14 +287,10 @@ class TestCausalDiscoveryEngineIntegration:
         variable_names = ["X", "Y", "Z"]
 
         # Simple discovery
-        dag_simple, _ = engine.discover_from_data(
-            data, variable_names, threshold=0.3, seed=42
-        )
+        dag_simple, _ = engine.discover_from_data(data, variable_names, threshold=0.3, seed=42)
 
         # Advanced discovery
-        dag_advanced, _ = engine.discover_advanced(
-            data, variable_names, algorithm="notears"
-        )
+        dag_advanced, _ = engine.discover_advanced(data, variable_names, algorithm="notears")
 
         # Both should be DAGs
         assert nx.is_directed_acyclic_graph(dag_simple)
@@ -345,8 +347,13 @@ class TestSyntheticData:
 class TestPerformance:
     """Test performance characteristics."""
 
+    @pytest.mark.perf
     def test_small_data_performance(self):
-        """Test performance with small dataset."""
+        """Test performance with small dataset.
+
+        Marked perf (excluded from default PR CI): the only assertion is a
+        wall-clock bound on NOTEARS, which is hardware-sensitive.
+        """
         import time
 
         np.random.seed(42)

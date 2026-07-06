@@ -5,7 +5,6 @@ Quick latency checks to catch performance regressions in CI.
 These tests verify that endpoints respond within acceptable latency bounds.
 """
 
-import os
 import statistics
 import time
 from typing import List
@@ -14,6 +13,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from src.api.main import app
+from tests.perf_utils import is_perf_strict
 
 # ---------------------------------------------------------------------------
 # CI-resilience knobs for the throughput smoke (NOT an ISL science change).
@@ -26,17 +26,9 @@ from src.api.main import app
 #     (catches a hung/broken endpoint or a catastrophic throughput collapse);
 #   * the strict absolute target is enforced only when ISL_PERF_STRICT is set,
 #     i.e. on a dedicated/nightly perf runner with stable resources.
+# is_perf_strict lives in tests/perf_utils (shared with other gated tests);
+# it is call-time evaluated so monkeypatch.setenv works.
 # ---------------------------------------------------------------------------
-
-
-def is_perf_strict() -> bool:
-    """Whether the strict absolute throughput target is enforced.
-
-    Evaluated at call time (not import time) so tests and CI can toggle
-    ISL_PERF_STRICT via monkeypatch.setenv without an import-order trap.
-    """
-    return os.getenv("ISL_PERF_STRICT", "").strip().lower() in ("1", "true", "yes")
-
 
 # Strict absolute throughput target — enforced only under ISL_PERF_STRICT.
 STRICT_MIN_RPS = 100.0
@@ -51,12 +43,18 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
+@pytest.mark.perf
 class TestLatencyBaselines:
     """
     Verify endpoint latencies are within acceptable bounds.
 
     These are smoke tests - not comprehensive benchmarks.
     Run full benchmarks separately for detailed analysis.
+
+    Marked ``perf`` (excluded from default PR CI): every assertion here is a
+    pure wall-clock P95 threshold on a shared-runner-sensitive measurement.
+    Endpoint availability/correctness for /health and /ready is covered by
+    the functional health tests, which stay in the default suite.
     """
 
     # Latency thresholds in milliseconds (P95 targets)
