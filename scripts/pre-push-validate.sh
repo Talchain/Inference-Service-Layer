@@ -117,7 +117,9 @@ if [ -n "$PYTEST_CMD" ]; then
     # Run with ISL_AUTH_DISABLED=true (consistent with repo conventions)
     # Exclude _archived tests (dead code with broken imports)
     set +e
-    TEST_OUTPUT=$(ISL_AUTH_DISABLED=true $PYTEST_CMD tests/ --ignore=tests/_archived -q 2>&1)
+    # -m "not perf": hardware-sensitive timing budgets are excluded from the
+    # correctness gate (enforced in the perf-tests workflow / ISL_PERF_STRICT=1)
+    TEST_OUTPUT=$(ISL_AUTH_DISABLED=true $PYTEST_CMD tests/ --ignore=tests/_archived -q -m "not perf" 2>&1)
     TEST_EXIT=$?
     set -e
 

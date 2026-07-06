@@ -32,6 +32,8 @@ import time
 
 import pytest
 
+from tests.perf_utils import assert_time_budget
+
 from src.models.robustness_v2 import (
     EdgeV2,
     GraphV2,
@@ -341,7 +343,8 @@ def test_performance_10_factor_multipath_under_500ms():
     elapsed_ms = (time.perf_counter() - t0) * 1000
 
     assert len(dec.paths) == 3  # three distinct chains, top-3
-    assert elapsed_ms < 500, f"path decomposition took {elapsed_ms:.2f}ms (>500ms)"
+    # Hardware-sensitive budget: enforced only under ISL_PERF_STRICT
+    assert_time_budget(elapsed_ms, 500, "path decomposition three-chain")
 
 
 # =============================================================================
@@ -365,7 +368,7 @@ def test_combinatorial_under_cap_exact_and_fast():
     assert dec.truncated is False
     assert dec.path_count == 5**6  # all paths enumerated exactly
     assert len(dec.paths) == 3  # top-3 of the combinatorial set
-    assert elapsed_ms < 500, f"combinatorial under-cap took {elapsed_ms:.1f}ms (>500ms)"
+    assert_time_budget(elapsed_ms, 500, "path decomposition combinatorial under-cap")
 
 
 # =============================================================================
@@ -390,7 +393,7 @@ def test_combinatorial_over_cap_truncates_fast_and_deterministically():
     assert dec.paths == []  # no misleading partial top-3
     assert dec.path_count == MAX_DECOMPOSITION_PATHS  # stopped at the budget
     assert dec.entry_nodes == ["src"]  # option metadata still reported
-    assert elapsed_ms < 500, f"combinatorial over-cap took {elapsed_ms:.1f}ms (>500ms)"
+    assert_time_budget(elapsed_ms, 500, "path decomposition combinatorial over-cap")
 
     # Truncation is deterministic (count-based, not wall-clock): identical result twice.
     dec2 = analyzer._compute_path_decomposition(request, "opt_a", graph)
@@ -421,7 +424,7 @@ def test_exact_cap_boundary_is_not_truncated():
     assert dec.truncated is False  # reached the budget but did NOT exceed it
     assert dec.path_count == MAX_DECOMPOSITION_PATHS  # exact count, equal to the cap
     assert len(dec.paths) == 3  # exact top-3 still produced
-    assert elapsed_ms < 500, f"exact-cap took {elapsed_ms:.1f}ms (>500ms)"
+    assert_time_budget(elapsed_ms, 500, "path decomposition exact-cap boundary")
 
 
 # =============================================================================

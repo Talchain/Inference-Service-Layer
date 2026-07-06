@@ -1,0 +1,69 @@
+# Dedicated performance-budget workflow.
+#
+# CI policy: the default PR gate (pr-ci.yml) proves CORRECTNESS and excludes
+# hardware-sensitive timing/throughput tests (-m "not perf"), because shared
+# GitHub-hosted runners are too variable for hard wall-clock/RPS assertions
+# (observed 46-53 RPS against a 100 RPS target, 3.2-3.3s against a 2s budget,
+# on unchanged code). This workflow is where strict performance budgets ARE
+# enforced: ISL_PERF_STRICT=1 activates both the @pytest.mark.perf tests and
+# the env-gated timing assertions inside mixed correctness+timing tests
+# (see tests/perf_utils.py).
+#
+# Non-blocking for PRs by construction (no pull_request trigger). Budget
+# breaches here are performance signals to triage, ideally on a dedicated
+# runner with stable resources.
+#
+# NOTE: GitHub only runs 'schedule' triggers from the repository DEFAULT
+# branch. Merging to staging does not activate the nightly run - it takes
+# effect once this file is promoted to the default branch (workflow_dispatch
+# likewise appears in the UI from the default branch).
+name: Performance Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly, off-peak, off-minute
+    - cron: '23 3 * * *'
+
+jobs:
+  perf:
+    name: Strict Performance Budgets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-interaction
+
+      - name: Run perf-marked tests (strict budgets)
+        env:
+          ISL_AUTH_DISABLED: 'true'
+          ISL_PERF_STRICT: '1'
+        # -rA: show captured output for PASSING tests too, so the measured
+        # RPS/ms figures printed by the perf helpers land in the run log.
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -rA -m perf
+
+      - name: Run full suite with strict timing budgets (mixed tests enforced)
+        env:
+          ISL_AUTH_DISABLED: 'true'
+          ISL_PERF_STRICT: '1'
+        # No -x: report every budget breach in one run, not just the first.
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -rA

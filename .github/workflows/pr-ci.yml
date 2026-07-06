@@ -67,4 +67,9 @@ jobs:
       - name: Run tests
         env:
           ISL_AUTH_DISABLED: 'true'
-        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -x -q
+        # -m "not perf": hardware-sensitive timing/throughput budget tests are
+        # excluded from the default correctness gate (shared runners are too
+        # variable for hard wall-clock/RPS assertions). They run in the dedicated
+        # perf-tests workflow with ISL_PERF_STRICT=1. Correctness assertions in
+        # mixed tests remain in this suite; see tests/perf_utils.py.
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -x -q -m "not perf"

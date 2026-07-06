@@ -94,6 +94,7 @@ markers = [
     "slow: marks tests as slow (excluded from default CI with -m 'not slow')",
     "smoke: marks smoke tests (require running server)",
     "quarantined: marks pre-existing failing tests (excluded from default run, tracked in tests/_quarantined/MANIFEST.md)",
+    "perf: hardware-sensitive timing/throughput budget tests (excluded from default PR CI via -m 'not perf'; run in the dedicated perf workflow with ISL_PERF_STRICT=1). Only pure timing tests carry this marker - mixed correctness+timing tests stay in the default suite with their budgets gated via tests/perf_utils.assert_time_budget.",
 ]
 
 [tool.mypy]
