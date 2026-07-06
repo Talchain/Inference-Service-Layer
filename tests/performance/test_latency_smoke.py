@@ -173,7 +173,11 @@ class TestThroughputBaselines:
                 response = client.get("/health")
                 assert response.status_code == 200
             elapsed = time.perf_counter() - start
-            best_rps = max(best_rps, num_requests / elapsed)
+            # Guard against elapsed == 0.0 (low-resolution clocks in some
+            # virtualized environments): immeasurably fast is not a perf
+            # problem, so treat it as unbounded throughput rather than raise.
+            rps = num_requests / elapsed if elapsed > 0 else float("inf")
+            best_rps = max(best_rps, rps)
 
         print(
             f"health throughput: {best_rps:.1f} RPS "
