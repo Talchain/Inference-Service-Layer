@@ -33,7 +33,7 @@ class TestObjectiveFunctionValidation:
             variable_id="profit",
             direction="maximize",
             coefficients={"price": 100, "quantity": -5},
-            constant=-10000,
+            constant=-10000
         )
         assert obj.direction == "maximize"
         assert obj.coefficients["price"] == 100
@@ -42,13 +42,19 @@ class TestObjectiveFunctionValidation:
         """Invalid direction should be rejected."""
         with pytest.raises(ValidationError):
             ObjectiveFunction(
-                variable_id="profit", direction="optimal", coefficients={"price": 100}  # Invalid
+                variable_id="profit",
+                direction="optimal",  # Invalid
+                coefficients={"price": 100}
             )
 
     def test_empty_coefficients_rejected(self):
         """Empty coefficients should be rejected."""
         with pytest.raises(ValidationError):
-            ObjectiveFunction(variable_id="profit", direction="maximize", coefficients={})
+            ObjectiveFunction(
+                variable_id="profit",
+                direction="maximize",
+                coefficients={}
+            )
 
 
 class TestDecisionVariableValidation:
@@ -56,18 +62,30 @@ class TestDecisionVariableValidation:
 
     def test_valid_variable(self):
         """Valid decision variable should be accepted."""
-        var = DecisionVariable(variable_id="price", lower_bound=10.0, upper_bound=100.0)
+        var = DecisionVariable(
+            variable_id="price",
+            lower_bound=10.0,
+            upper_bound=100.0
+        )
         assert var.lower_bound == 10.0
         assert var.upper_bound == 100.0
 
     def test_upper_bound_less_than_lower(self):
         """upper_bound < lower_bound should be rejected."""
         with pytest.raises(ValidationError):
-            DecisionVariable(variable_id="price", lower_bound=100.0, upper_bound=10.0)
+            DecisionVariable(
+                variable_id="price",
+                lower_bound=100.0,
+                upper_bound=10.0
+            )
 
     def test_equal_bounds_allowed(self):
         """Equal bounds should be allowed (fixed variable)."""
-        var = DecisionVariable(variable_id="fixed", lower_bound=50.0, upper_bound=50.0)
+        var = DecisionVariable(
+            variable_id="fixed",
+            lower_bound=50.0,
+            upper_bound=50.0
+        )
         assert var.lower_bound == var.upper_bound
 
 
@@ -78,11 +96,13 @@ class TestOptimisationRequestValidation:
         """Valid optimization request should be accepted."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="profit", direction="maximize", coefficients={"price": 100}
+                variable_id="profit",
+                direction="maximize",
+                coefficients={"price": 100}
             ),
             decision_variables=[
                 DecisionVariable(variable_id="price", lower_bound=10, upper_bound=100)
-            ],
+            ]
         )
         assert len(request.decision_variables) == 1
 
@@ -91,14 +111,14 @@ class TestOptimisationRequestValidation:
         with pytest.raises(ValidationError):
             OptimisationRequest(
                 objective=ObjectiveFunction(
-                    variable_id="profit", direction="maximize", coefficients={"price": 100}
+                    variable_id="profit",
+                    direction="maximize",
+                    coefficients={"price": 100}
                 ),
                 decision_variables=[
                     DecisionVariable(variable_id="price", lower_bound=10, upper_bound=100),
-                    DecisionVariable(
-                        variable_id="price", lower_bound=20, upper_bound=80
-                    ),  # Duplicate
-                ],
+                    DecisionVariable(variable_id="price", lower_bound=20, upper_bound=80)  # Duplicate
+                ]
             )
 
     def test_grid_points_bounds(self):
@@ -107,12 +127,14 @@ class TestOptimisationRequestValidation:
         with pytest.raises(ValidationError):
             OptimisationRequest(
                 objective=ObjectiveFunction(
-                    variable_id="profit", direction="maximize", coefficients={"price": 100}
+                    variable_id="profit",
+                    direction="maximize",
+                    coefficients={"price": 100}
                 ),
                 decision_variables=[
                     DecisionVariable(variable_id="price", lower_bound=10, upper_bound=100)
                 ],
-                grid_points=2,  # < 5 minimum
+                grid_points=2  # < 5 minimum
             )
 
 
@@ -123,10 +145,15 @@ class TestContinuousOptimizerBasic:
         """Maximize single variable: f(x) = 2x, x in [0, 10]."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 2.0}, constant=0.0
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 2.0},
+                constant=0.0
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=11,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -141,10 +168,15 @@ class TestContinuousOptimizerBasic:
         """Minimize single variable: f(x) = 2x, x in [0, 10]."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="minimize", coefficients={"x": 2.0}, constant=0.0
+                variable_id="output",
+                direction="minimize",
+                coefficients={"x": 2.0},
+                constant=0.0
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=11,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -161,13 +193,13 @@ class TestContinuousOptimizerBasic:
                 variable_id="output",
                 direction="maximize",
                 coefficients={"x": 3.0, "y": 2.0},
-                constant=0.0,
+                constant=0.0
             ),
             decision_variables=[
                 DecisionVariable(variable_id="x", lower_bound=0, upper_bound=5),
-                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=10),
+                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=10)
             ],
-            grid_points=6,
+            grid_points=6
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -187,15 +219,22 @@ class TestConstraintHandling:
         """Less-than-or-equal constraint: x <= 5."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 2.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 2.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
             constraints=[
                 OptimisationConstraint(
-                    constraint_id="limit", coefficients={"x": 1.0}, relation="le", rhs=5.0
+                    constraint_id="limit",
+                    coefficients={"x": 1.0},
+                    relation="le",
+                    rhs=5.0
                 )
             ],
-            grid_points=11,
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -210,15 +249,22 @@ class TestConstraintHandling:
         """Greater-than-or-equal constraint: x >= 3."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="minimize", coefficients={"x": 2.0}
+                variable_id="output",
+                direction="minimize",
+                coefficients={"x": 2.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
             constraints=[
                 OptimisationConstraint(
-                    constraint_id="minimum", coefficients={"x": 1.0}, relation="ge", rhs=3.0
+                    constraint_id="minimum",
+                    coefficients={"x": 1.0},
+                    relation="ge",
+                    rhs=3.0
                 )
             ],
-            grid_points=11,
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -238,24 +284,27 @@ class TestConstraintHandling:
             objective=ObjectiveFunction(
                 variable_id="profit",
                 direction="maximize",
-                coefficients={"price": 3.0, "quantity": 2.0},
+                coefficients={"price": 3.0, "quantity": 2.0}
             ),
             decision_variables=[
                 DecisionVariable(variable_id="price", lower_bound=0, upper_bound=100),
-                DecisionVariable(variable_id="quantity", lower_bound=0, upper_bound=100),
+                DecisionVariable(variable_id="quantity", lower_bound=0, upper_bound=100)
             ],
             constraints=[
                 OptimisationConstraint(
                     constraint_id="budget",
                     coefficients={"price": 1.0, "quantity": 1.0},
                     relation="le",
-                    rhs=100.0,
+                    rhs=100.0
                 ),
                 OptimisationConstraint(
-                    constraint_id="min_price", coefficients={"price": 1.0}, relation="ge", rhs=10.0
-                ),
+                    constraint_id="min_price",
+                    coefficients={"price": 1.0},
+                    relation="ge",
+                    rhs=10.0
+                )
             ],
-            grid_points=11,
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -278,18 +327,28 @@ class TestNoFeasibleSolution:
         # x >= 60 AND x <= 40 → impossible
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 1.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 1.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=100)],
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=100)
+            ],
             constraints=[
                 OptimisationConstraint(
-                    constraint_id="c1", coefficients={"x": 1.0}, relation="ge", rhs=60.0
+                    constraint_id="c1",
+                    coefficients={"x": 1.0},
+                    relation="ge",
+                    rhs=60.0
                 ),
                 OptimisationConstraint(
-                    constraint_id="c2", coefficients={"x": 1.0}, relation="le", rhs=40.0
-                ),
+                    constraint_id="c2",
+                    coefficients={"x": 1.0},
+                    relation="le",
+                    rhs=40.0
+                )
             ],
-            grid_points=11,
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -312,10 +371,12 @@ class TestFlatObjective:
                 variable_id="output",
                 direction="maximize",
                 coefficients={"y": 1.0},  # y not in variables
-                constant=10.0,
+                constant=10.0
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=11,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -333,10 +394,14 @@ class TestBoundaryOptimum:
         """Boundary optimum should be detected and reported."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 1.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 1.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=11,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -357,12 +422,16 @@ class TestConfidenceIntervals:
         """Confidence interval should be computed."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 10.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 10.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
             grid_points=11,
             confidence_level=0.95,
-            noise_std=5.0,
+            noise_std=5.0
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -382,11 +451,13 @@ class TestConfidenceIntervals:
             "objective": {
                 "variable_id": "output",
                 "direction": "maximize",
-                "coefficients": {"x": 10.0},
+                "coefficients": {"x": 10.0}
             },
-            "decision_variables": [{"variable_id": "x", "lower_bound": 0, "upper_bound": 10}],
+            "decision_variables": [
+                {"variable_id": "x", "lower_bound": 0, "upper_bound": 10}
+            ],
             "grid_points": 11,
-            "noise_std": 5.0,
+            "noise_std": 5.0
         }
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -402,14 +473,8 @@ class TestConfidenceIntervals:
         assert result_90.optimal_point is not None
         assert result_99.optimal_point is not None
 
-        width_90 = (
-            result_90.optimal_point.confidence_interval.upper
-            - result_90.optimal_point.confidence_interval.lower
-        )
-        width_99 = (
-            result_99.optimal_point.confidence_interval.upper
-            - result_99.optimal_point.confidence_interval.lower
-        )
+        width_90 = result_90.optimal_point.confidence_interval.upper - result_90.optimal_point.confidence_interval.lower
+        width_99 = result_99.optimal_point.confidence_interval.upper - result_99.optimal_point.confidence_interval.lower
 
         # 99% CI should be wider than 90% CI
         assert width_99 > width_90
@@ -422,13 +487,15 @@ class TestSensitivityAnalysis:
         """Gradient at optimum should equal coefficients."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 5.0, "y": 3.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 5.0, "y": 3.0}
             ),
             decision_variables=[
                 DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10),
-                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=10),
+                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=10)
             ],
-            grid_points=11,
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -443,10 +510,14 @@ class TestSensitivityAnalysis:
         """5% tolerance range should be computed."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 10.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 10.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=21,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=21
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -464,10 +535,14 @@ class TestSensitivityAnalysis:
         """Robustness score should be computed."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 10.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 10.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=21,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=21
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -487,13 +562,15 @@ class TestPerformance:
 
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 3.0, "y": 2.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 3.0, "y": 2.0}
             ),
             decision_variables=[
                 DecisionVariable(variable_id="x", lower_bound=0, upper_bound=100),
-                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=100),
+                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=100)
             ],
-            grid_points=20,
+            grid_points=20
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -502,7 +579,7 @@ class TestPerformance:
         result = optimizer.optimize(request)
         elapsed = time.time() - start
 
-        # Hardware-sensitive budget: enforced only under ISL_PERF_STRICT
+        # Hardware-sensitive budget: enforced only under ISL_PERF_STRICT.
         assert_time_budget(elapsed * 1000, 2000, "continuous optimizer grid-20")
         assert result.optimal_point is not None
 
@@ -510,10 +587,14 @@ class TestPerformance:
         """Grid metrics should be accurately reported."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 1.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 1.0}
             ),
-            decision_variables=[DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)],
-            grid_points=11,
+            decision_variables=[
+                DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10)
+            ],
+            grid_points=11
         )
 
         optimizer = ContinuousOptimizer(seed=42)
@@ -532,14 +613,16 @@ class TestReproducibility:
         """Same seed should produce same result."""
         request = OptimisationRequest(
             objective=ObjectiveFunction(
-                variable_id="output", direction="maximize", coefficients={"x": 3.0, "y": 2.0}
+                variable_id="output",
+                direction="maximize",
+                coefficients={"x": 3.0, "y": 2.0}
             ),
             decision_variables=[
                 DecisionVariable(variable_id="x", lower_bound=0, upper_bound=10),
-                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=10),
+                DecisionVariable(variable_id="y", lower_bound=0, upper_bound=10)
             ],
             grid_points=11,
-            seed=42,
+            seed=42
         )
 
         optimizer1 = ContinuousOptimizer(seed=42)
