@@ -27,7 +27,16 @@ from src.api.main import app
 #   * the strict absolute target is enforced only when ISL_PERF_STRICT is set,
 #     i.e. on a dedicated/nightly perf runner with stable resources.
 # ---------------------------------------------------------------------------
-PERF_STRICT = os.getenv("ISL_PERF_STRICT", "").strip().lower() in ("1", "true", "yes")
+
+
+def is_perf_strict() -> bool:
+    """Whether the strict absolute throughput target is enforced.
+
+    Evaluated at call time (not import time) so tests and CI can toggle
+    ISL_PERF_STRICT via monkeypatch.setenv without an import-order trap.
+    """
+    return os.getenv("ISL_PERF_STRICT", "").strip().lower() in ("1", "true", "yes")
+
 
 # Strict absolute throughput target — enforced only under ISL_PERF_STRICT.
 STRICT_MIN_RPS = 100.0
@@ -171,7 +180,7 @@ class TestThroughputBaselines:
         print(
             f"health throughput: {best_rps:.1f} RPS "
             f"(liveness floor {LIVENESS_MIN_RPS}, strict target {STRICT_MIN_RPS}, "
-            f"strict_enforced={PERF_STRICT})"
+            f"strict_enforced={is_perf_strict()})"
         )
 
         # Always: runner-independent liveness / catastrophic-regression floor.
@@ -181,11 +190,37 @@ class TestThroughputBaselines:
         )
 
         # Strict absolute target only on a dedicated perf runner.
-        if PERF_STRICT:
+        if is_perf_strict():
             assert best_rps > STRICT_MIN_RPS, (
                 f"Health endpoint throughput {best_rps:.1f} RPS below "
                 f"{STRICT_MIN_RPS} RPS target (ISL_PERF_STRICT enforced)"
             )
+
+
+class TestPerfStrictFlag:
+    """Lock in that strict enforcement is evaluated dynamically (not frozen
+    at import), so a dedicated perf runner or a test can toggle it."""
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("1", True),
+            ("true", True),
+            ("TRUE", True),
+            ("yes", True),
+            (" 1 ", True),
+            ("0", False),
+            ("false", False),
+            ("", False),
+        ],
+    )
+    def test_is_perf_strict_reads_env_dynamically(self, monkeypatch, value, expected):
+        monkeypatch.setenv("ISL_PERF_STRICT", value)
+        assert is_perf_strict() is expected
+
+    def test_is_perf_strict_defaults_false_when_unset(self, monkeypatch):
+        monkeypatch.delenv("ISL_PERF_STRICT", raising=False)
+        assert is_perf_strict() is False
 
 
 class TestMemoryBaseline:
