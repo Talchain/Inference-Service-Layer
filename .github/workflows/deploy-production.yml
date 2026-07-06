@@ -41,7 +41,10 @@ jobs:
         run: poetry install
 
       - name: Run tests
-        run: poetry run pytest --cov --cov-report=xml --cov-report=term
+        # -m "not perf": hardware-sensitive timing budgets are excluded from all
+        # default correctness gates (see pr-ci.yml and tests/perf_utils.py); they
+        # are enforced in the dedicated perf-tests workflow with ISL_PERF_STRICT=1.
+        run: poetry run pytest --cov --cov-report=xml --cov-report=term -m "not perf"
 
       - name: Check test coverage
         run: |

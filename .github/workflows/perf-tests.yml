@@ -12,6 +12,11 @@
 # Non-blocking for PRs by construction (no pull_request trigger). Budget
 # breaches here are performance signals to triage, ideally on a dedicated
 # runner with stable resources.
+#
+# NOTE: GitHub only runs 'schedule' triggers from the repository DEFAULT
+# branch. Merging to staging does not activate the nightly run - it takes
+# effect once this file is promoted to the default branch (workflow_dispatch
+# likewise appears in the UI from the default branch).
 name: Performance Tests
 
 on:
@@ -52,11 +57,13 @@ jobs:
         env:
           ISL_AUTH_DISABLED: 'true'
           ISL_PERF_STRICT: '1'
-        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -m perf
+        # -rA: show captured output for PASSING tests too, so the measured
+        # RPS/ms figures printed by the perf helpers land in the run log.
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -rA -m perf
 
       - name: Run full suite with strict timing budgets (mixed tests enforced)
         env:
           ISL_AUTH_DISABLED: 'true'
           ISL_PERF_STRICT: '1'
         # No -x: report every budget breach in one run, not just the first.
-        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -rA
