@@ -447,6 +447,91 @@ class TestEVPI:
             assert evpi["n_evpi_samples"] <= 500  # Budget cap
 
 
+class TestEVPIBelowResolutionLabelling:
+    """T0-4 remediation: below-resolution labelling of EVPI estimates.
+
+    EVPI is a difference of two independent MC proportion estimates, so at the
+    500-sample budget cap the estimator noise is ~+/-0.03-0.06. Entries whose
+    |evpi| is inside the noise floor are LABELLED below_resolution; the raw
+    evpi value is never clamped or altered (provisional_doctrine_v0).
+    """
+
+    def test_noise_floor_formula(self):
+        """noise_floor(n) = 1.96 * sqrt(0.5 / n) — two-sided 95% worst-case bound."""
+        from src.services.robustness_analyzer_v2 import evpi_noise_floor
+
+        assert math.isclose(evpi_noise_floor(500), 1.96 * math.sqrt(0.5 / 500))
+        assert math.isclose(evpi_noise_floor(500), 0.0619806, abs_tol=1e-6)
+        assert math.isclose(evpi_noise_floor(100), 1.96 * math.sqrt(0.5 / 100))
+        # Monotone decreasing in n: more samples -> finer resolution
+        assert evpi_noise_floor(500) < evpi_noise_floor(200) < evpi_noise_floor(100)
+        # Degenerate budget: nothing is resolvable
+        assert evpi_noise_floor(0) == float("inf")
+
+    def test_labelling_fields_present_on_every_entry(self):
+        """Every factor_evpi entry carries the additive labelling fields."""
+        from src.services.robustness_analyzer_v2 import evpi_noise_floor
+
+        graph = _make_graph()
+        request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=200)
+        response = RobustnessAnalyzerV2().analyze(request)
+        assert response.factor_evpi is not None
+        for entry in response.factor_evpi:
+            assert entry["evpi_status"] in ("below_resolution", "resolved")
+            assert entry["evpi_noise_floor"] == round(evpi_noise_floor(entry["n_evpi_samples"]), 6)
+            assert entry["evpi_noise_floor_method"] == "z95_worst_case_bernoulli_diff"
+            assert entry["evpi_labelling_doctrine"] == "provisional_doctrine_v0"
+
+    def test_status_consistent_with_floor(self):
+        """evpi_status is below_resolution iff |evpi| < noise floor."""
+        from src.services.robustness_analyzer_v2 import evpi_noise_floor
+
+        graph = _make_graph()
+        request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
+        response = RobustnessAnalyzerV2().analyze(request)
+        assert response.factor_evpi is not None
+        for entry in response.factor_evpi:
+            floor = evpi_noise_floor(entry["n_evpi_samples"])
+            # Guard: skip entries within rounding distance of the boundary
+            # (evpi is rounded to 6 dp before serialisation).
+            if abs(abs(entry["evpi"]) - floor) < 2e-6:
+                continue
+            expected = "below_resolution" if abs(entry["evpi"]) < floor else "resolved"
+            assert entry["evpi_status"] == expected
+
+    def test_small_sample_entries_labelled_below_resolution(self):
+        """At n=100 (floor ~0.139) the deterministic fixture EVPIs are all noise."""
+        graph = _make_graph()
+        request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=100)
+        response = RobustnessAnalyzerV2().analyze(request)
+        assert response.factor_evpi is not None
+        assert len(response.factor_evpi) == 2
+        for entry in response.factor_evpi:
+            assert entry["evpi_status"] == "below_resolution"
+
+    def test_raw_evpi_never_clamped_by_labelling(self):
+        """Label, do NOT clamp: raw evpi stays perfect_metric - current_metric.
+
+        The deterministic fixture (seed=12345, n=500) produces a raw NEGATIVE
+        evpi entry — the audit's live pattern (e.g. fac_tech_lead -0.004). It
+        must be preserved as-is and labelled, never zeroed or clamped.
+        """
+        graph = _make_graph()
+        request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
+        response = RobustnessAnalyzerV2().analyze(request)
+        assert response.factor_evpi is not None
+        for entry in response.factor_evpi:
+            assert math.isclose(
+                entry["evpi"],
+                entry["perfect_metric"] - entry["current_metric"],
+                abs_tol=2e-6,
+            )
+        negatives = [e for e in response.factor_evpi if e["evpi"] < 0]
+        assert negatives, "fixture regression: expected a raw negative EVPI entry"
+        for entry in negatives:
+            assert entry["evpi_status"] == "below_resolution"
+
+
 # ===========================================================================
 # Task 9: Reproducibility with new fields
 # ===========================================================================

@@ -33,23 +33,19 @@ class TestRequestIdPropagation:
         response = client.get("/health")
 
         assert response.status_code == 200
-        assert "X-Request-ID" in response.headers, \
-            "X-Request-ID header missing from response"
-        assert len(response.headers["X-Request-ID"]) > 0, \
-            "X-Request-ID header is empty"
+        assert "X-Request-ID" in response.headers, "X-Request-ID header missing from response"
+        assert len(response.headers["X-Request-ID"]) > 0, "X-Request-ID header is empty"
 
     def test_provided_request_id_echoed_back(self):
         """When client provides X-Request-ID, it should be echoed back."""
         custom_request_id = f"test-{uuid.uuid4()}"
 
-        response = client.get(
-            "/health",
-            headers={"X-Request-ID": custom_request_id}
-        )
+        response = client.get("/health", headers={"X-Request-ID": custom_request_id})
 
         assert response.status_code == 200
-        assert response.headers.get("X-Request-ID") == custom_request_id, \
-            f"Expected {custom_request_id}, got {response.headers.get('X-Request-ID')}"
+        assert (
+            response.headers.get("X-Request-ID") == custom_request_id
+        ), f"Expected {custom_request_id}, got {response.headers.get('X-Request-ID')}"
 
     def test_request_id_generated_when_not_provided(self):
         """When no X-Request-ID provided, server should generate one."""
@@ -68,7 +64,7 @@ class TestRequestIdPropagation:
         response = client.post(
             "/api/v1/analysis/thresholds",
             json={"parameter_sweeps": [], "confidence_threshold": 0.1},
-            headers={"X-Request-ID": custom_request_id}
+            headers={"X-Request-ID": custom_request_id},
         )
 
         assert response.status_code == 422
@@ -84,21 +80,30 @@ class TestRequestIdPropagation:
             "/api/v1/analysis/dominance",
             json={
                 "options": [
-                    {"option_id": "A", "option_label": "Option A", "scores": {"cost": 0.3, "quality": 0.8}},
-                    {"option_id": "B", "option_label": "Option B", "scores": {"cost": 0.5, "quality": 0.9}}
+                    {
+                        "option_id": "A",
+                        "option_label": "Option A",
+                        "scores": {"cost": 0.3, "quality": 0.8},
+                    },
+                    {
+                        "option_id": "B",
+                        "option_label": "Option B",
+                        "scores": {"cost": 0.5, "quality": 0.9},
+                    },
                 ],
-                "criteria": ["cost", "quality"]
+                "criteria": ["cost", "quality"],
             },
-            headers={"X-Request-ID": custom_request_id}
+            headers={"X-Request-ID": custom_request_id},
         )
 
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.json()}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.json()}"
         data = response.json()
 
         # Check metadata contains request_id
         if "_metadata" in data:
-            assert "request_id" in data["_metadata"], \
-                "request_id missing from _metadata"
+            assert "request_id" in data["_metadata"], "request_id missing from _metadata"
 
     def test_request_id_unique_across_requests(self):
         """Generated request IDs should be unique across requests."""
@@ -107,8 +112,7 @@ class TestRequestIdPropagation:
         for _ in range(10):
             response = client.get("/health")
             request_id = response.headers.get("X-Request-ID")
-            assert request_id not in request_ids, \
-                f"Duplicate request ID generated: {request_id}"
+            assert request_id not in request_ids, f"Duplicate request ID generated: {request_id}"
             request_ids.add(request_id)
 
     def test_request_id_format_valid_uuid_or_string(self):
@@ -117,8 +121,9 @@ class TestRequestIdPropagation:
         request_id = response.headers.get("X-Request-ID")
 
         # Should be alphanumeric with dashes (UUID format) or similar
-        assert all(c.isalnum() or c in "-_" for c in request_id), \
-            f"Request ID contains invalid characters: {request_id}"
+        assert all(
+            c.isalnum() or c in "-_" for c in request_id
+        ), f"Request ID contains invalid characters: {request_id}"
 
 
 # ============================================================================
@@ -133,7 +138,7 @@ class TestErrorSchemaObservability:
         """Error responses should identify ISL as the source."""
         response = client.post(
             "/api/v1/analysis/thresholds",
-            json={"parameter_sweeps": [], "confidence_threshold": 0.1}
+            json={"parameter_sweeps": [], "confidence_threshold": 0.1},
         )
 
         assert response.status_code == 422
@@ -146,22 +151,21 @@ class TestErrorSchemaObservability:
         # Use a validation error which goes through our error handler
         response = client.post(
             "/api/v1/analysis/thresholds",
-            json={"parameter_sweeps": [], "confidence_threshold": 0.1}
+            json={"parameter_sweeps": [], "confidence_threshold": 0.1},
         )
 
         assert response.status_code == 422
         data = response.json()
 
         # At minimum, request_id should be present for correlation
-        assert "request_id" in data, \
-            "Error response must have request_id for correlation"
+        assert "request_id" in data, "Error response must have request_id for correlation"
 
     def test_error_response_retryable_flag(self):
         """Error responses should indicate if the request is retryable."""
         # Validation error - not retryable
         response = client.post(
             "/api/v1/analysis/thresholds",
-            json={"parameter_sweeps": [], "confidence_threshold": 0.1}
+            json={"parameter_sweeps": [], "confidence_threshold": 0.1},
         )
 
         assert response.status_code == 422
@@ -174,7 +178,7 @@ class TestErrorSchemaObservability:
         """Error code should be machine-readable (no spaces, uppercase)."""
         response = client.post(
             "/api/v1/analysis/thresholds",
-            json={"parameter_sweeps": [], "confidence_threshold": 0.1}
+            json={"parameter_sweeps": [], "confidence_threshold": 0.1},
         )
 
         assert response.status_code == 422
@@ -183,8 +187,9 @@ class TestErrorSchemaObservability:
 
         code = data["code"]
         # Should be uppercase with underscores (e.g., VALIDATION_ERROR)
-        assert code == code.upper() or "_" in code, \
-            f"Error code should be machine-readable format: {code}"
+        assert (
+            code == code.upper() or "_" in code
+        ), f"Error code should be machine-readable format: {code}"
 
 
 # ============================================================================
@@ -202,13 +207,15 @@ class TestResponseMetadata:
             json={
                 "options": [
                     {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
-                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}}
+                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}},
                 ],
-                "criteria": ["x"]
-            }
+                "criteria": ["x"],
+            },
         )
 
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.json()}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.json()}"
         data = response.json()
 
         # _metadata is expected in responses
@@ -224,13 +231,15 @@ class TestResponseMetadata:
             json={
                 "options": [
                     {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
-                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}}
+                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}},
                 ],
-                "criteria": ["x"]
-            }
+                "criteria": ["x"],
+            },
         )
 
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.json()}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.json()}"
         data = response.json()
 
         if "_metadata" in data and "isl_version" in data["_metadata"]:
@@ -246,18 +255,21 @@ class TestResponseMetadata:
             json={
                 "options": [
                     {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
-                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}}
+                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}},
                 ],
-                "criteria": ["x"]
-            }
+                "criteria": ["x"],
+            },
         )
 
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.json()}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.json()}"
         data = response.json()
 
         if "_metadata" in data:
-            assert "config_fingerprint" in data["_metadata"], \
-                "config_fingerprint missing from metadata"
+            assert (
+                "config_fingerprint" in data["_metadata"]
+            ), "config_fingerprint missing from metadata"
 
 
 # ============================================================================
@@ -268,23 +280,34 @@ class TestResponseMetadata:
 class TestObservabilityConsistency:
     """Tests for consistent observability across all endpoints."""
 
-    @pytest.mark.parametrize("endpoint,method,body", [
-        ("/health", "GET", None),
-        ("/api/v1/analysis/dominance", "POST", {
-            "options": [
-                {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
-                {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}}
-            ],
-            "criteria": ["x"]
-        }),
-        ("/api/v1/analysis/pareto", "POST", {
-            "options": [
-                {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
-                {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}}
-            ],
-            "criteria": ["x"]
-        }),
-    ])
+    @pytest.mark.parametrize(
+        "endpoint,method,body",
+        [
+            ("/health", "GET", None),
+            (
+                "/api/v1/analysis/dominance",
+                "POST",
+                {
+                    "options": [
+                        {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
+                        {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}},
+                    ],
+                    "criteria": ["x"],
+                },
+            ),
+            (
+                "/api/v1/analysis/pareto",
+                "POST",
+                {
+                    "options": [
+                        {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
+                        {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}},
+                    ],
+                    "criteria": ["x"],
+                },
+            ),
+        ],
+    )
     def test_request_id_header_present_all_endpoints(self, endpoint, method, body):
         """All endpoints should return X-Request-ID header."""
         if method == "GET":
@@ -293,8 +316,7 @@ class TestObservabilityConsistency:
             response = client.post(endpoint, json=body)
 
         # Any response (success or error) should have X-Request-ID
-        assert "X-Request-ID" in response.headers, \
-            f"{endpoint} missing X-Request-ID header"
+        assert "X-Request-ID" in response.headers, f"{endpoint} missing X-Request-ID header"
 
     def test_error_schema_consistent_across_endpoints(self):
         """Error schema should be consistent across all endpoints."""
@@ -312,8 +334,7 @@ class TestObservabilityConsistency:
             if response.status_code >= 400:
                 data = response.json()
                 for field in required_error_fields:
-                    assert field in data, \
-                        f"{endpoint} error missing required field: {field}"
+                    assert field in data, f"{endpoint} error missing required field: {field}"
 
 
 # ============================================================================
@@ -338,7 +359,7 @@ class TestSentryIntegration:
         """Error responses should have enough context for Sentry grouping."""
         response = client.post(
             "/api/v1/analysis/thresholds",
-            json={"parameter_sweeps": [], "confidence_threshold": 0.1}
+            json={"parameter_sweeps": [], "confidence_threshold": 0.1},
         )
 
         assert response.status_code == 422
@@ -360,10 +381,7 @@ class TestHeaderPropagation:
 
     def test_cors_headers_present(self):
         """CORS headers should be present for cross-origin requests."""
-        response = client.options(
-            "/health",
-            headers={"Origin": "http://localhost:3000"}
-        )
+        response = client.options("/health", headers={"Origin": "http://localhost:3000"})
 
         # Should have CORS headers (exact values depend on config)
         # At minimum, the request should not fail
@@ -376,25 +394,106 @@ class TestHeaderPropagation:
             json={
                 "options": [
                     {"option_id": "A", "option_label": "Option A", "scores": {"x": 0.3}},
-                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}}
+                    {"option_id": "B", "option_label": "Option B", "scores": {"x": 0.7}},
                 ],
-                "criteria": ["x"]
-            }
+                "criteria": ["x"],
+            },
         )
 
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.json()}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.json()}"
         content_type = response.headers.get("content-type", "")
-        assert "application/json" in content_type, \
-            f"Expected JSON content type, got: {content_type}"
+        assert (
+            "application/json" in content_type
+        ), f"Expected JSON content type, got: {content_type}"
 
     def test_error_responses_json_content_type(self):
         """Error responses should also be JSON."""
-        response = client.post(
-            "/api/v1/analysis/thresholds",
-            json={"parameter_sweeps": []}
-        )
+        response = client.post("/api/v1/analysis/thresholds", json={"parameter_sweeps": []})
 
         assert response.status_code == 422
         content_type = response.headers.get("content-type", "")
-        assert "application/json" in content_type, \
-            f"Error response should be JSON, got: {content_type}"
+        assert (
+            "application/json" in content_type
+        ), f"Error response should be JSON, got: {content_type}"
+
+
+# ============================================================================
+# Response Hash on Compressed Responses
+# ============================================================================
+
+
+class TestResponseHashOnGzippedResponses:
+    """Response hash must be computed over PRE-compression bytes.
+
+    Regression: GZipMiddleware used to be registered first (innermost, LIFO),
+    so ObservabilityMiddleware received gzip bytes and response hashing failed
+    on every compressed response ("Failed to compute response hash: 'utf-8'
+    codec can't decode byte 0x8b"), leaving x-olumi-response-hash absent and
+    cross-service reconciliation dead.
+    """
+
+    _ROBUSTNESS_V2_BODY = {
+        "graph": {
+            "nodes": [
+                {
+                    "id": "a",
+                    "kind": "factor",
+                    "label": "A",
+                    "observed_state": {"value": 0.5},
+                },
+                {
+                    "id": "o",
+                    "kind": "outcome",
+                    "label": "O",
+                    "observed_state": {"value": 0.0},
+                },
+            ],
+            "edges": [
+                {
+                    "from": "a",
+                    "to": "o",
+                    "strength": {"mean": 0.8, "std": 0.1},
+                    "exists_probability": 0.95,
+                }
+            ],
+        },
+        "options": [
+            {"id": "x", "label": "X", "interventions": {"a": 0.9}},
+            {"id": "y", "label": "Y", "interventions": {"a": 0.1}},
+        ],
+        "goal_node_id": "o",
+        "seed": 42,
+        "n_samples": 100,
+    }
+
+    def test_hash_present_and_matches_on_gzipped_json_response(self):
+        """Large JSON response is gzipped AND carries a valid response hash."""
+        from src.utils.canonical_hash import canonical_json_hash
+
+        response = client.post(
+            "/api/v1/robustness/analyze/v2",
+            json=self._ROBUSTNESS_V2_BODY,
+            headers={"Accept-Encoding": "gzip"},
+        )
+
+        assert response.status_code == 200, response.text[:500]
+        # Precondition: compression actually happened (response >1KB)
+        assert response.headers.get("content-encoding") == "gzip", (
+            "expected gzipped response; if compression config changed, "
+            "this test needs a larger response body"
+        )
+        response_hash = response.headers.get("x-olumi-response-hash")
+        assert response_hash, "x-olumi-response-hash missing on gzipped response"
+        # The hash must be over the pre-compression JSON, so recomputing it
+        # from the decompressed body must reproduce the header value.
+        assert response_hash == canonical_json_hash(response.json())
+
+    def test_hash_still_present_on_small_uncompressed_response(self):
+        """Responses below the gzip threshold keep their hash too."""
+        response = client.get("/health", headers={"Accept-Encoding": "gzip"})
+
+        assert response.status_code == 200
+        assert response.headers.get("content-encoding") is None
+        assert response.headers.get("x-olumi-response-hash")
