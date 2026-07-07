@@ -93,6 +93,11 @@ def main() -> None:
             std = grid["strength"]["std"]
             exists_p = grid["exists_probability"]
             threshold = case.payload["goal_threshold"]
+            # Intervention value per option, read from the payload itself so a
+            # grid change in graphs.py cannot silently desynchronise from here.
+            x_by_option = {
+                opt["id"]: opt["interventions"]["lever"] for opt in case.payload["options"]
+            }
             for seed in seeds:
                 request = build_request(
                     {**case.payload, "seed": seed, "request_id": f"scival-cal-{case.name}"}
@@ -100,7 +105,7 @@ def main() -> None:
                 response = RobustnessAnalyzerV2().analyze(request)
                 noise_applied = bool(response.metadata.auto_noise_applied)
                 for result in response.results:
-                    x = {"opt_hi": 1.0, "opt_lo": 0.5}[result.option_id]
+                    x = x_by_option[result.option_id]
                     clean = case.option_truths[result.option_id]
                     truth = (
                         noisy_truth(mean, std, exists_p, x, threshold) if noise_applied else clean

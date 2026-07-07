@@ -1,9 +1,9 @@
 {
   "provenance": {
-    "command": "poetry run python benchmarks/science-validation/exp3_determinism.py",
-    "git_sha": "9a22a1ae025551eb08cf6526c88507573bc2923c",
+    "command": "poetry run python /home/user/Inference-Service-Layer/benchmarks/science-validation/exp3_determinism.py",
+    "git_sha": "2077ce4098cebca952b24736bb9038ae68027793",
     "python": "3.11.15",
-    "generated_utc": "2026-07-07T12:57:36Z"
+    "generated_utc": "2026-07-07T14:03:00Z"
   },
   "config": {
     "n_graphs": 50,
@@ -12,16 +12,16 @@
   },
   "summary": {
     "n_graphs": 50,
-    "inprocess_raw_identical": 11,
+    "inprocess_raw_identical": 3,
     "inprocess_canonical_identical": 37,
     "inprocess_stable_identical": 50,
     "wire_ok": 50,
     "wire_raw_identical": 0,
     "wire_normalised_identical": 50,
     "volatile_fields": {
-      "_metadata.execution_time_ms": 39,
+      "_metadata.execution_time_ms": 45,
       "critiques": 34,
-      "processing_time_ms": 43,
+      "processing_time_ms": 42,
       "timestamp": 50
     },
     "cross_process": {
@@ -50,9 +50,9 @@
         21,
         22,
         23,
-        24,
         25,
         26,
+        27,
         28,
         30,
         31,
@@ -65,10 +65,12 @@
         38,
         39,
         40,
+        41,
         42,
         43,
         45,
         46,
+        48,
         49
       ],
       "order_insensitive_all_identical": true,
@@ -89,7 +91,7 @@
     {
       "graph": 1,
       "request_id": "scival-det-001",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -219,7 +221,7 @@
     {
       "graph": 14,
       "request_id": "scival-det-014",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -269,7 +271,7 @@
     {
       "graph": 19,
       "request_id": "scival-det-019",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -299,7 +301,7 @@
     {
       "graph": 22,
       "request_id": "scival-det-022",
-      "inprocess_raw_identical": false,
+      "inprocess_raw_identical": true,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -349,7 +351,7 @@
     {
       "graph": 27,
       "request_id": "scival-det-027",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -369,7 +371,7 @@
     {
       "graph": 29,
       "request_id": "scival-det-029",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -459,7 +461,7 @@
     {
       "graph": 38,
       "request_id": "scival-det-038",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -509,7 +511,7 @@
     {
       "graph": 43,
       "request_id": "scival-det-043",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -519,7 +521,7 @@
     {
       "graph": 44,
       "request_id": "scival-det-044",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -559,7 +561,7 @@
     {
       "graph": 48,
       "request_id": "scival-det-048",
-      "inprocess_raw_identical": true,
+      "inprocess_raw_identical": false,
       "inprocess_canonical_identical": true,
       "inprocess_stable_identical": true,
       "wire_status": 200,
@@ -577,5 +579,5 @@
       "wire_normalised_identical": true
     }
   ],
-  "elapsed_seconds": 403.1
+  "elapsed_seconds": 417.1
 }

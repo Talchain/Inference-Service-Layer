@@ -22,10 +22,10 @@ against §1.
 
 | Question | Verdict |
 |---|---|
-| Are the live uniform zeros in `marginal_switch_probability` true zeros? | **Not decidable at K=100, and in the fixtures examined they are not all true zeros.** Two fixture edges are genuinely under-resolved non-zeros (p ≈ 6.6×10⁻⁴ and 8×10⁻⁵); one edge per fixture graph is a true zero (bounded below 5.4×10⁻⁶). At K=100, single-seed zeros also occur for edges with p as high as ≈ 0.025. |
+| Are the live uniform zeros in `marginal_switch_probability` true zeros? | **Not decidable at K=100, and in the fixtures examined they are not all true zeros.** Two fixture edges are genuinely under-resolved non-zeros (p ≈ 6.6×10⁻⁴ and 8×10⁻⁵); one edge per fixture graph is a true zero (bounded below 6×10⁻⁶). At K=100, single-seed zeros also occur for edges with p as high as ≈ 0.025. |
 | Is the marginal-switch estimator itself sound? | **Yes.** Unbiased against closed-form truth across ten analytic cases (all exact binomial p-values ≥ 0.10); no cross-seed instability detected anywhere (all homogeneity p-values ≥ 0.01). |
 | Is the EVPI noise floor conservative, tight, or leaky? | **Regime-dependent: conservative away from the decision boundary (SD 0.5–0.9× the worst-case SE), exactly tight at the knife edge, with the ≈5% false-"resolved" rate a z95 bound implies.** Not leaky beyond its stated 95% coverage. |
-| Is same-seed output byte-identical? | **No, as shipped.** Four volatile fields (`metadata.execution_time_ms`, envelope `timestamp`, envelope `processing_time_ms`, `critiques[].id`); after masking them, 50/50 identical in-process and over the wire — but **cross-process, 42/50 still differ**: `fragile_edges`/`robust_edges` ordering follows the per-process hash salt and the `interpretation` string names a process-dependent subset of edges. All numeric content is cross-process deterministic (50/50 once ordering is normalised). |
+| Is same-seed output byte-identical? | **No, as shipped.** Four volatile fields (`metadata.execution_time_ms`, envelope `timestamp`, envelope `processing_time_ms`, `critiques[].id`); after masking them, 50/50 identical in-process and over the wire — but **cross-process, 44/50 still differ** (the exact count varies run to run with the child process's random hash salt): `fragile_edges`/`robust_edges` ordering follows the per-process hash salt and the `interpretation` string names a process-dependent subset of edges. All numeric content is cross-process deterministic (50/50 once ordering is normalised). |
 | Does 72% mean 72%? | **Without auto-noise: yes, within Monte Carlo error** (unbiased vs closed-form truth, nominal coverage). **With auto-noise (outcome/risk goals): no** — reported probabilities deviate from the no-noise truth by up to ≈ 0.17 on the tested grid; the deviation is the auto-noise heuristic itself, applied as documented. |
 
 ---
@@ -60,27 +60,30 @@ Two graph families:
 
 ### Estimator validation (margin family, closed-form truth)
 
-Pooled estimates over all K and all five seeds, exact binomial test against
-the analytic probability:
+Because the per-edge stream is seeded per (seed, edge), the smaller-K sweeps
+are prefixes of the K=100000 stream; pooled statistics therefore use only the
+largest-K row per seed — 5 × 100000 = 500,000 independent draws per edge.
+Exact binomial test against the analytic probability:
 
-| Case | Analytic p | Pooled p̂ | Binomial p-value |
+| Case | Analytic p | Pooled p̂ (K=10⁵) | Binomial p-value |
 |---|---|---|---|
-| knife_edge_p0.4 | 0.400018 | 0.399524 | 0.28 |
-| moderate_p0.05 | 0.049995 | 0.049694 | 0.10 |
-| moderate_p0.02 | 0.020002 | 0.019844 | 0.16 |
-| floor_p0.01 | 0.010001 | 0.010002 | 0.81 |
-| under_res_p0.005 | 0.005001 | 0.005066 | 0.41 |
-| under_res_p0.002 | 0.002000 | 0.002020 | 0.66 |
-| under_res_p0.001 | 0.001000 | 0.000992 | 0.70 |
-| under_res_p0.0003 | 0.000300 | 0.000280 | 0.35 |
-| under_res_p0.0001 | 0.000100 | 0.000100 | 0.89 |
+| knife_edge_p0.4 | 0.400018 | 0.399524 | 0.48 |
+| moderate_p0.05 | 0.049995 | 0.049694 | 0.33 |
+| moderate_p0.02 | 0.020002 | 0.019844 | 0.43 |
+| floor_p0.01 | 0.010001 | 0.010002 | 0.99 |
+| under_res_p0.005 | 0.005001 | 0.005066 | 0.51 |
+| under_res_p0.002 | 0.002000 | 0.002020 | 0.74 |
+| under_res_p0.001 | 0.001000 | 0.000992 | 0.88 |
+| under_res_p0.0003 | 0.000300 | 0.000280 | 0.44 |
+| under_res_p0.0001 | 0.000100 | 0.000100 | 1.00 |
 | near_zero_p3e-6 | 0.000003 | 0.000002 | 1.00 |
 
 No case rejects the analytic truth; no case shows cross-seed heterogeneity
-beyond binomial noise (all Pearson χ² homogeneity p-values ≥ 0.01, most far
-above). The estimator is sound; the only problem at K=100 is resolution.
-The ten structural-zero edges returned 0 in every one of the 555,500 draws
-each, as construction requires.
+beyond binomial noise (Pearson χ² homogeneity, run only where the expected
+flip count is ≥ 5, since the χ² approximation is invalid on sparse counts —
+all p-values ≥ 0.01, most far above). The estimator is sound; the only
+problem at K=100 is resolution. The ten structural-zero edges returned 0 in
+every draw — 500,000 independent draws each — as construction requires.
 
 ### Per-edge classification table (fixtures + margin family)
 
@@ -93,13 +96,13 @@ binomial sampling (χ² p < 0.01); **RESOLVED NON-ZERO** otherwise.
 | Graph | Edge | Class | Pooled p̂ at K=10⁵ | Note |
 |---|---|---|---|---|
 | sample_variants[0] | price→demand | RESOLVED NON-ZERO | 0.0117 | zero at K=100 on some single seeds |
-| sample_variants[0] | demand→revenue | **TRUE ZERO** | 0 (< 5.4×10⁻⁶) | |
+| sample_variants[0] | demand→revenue | **TRUE ZERO** | 0 (< 6×10⁻⁶) | |
 | sample_variants[0] | price→revenue | RESOLVED NON-ZERO | 0.0248 | zero at K=100 on some single seeds |
 | sample_variants[1] | price→demand | **UNDER-RESOLUTION NON-ZERO** | 6.6×10⁻⁴ | uniformly 0 at K=100, all 5 seeds |
-| sample_variants[1] | demand→revenue | **TRUE ZERO** | 0 (< 5.4×10⁻⁶) | |
+| sample_variants[1] | demand→revenue | **TRUE ZERO** | 0 (< 6×10⁻⁶) | |
 | sample_variants[1] | price→revenue | **UNDER-RESOLUTION NON-ZERO** | 8×10⁻⁵ | uniformly 0 at K=100, all 5 seeds |
 | sample_variants[2] | price→demand | RESOLVED NON-ZERO | 0.2237 | |
-| sample_variants[2] | demand→revenue | **TRUE ZERO** | 0 (< 5.4×10⁻⁶) | |
+| sample_variants[2] | demand→revenue | **TRUE ZERO** | 0 (< 6×10⁻⁶) | |
 | sample_variants[2] | price→revenue | RESOLVED NON-ZERO | 0.2343 | |
 | margin family ×10 | upstream→lever | **TRUE ZERO** (structural) | 0 | flip impossible by construction |
 | margin family | lever→goal | per table above | — | matches analytic truth |
@@ -186,16 +189,16 @@ margin at all**: the worst case p = 0.5 the formula assumes is the actual
 operating point.
 
 **Sign stability.** Among below-floor estimates, the sign disagreed with the
-20-seed consensus in 25–61% of replicates (true-zero factors sit near 50%, as
-pure noise should). A below-floor EVPI's sign carries no information —
-supporting the labelling doctrine.
+largest-n 20-seed consensus in 25–65% of replicates (true-zero factors sit in
+the coin-toss region, as pure noise should). A below-floor EVPI's sign
+carries no information — supporting the labelling doctrine.
 
 **False-"resolved" rate (leakage).** For the two true-zero factors
-(`common`, `stranded`), 5 of 120 knife-edge estimates and 3 of 120 comfortable
-estimates exceeded the floor and would be labelled `resolved` — ≈ 3–4%,
+(`common`, `stranded`), 6 of 240 estimates across both graphs and all three
+n levels exceeded the floor and would be labelled `resolved` — 2.5%,
 consistent with the ≈ 5% a z95 bound is designed to allow. **`resolved` is a
-95% label, not a guarantee**: roughly one in twenty truly-zero factors will be
-labelled resolved at any n.
+95% label, not a guarantee**: up to roughly one in twenty truly-zero factors
+can be labelled resolved at any n.
 
 **n-scaling.** Raising n from 500 to 10000 shrinks both floor and empirical SD
 by the expected √20 ≈ 4.5×; the material `driver` EVPI (+0.153) is unaffected
@@ -244,7 +247,7 @@ Python interpreter regenerates the same graphs and reports response hashes).
 | in-process, four volatile fields masked | **50/50** |
 | wire, raw bytes | 0/50 |
 | wire, four volatile fields masked | **50/50** |
-| cross-process, four volatile fields masked | 8/50 |
+| cross-process, four volatile fields masked | 6/50 |
 | cross-process, additionally order-normalised | **50/50** |
 
 ### Volatile-field catalogue (complete, as observed)
@@ -264,7 +267,9 @@ Python interpreter regenerates the same graphs and reports response hashes).
 ### Cross-process finding: set-order leaks into the response
 
 With the four fields above masked, same-seed responses from a *different OS
-process* still differed on 42/50 graphs. Cause (localised by controlling
+process* still differed on 44/50 graphs — the exact count varies run to run,
+since whether two processes' set orderings happen to coincide depends on each
+process's random hash salt. Cause (localised by controlling
 `PYTHONHASHSEED`): `robustness.fragile_edges` and `robustness.robust_edges`
 are materialised via `list(set(...))`
 (`src/services/robustness_analyzer_v2.py:2792–2805`), so their order follows
@@ -350,7 +355,7 @@ remains banned pending doctrine).
    implementable as labels without changing any numeric value, matching the
    labels-over-clamps precedent.
 2. **A TRUE-ZERO label is itself only a bound.** Even at K=100000 × 5 seeds,
-   "true zero" means p < 5.4×10⁻⁶ at 95% — the margin family's p ≈ 3×10⁻⁶ case
+   "true zero" means p < 6×10⁻⁶ at 95% — the margin family's p ≈ 3×10⁻⁶ case
    correctly lands in the zero bucket. Doctrine wording should say "below
    measurable resolution", not "cannot switch", unless the zero is structural
    (an intervened-on path, §1 method), which IS provable.

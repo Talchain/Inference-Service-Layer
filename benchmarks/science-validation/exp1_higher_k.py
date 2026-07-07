@@ -75,18 +75,31 @@ def sweep_edge(
 
 
 def classify(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Classify one edge from its sweep rows (see module docstring)."""
+    """Classify one edge from its sweep rows (see module docstring).
+
+    Independence caveat: the per-edge RNG stream depends only on (seed, edge),
+    so at a given seed the K=100 draws are a prefix of the K=100000 draws.
+    Rows at different K therefore OVERLAP; pooled statistics (the rule-of-three
+    bound and the zero test) use only the largest-K row per seed, which are
+    independent across seeds. The prefix property also means a flip at a
+    smaller K implies the same flip inside the largest-K row, so
+    "zero flips at K_max across all seeds" is equivalent to "zero everywhere".
+    """
     by_k: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for r in rows:
         by_k[r["k"]].append(r)
     k_min, k_max = min(by_k), max(by_k)
 
-    total_draws = sum(r["k"] for r in rows)
-    total_flips = sum(r["flips"] for r in rows)
+    max_rows = by_k[k_max]
+    n_independent = sum(r["k"] for r in max_rows)
+    flips_independent = sum(r["flips"] for r in max_rows)
     zero_at_default = all(r["flips"] == 0 for r in by_k[k_min])
-    pooled_at_max = sum(r["flips"] for r in by_k[k_max]) / sum(r["k"] for r in by_k[k_max])
+    pooled_at_max = flips_independent / n_independent
 
-    # Cross-seed binomial homogeneity per K (Pearson chi-square)
+    # Cross-seed binomial homogeneity per K (Pearson chi-square). Skipped when
+    # the expected flip count is below 5: the chi-square approximation is
+    # invalid on sparse counts and would spuriously label rare-flip edges
+    # UNSTABLE. Sparse regimes are covered by the zero/under-resolution logic.
     min_pvalue = 1.0
     for k, group in by_k.items():
         flips = [r["flips"] for r in group]
@@ -95,11 +108,13 @@ def classify(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         if n_seeds < 2 or pooled <= 0.0 or pooled >= 1.0:
             continue
         expected = k * pooled
+        if expected < 5.0:
+            continue
         chi2 = sum((f - expected) ** 2 for f in flips) / (expected * (1.0 - pooled))
         pvalue = float(stats.chi2.sf(chi2, df=n_seeds - 1))
         min_pvalue = min(min_pvalue, pvalue)
 
-    if total_flips == 0:
+    if flips_independent == 0:
         label = "TRUE_ZERO"
     elif min_pvalue < CHI2_ALPHA:
         label = "UNSTABLE"
@@ -112,8 +127,10 @@ def classify(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "classification": label,
         "zero_at_k100_all_seeds": zero_at_default,
         "pooled_p_at_k_max": pooled_at_max,
-        "pooled_p_all_draws": total_flips / total_draws,
-        "rule_of_three_upper_bound": rule_of_three_upper(total_draws) if total_flips == 0 else None,
+        "n_independent_draws": n_independent,
+        "rule_of_three_upper_bound": (
+            rule_of_three_upper(n_independent) if flips_independent == 0 else None
+        ),
         "min_homogeneity_pvalue": min_pvalue,
         "k_max": k_max,
     }
@@ -142,11 +159,14 @@ def run_margin_family(
                 **summary,
                 "rows": rows,
             }
-            # Consistency of the pooled estimate with the analytic truth
+            # Consistency of the pooled estimate with the analytic truth.
+            # Only the largest-K row per seed is used: smaller-K rows are
+            # prefixes of the same RNG stream, not independent draws.
             if kind == "decisive":
                 p = case.analytic_flip_probability
-                n = sum(r["k"] for r in rows)
-                x = sum(r["flips"] for r in rows)
+                max_k = max(r["k"] for r in rows)
+                n = sum(r["k"] for r in rows if r["k"] == max_k)
+                x = sum(r["flips"] for r in rows if r["k"] == max_k)
                 # Exact binomial two-sided p-value against the analytic truth
                 entry["binom_pvalue_vs_analytic"] = float(
                     stats.binomtest(x, n, p).pvalue if n > 0 else 1.0

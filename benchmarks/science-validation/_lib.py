@@ -20,7 +20,7 @@ import sys
 import time
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Tuple
+from typing import Any, Dict, Iterator, Tuple
 
 HARNESS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = HARNESS_DIR.parent.parent
@@ -49,8 +49,6 @@ SEEDS: Dict[str, Any] = {
     "exp3_request_seed": 42,
     "exp4_request_seed": 42,
 }
-
-MARGINAL_K_DEFAULT = 100  # mirrors MARGINAL_K_SAMPLES in robustness_analyzer_v2
 
 
 # ---------------------------------------------------------------------------
@@ -165,16 +163,8 @@ def rule_of_three_upper(n_zero_draws: int) -> float:
     return 3.0 / n_zero_draws if n_zero_draws > 0 else float("inf")
 
 
-def timed(fn: Callable[[], Any]) -> Tuple[Any, float]:
-    """Run fn, returning (result, elapsed_seconds)."""
-    t0 = time.perf_counter()
-    result = fn()
-    return result, time.perf_counter() - t0
-
-
 __all__ = [
     "HARNESS_DIR",
-    "MARGINAL_K_DEFAULT",
     "REPO_ROOT",
     "RESULTS_DIR",
     "SEEDS",
@@ -186,5 +176,4 @@ __all__ = [
     "override_marginal_k",
     "rule_of_three_upper",
     "save_result",
-    "timed",
 ]

@@ -131,12 +131,6 @@ def order_insensitive_json(raw_json: str) -> str:
     return json.dumps(body, sort_keys=True)
 
 
-def analyze_canonical(payload: Dict[str, Any]) -> str:
-    request = build_request(payload)
-    response = RobustnessAnalyzerV2().analyze(request)
-    return canonical_response_json(response)
-
-
 CHILD_SCRIPT = """
 import hashlib, json, logging, sys
 logging.disable(logging.WARNING)
@@ -242,13 +236,19 @@ def main() -> None:
             cwd=REPO_ROOT,
             timeout=1800,
         )
-        if child.returncode != 0:
-            cross_process = {"run": True, "error": child.stderr[-2000:]}
+        child_stdout_lines = child.stdout.strip().splitlines()
+        if child.returncode != 0 or not child_stdout_lines:
+            cross_process = {
+                "run": True,
+                "error": child.stderr[-2000:] if child.stderr else "empty child stdout",
+            }
         else:
-            child_hashes = json.loads(child.stdout.strip().splitlines()[-1])
+            child_hashes = json.loads(child_stdout_lines[-1])
+            # strict=True: a truncated child hash list must fail loudly, not
+            # silently shorten the comparison.
             mismatches = [
                 i
-                for i, (a, b) in enumerate(zip(parent_hashes, child_hashes["stable"], strict=False))
+                for i, (a, b) in enumerate(zip(parent_hashes, child_hashes["stable"], strict=True))
                 if a != b
             ]
             orderless_mismatches = [
@@ -257,7 +257,7 @@ def main() -> None:
                     zip(
                         parent_orderless_hashes,
                         child_hashes["order_insensitive"],
-                        strict=False,
+                        strict=True,
                     )
                 )
                 if a != b

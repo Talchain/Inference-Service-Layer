@@ -1,9 +1,9 @@
 {
   "provenance": {
     "command": "poetry run python /home/user/Inference-Service-Layer/benchmarks/science-validation/exp1_higher_k.py",
-    "git_sha": "9a22a1ae025551eb08cf6526c88507573bc2923c",
+    "git_sha": "2077ce4098cebca952b24736bb9038ae68027793",
     "python": "3.11.15",
-    "generated_utc": "2026-07-07T12:40:33Z"
+    "generated_utc": "2026-07-07T13:55:06Z"
   },
   "config": {
     "k_levels": [
@@ -36,7 +36,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.399524,
-      "pooled_p_all_draws": 0.39930693069306933,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.6450682484949296,
       "k_max": 100000,
@@ -162,7 +162,7 @@
           "flips": 40035
         }
       ],
-      "binom_pvalue_vs_analytic": 0.27934266349800274
+      "binom_pvalue_vs_analytic": 0.47583248800029987
     },
     {
       "family": "margin",
@@ -174,8 +174,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -311,7 +311,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.049694,
-      "pooled_p_all_draws": 0.049519351935193516,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.5503044515845192,
       "k_max": 100000,
@@ -437,7 +437,7 @@
           "flips": 5028
         }
       ],
-      "binom_pvalue_vs_analytic": 0.1040966210664021
+      "binom_pvalue_vs_analytic": 0.3303669864585229
     },
     {
       "family": "margin",
@@ -449,8 +449,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -586,7 +586,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.019844,
-      "pooled_p_all_draws": 0.019735373537353735,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.46999178071590364,
       "k_max": 100000,
@@ -712,7 +712,7 @@
           "flips": 2008
         }
       ],
-      "binom_pvalue_vs_analytic": 0.15610315549473056
+      "binom_pvalue_vs_analytic": 0.42781944649094195
     },
     {
       "family": "margin",
@@ -724,8 +724,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -861,9 +861,9 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.010002,
-      "pooled_p_all_draws": 0.009967596759675968,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.07283643873352923,
+      "min_homogeneity_pvalue": 0.5250641709678416,
       "k_max": 100000,
       "rows": [
         {
@@ -987,7 +987,7 @@
           "flips": 1013
         }
       ],
-      "binom_pvalue_vs_analytic": 0.8082298676561789
+      "binom_pvalue_vs_analytic": 0.9943300356787259
     },
     {
       "family": "margin",
@@ -999,8 +999,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -1136,9 +1136,9 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.005066,
-      "pooled_p_all_draws": 0.005078307830783078,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.2518051024620578,
+      "min_homogeneity_pvalue": 0.5487725908169938,
       "k_max": 100000,
       "rows": [
         {
@@ -1262,7 +1262,7 @@
           "flips": 509
         }
       ],
-      "binom_pvalue_vs_analytic": 0.4079962512322355
+      "binom_pvalue_vs_analytic": 0.5082091042896262
     },
     {
       "family": "margin",
@@ -1274,8 +1274,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -1411,7 +1411,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.00202,
-      "pooled_p_all_draws": 0.0020252025202520253,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.31123329576976916,
       "k_max": 100000,
@@ -1537,7 +1537,7 @@
           "flips": 210
         }
       ],
-      "binom_pvalue_vs_analytic": 0.6632322245316975
+      "binom_pvalue_vs_analytic": 0.7396101254549863
     },
     {
       "family": "margin",
@@ -1549,8 +1549,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -1686,9 +1686,9 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.000992,
-      "pooled_p_all_draws": 0.000982898289828983,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.40492208476457436,
+      "min_homogeneity_pvalue": 0.6463603610089487,
       "k_max": 100000,
       "rows": [
         {
@@ -1812,7 +1812,7 @@
           "flips": 104
         }
       ],
-      "binom_pvalue_vs_analytic": 0.7024483270874118
+      "binom_pvalue_vs_analytic": 0.8755699918590348
     },
     {
       "family": "margin",
@@ -1824,8 +1824,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -1961,9 +1961,9 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.00028,
-      "pooled_p_all_draws": 0.0002772277227722772,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.40492208476457436,
+      "min_homogeneity_pvalue": 0.43563114020608285,
       "k_max": 100000,
       "rows": [
         {
@@ -2087,7 +2087,7 @@
           "flips": 34
         }
       ],
-      "binom_pvalue_vs_analytic": 0.35242260109224643
+      "binom_pvalue_vs_analytic": 0.43788388281675367
     },
     {
       "family": "margin",
@@ -2099,8 +2099,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -2236,7 +2236,7 @@
       "classification": "UNDER_RESOLUTION_NONZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0001,
-      "pooled_p_all_draws": 9.72097209720972e-05,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.135851234530767,
       "k_max": 100000,
@@ -2362,7 +2362,7 @@
           "flips": 16
         }
       ],
-      "binom_pvalue_vs_analytic": 0.8933118064752927
+      "binom_pvalue_vs_analytic": 1.0
     },
     {
       "family": "margin",
@@ -2374,8 +2374,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -2511,9 +2511,9 @@
       "classification": "UNDER_RESOLUTION_NONZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 2e-06,
-      "pooled_p_all_draws": 1.8001800180018002e-06,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.40600476702648935,
+      "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
         {
@@ -2649,8 +2649,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -2787,9 +2787,9 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.01174,
-      "pooled_p_all_draws": 0.011672367236723673,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.09040835047244855,
+      "min_homogeneity_pvalue": 0.6279698347817922,
       "k_max": 100000,
       "rows": [
         {
@@ -2923,8 +2923,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -3059,7 +3059,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.024808,
-      "pooled_p_all_draws": 0.024883888388838885,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.13532614081671548,
       "k_max": 100000,
@@ -3195,7 +3195,7 @@
       "classification": "UNDER_RESOLUTION_NONZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.000656,
-      "pooled_p_all_draws": 0.0006552655265526552,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.45115212819401584,
       "k_max": 100000,
@@ -3331,8 +3331,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -3467,9 +3467,9 @@
       "classification": "UNDER_RESOLUTION_NONZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 8e-05,
-      "pooled_p_all_draws": 8.460846084608461e-05,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
-      "min_homogeneity_pvalue": 0.40589757065642634,
+      "min_homogeneity_pvalue": 0.7357294496330056,
       "k_max": 100000,
       "rows": [
         {
@@ -3603,7 +3603,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.223714,
-      "pooled_p_all_draws": 0.22373537353735373,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.0865042727282675,
       "k_max": 100000,
@@ -3739,8 +3739,8 @@
       "classification": "TRUE_ZERO",
       "zero_at_k100_all_seeds": true,
       "pooled_p_at_k_max": 0.0,
-      "pooled_p_all_draws": 0.0,
-      "rule_of_three_upper_bound": 5.400540054005401e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
       "min_homogeneity_pvalue": 1.0,
       "k_max": 100000,
       "rows": [
@@ -3875,7 +3875,7 @@
       "classification": "RESOLVED_NONZERO",
       "zero_at_k100_all_seeds": false,
       "pooled_p_at_k_max": 0.23423,
-      "pooled_p_all_draws": 0.2341962196219622,
+      "n_independent_draws": 500000,
       "rule_of_three_upper_bound": null,
       "min_homogeneity_pvalue": 0.46685329824943855,
       "k_max": 100000,
@@ -4461,5 +4461,5 @@
       ]
     }
   ],
-  "elapsed_seconds": 106.4
+  "elapsed_seconds": 106.3
 }

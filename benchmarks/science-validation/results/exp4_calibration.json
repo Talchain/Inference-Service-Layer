@@ -1,9 +1,9 @@
 {
   "provenance": {
     "command": "poetry run python /home/user/Inference-Service-Layer/benchmarks/science-validation/exp4_calibration.py",
-    "git_sha": "9a22a1ae025551eb08cf6526c88507573bc2923c",
+    "git_sha": "2077ce4098cebca952b24736bb9038ae68027793",
     "python": "3.11.15",
-    "generated_utc": "2026-07-07T12:48:28Z"
+    "generated_utc": "2026-07-07T14:03:12Z"
   },
   "config": {
     "n_samples": 10000,
@@ -2555,5 +2555,5 @@
       "covered_95": true
     }
   ],
-  "elapsed_seconds": 10.9
+  "elapsed_seconds": 11.3
 }

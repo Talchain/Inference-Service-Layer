@@ -146,25 +146,35 @@ def main() -> None:
             "cells": [],
         }
 
-        # Per-seed estimates at each n
+        # Per-seed estimates at each n, collected before summarising so the
+        # sign reference can come from the largest-n consensus.
+        estimates_by_n: Dict[int, Dict[str, List[float]]] = {}
         for n in n_levels:
-            floor = evpi_noise_floor(n)
             per_factor: Dict[str, List[float]] = {}
             for seed in seeds:
                 estimates = evpi_at_n(request_f, evaluator, seed, n, policy)
                 for factor, value in estimates.items():
                     per_factor.setdefault(factor, []).append(value)
-            # Reference sign: sign of the large-n consensus (mean at the
-            # largest n gets computed on the final pass; for the true-zero
-            # factor the reference is arbitrary — that is the point).
-            for factor, values in per_factor.items():
-                mean = statistics.fmean(values)
-                reference_sign = 1 if mean >= 0 else -1
+            estimates_by_n[n] = per_factor
+
+        # Reference sign per factor: the mean at the LARGEST n (best available
+        # consensus). For true-zero factors the reference is arbitrary noise —
+        # that is the point: their below-floor sign-flip rate should sit near
+        # the coin-toss region.
+        n_max = max(n_levels)
+        reference_sign = {
+            factor: (1 if statistics.fmean(values) >= 0 else -1)
+            for factor, values in estimates_by_n[n_max].items()
+        }
+
+        for n in n_levels:
+            floor = evpi_noise_floor(n)
+            for factor, values in estimates_by_n[n].items():
                 cell = {
                     "factor": factor,
                     "true_evpi_is_zero": factor == "stranded",
                     "n": n,
-                    **summarise(values, floor, reference_sign),
+                    **summarise(values, floor, reference_sign[factor]),
                     "estimates": values,
                 }
                 graph_result["cells"].append(cell)

@@ -17,6 +17,13 @@ All work is on that branch. Draft PR: see the PR titled
   `docs/science-validation/REPORT.md`.
 - No `src/` changes made. Recommended src changes are written up as findings
   only (REPORT section "Doctrine-relevant findings").
+- Code-review pass (2026-07-07, same session): corrected exp1's pooled
+  statistics for overlapping RNG streams (the smaller-K sweeps are prefixes of
+  the K=100000 stream, so only the largest-K rows are independent — the
+  TRUE-ZERO bound is 6e-6, not the 5.4e-6 first stated), guarded the chi-square
+  homogeneity test against sparse counts, and tightened exp2's sign-flip
+  reference to the largest-n consensus. All classifications and headline
+  conclusions are unchanged; results/ regenerated.
 
 ## Headline results (details and reproduction commands in REPORT.md)
 
@@ -29,7 +36,7 @@ All work is on that branch. Draft PR: see the PR titled
 2. **EVPI floor**: conservative in comfortable regimes (empirical SD 0.5-0.9x
    the worst-case SE), exactly tight at knife-edge (P(win) ~ 0.5) with ~5%
    false-"resolved" rate on true-zero factors — as a 95% bound should behave.
-   Below-floor signs flip across seeds 25-61% of the time.
+   Below-floor signs flip across seeds 25-65% of the time.
    Bonus structural finding: under the p_win metric, factor EVPI is exactly
    zero for any factor whose causal path no option intervenes on
    (common-mode cancellation) — such factors' reported EVPI is pure MC noise.
@@ -38,7 +45,8 @@ All work is on that branch. Draft PR: see the PR titled
    envelope processing_time_ms, and critiques[].id (uuid4 per run,
    src/models/critique.py:34 — recommended fix written up, not made).
    With those masked: 50/50 identical in-process and over the wire. **Across
-   OS processes, 45/50 graphs differed**: robustness.fragile_edges /
+   OS processes, 44/50 graphs differed** (count varies with the process hash
+   salt): robustness.fragile_edges /
    robust_edges are built via list(set(...)) so their ORDER follows the
    per-process string-hash salt (PYTHONHASHSEED), and the user-facing
    robustness.interpretation string names the first three entries of that
