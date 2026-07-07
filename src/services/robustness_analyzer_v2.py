@@ -13,6 +13,7 @@ This enables answering:
 
 import hashlib
 import logging
+import math
 import time
 import uuid
 from collections import defaultdict, deque
@@ -88,6 +89,41 @@ EDGE_STRENGTH_MAX = 1.0
 
 # Default samples for marginal switch probability calculation
 MARGINAL_K_SAMPLES = 100
+
+# --- EVPI below-resolution labelling (provisional_doctrine_v0) ------------------
+# EVPI is the difference of two Monte Carlo proportion estimates
+# (perfect_metric - baseline_metric), each computed over n_evpi_samples draws
+# with INDEPENDENT seed streams (baseline: seed+100/101; perfect: per-factor
+# hash seeds), i.e. no common-random-numbers pairing, so the variances add:
+#
+#   Var(evpi_hat) = Var(p_perfect_hat) + Var(p_baseline_hat)
+#                 <= 2 * (0.25 / n)          [worst case p = 0.5 for a proportion]
+#   SE_max(evpi_hat) = sqrt(0.5 / n)
+#
+# The noise floor is the two-sided 95% bound on that worst-case standard error:
+#
+#   noise_floor(n) = 1.96 * sqrt(0.5 / n)    (~0.062 at the n=500 budget cap)
+#
+# The worst-case p=0.5 bound is used instead of a plug-in estimate
+# sqrt((p1*(1-p1) + p2*(1-p2)) / n) because the plug-in collapses to 0 when an
+# estimated metric hits 0 or 1 at small n, understating the true uncertainty.
+# Entries with |evpi| < noise_floor are LABELLED below-resolution; the raw evpi
+# value is never altered or clamped (labels over clamps per audit T0-4).
+EVPI_NOISE_FLOOR_Z = 1.96
+EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
+
+
+def evpi_noise_floor(n_samples: int) -> float:
+    """Return the MC noise floor for an EVPI estimate over n_samples draws.
+
+    Formula: EVPI_NOISE_FLOOR_Z * sqrt(0.5 / n_samples) — the two-sided 95%
+    bound on the worst-case standard error of a difference of two independent
+    Bernoulli proportion estimates (see module comment above for derivation).
+    """
+    if n_samples <= 0:
+        # Degenerate: nothing is resolvable with no samples.
+        return float("inf")
+    return EVPI_NOISE_FLOOR_Z * math.sqrt(0.5 / n_samples)
 
 
 def filter_inference_graph(graph: GraphV2, *, log: bool = True) -> GraphV2:
@@ -3073,6 +3109,12 @@ class RobustnessAnalyzerV2:
 
             evpi = perfect_metric - baseline_metric
 
+            # Below-resolution labelling (provisional_doctrine_v0): flag EVPI
+            # estimates smaller in magnitude than the MC noise floor for this
+            # sample budget. Additive, label-only — the raw evpi is untouched.
+            noise_floor = evpi_noise_floor(n_samples)
+            below_resolution = abs(evpi) < noise_floor
+
             results.append(
                 {
                     "factor_id": uncertainty.node_id,
@@ -3084,6 +3126,17 @@ class RobustnessAnalyzerV2:
                     if request.goal_constraints
                     else "p_win_recommended",
                     "n_evpi_samples": n_samples,
+                    # Additive labelling fields (provisional_doctrine_v0).
+                    # Safe additive extension: factor_evpi entries are
+                    # Dict[str, Any] at every hop (analyzer -> V1 model ->
+                    # V2 envelope) and no cross-service consumer parses
+                    # these entries strictly (verified 2026-07-07: PLoT has
+                    # no factor_evpi reference; DGAI debug export treats it
+                    # as unknown[]). Raw evpi is never clamped or altered.
+                    "evpi_status": "below_resolution" if below_resolution else "resolved",
+                    "evpi_noise_floor": round(noise_floor, 6),
+                    "evpi_noise_floor_method": "z95_worst_case_bernoulli_diff",
+                    "evpi_labelling_doctrine": EVPI_LABELLING_DOCTRINE,
                 }
             )
 
