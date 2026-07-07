@@ -1,0 +1,4465 @@
+{
+  "provenance": {
+    "command": "poetry run python /home/user/Inference-Service-Layer/benchmarks/science-validation/exp1_higher_k.py",
+    "git_sha": "2077ce4098cebca952b24736bb9038ae68027793",
+    "python": "3.11.15",
+    "generated_utc": "2026-07-07T13:55:06Z"
+  },
+  "config": {
+    "k_levels": [
+      100,
+      1000,
+      10000,
+      100000
+    ],
+    "seeds": [
+      42,
+      1042,
+      2042,
+      3042,
+      4042
+    ],
+    "chi2_alpha": 0.01
+  },
+  "reproducibility": {
+    "identical_on_repeat": true,
+    "mismatches": []
+  },
+  "margin_family": [
+    {
+      "family": "margin",
+      "case": "knife_edge_p0.4",
+      "regime": "knife_edge",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.40001819808051053,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.399524,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.6450682484949296,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.39,
+          "flips": 39
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.41,
+          "flips": 41
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.42,
+          "flips": 42
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.41,
+          "flips": 41
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.47,
+          "flips": 47
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.385,
+          "flips": 385
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.4,
+          "flips": 400
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.392,
+          "flips": 392
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.415,
+          "flips": 415
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.399,
+          "flips": 399
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.3981,
+          "flips": 3981
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.3951,
+          "flips": 3951
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.3913,
+          "flips": 3913
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.4005,
+          "flips": 4005
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.4002,
+          "flips": 4002
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.39956,
+          "flips": 39956
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.40089,
+          "flips": 40089
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.39844,
+          "flips": 39844
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.39838,
+          "flips": 39838
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.40035,
+          "flips": 40035
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.47583248800029987
+    },
+    {
+      "family": "margin",
+      "case": "knife_edge_p0.4",
+      "regime": "knife_edge",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "moderate_p0.05",
+      "regime": "comfortable",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.049995230266714735,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.049694,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.5503044515845192,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.05,
+          "flips": 5
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.05,
+          "flips": 5
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.07,
+          "flips": 7
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.04,
+          "flips": 4
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.06,
+          "flips": 6
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.036,
+          "flips": 36
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.048,
+          "flips": 48
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.051,
+          "flips": 51
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.044,
+          "flips": 44
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.043,
+          "flips": 43
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0482,
+          "flips": 482
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0479,
+          "flips": 479
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0485,
+          "flips": 485
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0461,
+          "flips": 461
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0505,
+          "flips": 505
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.05027,
+          "flips": 5027
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.04953,
+          "flips": 4953
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.04903,
+          "flips": 4903
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.04936,
+          "flips": 4936
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.05028,
+          "flips": 5028
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.3303669864585229
+    },
+    {
+      "family": "margin",
+      "case": "moderate_p0.05",
+      "regime": "comfortable",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "moderate_p0.02",
+      "regime": "comfortable",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.020002407981539516,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.019844,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.46999178071590364,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.01,
+          "flips": 1
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.03,
+          "flips": 3
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.02,
+          "flips": 2
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.04,
+          "flips": 4
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.02,
+          "flips": 2
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.016,
+          "flips": 16
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.022,
+          "flips": 22
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.017,
+          "flips": 17
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.02,
+          "flips": 20
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.017,
+          "flips": 17
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0201,
+          "flips": 201
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0184,
+          "flips": 184
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0185,
+          "flips": 185
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0169,
+          "flips": 169
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0198,
+          "flips": 198
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.02015,
+          "flips": 2015
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.01944,
+          "flips": 1944
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.01997,
+          "flips": 1997
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.01958,
+          "flips": 1958
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.02008,
+          "flips": 2008
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.42781944649094195
+    },
+    {
+      "family": "margin",
+      "case": "moderate_p0.02",
+      "regime": "comfortable",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "floor_p0.01",
+      "regime": "floor",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.010001347148959503,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.010002,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.5250641709678416,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.03,
+          "flips": 3
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.01,
+          "flips": 1
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.009,
+          "flips": 9
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.013,
+          "flips": 13
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.009,
+          "flips": 9
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.011,
+          "flips": 11
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.009,
+          "flips": 9
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0106,
+          "flips": 106
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0097,
+          "flips": 97
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0098,
+          "flips": 98
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0082,
+          "flips": 82
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0098,
+          "flips": 98
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.01008,
+          "flips": 1008
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00985,
+          "flips": 985
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.01005,
+          "flips": 1005
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0099,
+          "flips": 990
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.01013,
+          "flips": 1013
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.9943300356787259
+    },
+    {
+      "family": "margin",
+      "case": "floor_p0.01",
+      "regime": "floor",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.005",
+      "regime": "under_resolution",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.0050005311902348686,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.005066,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.5487725908169938,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.02,
+          "flips": 2
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.01,
+          "flips": 1
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.003,
+          "flips": 3
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.005,
+          "flips": 5
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.005,
+          "flips": 5
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.008,
+          "flips": 8
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.004,
+          "flips": 4
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0055,
+          "flips": 55
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.005,
+          "flips": 50
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0058,
+          "flips": 58
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0042,
+          "flips": 42
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0055,
+          "flips": 55
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.00504,
+          "flips": 504
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00506,
+          "flips": 506
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.00522,
+          "flips": 522
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.00492,
+          "flips": 492
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.00509,
+          "flips": 509
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.5082091042896262
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.005",
+      "regime": "under_resolution",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.002",
+      "regime": "under_resolution",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.0019999090048568647,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.00202,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.31123329576976916,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.01,
+          "flips": 1
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.003,
+          "flips": 3
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.002,
+          "flips": 2
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.002,
+          "flips": 2
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.003,
+          "flips": 3
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.002,
+          "flips": 2
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.002,
+          "flips": 20
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0023,
+          "flips": 23
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0024,
+          "flips": 24
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0012,
+          "flips": 12
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0023,
+          "flips": 23
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.00215,
+          "flips": 215
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00209,
+          "flips": 209
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.00193,
+          "flips": 193
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.00183,
+          "flips": 183
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0021,
+          "flips": 210
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.7396101254549863
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.002",
+      "regime": "under_resolution",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.001",
+      "regime": "under_resolution",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.0010002829673324291,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.000992,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.6463603610089487,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.01,
+          "flips": 1
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.002,
+          "flips": 2
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.001,
+          "flips": 1
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.002,
+          "flips": 2
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0011,
+          "flips": 11
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0008,
+          "flips": 8
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0009,
+          "flips": 9
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0007,
+          "flips": 7
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0009,
+          "flips": 9
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0011,
+          "flips": 110
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00098,
+          "flips": 98
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.00093,
+          "flips": 93
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.00091,
+          "flips": 91
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.00104,
+          "flips": 104
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.8755699918590348
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.001",
+      "regime": "under_resolution",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.0003",
+      "regime": "under_resolution",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.0003001984742296474,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.00028,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.43563114020608285,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.01,
+          "flips": 1
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.001,
+          "flips": 1
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0002,
+          "flips": 2
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0002,
+          "flips": 2
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0001,
+          "flips": 1
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0004,
+          "flips": 4
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0003,
+          "flips": 3
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.00024,
+          "flips": 24
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00033,
+          "flips": 33
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.00026,
+          "flips": 26
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.00023,
+          "flips": 23
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.00034,
+          "flips": 34
+        }
+      ],
+      "binom_pvalue_vs_analytic": 0.43788388281675367
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.0003",
+      "regime": "under_resolution",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.0001",
+      "regime": "under_resolution",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 0.00010016688415326785,
+      "classification": "UNDER_RESOLUTION_NONZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0001,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.135851234530767,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0001,
+          "flips": 1
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0001,
+          "flips": 1
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0002,
+          "flips": 2
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 9e-05,
+          "flips": 9
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00012,
+          "flips": 12
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 5e-05,
+          "flips": 5
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 8e-05,
+          "flips": 8
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.00016,
+          "flips": 16
+        }
+      ],
+      "binom_pvalue_vs_analytic": 1.0
+    },
+    {
+      "family": "margin",
+      "case": "under_res_p0.0001",
+      "regime": "under_resolution",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "margin",
+      "case": "near_zero_p3e-6",
+      "regime": "near_zero",
+      "edge": "lever->goal",
+      "edge_role": "decisive",
+      "analytic_p": 3.4498701430109276e-06,
+      "classification": "UNDER_RESOLUTION_NONZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 2e-06,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 1e-05,
+          "flips": 1
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ],
+      "binom_pvalue_vs_analytic": 1.0
+    },
+    {
+      "family": "margin",
+      "case": "near_zero_p3e-6",
+      "regime": "near_zero",
+      "edge": "upstream->lever",
+      "edge_role": "structural_zero",
+      "analytic_p": 0.0,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    }
+  ],
+  "fixture_family": [
+    {
+      "family": "fixture",
+      "case": "sample_variants[0]",
+      "edge": "price->demand",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.01174,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.6279698347817922,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.02,
+          "flips": 2
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.006,
+          "flips": 6
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.012,
+          "flips": 12
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.012,
+          "flips": 12
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.011,
+          "flips": 11
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.012,
+          "flips": 12
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0117,
+          "flips": 117
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0109,
+          "flips": 109
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0106,
+          "flips": 106
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0111,
+          "flips": 111
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0116,
+          "flips": 116
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.01194,
+          "flips": 1194
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.01168,
+          "flips": 1168
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0118,
+          "flips": 1180
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.01167,
+          "flips": 1167
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.01161,
+          "flips": 1161
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[0]",
+      "edge": "demand->revenue",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[0]",
+      "edge": "price->revenue",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.024808,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.13532614081671548,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.04,
+          "flips": 4
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.05,
+          "flips": 5
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.04,
+          "flips": 4
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.02,
+          "flips": 2
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.018,
+          "flips": 18
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.023,
+          "flips": 23
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.033,
+          "flips": 33
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.032,
+          "flips": 32
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.024,
+          "flips": 24
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0255,
+          "flips": 255
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0257,
+          "flips": 257
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0271,
+          "flips": 271
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.022,
+          "flips": 220
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0271,
+          "flips": 271
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.02488,
+          "flips": 2488
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.02464,
+          "flips": 2464
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.02526,
+          "flips": 2526
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.02391,
+          "flips": 2391
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.02535,
+          "flips": 2535
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[1]",
+      "edge": "price->demand",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "UNDER_RESOLUTION_NONZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.000656,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.45115212819401584,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.001,
+          "flips": 1
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.001,
+          "flips": 1
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.001,
+          "flips": 1
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0005,
+          "flips": 5
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0005,
+          "flips": 5
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0008,
+          "flips": 8
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0008,
+          "flips": 8
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0007,
+          "flips": 7
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.00055,
+          "flips": 55
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.00068,
+          "flips": 68
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.00067,
+          "flips": 67
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.00062,
+          "flips": 62
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.00076,
+          "flips": 76
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[1]",
+      "edge": "demand->revenue",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[1]",
+      "edge": "price->revenue",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "UNDER_RESOLUTION_NONZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 8e-05,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.7357294496330056,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.001,
+          "flips": 1
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0001,
+          "flips": 1
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0002,
+          "flips": 2
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0002,
+          "flips": 2
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0001,
+          "flips": 1
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 5e-05,
+          "flips": 5
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0001,
+          "flips": 10
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 7e-05,
+          "flips": 7
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 9e-05,
+          "flips": 9
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 9e-05,
+          "flips": 9
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[2]",
+      "edge": "price->demand",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.223714,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.0865042727282675,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.21,
+          "flips": 21
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.23,
+          "flips": 23
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.23,
+          "flips": 23
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.19,
+          "flips": 19
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.15,
+          "flips": 15
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.221,
+          "flips": 221
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.225,
+          "flips": 225
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.233,
+          "flips": 233
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.213,
+          "flips": 213
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.227,
+          "flips": 227
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.2229,
+          "flips": 2229
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.22,
+          "flips": 2200
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.2262,
+          "flips": 2262
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.2219,
+          "flips": 2219
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.2298,
+          "flips": 2298
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.22114,
+          "flips": 22114
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.22267,
+          "flips": 22267
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.2238,
+          "flips": 22380
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.22578,
+          "flips": 22578
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.22518,
+          "flips": 22518
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[2]",
+      "edge": "demand->revenue",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "TRUE_ZERO",
+      "zero_at_k100_all_seeds": true,
+      "pooled_p_at_k_max": 0.0,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": 6e-06,
+      "min_homogeneity_pvalue": 1.0,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.0,
+          "flips": 0
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.0,
+          "flips": 0
+        }
+      ]
+    },
+    {
+      "family": "fixture",
+      "case": "sample_variants[2]",
+      "edge": "price->revenue",
+      "edge_role": "fixture",
+      "analytic_p": null,
+      "classification": "RESOLVED_NONZERO",
+      "zero_at_k100_all_seeds": false,
+      "pooled_p_at_k_max": 0.23423,
+      "n_independent_draws": 500000,
+      "rule_of_three_upper_bound": null,
+      "min_homogeneity_pvalue": 0.46685329824943855,
+      "k_max": 100000,
+      "rows": [
+        {
+          "k": 100,
+          "seed": 42,
+          "p_hat": 0.2,
+          "flips": 20
+        },
+        {
+          "k": 100,
+          "seed": 1042,
+          "p_hat": 0.28,
+          "flips": 28
+        },
+        {
+          "k": 100,
+          "seed": 2042,
+          "p_hat": 0.23,
+          "flips": 23
+        },
+        {
+          "k": 100,
+          "seed": 3042,
+          "p_hat": 0.28,
+          "flips": 28
+        },
+        {
+          "k": 100,
+          "seed": 4042,
+          "p_hat": 0.2,
+          "flips": 20
+        },
+        {
+          "k": 1000,
+          "seed": 42,
+          "p_hat": 0.216,
+          "flips": 216
+        },
+        {
+          "k": 1000,
+          "seed": 1042,
+          "p_hat": 0.222,
+          "flips": 222
+        },
+        {
+          "k": 1000,
+          "seed": 2042,
+          "p_hat": 0.235,
+          "flips": 235
+        },
+        {
+          "k": 1000,
+          "seed": 3042,
+          "p_hat": 0.23,
+          "flips": 230
+        },
+        {
+          "k": 1000,
+          "seed": 4042,
+          "p_hat": 0.223,
+          "flips": 223
+        },
+        {
+          "k": 10000,
+          "seed": 42,
+          "p_hat": 0.2357,
+          "flips": 2357
+        },
+        {
+          "k": 10000,
+          "seed": 1042,
+          "p_hat": 0.2386,
+          "flips": 2386
+        },
+        {
+          "k": 10000,
+          "seed": 2042,
+          "p_hat": 0.23,
+          "flips": 2300
+        },
+        {
+          "k": 10000,
+          "seed": 3042,
+          "p_hat": 0.2314,
+          "flips": 2314
+        },
+        {
+          "k": 10000,
+          "seed": 4042,
+          "p_hat": 0.2379,
+          "flips": 2379
+        },
+        {
+          "k": 100000,
+          "seed": 42,
+          "p_hat": 0.23488,
+          "flips": 23488
+        },
+        {
+          "k": 100000,
+          "seed": 1042,
+          "p_hat": 0.23383,
+          "flips": 23383
+        },
+        {
+          "k": 100000,
+          "seed": 2042,
+          "p_hat": 0.23396,
+          "flips": 23396
+        },
+        {
+          "k": 100000,
+          "seed": 3042,
+          "p_hat": 0.23308,
+          "flips": 23308
+        },
+        {
+          "k": 100000,
+          "seed": 4042,
+          "p_hat": 0.2354,
+          "flips": 23540
+        }
+      ]
+    }
+  ],
+  "end_to_end": [
+    {
+      "case": "sample_variants[0]",
+      "k": 100,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 100,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.04
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.02
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 1000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.018
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.006
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 1000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.023
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.012
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 10000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0255
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0117
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 10000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0257
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0109
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 100000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.02488
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.01194
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[0]",
+      "k": 100000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.02464
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.01168
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 100,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 100,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 1000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.001
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 1000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 10000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0001
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0005
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 10000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.0005
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 100000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 5e-05
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.00055
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[1]",
+      "k": 100000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.0001
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.00068
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 100,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.2
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.21
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 100,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.28
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.23
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 1000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.216
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.221
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 1000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.222
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.225
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 10000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.2357
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.2229
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 10000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.2386
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.22
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 100000,
+      "seed": 42,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.23488
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.22114
+        }
+      ]
+    },
+    {
+      "case": "sample_variants[2]",
+      "k": 100000,
+      "seed": 1042,
+      "fragile_edges": [
+        {
+          "edge": "price->revenue",
+          "marginal_switch_probability": 0.23383
+        },
+        {
+          "edge": "price->demand",
+          "marginal_switch_probability": 0.22267
+        },
+        {
+          "edge": "demand->revenue",
+          "marginal_switch_probability": 0.0
+        }
+      ]
+    }
+  ],
+  "elapsed_seconds": 106.3
+}
