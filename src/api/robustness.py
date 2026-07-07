@@ -36,12 +36,15 @@ from src.models.response_v2 import (
     ConstraintResultV2,
     DiagnosticsV2,
     EdgeEValueV2,
+    EdgeSensitivityV2,
     FactorSensitivityV2,
     FragileEdgeV2,
     ISLResponseV2,
     ISLV2Error422,
     OptionResultV2,
     OutcomeDistributionV2,
+    PathContributionV2,
+    PathDecompositionV2,
     RobustnessResultV2,
 )
 from src.models.robustness import RobustnessRequest, RobustnessResponse
@@ -770,6 +773,36 @@ async def _analyze_robustness_v2_enhanced(
                         )
                     )
 
+            # T1-6: Edge-level sensitivity (additive wire completeness).
+            # The analyzer always computed these forced-existence + magnitude
+            # contrasts (v1_response.sensitivity) but the V2 envelope dropped
+            # them, so consumers saw EDGE_SENSITIVITY_UNAVAILABLE_V2_WIRE.
+            # Mirror them onto robustness.edge_sensitivity in V2 naming style.
+            # sensitivity_score uses the same max-|elasticity| normalization as
+            # factor_sensitivity; edge_id uses the same 'from->to' format as
+            # fragile_edges and edge_e_values.
+            edge_sensitivity_v2 = None
+            if v1_response.sensitivity:
+                max_abs_edge_elasticity = max(
+                    (abs(s.elasticity) for s in v1_response.sensitivity), default=1.0
+                )
+                if max_abs_edge_elasticity < 1e-10:
+                    max_abs_edge_elasticity = 1.0
+                edge_sensitivity_v2 = [
+                    EdgeSensitivityV2(
+                        edge_id=f"{s.edge_from}->{s.edge_to}",
+                        from_id=s.edge_from,
+                        to_id=s.edge_to,
+                        sensitivity_type=s.sensitivity_type,
+                        sensitivity_score=min(1.0, abs(s.elasticity) / max_abs_edge_elasticity),
+                        direction="positive" if s.elasticity > 0 else "negative",
+                        elasticity=s.elasticity,
+                        importance_rank=s.importance_rank,
+                        interpretation=s.interpretation,
+                    )
+                    for s in v1_response.sensitivity
+                ]
+
             robustness_result = RobustnessResultV2(
                 # V2 fields
                 level=level,
@@ -783,6 +816,8 @@ async def _analyze_robustness_v2_enhanced(
                 recommendation_stability=v1_response.robustness.recommendation_stability,
                 # E-value analogue
                 edge_e_values=edge_e_values_v2,
+                # Edge-level sensitivity (T1-6 — additive)
+                edge_sensitivity=edge_sensitivity_v2,
                 # Trust penalty audit trail
                 stability_penalty_factor=v1_response.robustness.stability_penalty_factor,
                 defaulted_root_node_ids=v1_response.robustness.defaulted_root_node_ids,
@@ -889,6 +924,41 @@ async def _analyze_robustness_v2_enhanced(
         # Optional on the V2 envelope covers error paths where build() runs
         # without metadata having been populated.
         builder.set_auto_noise_applied(v1_response.metadata.auto_noise_applied)
+
+        # T1-6: Path decomposition passthrough (additive; request-gated by
+        # include_path_decomposition so it only appears when asked for).
+        # Previously computed by the analyzer on request but dropped from the
+        # V2 envelope. Same schema, V2 module (PathDecompositionV2 mirror).
+        if v1_response.path_decomposition is not None:
+            pd = v1_response.path_decomposition
+            builder.set_path_decomposition(
+                PathDecompositionV2(
+                    recommended_option_id=pd.recommended_option_id,
+                    entry_nodes=pd.entry_nodes,
+                    truncated=pd.truncated,
+                    path_count=pd.path_count,
+                    paths=[
+                        PathContributionV2(
+                            path=p.path,
+                            path_effect=p.path_effect,
+                            total_effect=p.total_effect,
+                            signed_contribution=p.signed_contribution,
+                            status=p.status,
+                            mechanism=p.mechanism,
+                        )
+                        for p in pd.paths
+                    ],
+                )
+            )
+
+        # T1-5: Reference-option disclosure (additive). Edge sensitivity,
+        # factor sensitivity, and the fragile-edge classification derived from
+        # edge sensitivity are all computed against request.options[0] (see
+        # RobustnessAnalyzerV2._compute_sensitivity /
+        # _compute_factor_sensitivity: ref_option = request.options[0]).
+        # Disclose it whenever any of those analyses produced results.
+        if v1_response.sensitivity or v1_response.factor_sensitivity:
+            builder.set_sensitivity_reference_option_id(request.options[0].id)
 
         # Convert conditional winners (V1 -> V2)
         if v1_response.conditional_winners is not None:
