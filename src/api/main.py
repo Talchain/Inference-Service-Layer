@@ -574,6 +574,7 @@ def _build_v2_pydantic_error_response(
     """
     import uuid
 
+    from src.models.critique import deterministic_critique_id
     from src.models.response_v2 import CritiqueV2, ISLV2Error422
     from src.utils.tracing import get_trace_id, sanitize_request_id
 
@@ -590,12 +591,16 @@ def _build_v2_pydantic_error_response(
         # Strip leading "body" from location path (FastAPI artifact)
         loc_parts = [str(loc) for loc in error["loc"] if loc != "body"]
         loc_path = " -> ".join(loc_parts)
+        message = f"{loc_path}: {error['msg']}" if loc_path else error["msg"]
         critiques.append(
             CritiqueV2(
-                id=f"critique_{uuid.uuid4().hex[:8]}",
+                # Content-derived id: same invalid request -> same critique id
+                # (science-validation report §3/§5.7a; uuid4 broke same-seed
+                # byte-stability of every critique-bearing response).
+                id=deterministic_critique_id(code="VALIDATION_ERROR", message=message),
                 code="VALIDATION_ERROR",
                 severity="blocker",
-                message=f"{loc_path}: {error['msg']}" if loc_path else error["msg"],
+                message=message,
                 source="validation",
             )
         )

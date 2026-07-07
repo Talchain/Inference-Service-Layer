@@ -5,11 +5,41 @@ Provides structured critique types with explicit source classification
 for validation, analysis, and engine errors.
 """
 
-import uuid
+import hashlib
 from dataclasses import dataclass
 from typing import Any, List, Literal, Optional
 
 from src.models.response_v2 import CritiqueV2
+
+
+def deterministic_critique_id(
+    code: str,
+    message: str,
+    affected_option_ids: Optional[List[str]] = None,
+    affected_node_ids: Optional[List[str]] = None,
+    seed: Optional[int] = None,
+) -> str:
+    """Derive a stable critique id from critique content (+ seed when known).
+
+    Same-seed identical requests must produce byte-identical responses; a
+    ``uuid.uuid4()`` id broke that on every response containing a critique
+    (science-validation report §3 volatile-field catalogue, fix recommended
+    in §5.7a). The formatted message participates in the hash because some
+    critiques (e.g. EDGE_STRENGTH_OUT_OF_RANGE) carry their distinguishing
+    detail only in template vars, not in the affected-id lists — hashing
+    (seed, code, affected ids) alone would collide within one response.
+    """
+    material = "\x1f".join(
+        [
+            "" if seed is None else str(seed),
+            code,
+            message,
+            "\x1e".join(affected_option_ids or []),
+            "\x1e".join(affected_node_ids or []),
+        ]
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
+    return f"critique_{digest}"
 
 
 @dataclass
@@ -27,15 +57,27 @@ class CritiqueDefinition:
         affected_option_ids: Optional[List[str]] = None,
         affected_node_ids: Optional[List[str]] = None,
         suggestion: Optional[str] = None,
+        seed: Optional[int] = None,
         **template_vars: Any,
     ) -> CritiqueV2:
-        """Build a CritiqueV2 instance from this definition."""
+        """Build a CritiqueV2 instance from this definition.
+
+        ``seed`` (the analysis seed, when the call site has one) feeds the
+        deterministic critique id; it is not part of the critique payload.
+        """
+        message = self.message_template.format(**template_vars)
         return CritiqueV2(
-            id=f"critique_{uuid.uuid4().hex[:8]}",
+            id=deterministic_critique_id(
+                code=self.code,
+                message=message,
+                affected_option_ids=affected_option_ids,
+                affected_node_ids=affected_node_ids,
+                seed=seed,
+            ),
             code=self.code,
             severity=self.severity,
             source=self.source,
-            message=self.message_template.format(**template_vars),
+            message=message,
             affected_option_ids=affected_option_ids,
             affected_node_ids=affected_node_ids,
             suggestion=suggestion or self.default_suggestion,
