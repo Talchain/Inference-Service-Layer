@@ -396,6 +396,52 @@ class EdgeEValueV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class EdgeSensitivityV2(BaseModel):
+    """Edge-level sensitivity result on the V2 wire (T1-6 wire completeness).
+
+    V2 mirror of the internal V1 SensitivityResult (same content, V2 naming
+    style: edge_id/from_id/to_id like FragileEdgeV2/EdgeEValueV2). These
+    forced-existence and magnitude contrasts were always computed by the V2
+    analyzer but were previously dropped from the V2 envelope (consumers saw
+    EDGE_SENSITIVITY_UNAVAILABLE_V2_WIRE). Additive optional field.
+
+    Computed against the reference option disclosed in the envelope's
+    sensitivity_reference_option_id field (currently options[0]).
+    """
+
+    edge_id: str = Field(..., description="Edge identifier in 'from->to' format")
+    from_id: str = Field(..., description="Source node ID")
+    to_id: str = Field(..., description="Target node ID")
+    sensitivity_type: str = Field(
+        ..., description="Contrast type: 'existence' (edge forced on vs off) or 'magnitude'"
+    )
+    sensitivity_score: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="Normalized sensitivity score (0-1, |elasticity| relative to the "
+        "max |elasticity| in this analysis; same normalization as factor sensitivity_score)",
+    )
+    direction: Literal["positive", "negative"] = Field(
+        ..., description="Sign of the raw elasticity"
+    )
+    elasticity: float = Field(
+        ..., description="Raw elasticity: % change in outcome per % change in parameter"
+    )
+    importance_rank: int = Field(
+        ..., ge=1, description="Rank by |elasticity| across all edge contrasts (1 = most important)"
+    )
+    interpretation: str = Field(
+        ...,
+        description="Human-readable explanation. Wording is provisional "
+        "(provisional_doctrine_v0).",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
+
 # =============================================================================
 # Robustness Result
 # =============================================================================
@@ -439,6 +485,15 @@ class RobustnessResultV2(BaseModel):
         None,
         description="E-value analogue per edge: how wrong must the strength be "
         "to flip the recommendation. Only included when computed within budget.",
+    )
+
+    # Edge-level sensitivity (T1-6 wire completeness — additive optional)
+    edge_sensitivity: Optional[List[EdgeSensitivityV2]] = Field(
+        None,
+        description="Edge-level sensitivity (forced-existence and magnitude contrasts) "
+        "computed against the reference option disclosed in the envelope's "
+        "sensitivity_reference_option_id. Mirrors the V1 sensitivity results that were "
+        "previously absent from the V2 wire.",
     )
 
     # Trust penalty metadata (audit trail for root node default trust downgrade)
@@ -605,6 +660,103 @@ class ConditionalWinnerV2(BaseModel):
 
 
 # =============================================================================
+# Path Decomposition (T1-6 wire completeness — V2 mirrors of the internal
+# V1 models in robustness_v2.py; same schema, different modules, following the
+# FragileEdgeV2 pattern. response_v2 must not import robustness_v2.)
+# =============================================================================
+
+
+class PathContributionV2(BaseModel):
+    """One modelled pathway's signed structural contribution to the goal (V2 wire).
+
+    A pathway is a simple directed sequence of node IDs from a retained
+    intervention target to the goal. ``path_effect`` is the signed product of
+    per-edge coefficients (``strength.mean * exists_probability``) along the
+    pathway and is NOT scaled by the intervention magnitude. Structural
+    decomposition of the modelled effect, not a real-world causal claim.
+    """
+
+    path: List[str] = Field(
+        ...,
+        description="Node IDs from the retained intervention target to the goal, "
+        "in directed path order.",
+    )
+    path_effect: float = Field(
+        ...,
+        description="Signed product of per-edge coefficients (strength.mean * "
+        "exists_probability) along this path. Structural only — not scaled by the "
+        "intervention magnitude.",
+    )
+    total_effect: float = Field(
+        ...,
+        description="Signed sum of path_effect across all enumerated "
+        "intervention-target-to-goal paths. Identical on every entry, for auditability.",
+    )
+    signed_contribution: Optional[float] = Field(
+        None,
+        description="path_effect / total_effect when the net modelled effect is "
+        "non-negligible; omitted when indeterminate. May be negative or exceed 1 "
+        "when paths oppose.",
+    )
+    status: Literal["computed", "indeterminate"] = Field(
+        ...,
+        description="'computed' when |total_effect| >= 1e-10; 'indeterminate' when the "
+        "net modelled effect is near zero and a relative share is not well defined.",
+    )
+    mechanism: str = Field(
+        ...,
+        description="Human-readable modelled-pathway-contribution statement. Describes "
+        "modelled structure only; not a real-world causal claim. Wording is provisional "
+        "(provisional_doctrine_v0).",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
+
+class PathDecompositionV2(BaseModel):
+    """Structural pathway decomposition on the V2 wire (T1-6 wire completeness).
+
+    V2 mirror of the internal V1 PathDecomposition. Request-gated by
+    include_path_decomposition: previously computed on request but dropped from
+    the V2 envelope. Additive optional field.
+    """
+
+    recommended_option_id: str = Field(
+        ...,
+        description="The recommended option this decomposition explains "
+        "(context/metadata; not a path node).",
+    )
+    entry_nodes: List[str] = Field(
+        ...,
+        description="Retained intervention target node IDs the paths start from "
+        "(intervention targets that survived inference-graph filtering).",
+    )
+    truncated: bool = Field(
+        default=False,
+        description="True when the number of simple paths exceeded the safety budget, so "
+        "the top-3 pathway ranking was suppressed for performance and paths is empty. "
+        "This does NOT mean the modelled effect is zero — only that individual pathways "
+        "were too numerous to rank. Distinct from an empty result with truncated=False, "
+        "which means no reachable path from the retained intervention targets.",
+    )
+    path_count: int = Field(
+        default=0,
+        description="Number of simple intervention-target-to-goal paths enumerated. When "
+        "truncated is True this equals the budget cap and the true count is higher.",
+    )
+    paths: List[PathContributionV2] = Field(
+        default_factory=list,
+        description="Top-3 intervention-target-to-goal paths, ranked by absolute " "path_effect.",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
+
+# =============================================================================
 # Main V2 Response
 # =============================================================================
 
@@ -686,6 +838,27 @@ class ISLResponseV2(BaseModel):
         None,
         description="Expected Value of Perfect Information per factor: how much does "
         "removing this factor's uncertainty improve the decision metric?",
+    )
+
+    # Path decomposition (T1-6 wire completeness — additive optional, request-gated
+    # by include_path_decomposition so payload size is opt-in; matches the V1
+    # response's top-level placement)
+    path_decomposition: Optional[PathDecompositionV2] = Field(
+        None,
+        description="Structural pathway decomposition for the recommended option's "
+        "retained intervention targets: top-3 simple directed paths to the goal with "
+        "signed structural contributions. Structural decomposition of the modelled "
+        "effect, not a causal claim. Only present when include_path_decomposition "
+        "was requested.",
+    )
+
+    # Reference-option disclosure (T1-5 — additive optional)
+    sensitivity_reference_option_id: Optional[str] = Field(
+        None,
+        description="Option ID used as the reference/baseline for edge sensitivity, "
+        "factor sensitivity, and the fragile-edge classification derived from them "
+        "(currently the first option in the request). Disclosure only — consumers "
+        "should surface that sensitivity results are relative to this option.",
     )
 
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can
