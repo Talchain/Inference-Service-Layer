@@ -29,6 +29,7 @@ from src.models.response_v2 import (
     ISLV2Error422,
     ISLResponseV2,
     OptionResultV2,
+    PathDecompositionV2,
     RequestEchoV2,
     RobustnessResultV2,
     StabilityThresholdsResponse,
@@ -108,6 +109,10 @@ class ResponseBuilder:
         # Auto-noise disclosure (B3): None until explicitly set from V1 metadata.
         # Preserves False as False; never coerced to None on the path through the route.
         self.auto_noise_applied: Optional[bool] = None
+        # T1-6: path decomposition passthrough (request-gated; additive)
+        self.path_decomposition: Optional[PathDecompositionV2] = None
+        # T1-5: reference-option disclosure for sensitivity analyses (additive)
+        self.sensitivity_reference_option_id: Optional[str] = None
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -149,6 +154,14 @@ class ResponseBuilder:
     def set_auto_noise_applied(self, flag: Optional[bool]) -> None:
         """Set the auto-noise disclosure flag for the V2 envelope (B3)."""
         self.auto_noise_applied = flag
+
+    def set_path_decomposition(self, path_decomposition: Optional[PathDecompositionV2]) -> None:
+        """Set the path decomposition passthrough (T1-6 wire completeness)."""
+        self.path_decomposition = path_decomposition
+
+    def set_sensitivity_reference_option_id(self, option_id: Optional[str]) -> None:
+        """Set the reference-option disclosure for sensitivity analyses (T1-5)."""
+        self.sensitivity_reference_option_id = option_id
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -237,6 +250,8 @@ class ResponseBuilder:
             conditional_winners=self.conditional_winners,
             stability_thresholds=self.stability_thresholds,  # 3C
             factor_evpi=self.factor_evpi,
+            path_decomposition=self.path_decomposition,  # T1-6
+            sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
             auto_noise_applied=self.auto_noise_applied,
             request_id=self.request_id,
             processing_time_ms=processing_time,
