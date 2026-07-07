@@ -856,6 +856,7 @@ class RobustnessAnalyzerV2:
                         CONSTRAINT_NODE_DEFAULT_BASE.build(
                             node_id=node_id,
                             affected_node_ids=[node_id],
+                            seed=seed,
                         )
                     )
                     self.logger.warning(
@@ -983,6 +984,7 @@ class RobustnessAnalyzerV2:
                     DEGENERATE_OPTION_ZERO_VARIANCE.build(
                         option_label=option_labels.get(result.option_id, result.option_id),
                         affected_option_ids=[result.option_id],
+                        seed=seed,
                     )
                 )
 
@@ -991,6 +993,7 @@ class RobustnessAnalyzerV2:
             critiques.append(
                 HIGH_TIE_RATE.build(
                     tie_rate_pct=int(tie_rate * 100),
+                    seed=seed,
                 )
             )
 
@@ -2801,8 +2804,12 @@ class RobustnessAnalyzerV2:
                 robust_edge_ids.add(edge_id)
             # Edges with 0.05 <= elasticity <= 0.1 are implicitly "moderate" (uncategorized)
 
-        fragile_edges = list(fragile_edge_ids)
-        robust_edges = list(robust_edge_ids)
+        # Canonical (sorted) order: set iteration order follows the per-process
+        # string-hash salt, so list(...) here leaked process identity into the
+        # response — and into the interpretation string's "sensitive to:" list
+        # (science-validation report §3 cross-process finding, fix §5.7b).
+        fragile_edges = sorted(fragile_edge_ids)
+        robust_edges = sorted(robust_edge_ids)
 
         # Compute alternative winners for fragile edges (includes marginal calculation)
         fragile_edges_enhanced = self._compute_alternative_winners(
