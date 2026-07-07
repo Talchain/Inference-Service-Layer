@@ -185,13 +185,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Enable gzip compression (40-70% size reduction for JSON responses)
-app.add_middleware(
-    GZipMiddleware,
-    minimum_size=1000,  # Only compress responses >1KB
-    compresslevel=6,  # Balance speed vs compression (1-9, 6 is good default)
-)
-
 
 # Security headers middleware (defense in depth)
 @app.middleware("http")
@@ -246,6 +239,19 @@ app.add_middleware(MemoryCircuitBreaker, threshold_percent=85.0)
 # Observability (service headers, payload hashing, boundary logging)
 # NOTE: Must be added BEFORE TracingMiddleware so TracingMiddleware runs first (LIFO)
 app.add_middleware(ObservabilityMiddleware)
+
+# Enable gzip compression (40-70% size reduction for JSON responses)
+# NOTE: Must be added AFTER ObservabilityMiddleware (LIFO — last added runs
+# outermost) so compression wraps observability and the response hash is
+# computed over PRE-compression JSON bytes. When GZip was registered first
+# (innermost), ObservabilityMiddleware received gzipped bytes and response
+# hashing failed on every compressed response
+# ("Failed to compute response hash: 'utf-8' ... 0x8b").
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000,  # Only compress responses >1KB
+    compresslevel=6,  # Balance speed vs compression (1-9, 6 is good default)
+)
 
 # Distributed tracing (adds X-Trace-Id to all requests/responses)
 # Sets trace ID from X-Request-Id header or generates unique ID per request
