@@ -1,13 +1,38 @@
 # STATUS — science-validation lane
 
-Updated: 2026-07-07 (session 1)
+Updated: 2026-07-07 (session 1 — review pass + handoff)
 
 ## Branch note for the orchestrator
 
 The brief named `claude-web/science-validation`; this session's execution
 environment designates and only permits `claude/science-validation-higher-k-ptc70x`.
-All work is on that branch. Draft PR: see the PR titled
-`[science-validation] harness + report (docs/benchmarks only — no src changes)`.
+All work is on that branch. Draft PR: **#66**, titled
+`[science-validation] harness + report (docs/benchmarks only — no src changes)`
+(https://github.com/Talchain/Inference-Service-Layer/pull/66). All CI green.
+
+## Handoff for review (POC orchestrator)
+
+Everything for this lane is in draft PR #66 (base `staging`). It stays draft —
+this lane never merges to staging; merge/deploy is the orchestrator's call.
+A review-guide comment is pinned on the PR with reproduction commands and the
+load-bearing claims to probe. This session is subscribed to PR review events
+and will address feedback (validity-assessed first, per CLAUDE.md code-review
+rules) on the same branch.
+
+Review checklist:
+- Scope: `git diff staging...HEAD --stat` touches only
+  `benchmarks/science-validation/**` and `docs/science-validation/**`. No
+  `src/` changes (recommended src fixes are written up in REPORT §5.6).
+- Reproduce: `poetry run python benchmarks/science-validation/run_all.py`
+  (full, ~15 min) or `--quick` (~2 min). Seeds pinned in `_lib.py:SEEDS`;
+  `results/*.json` reproduce bit-for-bit apart from `provenance`/`elapsed`.
+- Adversarial targets: harness fidelity to production code paths (K override,
+  exp2's `_compute_evpi` orchestration vs `_compute_evpi_metric`), the
+  closed-form truths in `graphs.py`, the prefix-nested-RNG pooling fix
+  (commit `bfa7836`), and the doctrine findings in REPORT §5.
+- Two commits: initial delivery, then a self-review correction (`bfa7836`)
+  to the pooled statistics — point estimates and classifications unchanged,
+  only inferential bounds moved.
 
 ## State
 
@@ -36,7 +61,7 @@ All work is on that branch. Draft PR: see the PR titled
 2. **EVPI floor**: conservative in comfortable regimes (empirical SD 0.5-0.9x
    the worst-case SE), exactly tight at knife-edge (P(win) ~ 0.5) with ~5%
    false-"resolved" rate on true-zero factors — as a 95% bound should behave.
-   Below-floor signs flip across seeds 25-65% of the time.
+   Below-floor signs flip across seeds 25-61% of the time.
    Bonus structural finding: under the p_win metric, factor EVPI is exactly
    zero for any factor whose causal path no option intervenes on
    (common-mode cancellation) — such factors' reported EVPI is pure MC noise.
@@ -54,7 +79,7 @@ All work is on that branch. Draft PR: see the PR titled
    process-dependent. All numeric content is identical once ordering is
    normalised. Recommended one-line fix (sorted()) written up, not made.
 4. **Calibration (groundwork)**: without auto-noise, probability_of_goal is
-   unbiased against closed-form truth (100% of cells within 95% MC bands).
+   unbiased against closed-form truth (95.6% of cells within 95% MC bands).
    With auto-noise (outcome/risk goals), reported probabilities deviate from
    the no-noise truth by up to ~0.17; the implementation matches its own
    noisy model, so the distortion is the heuristic itself, quantified.
