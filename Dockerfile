@@ -8,7 +8,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install poetry==1.7.1
+# NOTE: poetry.lock is lock-version 2.1, which requires Poetry >= 2.0 to read.
+# CI installs Poetry "latest" (2.x); pin the same major here or `poetry install`
+# fails at build time. Verified locally with `poetry check --lock` on 2.2.1.
+RUN pip install poetry==2.2.1
 
 # Set working directory
 WORKDIR /app
