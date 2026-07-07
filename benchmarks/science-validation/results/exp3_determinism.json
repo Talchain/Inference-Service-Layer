@@ -1,0 +1,581 @@
+{
+  "provenance": {
+    "command": "poetry run python benchmarks/science-validation/exp3_determinism.py",
+    "git_sha": "9a22a1ae025551eb08cf6526c88507573bc2923c",
+    "python": "3.11.15",
+    "generated_utc": "2026-07-07T12:57:36Z"
+  },
+  "config": {
+    "n_graphs": 50,
+    "graphgen_seed": 20260707,
+    "request_seed": 42
+  },
+  "summary": {
+    "n_graphs": 50,
+    "inprocess_raw_identical": 11,
+    "inprocess_canonical_identical": 37,
+    "inprocess_stable_identical": 50,
+    "wire_ok": 50,
+    "wire_raw_identical": 0,
+    "wire_normalised_identical": 50,
+    "volatile_fields": {
+      "_metadata.execution_time_ms": 39,
+      "critiques": 34,
+      "processing_time_ms": 43,
+      "timestamp": 50
+    },
+    "cross_process": {
+      "run": true,
+      "all_identical": false,
+      "mismatched_graphs": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        28,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        42,
+        43,
+        45,
+        46,
+        49
+      ],
+      "order_insensitive_all_identical": true,
+      "order_insensitive_mismatched_graphs": []
+    }
+  },
+  "per_graph": [
+    {
+      "graph": 0,
+      "request_id": "scival-det-000",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 1,
+      "request_id": "scival-det-001",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 2,
+      "request_id": "scival-det-002",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 3,
+      "request_id": "scival-det-003",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 4,
+      "request_id": "scival-det-004",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 5,
+      "request_id": "scival-det-005",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 6,
+      "request_id": "scival-det-006",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 7,
+      "request_id": "scival-det-007",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 8,
+      "request_id": "scival-det-008",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 9,
+      "request_id": "scival-det-009",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 10,
+      "request_id": "scival-det-010",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 11,
+      "request_id": "scival-det-011",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 12,
+      "request_id": "scival-det-012",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 13,
+      "request_id": "scival-det-013",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 14,
+      "request_id": "scival-det-014",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 15,
+      "request_id": "scival-det-015",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 16,
+      "request_id": "scival-det-016",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 17,
+      "request_id": "scival-det-017",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 18,
+      "request_id": "scival-det-018",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 19,
+      "request_id": "scival-det-019",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 20,
+      "request_id": "scival-det-020",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 21,
+      "request_id": "scival-det-021",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 22,
+      "request_id": "scival-det-022",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 23,
+      "request_id": "scival-det-023",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 24,
+      "request_id": "scival-det-024",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 25,
+      "request_id": "scival-det-025",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 26,
+      "request_id": "scival-det-026",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 27,
+      "request_id": "scival-det-027",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 28,
+      "request_id": "scival-det-028",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 29,
+      "request_id": "scival-det-029",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 30,
+      "request_id": "scival-det-030",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 31,
+      "request_id": "scival-det-031",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 32,
+      "request_id": "scival-det-032",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 33,
+      "request_id": "scival-det-033",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 34,
+      "request_id": "scival-det-034",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 35,
+      "request_id": "scival-det-035",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 36,
+      "request_id": "scival-det-036",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 37,
+      "request_id": "scival-det-037",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 38,
+      "request_id": "scival-det-038",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 39,
+      "request_id": "scival-det-039",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 40,
+      "request_id": "scival-det-040",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 41,
+      "request_id": "scival-det-041",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 42,
+      "request_id": "scival-det-042",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 43,
+      "request_id": "scival-det-043",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 44,
+      "request_id": "scival-det-044",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 45,
+      "request_id": "scival-det-045",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 46,
+      "request_id": "scival-det-046",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 47,
+      "request_id": "scival-det-047",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 48,
+      "request_id": "scival-det-048",
+      "inprocess_raw_identical": true,
+      "inprocess_canonical_identical": true,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    },
+    {
+      "graph": 49,
+      "request_id": "scival-det-049",
+      "inprocess_raw_identical": false,
+      "inprocess_canonical_identical": false,
+      "inprocess_stable_identical": true,
+      "wire_status": 200,
+      "wire_raw_identical": false,
+      "wire_normalised_identical": true
+    }
+  ],
+  "elapsed_seconds": 403.1
+}
