@@ -884,6 +884,65 @@ class TestInferenceWarningsDefaultBase:
         assert constraint_critiques[0].severity == "warning"
         assert constraint_critiques[0].affected_node_ids == ["fac_churn"]
 
+        # ROADMAP 1.26b: this is the genuine missing-data case (fac_churn is not
+        # the goal node) — message must read as a data gap, not a doctrine-expected
+        # default. It must NOT claim the objective/modelled-outcome framing.
+        message = str(w.detail.get("message", ""))
+        assert "no ParameterUncertainty" in message or "missing" in message.lower()
+        assert "objective node" not in message
+        assert "modelled outcome distribution" not in message
+        critique_message = constraint_critiques[0].message
+        assert "objective node" not in critique_message
+        assert "modelled outcome distribution" not in critique_message
+
+    def test_message_distinguishes_doctrine_b_goal_node_case(
+        self, multi_outcome_graph, multi_outcome_options, caplog
+    ):
+        """A constraint on the goal node itself (doctrine B, post-#204) is an
+        EXPECTED default — not a missing-data problem. The message must not
+        claim the probability "may be unreliable" the way the generic
+        missing-data case does; it should read as expected/modelled behaviour.
+        """
+        request = RobustnessRequestV2(
+            graph=multi_outcome_graph,
+            options=multi_outcome_options,
+            goal_node_id="revenue",
+            n_samples=100,
+            seed=1,
+            goal_constraints=[
+                GoalConstraint(node_id="revenue", operator=">=", value=20.0),
+            ],
+            # No parameter_uncertainties for revenue (the goal node) — revenue
+            # is non-root (demand -> revenue, price -> revenue) so this is the
+            # doctrine-B "non-root objective defaults to base=0.0" case.
+        )
+
+        analyzer = RobustnessAnalyzerV2()
+
+        with caplog.at_level("WARNING"):
+            response = analyzer.analyze(request)
+
+        default_base_warnings = [
+            w for w in response.inference_warnings if w.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        ]
+        assert len(default_base_warnings) == 1
+        w = default_base_warnings[0]
+        message = str(w.detail.get("message", ""))
+        # Doctrine-B wording: expected default for the objective node, scored
+        # from the modelled outcome distribution — not a data-quality warning.
+        assert "objective node" in message
+        assert "modelled outcome distribution" in message
+        assert "may be unreliable" not in message
+
+        constraint_critiques = [
+            c for c in response.critiques if c.code == "CONSTRAINT_NODE_DEFAULT_BASE"
+        ]
+        assert len(constraint_critiques) == 1
+        critique_message = constraint_critiques[0].message
+        assert "objective node" in critique_message
+        assert "modelled outcome distribution" in critique_message
+        assert "may be unreliable" not in critique_message
+
     def test_no_warning_when_node_has_parameter_uncertainty(self, caplog):
         """Non-root factor WITH ParameterUncertainty does NOT trigger warning."""
         graph = self._make_graph_with_nonroot_factor()
