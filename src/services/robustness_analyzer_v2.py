@@ -58,6 +58,7 @@ from src.constants import (
 )
 from src.models.critique import (
     CONSTRAINT_NODE_DEFAULT_BASE,
+    CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE,
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
 )
@@ -836,6 +837,29 @@ class RobustnessAnalyzerV2:
                 # (intervention value overrides the base, so base=0.0 is never used)
                 all_options_intervene = all(node_id in opt.interventions for opt in request.options)
                 if not is_root and not has_uncertainty and not all_options_intervene:
+                    # Doctrine B (post-#204): a constraint on the graph's own
+                    # objective node defaulting to base=0.0 is EXPECTED — the
+                    # probability is scored from the modelled outcome
+                    # distribution, not left unmeasured. Everything else (a
+                    # non-objective constraint node missing data) keeps the
+                    # generic "may be unreliable" wording.
+                    is_objective_node = node_id == request.goal_node_id
+                    if is_objective_node:
+                        message = (
+                            f"Node '{node_id}' is the objective node and has no "
+                            f"ParameterUncertainty — defaulted to base=0.0 as "
+                            f"expected for a non-root objective; its constraint "
+                            f"probability is scored from the modelled outcome "
+                            f"distribution, not a missing-data placeholder"
+                        )
+                        default_base_critique_def = CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE
+                    else:
+                        message = (
+                            f"Node '{node_id}' has no ParameterUncertainty "
+                            f"— defaulted to base=0.0, constraint probability "
+                            f"may be unreliable"
+                        )
+                        default_base_critique_def = CONSTRAINT_NODE_DEFAULT_BASE
                     inference_warnings.append(
                         InferenceWarning(
                             code="CONSTRAINT_NODE_DEFAULT_BASE",
@@ -844,16 +868,12 @@ class RobustnessAnalyzerV2:
                                 "node_id": node_id,
                                 "defaulted_to": 0.0,
                                 "reason": "no_parameter_uncertainty",
-                                "message": (
-                                    f"Node '{node_id}' has no ParameterUncertainty "
-                                    f"— defaulted to base=0.0, constraint probability "
-                                    f"may be unreliable"
-                                ),
+                                "message": message,
                             },
                         )
                     )
                     constraint_default_base_critiques.append(
-                        CONSTRAINT_NODE_DEFAULT_BASE.build(
+                        default_base_critique_def.build(
                             node_id=node_id,
                             affected_node_ids=[node_id],
                             seed=seed,

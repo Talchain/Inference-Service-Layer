@@ -361,6 +361,32 @@ CONSTRAINT_NODE_DEFAULT_BASE = CritiqueDefinition(
     ),
 )
 
+# Doctrine-B variant (post-#204): fires for the SAME underlying condition
+# (non-root constraint target, no ParameterUncertainty) but when the target IS
+# the graph's objective node (goal_node_id). There, base=0.0 is the expected,
+# ratified default — the constraint probability is scored from the same
+# forward-propagated outcome-distribution series used for the outcome stats,
+# not left unmeasured for lack of data. Using the generic "may be unreliable"
+# wording here misrepresents expected behaviour as a data gap. Same `code`
+# (downstream consumers key on code, not on message text) and severity — only
+# the message/suggestion differ.
+CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE = CritiqueDefinition(
+    code="CONSTRAINT_NODE_DEFAULT_BASE",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "Constraint node '{node_id}' is the objective node and has no "
+        "ParameterUncertainty — defaulted to base=0.0 as expected for a "
+        "non-root objective; its constraint probability is scored from the "
+        "modelled outcome distribution, not a missing-data placeholder"
+    ),
+    default_suggestion=(
+        "This is expected for a non-root objective node without an explicit "
+        "baseline. Supply a ParameterUncertainty entry only if you want the "
+        "objective's own sampling base to reflect an observed value instead"
+    ),
+)
+
 
 # =============================================================================
 # Engine Critiques (internal errors)
