@@ -1,6 +1,11 @@
 # Inference Service Layer (ISL)
 
-**Causal inference API for Olumi's decision platform**
+**Inference API for Olumi's decision platform: probabilistic simulation and robustness analysis over user-specified causal structure**
+
+> **Deployment status (pilot):** the live API surface is `/health`, `/metrics`, and the
+> robustness suite (`/api/v1/robustness/*`). All other routers listed below are built and
+> tested but **disabled** in the deployed service (see `src/api/main.py`, "Disabled for
+> pilot"). Calling them on a deployed instance returns 404.
 
 ---
 
@@ -15,11 +20,9 @@ docker-compose up -d
 # 2. Verify
 curl http://localhost:8000/health
 
-# 3. Test endpoint
-curl -X POST http://localhost:8000/api/v1/validation/assumptions \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $ISL_API_KEY" \
-  -d '{"dag": {"nodes": ["A", "B"], "edges": [["A", "B"]]}, "treatment": "A", "outcome": "B"}'
+# 3. Explore the live API surface (robustness suite + health/metrics)
+open http://localhost:8000/docs
+# Live compute endpoint: POST /api/v1/robustness/analyze/v2 (see docs/ for request examples)
 ```
 
 ### Local vs. Production Configuration
@@ -56,13 +59,22 @@ SENTRY_DSN=https://...@sentry.io
 
 ## What ISL Does
 
+### Live in the pilot build
+
+| Capability | Endpoint | Description |
+|------------|----------|-------------|
+| **Robustness (FACET)** | `/api/v1/robustness/analyze`, `/analyze/v2`, `/analyze/unified` | Monte Carlo robustness of recommendations under structural + parametric uncertainty; sensitivity; VoI |
+| **Health / Metrics** | `/health`, `/metrics` | Service health and Prometheus metrics |
+
+### Built, currently disabled (routers commented out in `src/api/main.py`)
+
 | Capability | Endpoint | Description |
 |------------|----------|-------------|
 | **Multi-Criteria Analysis** | `/api/v1/analysis/*` | Dominance, Pareto, risk adjustment, thresholds |
 | **Continuous Optimization** | `/api/v1/analysis/optimise` | Grid search with constraints, confidence intervals, sensitivity |
 | **Y₀ Identifiability** | `/api/v1/analysis/identifiability` | Causal effect identifiability analysis with hard rule |
-| **Decision Robustness** | `/api/v1/analysis/robustness` | Unified sensitivity, robustness bounds, VoI, Pareto |
-| **Outcome Logging** | `/api/v1/outcomes/*` | Log decisions and outcomes for calibration |
+| **Decision Robustness Suite** | `/api/v1/analysis/robustness` | Unified sensitivity, robustness bounds, VoI, Pareto |
+| **Outcome Logging** | `/api/v1/outcomes/*` | Log decisions and outcomes for future calibration |
 | **Aggregation** | `/api/v1/aggregation/*` | Multi-criteria scoring (sum/product/lexicographic) |
 | **Validation** | `/api/v1/validation/*` | Validate causal DAGs, constraints, coherence |
 | **Feasibility Checking** | `/api/v1/validation/feasibility` | Check options against business constraints |
@@ -92,7 +104,8 @@ Import the complete API collection for interactive testing and development:
    - Production: https://isl-production.onrender.com
 ```
 
-**Included Endpoints:**
+**Included Endpoints** (the collection covers the full built surface; all of the following
+are currently **disabled** on deployed instances — see "What ISL Does" above):
 - ✅ Dominance Detection - Identify dominated options
 - ✅ Pareto Frontier - Find non-dominated options
 - ✅ Risk Adjustment - Certainty equivalents with risk profiles

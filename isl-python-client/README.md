@@ -5,6 +5,11 @@
 
 Type-safe Python client for the Olumi Inference Service Layer (ISL).
 
+> **Endpoint availability:** this client covers the full built ISL surface, but deployed
+> pilot instances only serve `/health`, `/metrics`, and the robustness suite
+> (`/api/v1/robustness/*`). The other endpoint groups (causal validation, preferences,
+> teaching, etc.) are disabled in `src/api/main.py` and return 404 on deployed instances.
+
 ## Features
 
 ✅ **Type-Safe**: Full Pydantic models for all requests and responses
