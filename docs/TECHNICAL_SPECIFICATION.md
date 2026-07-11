@@ -2,7 +2,12 @@
 
 **Version:** 2.1.0
 **Updated:** 2025-11-26
-**Status:** Production Ready
+**Status:** Historical specification of the full built surface
+
+> **Deployment note (2026-07):** most routers described here are **disabled** in the
+> deployed pilot build — the live surface is `/health`, `/metrics`, and
+> `/api/v1/robustness/*` (see `src/api/main.py`, "Disabled for pilot"). Capabilities and
+> latencies below describe the built-and-tested code, not what a deployed instance serves.
 
 ---
 
