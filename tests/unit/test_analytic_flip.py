@@ -209,13 +209,13 @@ def _assert_entries_agree(
         an_inf = an["e_value"] == float("inf")
         ref_inf = ref["e_value"] == float("inf")
         assert an_inf == ref_inf, f"{label}: flip/no-flip disagreement"
-        assert abs(an["flip_mean"] - ref["flip_mean"]) <= FLIP_MEAN_TOL, (
-            f"{label}: flip_mean analytic={an['flip_mean']} mc={ref['flip_mean']}"
-        )
+        assert (
+            abs(an["flip_mean"] - ref["flip_mean"]) <= FLIP_MEAN_TOL
+        ), f"{label}: flip_mean analytic={an['flip_mean']} mc={ref['flip_mean']}"
         if not ref_inf:
-            assert abs(an["e_value"] - ref["e_value"]) <= E_VALUE_TOL, (
-                f"{label}: e_value analytic={an['e_value']} mc={ref['e_value']}"
-            )
+            assert (
+                abs(an["e_value"] - ref["e_value"]) <= E_VALUE_TOL
+            ), f"{label}: e_value analytic={an['e_value']} mc={ref['e_value']}"
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +239,9 @@ class TestClosedFormExactness:
         entries = analytic_edge_e_values(request, _deterministic_evaluator(request))
         entry = next(e for e in entries if e["edge_id"] == "price->demand")
         assert entry["flip_direction"] == "decrease"
-        assert entry["flip_mean"] == pytest.approx(-0.2 / 0.304, abs=1e-9)
+        # flip_mean carries the wire contract's 6-dp rounding, so compare
+        # against the rounded closed-form value exactly.
+        assert entry["flip_mean"] == pytest.approx(round(-0.2 / 0.304, 6), abs=1e-9)
         assert entry["e_value"] == pytest.approx((0.2 / 0.304) / 0.4, abs=1e-3)
 
     def test_price_revenue_edge_matches_hand_crossing_and_e_value_clamp(self) -> None:
@@ -304,18 +306,16 @@ class TestBackgroundAgreement:
                 mc_value = analyzer._flip_mean_under_background(
                     request, evaluator, edge, background
                 )
-                an_value = analytic_flip_mean_under_background(
-                    request, evaluator, edge, background
-                )
+                an_value = analytic_flip_mean_under_background(request, evaluator, edge, background)
                 label = f"seed={child_seed} edge={edge.from_}->{edge.to}"
                 if mc_value is None:
                     assert an_value is None, f"{label}: MC found no flip, analytic did"
                     none_agreements += 1
                 else:
                     assert an_value is not None, f"{label}: MC flipped, analytic did not"
-                    assert abs(an_value - mc_value) <= FLIP_MEAN_TOL, (
-                        f"{label}: analytic={an_value} mc={mc_value}"
-                    )
+                    assert (
+                        abs(an_value - mc_value) <= FLIP_MEAN_TOL
+                    ), f"{label}: analytic={an_value} mc={mc_value}"
                 checked += 1
         assert checked == 3 * 17
 
