@@ -59,6 +59,8 @@ from src.constants import (
 from src.models.critique import (
     CONSTRAINT_NODE_DEFAULT_BASE,
     CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE,
+    CONSTRAINT_NODE_DEFAULT_BASE_SUPPORTED,
+    GOAL_ANCESTOR_DATA_GAP,
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
 )
@@ -821,28 +823,73 @@ class RobustnessAnalyzerV2:
         # These are generated during Pydantic model validation of EdgeV2.strength.mean.
         inference_warnings: List[InferenceWarning] = request.graph.collect_parse_warnings()
 
+        # ---------------------------------------------------------------
+        # Node data-support analysis (Cluster-2, Track S Phase 0).
+        # Computed BEFORE the constraint block so ancestor data-support
+        # checks can use it; warning EMISSION order below is unchanged
+        # (parse -> constraint default-base -> root default -> goal).
+        # ---------------------------------------------------------------
+        parent_map: dict[str, list[str]] = defaultdict(list)
+        children_map: dict[str, list[str]] = defaultdict(list)
+        for edge in request.graph.edges:
+            parent_map[edge.to].append(edge.from_)
+            children_map[edge.from_].append(edge.to)
+        uncertainty_node_ids = set(u.node_id for u in (request.parameter_uncertainties or []))
+        # Nodes every option intervenes on: the intervention overrides the
+        # structural equation in EVERY sample, so no base default is ever
+        # used there and no upstream influence passes through.
+        fully_intervened_node_ids = {
+            node.id
+            for node in request.graph.nodes
+            if all(node.id in opt.interventions for opt in request.options)
+        }
+
+        # Root nodes that will silently default to 0.0: NO observed_state.value,
+        # NO ParameterUncertainty entry (which would provide sampling via
+        # FactorSampler), and not intervened by every option.
+        defaulted_root_node_ids: List[str] = []
+        for node in request.graph.nodes:
+            is_root = len(parent_map.get(node.id, [])) == 0
+            if not is_root:
+                continue
+            has_observed_value = (
+                node.observed_state is not None and node.observed_state.value is not None
+            )
+            if (
+                not has_observed_value
+                and node.id not in uncertainty_node_ids
+                and node.id not in fully_intervened_node_ids
+            ):
+                defaulted_root_node_ids.append(node.id)
+
         # Detect constraint target nodes that will silently default to base=0.0
         # (non-root nodes without ParameterUncertainty, not fully covered by
         # interventions across all options)
         constraint_default_base_critiques: List[CritiqueV2] = []
         if constraint_target_nodes:
-            parent_map: dict[str, list[str]] = defaultdict(list)
-            for edge in request.graph.edges:
-                parent_map[edge.to].append(edge.from_)
-            uncertainty_node_ids = set(u.node_id for u in (request.parameter_uncertainties or []))
             for node_id in constraint_target_nodes:
                 is_root = len(parent_map.get(node_id, [])) == 0
                 has_uncertainty = node_id in uncertainty_node_ids
                 # Skip warning if every option intervenes on this node
                 # (intervention value overrides the base, so base=0.0 is never used)
-                all_options_intervene = all(node_id in opt.interventions for opt in request.options)
+                all_options_intervene = node_id in fully_intervened_node_ids
                 if not is_root and not has_uncertainty and not all_options_intervene:
+                    # Cluster-2: a non-root node's samples are the forward-
+                    # propagated composition of its parents; base=0.0 is a zero
+                    # exogenous OFFSET, not a fabricated value. Whether the
+                    # composition is trustworthy depends on ancestor data
+                    # support, so the wording keys off that — not off the mere
+                    # absence of a ParameterUncertainty entry.
+                    ancestor_data_gap = self._defaulted_roots_reaching(
+                        node_id,
+                        children_map,
+                        defaulted_root_node_ids,
+                        fully_intervened_node_ids,
+                    )
                     # Doctrine B (post-#204): a constraint on the graph's own
                     # objective node defaulting to base=0.0 is EXPECTED — the
                     # probability is scored from the modelled outcome
-                    # distribution, not left unmeasured. Everything else (a
-                    # non-objective constraint node missing data) keeps the
-                    # generic "may be unreliable" wording.
+                    # distribution, not left unmeasured.
                     is_objective_node = node_id == request.goal_node_id
                     if is_objective_node:
                         message = (
@@ -852,14 +899,40 @@ class RobustnessAnalyzerV2:
                             f"probability is scored from the modelled outcome "
                             f"distribution, not a missing-data placeholder"
                         )
-                        default_base_critique_def = CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE
+                        default_base_critique = CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE.build(
+                            node_id=node_id,
+                            affected_node_ids=[node_id],
+                            seed=seed,
+                        )
+                    elif ancestor_data_gap:
+                        gap_list = ", ".join(f"'{r}'" for r in ancestor_data_gap)
+                        message = (
+                            f"Node '{node_id}' has no ParameterUncertainty "
+                            f"— defaulted to base=0.0, and its root ancestor(s) "
+                            f"{gap_list} carry no observed value or "
+                            f"ParameterUncertainty (defaulted to 0.0); constraint "
+                            f"probability may be unreliable"
+                        )
+                        default_base_critique = CONSTRAINT_NODE_DEFAULT_BASE.build(
+                            node_id=node_id,
+                            gap_roots=gap_list,
+                            affected_node_ids=[node_id],
+                            seed=seed,
+                        )
                     else:
                         message = (
                             f"Node '{node_id}' has no ParameterUncertainty "
-                            f"— defaulted to base=0.0, constraint probability "
-                            f"may be unreliable"
+                            f"— base offset defaulted to 0.0; its samples are "
+                            f"the forward-propagated composition of its parents "
+                            f"(all root ancestors carry data), so the constraint "
+                            f"probability is model-derived, not a missing-data "
+                            f"placeholder"
                         )
-                        default_base_critique_def = CONSTRAINT_NODE_DEFAULT_BASE
+                        default_base_critique = CONSTRAINT_NODE_DEFAULT_BASE_SUPPORTED.build(
+                            node_id=node_id,
+                            affected_node_ids=[node_id],
+                            seed=seed,
+                        )
                     inference_warnings.append(
                         InferenceWarning(
                             code="CONSTRAINT_NODE_DEFAULT_BASE",
@@ -868,62 +941,54 @@ class RobustnessAnalyzerV2:
                                 "node_id": node_id,
                                 "defaulted_to": 0.0,
                                 "reason": "no_parameter_uncertainty",
+                                "base_semantics": "zero_base_offset_plus_parent_propagation",
+                                "ancestor_data_gap": ancestor_data_gap,
                                 "message": message,
                             },
                         )
                     )
-                    constraint_default_base_critiques.append(
-                        default_base_critique_def.build(
-                            node_id=node_id,
-                            affected_node_ids=[node_id],
-                            seed=seed,
-                        )
-                    )
+                    constraint_default_base_critiques.append(default_base_critique)
                     self.logger.warning(
                         "isl.constraint.default_base",
                         extra={
                             "node_id": node_id,
                             "defaulted_to": 0.0,
                             "reason": "no_parameter_uncertainty",
+                            "ancestor_data_gap": ancestor_data_gap,
                         },
                     )
 
-        # Detect root nodes that will silently default to 0.0
-        # A root node needs a warning if it has NO observed_state.value AND NO
-        # ParameterUncertainty entry (which would provide sampling via FactorSampler).
-        defaulted_root_node_ids: List[str] = []
-        uncertainty_node_ids = set(u.node_id for u in (request.parameter_uncertainties or []))
-        parent_map_for_roots: dict[str, list[str]] = defaultdict(list)
-        for edge in request.graph.edges:
-            parent_map_for_roots[edge.to].append(edge.from_)
-        for node in request.graph.nodes:
-            is_root = len(parent_map_for_roots.get(node.id, [])) == 0
-            if not is_root:
-                continue
-            has_observed_value = (
-                node.observed_state is not None and node.observed_state.value is not None
-            )
-            has_uncertainty = node.id in uncertainty_node_ids
-            # Skip warning if every option intervenes on this node
-            # (intervention value overrides the base, so default 0.0 is never used)
-            all_options_intervene = all(node.id in opt.interventions for opt in request.options)
-            if not has_observed_value and not has_uncertainty and not all_options_intervene:
-                defaulted_root_node_ids.append(node.id)
-                inference_warnings.append(
-                    InferenceWarning(
-                        code="ROOT_NODE_DEFAULT_VALUE",
-                        field=f"nodes[{node.id}].observed_state.value",
-                        detail={
-                            "node_id": node.id,
-                            "defaulted_to": 0.0,
-                            "message": (
-                                f"No observed value provided for root node '{node.id}'; "
-                                f"defaulted to 0.0. Results for downstream nodes may be "
-                                f"unreliable."
-                            ),
-                        },
-                    )
+        # Emit root-default warnings (list computed above; emission order and
+        # message unchanged)
+        for node_id in defaulted_root_node_ids:
+            inference_warnings.append(
+                InferenceWarning(
+                    code="ROOT_NODE_DEFAULT_VALUE",
+                    field=f"nodes[{node_id}].observed_state.value",
+                    detail={
+                        "node_id": node_id,
+                        "defaulted_to": 0.0,
+                        "message": (
+                            f"No observed value provided for root node '{node_id}'; "
+                            f"defaulted to 0.0. Results for downstream nodes may be "
+                            f"unreliable."
+                        ),
+                    },
                 )
+            )
+
+        # Cluster-2 goal-node disclosures (Track S Phase 0): make the goal
+        # node's base/propagation semantics explicit — no numeric change.
+        goal_disclosure_warnings, goal_disclosure_critiques = self._build_goal_node_disclosures(
+            request,
+            parent_map,
+            children_map,
+            uncertainty_node_ids,
+            fully_intervened_node_ids,
+            defaulted_root_node_ids,
+            seed,
+        )
+        inference_warnings.extend(goal_disclosure_warnings)
 
         # Run Monte Carlo simulation
         (
@@ -1019,6 +1084,10 @@ class RobustnessAnalyzerV2:
 
         # Add constraint default-base critiques (also surfaced via inference_warnings)
         critiques.extend(constraint_default_base_critiques)
+
+        # Add Cluster-2 goal-node disclosure critiques (also surfaced via
+        # inference_warnings)
+        critiques.extend(goal_disclosure_critiques)
 
         # Compute sensitivity if requested
         sensitivity = []
@@ -1271,6 +1340,207 @@ class RobustnessAnalyzerV2:
             constraint_node_values,
             factor_values_per_sample,
         )
+
+    @staticmethod
+    def _defaulted_roots_reaching(
+        target_node_id: str,
+        children_map: Dict[str, List[str]],
+        defaulted_root_node_ids: List[str],
+        fully_intervened_node_ids: set,
+    ) -> List[str]:
+        """
+        Root nodes that defaulted to 0.0 AND can influence the target's samples.
+
+        A defaulted root reaches the target iff there is a directed path
+        root -> ... -> target where no node after the root is intervened on by
+        EVERY option (an all-options intervention overrides the structural
+        equation in every sample, severing upstream influence at that node).
+
+        Nodes intervened by only SOME options still pass influence — the
+        default leaks into the remaining options' samples, so the root counts.
+
+        Returns:
+            Sorted list of defaulted root node IDs with an unblocked directed
+            path to the target.
+        """
+        reaching: List[str] = []
+        for root_id in defaulted_root_node_ids:
+            if root_id in fully_intervened_node_ids:
+                # Defensive: such roots are excluded from the defaulted list.
+                continue
+            stack = [root_id]
+            seen = {root_id}
+            found = False
+            while stack and not found:
+                current = stack.pop()
+                for child in children_map.get(current, []):
+                    if child in seen:
+                        continue
+                    seen.add(child)
+                    if child in fully_intervened_node_ids:
+                        # Blocked: overridden in every option's samples.
+                        continue
+                    if child == target_node_id:
+                        found = True
+                        break
+                    stack.append(child)
+            if found:
+                reaching.append(root_id)
+        return sorted(reaching)
+
+    def _build_goal_node_disclosures(
+        self,
+        request: RobustnessRequestV2,
+        parent_map: Dict[str, List[str]],
+        children_map: Dict[str, List[str]],
+        uncertainty_node_ids: set,
+        fully_intervened_node_ids: set,
+        defaulted_root_node_ids: List[str],
+        seed: int,
+    ) -> Tuple[List[InferenceWarning], List[CritiqueV2]]:
+        """
+        Cluster-2 (Track S Phase 0): disclose the goal node's base/propagation
+        semantics. Disclosure-only — never changes any sampled value.
+
+        Doctrine B (ratified, PLoT #204): a non-root goal node's distribution
+        is the forward-propagated composition of its parents; goal-fit is
+        scored from that distribution. The SCM evaluator already implements
+        this (non-root base offset = 0.0 + parent contributions). What was
+        previously SILENT, and is disclosed here:
+
+        - GOAL_OBSERVED_VALUE_UNUSED: observed_state.value on a non-root goal
+          is not used as a base (only root nodes consult it).
+        - GOAL_PU_BASE_ADDITIVE: a ParameterUncertainty entry on a non-root
+          goal draws a per-sample base that is ADDED to parent propagation —
+          it shifts the distribution, it does not pin the goal's value.
+        - GOAL_ANCESTOR_DATA_GAP (+ critique): the propagated distribution
+          rests partly on root ancestors that defaulted to 0.0 — honest
+          "insufficient data", disclosed rather than fabricated.
+        - GOAL_NODE_ROOT_STATIC: a root goal without ParameterUncertainty or
+          epsilon noise is a constant; options cannot differ through it
+          unless they intervene on it directly.
+        """
+        warnings: List[InferenceWarning] = []
+        critiques: List[CritiqueV2] = []
+        goal_id = request.goal_node_id
+        goal_node = next((n for n in request.graph.nodes if n.id == goal_id), None)
+        if goal_node is None:
+            return warnings, critiques
+        if goal_id in fully_intervened_node_ids:
+            # Every option pins the goal directly; no base/propagation
+            # semantics applies to any sample.
+            return warnings, critiques
+
+        goal_is_root = len(parent_map.get(goal_id, [])) == 0
+        goal_has_pu = goal_id in uncertainty_node_ids
+        observed_value = (
+            goal_node.observed_state.value if goal_node.observed_state is not None else None
+        )
+
+        if goal_is_root:
+            if not goal_has_pu and goal_node.epsilon_std == 0:
+                base_value = observed_value if observed_value is not None else 0.0
+                value_defaulted = observed_value is None
+                warnings.append(
+                    InferenceWarning(
+                        code="GOAL_NODE_ROOT_STATIC",
+                        field=f"nodes[{goal_id}]",
+                        detail={
+                            "node_id": goal_id,
+                            "base_value": base_value,
+                            "value_defaulted": value_defaulted,
+                            "message": (
+                                f"Goal node '{goal_id}' has no parents; with no "
+                                f"ParameterUncertainty and epsilon_std=0 its samples "
+                                f"are the constant base {base_value}"
+                                + (
+                                    " (defaulted to 0.0 — no observed value)"
+                                    if value_defaulted
+                                    else ""
+                                )
+                                + ". Options cannot differ through this goal unless "
+                                "they intervene on it directly."
+                            ),
+                        },
+                    )
+                )
+            return warnings, critiques
+
+        # Non-root goal: distribution = forward-propagated composition of
+        # parents (doctrine B).
+        if goal_has_pu:
+            warnings.append(
+                InferenceWarning(
+                    code="GOAL_PU_BASE_ADDITIVE",
+                    field=f"parameter_uncertainties[{goal_id}]",
+                    detail={
+                        "node_id": goal_id,
+                        "pu_mean_source": (
+                            "observed_state.value" if observed_value is not None else "default_0.0"
+                        ),
+                        "message": (
+                            f"Goal node '{goal_id}' is non-root and has a "
+                            f"ParameterUncertainty entry: each sample draws a base "
+                            f"from that distribution and the parents' propagated "
+                            f"contribution is added on top. The goal's distribution "
+                            f"is shifted by the sampled base — it is not pinned to it."
+                        ),
+                    },
+                )
+            )
+        elif observed_value is not None:
+            warnings.append(
+                InferenceWarning(
+                    code="GOAL_OBSERVED_VALUE_UNUSED",
+                    field=f"nodes[{goal_id}].observed_state.value",
+                    detail={
+                        "node_id": goal_id,
+                        "observed_value": observed_value,
+                        "reason": "non_root_goal_forward_propagation",
+                        "message": (
+                            f"Goal node '{goal_id}' is non-root; its distribution is "
+                            f"the forward-propagated composition of its parents "
+                            f"(doctrine B). The supplied observed_state.value="
+                            f"{observed_value} is not used as a base for the goal's "
+                            f"samples. Use the node's intercept for a fixed exogenous "
+                            f"offset."
+                        ),
+                    },
+                )
+            )
+
+        ancestor_data_gap = self._defaulted_roots_reaching(
+            goal_id, children_map, defaulted_root_node_ids, fully_intervened_node_ids
+        )
+        if ancestor_data_gap:
+            gap_list = ", ".join(f"'{r}'" for r in ancestor_data_gap)
+            warnings.append(
+                InferenceWarning(
+                    code="GOAL_ANCESTOR_DATA_GAP",
+                    field=f"nodes[{goal_id}]",
+                    detail={
+                        "node_id": goal_id,
+                        "unsupported_root_ancestors": ancestor_data_gap,
+                        "message": (
+                            f"Goal node '{goal_id}' is scored from its "
+                            f"forward-propagated outcome distribution, but root "
+                            f"ancestor(s) {gap_list} carry no observed value or "
+                            f"ParameterUncertainty and defaulted to 0.0 — goal-level "
+                            f"probabilities partially rest on placeholder zeros "
+                            f"(insufficient data)."
+                        ),
+                    },
+                )
+            )
+            critiques.append(
+                GOAL_ANCESTOR_DATA_GAP.build(
+                    node_id=goal_id,
+                    gap_roots=gap_list,
+                    affected_node_ids=[goal_id],
+                    seed=seed,
+                )
+            )
+        return warnings, critiques
 
     def _apply_auto_scaled_noise(
         self,

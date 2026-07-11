@@ -353,11 +353,44 @@ CONSTRAINT_NODE_DEFAULT_BASE = CritiqueDefinition(
     source="analysis",
     message_template=(
         "Constraint node '{node_id}' has no ParameterUncertainty and is non-root "
-        "— defaulted to base=0.0, constraint probability may be unreliable"
+        "— defaulted to base=0.0, and its root ancestor(s) {gap_roots} carry no "
+        "observed value or ParameterUncertainty (defaulted to 0.0); constraint "
+        "probability may be unreliable"
     ),
     default_suggestion=(
-        "Supply a ParameterUncertainty entry (even distribution='point_mass') "
-        "for this node so its observed_state.value is used as the sampling base"
+        "Provide observed values or ParameterUncertainty entries for the listed "
+        "root ancestors so the propagated composition is data-supported. Note: a "
+        "ParameterUncertainty base on a non-root node is ADDED to parent "
+        "propagation — it does not pin the node's value; use the node's "
+        "intercept for a fixed exogenous offset"
+    ),
+)
+
+# Cluster-2 (Track S Phase 0): fires for the SAME underlying condition as
+# CONSTRAINT_NODE_DEFAULT_BASE (non-root, non-objective constraint target
+# without ParameterUncertainty) but when every root ancestor of the target
+# carries data (observed value, ParameterUncertainty, or an intervention in
+# every option). There the target's samples are a fully-supported
+# forward-propagated composition of its parents — the base=0.0 is a zero
+# EXOGENOUS OFFSET, not a missing-data placeholder, and the old
+# "may be unreliable" wording misrepresented expected propagation as a data
+# gap. Same `code` and severity (downstream consumers key on code, not
+# message text — ROADMAP 1.26b precedent); only message/suggestion differ.
+CONSTRAINT_NODE_DEFAULT_BASE_SUPPORTED = CritiqueDefinition(
+    code="CONSTRAINT_NODE_DEFAULT_BASE",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "Constraint node '{node_id}' has no ParameterUncertainty and is non-root "
+        "— base offset defaulted to 0.0; its samples are the forward-propagated "
+        "composition of its parents (all root ancestors carry data), so the "
+        "constraint probability is model-derived, not a missing-data placeholder"
+    ),
+    default_suggestion=(
+        "No action needed if parent propagation is the intended semantics. Use "
+        "the node's intercept for a fixed exogenous offset; note a "
+        "ParameterUncertainty base on a non-root node is ADDED to parent "
+        "propagation — it does not pin the node's value"
     ),
 )
 
@@ -382,8 +415,33 @@ CONSTRAINT_NODE_DEFAULT_BASE_OBJECTIVE = CritiqueDefinition(
     ),
     default_suggestion=(
         "This is expected for a non-root objective node without an explicit "
-        "baseline. Supply a ParameterUncertainty entry only if you want the "
-        "objective's own sampling base to reflect an observed value instead"
+        "baseline. Supply a ParameterUncertainty entry only if you intend an "
+        "additive exogenous base on top of parent propagation — the sampled "
+        "base is ADDED to parent contributions, it does not replace them"
+    ),
+)
+
+
+# Cluster-2 (Track S Phase 0): the goal node's distribution is the
+# forward-propagated composition of its parents (doctrine B). When one or
+# more root ancestors of the goal carry NO data (no observed value, no
+# ParameterUncertainty, not intervened by every option) they default to 0.0,
+# so goal-level probabilities partially rest on placeholder zeros. Science
+# honesty: no priors are invented — the gap is disclosed instead.
+GOAL_ANCESTOR_DATA_GAP = CritiqueDefinition(
+    code="GOAL_ANCESTOR_DATA_GAP",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "Goal node '{node_id}' is scored from its forward-propagated outcome "
+        "distribution, but root ancestor(s) {gap_roots} carry no observed value "
+        "or ParameterUncertainty and defaulted to 0.0 — goal-level "
+        "probabilities partially rest on placeholder zeros (insufficient data)"
+    ),
+    default_suggestion=(
+        "Provide observed values or ParameterUncertainty entries for the listed "
+        "root ancestors; until then the honest reading of goal-fit is "
+        "'insufficient data', not a calibrated probability"
     ),
 )
 
@@ -441,6 +499,7 @@ CRITIQUES = {
     "DEGENERATE_OPTION_ZERO_VARIANCE": DEGENERATE_OPTION_ZERO_VARIANCE,
     "HIGH_TIE_RATE": HIGH_TIE_RATE,
     "CONSTRAINT_NODE_DEFAULT_BASE": CONSTRAINT_NODE_DEFAULT_BASE,
+    "GOAL_ANCESTOR_DATA_GAP": GOAL_ANCESTOR_DATA_GAP,
     # Engine
     "INTERNAL_ERROR": INTERNAL_ERROR,
     "INFERENCE_TIMEOUT": INFERENCE_TIMEOUT,
