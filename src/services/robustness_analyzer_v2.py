@@ -14,6 +14,8 @@ This enables answering:
 import hashlib
 import logging
 import math
+import os
+import statistics
 import time
 import uuid
 from collections import defaultdict, deque
@@ -114,6 +116,59 @@ MARGINAL_K_SAMPLES = 100
 # value is never altered or clamped (labels over clamps per audit T0-4).
 EVPI_NOISE_FLOOR_Z = 1.96
 EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
+
+# --- Flip-threshold stability bands (Track S Phase 1) ---------------------------
+# A single flip threshold (edge_e_values[].flip_mean) is searched against ONE
+# background — all other edges at expected value — so it is presented with
+# false stability. The 2026-06-10 PLoT/ISL science-performance report
+# recommends reporting flip thresholds with "a stability band from a small
+# seed sweep (e.g. 5 seeds)" and basing flip confidence on band width.
+# Flag-gated, default OFF: the flag-off wire is byte-identical (pinned by
+# tests/unit/test_flip_stability_bands.py against a base golden fixture).
+FLIP_STABILITY_BANDS_ENV = "ISL_FLIP_STABILITY_BANDS"
+FLIP_STABILITY_SEEDS_ENV = "ISL_FLIP_STABILITY_SEEDS"
+FLIP_STABILITY_DEFAULT_N_SEEDS = 5  # per the 06-10 report recommendation
+FLIP_STABILITY_MIN_N_SEEDS = 2  # a 1-seed "band" is the false stability we're fixing
+FLIP_STABILITY_MAX_N_SEEDS = 20
+_FLIP_STABILITY_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _flip_stability_bands_enabled() -> bool:
+    """Read the flag at request time (default off) so tests/ops can toggle it."""
+    return os.environ.get(FLIP_STABILITY_BANDS_ENV, "").strip().lower() in _FLIP_STABILITY_TRUTHY
+
+
+def _flip_stability_n_seeds() -> int:
+    """Sweep size N: ISL_FLIP_STABILITY_SEEDS, clamped to [2, 20]; default 5.
+
+    Unparseable or below-minimum values fall back to the default rather than
+    erroring — the sweep is an additive diagnostic and must never fail a
+    request over configuration.
+    """
+    raw = os.environ.get(FLIP_STABILITY_SEEDS_ENV)
+    if raw is None:
+        return FLIP_STABILITY_DEFAULT_N_SEEDS
+    try:
+        n = int(raw.strip())
+    except ValueError:
+        logger.warning(
+            "flip_stability_n_seeds_invalid",
+            extra={"raw": raw, "fallback": FLIP_STABILITY_DEFAULT_N_SEEDS},
+        )
+        return FLIP_STABILITY_DEFAULT_N_SEEDS
+    if n < FLIP_STABILITY_MIN_N_SEEDS:
+        logger.warning(
+            "flip_stability_n_seeds_below_minimum",
+            extra={"raw": raw, "fallback": FLIP_STABILITY_DEFAULT_N_SEEDS},
+        )
+        return FLIP_STABILITY_DEFAULT_N_SEEDS
+    if n > FLIP_STABILITY_MAX_N_SEEDS:
+        logger.warning(
+            "flip_stability_n_seeds_clamped",
+            extra={"raw": raw, "clamped_to": FLIP_STABILITY_MAX_N_SEEDS},
+        )
+        return FLIP_STABILITY_MAX_N_SEEDS
+    return n
 
 
 def evpi_noise_floor(n_samples: int) -> float:
@@ -1131,6 +1186,15 @@ class RobustnessAnalyzerV2:
         edge_e_values = None
         if request.include_e_values:
             edge_e_values = self._compute_edge_e_values(request, evaluator)
+            # Track S Phase 1: seed-sweep flip-threshold stability bands.
+            # Flag-gated (ISL_FLIP_STABILITY_BANDS, default OFF) and ADDITIVE:
+            # attaches a "stability" object to each edge_e_values entry and
+            # never mutates existing keys, so the flag-off wire stays
+            # byte-identical. Uses only fresh SHA-256-derived child RNGs —
+            # no shared RNG stream is consumed, so all other numbers are
+            # unchanged flag-on vs flag-off.
+            if edge_e_values is not None and _flip_stability_bands_enabled():
+                self._attach_flip_stability_bands(request, evaluator, edge_e_values, seed)
 
         # Find recommended option (needed before EVPI to fix decision policy)
         recommended_option_id = max(option_wins, key=lambda k: option_wins[k])
@@ -3314,6 +3378,186 @@ class RobustnessAnalyzerV2:
                 )
 
         return results
+
+    # Flip-stability sweep budget: max wall-clock for the full band sweep.
+    # All-or-nothing on exceed: NO bands are attached (partial bands would
+    # bias readers toward whichever edges happened to be computed first) and
+    # the base edge_e_values are never affected. Mirrors E_VALUE_BUDGET_MS
+    # semantics — band *presence* is budget-gated exactly as edge_e_values
+    # presence already is; band *content* is fully deterministic.
+    FLIP_STABILITY_BUDGET_MS = 2000
+
+    def _attach_flip_stability_bands(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        edge_e_values: List[Dict[str, Any]],
+        master_seed: int,
+    ) -> None:
+        """Attach a seed-sweep stability band to each edge_e_values entry.
+
+        Track S Phase 1 (flag-gated by ISL_FLIP_STABILITY_BANDS, default off).
+
+        Why: the single-point flip threshold (flip_mean) is searched against
+        ONE background — every other edge held at its expected value — so a
+        consumer sees one number with no indication of how much it moves
+        under the graph's own stated uncertainty. The 2026-06-10 science-
+        performance report recommends a stability band from a small seed
+        sweep, with flip confidence based on band width.
+
+        Method: N child seeds are SHA-256-derived from the master (request)
+        seed — same request+seed therefore yields byte-identical bands, and
+        the derivation never consumes any existing RNG stream. Each child
+        seed samples ONE full edge configuration from the joint uncertainty
+        (existence Bernoulli x truncated-normal strength — identical
+        semantics to the main MC's DualUncertaintySampler). Each edge's flip
+        point is then re-searched with the other edges held at that sampled
+        background. Backgrounds are shared across edges within a seed
+        (common random numbers), so bands are comparable across edges.
+
+        Mutates each entry dict by adding a "stability" key:
+          n_seeds, n_seeds_flipped, seed_flip_means (per-seed flip mean or
+          None when that background admits no flip), and — when at least one
+          seed flips — band_min / band_median / band_max / band_width.
+          The band_* keys are OMITTED (not null) when nothing flips, matching
+          the v2 wire's exclude_none serialisation so v1 (dict passthrough)
+          and v2 (model) wires carry the same shape.
+        """
+        t0 = time.time()
+        n_seeds = _flip_stability_n_seeds()
+
+        # Child seeds: SHA-256-derived (process-safe, NOT Python hash()) —
+        # the same sub-seed pattern as the per-edge marginal-switch and
+        # per-factor EVPI streams.
+        child_seeds = [
+            int(hashlib.sha256(f"{master_seed}:flip_stability:{i}".encode()).hexdigest()[:8], 16)
+            for i in range(n_seeds)
+        ]
+
+        # One sampled background per child seed, shared across all edges.
+        backgrounds: List[Dict[Tuple[str, str], float]] = []
+        for child_seed in child_seeds:
+            sweep_sampler = DualUncertaintySampler(request.graph.edges, SeededRNG(child_seed))
+            backgrounds.append(sweep_sampler.sample_edge_configuration())
+
+        edges_by_key = {(e.from_, e.to): e for e in request.graph.edges}
+
+        bands: List[Optional[Dict[str, Any]]] = []
+        for entry in edge_e_values:
+            edge = edges_by_key.get((entry["from_id"], entry["to_id"]))
+            if edge is None:
+                # Defensive: entries are built from the same edge list, so
+                # this should be unreachable; skip rather than fail the sweep.
+                bands.append(None)
+                continue
+
+            seed_flip_means: List[Optional[float]] = []
+            for background in backgrounds:
+                if (time.time() - t0) * 1000 > self.FLIP_STABILITY_BUDGET_MS:
+                    self.logger.info(
+                        "flip_stability_budget_exceeded",
+                        extra={
+                            "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                            "edges_completed": len(bands),
+                            "n_seeds": n_seeds,
+                        },
+                    )
+                    return  # all-or-nothing: attach nothing
+                flip_mean = self._flip_mean_under_background(request, evaluator, edge, background)
+                seed_flip_means.append(round(flip_mean, 6) if flip_mean is not None else None)
+
+            flipped = [v for v in seed_flip_means if v is not None]
+            band: Dict[str, Any] = {
+                "n_seeds": n_seeds,
+                "n_seeds_flipped": len(flipped),
+                "seed_flip_means": seed_flip_means,
+            }
+            if flipped:
+                band_min = min(flipped)
+                band_max = max(flipped)
+                band["band_min"] = band_min
+                band["band_median"] = round(float(statistics.median(flipped)), 6)
+                band["band_max"] = band_max
+                band["band_width"] = round(band_max - band_min, 6)
+            bands.append(band)
+
+        # Attach only after the full sweep completed within budget.
+        for entry, computed_band in zip(edge_e_values, bands):
+            if computed_band is not None:
+                entry["stability"] = computed_band
+
+    def _flip_mean_under_background(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        edge: EdgeV2,
+        background: Dict[Tuple[str, str], float],
+    ) -> Optional[float]:
+        """Flip point of one edge with the other edges held at a sampled background.
+
+        Identical search semantics to _compute_edge_e_values — boundary check
+        then E_VALUE_BISECT_STEPS bisection on strength.mean, effective value
+        mean * exists_probability, 'increase' direction tried first — differing
+        ONLY in the background: the other edges sit at one sampled
+        configuration instead of their expected values.
+
+        Returns the flip mean, or None when no perturbation within
+        [EDGE_STRENGTH_MIN, EDGE_STRENGTH_MAX] flips the winner under this
+        background.
+        """
+        edge_key = (edge.from_, edge.to)
+        current_mean = edge.strength.mean
+        ep = edge.exists_probability
+
+        baseline_config = dict(background)
+        baseline_config[edge_key] = current_mean * ep
+
+        def winner_under(config: Dict[Tuple[str, str], float]) -> str:
+            outcomes = {}
+            for option in request.options:
+                outcomes[option.id] = evaluator.evaluate(
+                    edge_strengths=config,
+                    interventions=option.interventions,
+                    goal_node=request.goal_node_id,
+                )
+            # Deterministic tie-breaking (sort by option_id) — same as base
+            return sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))[0][0]
+
+        def winner_at(mean_value: float) -> str:
+            test_config = dict(baseline_config)
+            test_config[edge_key] = mean_value * ep
+            return winner_under(test_config)
+
+        baseline_winner = winner_under(baseline_config)
+
+        for direction in ("increase", "decrease"):
+            if direction == "increase":
+                lo, hi = current_mean, EDGE_STRENGTH_MAX
+            else:
+                lo, hi = EDGE_STRENGTH_MIN, current_mean
+
+            boundary = hi if direction == "increase" else lo
+            if winner_at(boundary) == baseline_winner:
+                continue  # this direction cannot flip under this background
+
+            for _ in range(self.E_VALUE_BISECT_STEPS):
+                mid = (lo + hi) / 2
+                if winner_at(mid) != baseline_winner:
+                    # Flip happened — narrow toward current_mean
+                    if direction == "increase":
+                        hi = mid
+                    else:
+                        lo = mid
+                else:
+                    # No flip — narrow away from current_mean
+                    if direction == "increase":
+                        lo = mid
+                    else:
+                        hi = mid
+
+            return hi if direction == "increase" else lo
+
+        return None
 
     def _compute_evpi(
         self,

@@ -752,6 +752,17 @@
             "title": "Is Unflippable",
             "type": "boolean"
           },
+          "stability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FlipStabilityBandV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seed-sweep stability band for this flip threshold (Track S Phase 1). Only present when ISL_FLIP_STABILITY_BANDS is enabled \u2014 additive, default off."
+          },
           "to_id": {
             "description": "Target node ID",
             "title": "To Id",
@@ -1533,6 +1544,93 @@
           "direction"
         ],
         "title": "FactorSensitivityV2",
+        "type": "object"
+      },
+      "FlipStabilityBandV2": {
+        "description": "Seed-sweep stability band for one edge's flip threshold (Track S Phase 1).\n\nFlag-gated (ISL_FLIP_STABILITY_BANDS, default off) and ADDITIVE: only\npresent when the flag is on; the flag-off wire is byte-identical.\n\nThe single-point flip_mean is searched against ONE background (all other\nedges at expected value) and is therefore presented with false stability.\nThis band shows how the flip point moves across N backgrounds sampled\nfrom the graph's own joint uncertainty \u2014 child seeds are SHA-256-derived\nfrom the request seed, so the band is deterministic per request+seed.\nPer the 2026-06-10 science-performance report, flip confidence should be\nbased on band_width, not on the single-point value alone.",
+        "properties": {
+          "band_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum flip mean across flipped seeds. Omitted when nothing flips.",
+            "title": "Band Max"
+          },
+          "band_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median flip mean across flipped seeds. Omitted when nothing flips.",
+            "title": "Band Median"
+          },
+          "band_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minimum flip mean across flipped seeds. Omitted when nothing flips.",
+            "title": "Band Min"
+          },
+          "band_width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "band_max - band_min. The flip-confidence input recommended by the 06-10 science-performance report. Omitted when nothing flips. INTERPRETATION TRAP: when n_seeds_flipped == 1 this is 0.0 by construction (a single value has zero range) \u2014 a naive width rubric would read maximal stability from a single flipped background. Consumers MUST condition any width-based confidence rubric on n_seeds_flipped.",
+            "title": "Band Width"
+          },
+          "n_seeds": {
+            "description": "Number of child seeds swept (default 5)",
+            "minimum": 1.0,
+            "title": "N Seeds",
+            "type": "integer"
+          },
+          "n_seeds_flipped": {
+            "description": "Seeds whose sampled background admits a flip within [-1, 1]. When 0, the band_* fields are omitted (exclude_none).",
+            "minimum": 0.0,
+            "title": "N Seeds Flipped",
+            "type": "integer"
+          },
+          "seed_flip_means": {
+            "description": "Per-child-seed flip mean, in child-seed order; null where that seed's background admits no flip.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Seed Flip Means",
+            "type": "array"
+          }
+        },
+        "required": [
+          "n_seeds",
+          "n_seeds_flipped",
+          "seed_flip_means"
+        ],
+        "title": "FlipStabilityBandV2",
         "type": "object"
       },
       "FragileEdgeEnhanced": {

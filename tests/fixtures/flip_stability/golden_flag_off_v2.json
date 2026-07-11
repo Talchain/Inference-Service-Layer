@@ -1,0 +1,197 @@
+{
+  "analysis_status": "computed",
+  "auto_noise_applied": true,
+  "critiques": [],
+  "endpoint_version": "analyze/v2",
+  "engine_version": "1.0.0",
+  "factor_sensitivity_status": "skipped",
+  "inference_warnings": [],
+  "options": [
+    {
+      "id": "low_price",
+      "label": "Low price",
+      "outcome": {
+        "mean": 0.06652601937805164,
+        "n_samples": 200,
+        "n_valid_samples": 200,
+        "p10": -0.01458033353390531,
+        "p50": 0.06565185360902098,
+        "p90": 0.1546000099572261,
+        "percentiles_source": "samples",
+        "std": 0.06601701734309333,
+        "validity_ratio": 1.0
+      },
+      "status": "computed",
+      "win_probability": 0.075
+    },
+    {
+      "id": "high_price",
+      "label": "High price",
+      "outcome": {
+        "mean": 0.1454393077365287,
+        "n_samples": 200,
+        "n_valid_samples": 200,
+        "p10": -0.06027584554396794,
+        "p50": 0.14672497969618872,
+        "p90": 0.3403487792525816,
+        "percentiles_source": "samples",
+        "std": 0.15305289830453545,
+        "validity_ratio": 1.0
+      },
+      "status": "computed",
+      "win_probability": 0.925
+    }
+  ],
+  "request_echo": {
+    "goal_node_id_hash": "371f7e422380",
+    "graph_edge_count": 3,
+    "graph_node_count": 3,
+    "include_diagnostics": false,
+    "n_samples": 200,
+    "options_count": 2,
+    "response_version_requested": 2
+  },
+  "request_id": "flip-stability-golden-001",
+  "robustness": {
+    "confidence": 0.8595926227402444,
+    "edge_e_values": [
+      {
+        "current_mean": -0.4,
+        "e_value": 1.6447,
+        "edge_id": "price->demand",
+        "flip_direction": "decrease",
+        "flip_mean": -0.657895,
+        "from_id": "price",
+        "is_unflippable": false,
+        "to_id": "demand"
+      },
+      {
+        "current_mean": 0.8,
+        "edge_id": "demand->revenue",
+        "flip_direction": "increase",
+        "flip_mean": 0.8,
+        "from_id": "demand",
+        "is_unflippable": true,
+        "to_id": "revenue"
+      },
+      {
+        "current_mean": 0.5,
+        "e_value": 1.0,
+        "edge_id": "price->revenue",
+        "flip_direction": "decrease",
+        "flip_mean": 0.304,
+        "from_id": "price",
+        "is_unflippable": false,
+        "to_id": "revenue"
+      }
+    ],
+    "edge_sensitivity": [
+      {
+        "direction": "positive",
+        "edge_id": "price->revenue",
+        "elasticity": 2.40539110593194,
+        "from_id": "price",
+        "importance_rank": 1,
+        "interpretation": "Decision is highly sensitive to price->revenue existence - consider validating this relationship",
+        "sensitivity_score": 1.0,
+        "sensitivity_type": "existence",
+        "to_id": "revenue"
+      },
+      {
+        "direction": "negative",
+        "edge_id": "demand->revenue",
+        "elasticity": -1.6871429817353245,
+        "from_id": "demand",
+        "importance_rank": 2,
+        "interpretation": "Decision is highly sensitive to demand->revenue existence - consider validating this relationship",
+        "sensitivity_score": 0.7014006901308721,
+        "sensitivity_type": "existence",
+        "to_id": "revenue"
+      },
+      {
+        "direction": "negative",
+        "edge_id": "price->demand",
+        "elasticity": -1.2289194019958274,
+        "from_id": "price",
+        "importance_rank": 3,
+        "interpretation": "Decision is highly sensitive to price->demand existence - consider validating this relationship",
+        "sensitivity_score": 0.5109021144067535,
+        "sensitivity_type": "existence",
+        "to_id": "demand"
+      },
+      {
+        "direction": "positive",
+        "edge_id": "price->revenue",
+        "elasticity": 0.44511591250500043,
+        "from_id": "price",
+        "importance_rank": 4,
+        "interpretation": "Decision is highly sensitive to price->revenue effect size - consider narrowing uncertainty",
+        "sensitivity_score": 0.18504928841189242,
+        "sensitivity_type": "magnitude",
+        "to_id": "revenue"
+      },
+      {
+        "direction": "positive",
+        "edge_id": "price->demand",
+        "elasticity": 0.41410260492616324,
+        "from_id": "price",
+        "importance_rank": 5,
+        "interpretation": "Decision is highly sensitive to price->demand effect size - consider narrowing uncertainty",
+        "sensitivity_score": 0.1721560389513971,
+        "sensitivity_type": "magnitude",
+        "to_id": "demand"
+      },
+      {
+        "direction": "negative",
+        "edge_id": "demand->revenue",
+        "elasticity": -0.29423643185230086,
+        "from_id": "demand",
+        "importance_rank": 6,
+        "interpretation": "Decision is highly sensitive to demand->revenue effect size - consider narrowing uncertainty",
+        "sensitivity_score": 0.12232373817575187,
+        "sensitivity_type": "magnitude",
+        "to_id": "revenue"
+      }
+    ],
+    "fragile_edges": [
+      {
+        "alternative_winner_id": "low_price",
+        "edge_id": "price->revenue",
+        "from_id": "price",
+        "marginal_switch_probability": 0.0,
+        "switch_probability": 0.26,
+        "to_id": "revenue"
+      },
+      {
+        "alternative_winner_id": "low_price",
+        "edge_id": "demand->revenue",
+        "from_id": "demand",
+        "marginal_switch_probability": 0.0,
+        "switch_probability": 0.04,
+        "to_id": "revenue"
+      },
+      {
+        "alternative_winner_id": "low_price",
+        "edge_id": "price->demand",
+        "from_id": "price",
+        "marginal_switch_probability": 0.0,
+        "switch_probability": 0.24,
+        "to_id": "demand"
+      }
+    ],
+    "fragile_edges_v1": [
+      "demand->revenue",
+      "price->demand",
+      "price->revenue"
+    ],
+    "is_robust": true,
+    "level": "high",
+    "recommendation_stability": 0.925,
+    "robust_edges": []
+  },
+  "robustness_status": "computed",
+  "seed_source": "client_provided",
+  "seed_used": "42",
+  "sensitivity_reference_option_id": "low_price",
+  "version": "2.0"
+}
