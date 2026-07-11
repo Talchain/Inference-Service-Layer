@@ -128,6 +128,15 @@ protection there.
 - `band_width` is the flip-confidence input the 06-10 report recommends —
   it is NOT a confidence interval; it is the range of the flip point across
   N=5 draws of the background uncertainty.
+- **`n_seeds_flipped == 1` yields `band_width == 0.0` by construction** — a
+  single flipped value has zero range (`band_min == band_median == band_max`).
+  A naive width rubric ("narrow band ⇒ high flip confidence") would read
+  *maximal* stability from a single flipped background — the opposite of the
+  truth (only 1 of N sampled backgrounds even admits a flip). Downstream
+  consumers **MUST condition `band_width` on `n_seeds_flipped`**: interpret
+  width only when `n_seeds_flipped >= 2`, and treat a low `n_seeds_flipped`
+  as its own (weak-flip-evidence) signal. Also flagged in the
+  `FlipStabilityBandV2.band_width` field description on the wire schema.
 - `n_seeds_flipped < n_seeds` means some sampled backgrounds admit no flip
   at all within [-1, 1] — that asymmetry is signal, not noise.
 - No user-facing copy is generated from these fields yet; the band-based
@@ -139,7 +148,11 @@ protection there.
 - `src/services/robustness_analyzer_v2.py` — flag helpers, band sweep, background flip search
 - `src/models/response_v2.py` — `FlipStabilityBandV2`, `EdgeEValueV2.stability`
 - `src/api/robustness.py` — v1→v2 adapter passthrough
-- `tests/unit/test_flip_stability_bands.py` — 12 tests (pins + contract)
+- `openapi.json` — regenerated (`poetry run python scripts/generate_openapi.py`) to
+  carry `FlipStabilityBandV2` and `EdgeEValueV2.stability` — the spec is
+  generated from the models, so the model change widens the file scope here
+- `tests/unit/test_flip_stability_bands.py` — 15 tests (pins + contract +
+  forced zero-flip omission branch)
 - `tests/fixtures/flip_stability/golden_flag_off_v2.json` — base-captured flag-off golden
 - `benchmarks/flip_stability_budget.py` — budget measurement (this doc's table)
 

@@ -399,7 +399,11 @@ class FlipStabilityBandV2(BaseModel):
     band_width: Optional[float] = Field(
         None,
         description="band_max - band_min. The flip-confidence input recommended by the "
-        "06-10 science-performance report. Omitted when nothing flips.",
+        "06-10 science-performance report. Omitted when nothing flips. "
+        "INTERPRETATION TRAP: when n_seeds_flipped == 1 this is 0.0 by construction "
+        "(a single value has zero range) — a naive width rubric would read maximal "
+        "stability from a single flipped background. Consumers MUST condition any "
+        "width-based confidence rubric on n_seeds_flipped.",
     )
     seed_flip_means: List[Optional[float]] = Field(
         ...,

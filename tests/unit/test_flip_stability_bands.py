@@ -55,6 +55,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.models.response_v2 import FlipStabilityBandV2
 from src.models.robustness_v2 import RobustnessRequestV2
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
@@ -226,9 +227,9 @@ class TestFlagOnShape:
     def test_bands_attached_to_every_edge_e_value_entry(self, flag_on):
         response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         blocks = _stability_blocks(response)
-        assert all(isinstance(b, dict) for b in blocks), (
-            "every edge_e_values entry must carry a stability band when the flag is on"
-        )
+        assert all(
+            isinstance(b, dict) for b in blocks
+        ), "every edge_e_values entry must carry a stability band when the flag is on"
         for block in blocks:
             _assert_block_shape(block, DEFAULT_N_SEEDS)
 
@@ -258,9 +259,7 @@ class TestFlagOnShape:
         """
         response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         widths = [
-            b["band_width"]
-            for b in _stability_blocks(response)
-            if b.get("band_width") is not None
+            b["band_width"] for b in _stability_blocks(response) if b.get("band_width") is not None
         ]
         assert widths, "expected at least one edge with a computable band"
         assert any(w > 0 for w in widths)
@@ -351,6 +350,77 @@ class TestV2Wire:
             block = entry.get("stability")
             assert isinstance(block, dict), "flag-on v2 wire must carry stability bands"
             _assert_block_shape(block, DEFAULT_N_SEEDS)
+
+
+# ---------------------------------------------------------------------------
+# Zero-flip omission branch — forced, so the branch is GUARANTEED to execute
+# ---------------------------------------------------------------------------
+
+
+class TestZeroFlipOmission:
+    """The n_seeds_flipped == 0 omission contract, exercised deterministically.
+
+    No fixture graph guarantees a zero-flip band (the shape assertions above
+    only cover the branch IF a fixture happens to produce one), so these
+    tests force it: every background is made to admit no flip by patching
+    ``_flip_mean_under_background`` to return None — the exact value the real
+    search returns when no perturbation within [-1, 1] flips the winner.
+    """
+
+    @staticmethod
+    def _force_no_flip(monkeypatch):
+        monkeypatch.setattr(
+            RobustnessAnalyzerV2,
+            "_flip_mean_under_background",
+            lambda self, request, evaluator, edge, background: None,
+        )
+
+    def test_forced_zero_flip_analyzer_branch(self, flag_on, monkeypatch):
+        """v1 dict-passthrough shape: band_* keys OMITTED (not null) at zero flips."""
+        self._force_no_flip(monkeypatch)
+        response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+        blocks = _stability_blocks(response)
+        assert blocks, "expected stability blocks on every edge_e_values entry"
+        for block in blocks:
+            assert block["n_seeds_flipped"] == 0
+            assert block["seed_flip_means"] == [None] * DEFAULT_N_SEEDS
+            # The omission branch itself: exactly the 3 required keys, no band_*
+            assert set(block.keys()) == STABILITY_REQUIRED_KEYS
+            _assert_block_shape(block, DEFAULT_N_SEEDS)
+
+    def test_forced_zero_flip_v2_wire_parity(self, flag_on, client, monkeypatch):
+        """v2 model wire (exclude_none) carries the SAME zero-flip shape as v1.
+
+        Pins the parity claim end-to-end: band_* omitted by exclude_none,
+        while the None ELEMENTS inside seed_flip_means survive as JSON nulls.
+        """
+        self._force_no_flip(monkeypatch)
+        resp = client.post(ENDPOINT, json=_variant_request(2), headers=V2_HEADERS)
+        assert resp.status_code == 200, resp.text
+        edge_e_values = (resp.json().get("robustness") or {}).get("edge_e_values")
+        assert edge_e_values, "expected edge_e_values on the v2 wire"
+        for entry in edge_e_values:
+            block = entry.get("stability")
+            assert isinstance(block, dict)
+            assert set(block.keys()) == STABILITY_REQUIRED_KEYS
+            assert block["n_seeds_flipped"] == 0
+            assert block["seed_flip_means"] == [None] * DEFAULT_N_SEEDS
+
+    def test_flip_stability_band_v2_exclude_none_serialisation(self):
+        """Direct model pin: the exact model_dump the v2 wire uses
+        (src/api/robustness.py: by_alias=True, exclude_none=True) drops the
+        four unset band_* fields but preserves None list elements."""
+        band = FlipStabilityBandV2(
+            n_seeds=DEFAULT_N_SEEDS,
+            n_seeds_flipped=0,
+            seed_flip_means=[None] * DEFAULT_N_SEEDS,
+        )
+        dumped = band.model_dump(by_alias=True, exclude_none=True)
+        assert dumped == {
+            "n_seeds": DEFAULT_N_SEEDS,
+            "n_seeds_flipped": 0,
+            "seed_flip_means": [None] * DEFAULT_N_SEEDS,
+        }
 
 
 # ---------------------------------------------------------------------------
