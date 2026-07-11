@@ -365,6 +365,52 @@ class FragileEdgeV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class FlipStabilityBandV2(BaseModel):
+    """Seed-sweep stability band for one edge's flip threshold (Track S Phase 1).
+
+    Flag-gated (ISL_FLIP_STABILITY_BANDS, default off) and ADDITIVE: only
+    present when the flag is on; the flag-off wire is byte-identical.
+
+    The single-point flip_mean is searched against ONE background (all other
+    edges at expected value) and is therefore presented with false stability.
+    This band shows how the flip point moves across N backgrounds sampled
+    from the graph's own joint uncertainty — child seeds are SHA-256-derived
+    from the request seed, so the band is deterministic per request+seed.
+    Per the 2026-06-10 science-performance report, flip confidence should be
+    based on band_width, not on the single-point value alone.
+    """
+
+    n_seeds: int = Field(..., ge=1, description="Number of child seeds swept (default 5)")
+    n_seeds_flipped: int = Field(
+        ...,
+        ge=0,
+        description="Seeds whose sampled background admits a flip within [-1, 1]. "
+        "When 0, the band_* fields are omitted (exclude_none).",
+    )
+    band_min: Optional[float] = Field(
+        None, description="Minimum flip mean across flipped seeds. Omitted when nothing flips."
+    )
+    band_median: Optional[float] = Field(
+        None, description="Median flip mean across flipped seeds. Omitted when nothing flips."
+    )
+    band_max: Optional[float] = Field(
+        None, description="Maximum flip mean across flipped seeds. Omitted when nothing flips."
+    )
+    band_width: Optional[float] = Field(
+        None,
+        description="band_max - band_min. The flip-confidence input recommended by the "
+        "06-10 science-performance report. Omitted when nothing flips.",
+    )
+    seed_flip_means: List[Optional[float]] = Field(
+        ...,
+        description="Per-child-seed flip mean, in child-seed order; null where that "
+        "seed's background admits no flip.",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    model_config = {"extra": "ignore"}
+
+
 class EdgeEValueV2(BaseModel):
     """E-value analogue for an edge: how wrong must the strength be to flip the recommendation?
 
@@ -392,6 +438,11 @@ class EdgeEValueV2(BaseModel):
     )
     current_mean: float = Field(..., description="Current edge strength mean")
     flip_mean: float = Field(..., description="Minimum strength mean that flips the recommendation")
+    stability: Optional[FlipStabilityBandV2] = Field(
+        None,
+        description="Seed-sweep stability band for this flip threshold (Track S Phase 1). "
+        "Only present when ISL_FLIP_STABILITY_BANDS is enabled — additive, default off.",
+    )
 
     model_config = {"extra": "ignore"}
 

@@ -17,12 +17,18 @@ Contract under test (flag-gated, ADDITIVE only):
       {
         "n_seeds": int,             # seeds swept (default 5)
         "n_seeds_flipped": int,     # seeds whose background admits a flip
-        "band_min": float|None,     # min flip_mean across flipped seeds
-        "band_median": float|None,  # median flip_mean across flipped seeds
-        "band_max": float|None,     # max flip_mean across flipped seeds
-        "band_width": float|None,   # band_max - band_min
+        "band_min": float,          # min flip_mean across flipped seeds
+        "band_median": float,       # median flip_mean across flipped seeds
+        "band_max": float,          # max flip_mean across flipped seeds
+        "band_width": float,        # band_max - band_min
         "seed_flip_means": [float|None, ...]  # per-child-seed flip means
       }
+
+  The four band_* keys are OMITTED (not null) when n_seeds_flipped == 0,
+  matching the v2 wire's exclude_none serialisation so the v1 (dict
+  passthrough) and v2 (model) wires carry the same shape. None elements
+  inside seed_flip_means are preserved on both wires (verified: pydantic
+  exclude_none does not drop None list elements).
 
 - env ``ISL_FLIP_STABILITY_SEEDS`` overrides N (default 5, per the report's
   recommendation); invalid values fall back to the default.
@@ -63,15 +69,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 VARIANTS_PATH = REPO_ROOT / "tests" / "benchmarks" / "sample_variants.json"
 GOLDEN_PATH = REPO_ROOT / "tests" / "fixtures" / "flip_stability" / "golden_flag_off_v2.json"
 
-STABILITY_KEYS = {
-    "n_seeds",
-    "n_seeds_flipped",
-    "band_min",
-    "band_median",
-    "band_max",
-    "band_width",
-    "seed_flip_means",
-}
+STABILITY_REQUIRED_KEYS = {"n_seeds", "n_seeds_flipped", "seed_flip_means"}
+STABILITY_BAND_KEYS = {"band_min", "band_median", "band_max", "band_width"}
+
+
+def _assert_block_shape(block: dict, expected_n_seeds: int) -> None:
+    """Shared shape assertion: exact key set depends on whether any seed flipped."""
+    assert STABILITY_REQUIRED_KEYS <= set(block.keys())
+    assert block["n_seeds"] == expected_n_seeds
+    assert len(block["seed_flip_means"]) == expected_n_seeds
+    assert 0 <= block["n_seeds_flipped"] <= expected_n_seeds
+    if block["n_seeds_flipped"] > 0:
+        assert set(block.keys()) == STABILITY_REQUIRED_KEYS | STABILITY_BAND_KEYS
+    else:
+        assert set(block.keys()) == STABILITY_REQUIRED_KEYS
 
 
 # ---------------------------------------------------------------------------
@@ -219,10 +230,7 @@ class TestFlagOnShape:
             "every edge_e_values entry must carry a stability band when the flag is on"
         )
         for block in blocks:
-            assert set(block.keys()) == STABILITY_KEYS
-            assert block["n_seeds"] == DEFAULT_N_SEEDS
-            assert len(block["seed_flip_means"]) == DEFAULT_N_SEEDS
-            assert 0 <= block["n_seeds_flipped"] <= DEFAULT_N_SEEDS
+            _assert_block_shape(block, DEFAULT_N_SEEDS)
 
     def test_band_statistics_consistent_with_seed_values(self, flag_on):
         response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
@@ -230,10 +238,8 @@ class TestFlagOnShape:
             flipped = [v for v in block["seed_flip_means"] if v is not None]
             assert block["n_seeds_flipped"] == len(flipped)
             if not flipped:
-                assert block["band_min"] is None
-                assert block["band_median"] is None
-                assert block["band_max"] is None
-                assert block["band_width"] is None
+                # band_* keys are omitted entirely when no seed flips
+                assert not (STABILITY_BAND_KEYS & set(block.keys()))
                 continue
             assert block["band_min"] == pytest.approx(min(flipped), abs=1e-6)
             assert block["band_max"] == pytest.approx(max(flipped), abs=1e-6)
@@ -254,7 +260,7 @@ class TestFlagOnShape:
         widths = [
             b["band_width"]
             for b in _stability_blocks(response)
-            if b["band_width"] is not None
+            if b.get("band_width") is not None
         ]
         assert widths, "expected at least one edge with a computable band"
         assert any(w > 0 for w in widths)
@@ -344,7 +350,7 @@ class TestV2Wire:
         for entry in edge_e_values:
             block = entry.get("stability")
             assert isinstance(block, dict), "flag-on v2 wire must carry stability bands"
-            assert set(block.keys()) == STABILITY_KEYS
+            _assert_block_shape(block, DEFAULT_N_SEEDS)
 
 
 # ---------------------------------------------------------------------------

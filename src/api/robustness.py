@@ -38,6 +38,7 @@ from src.models.response_v2 import (
     EdgeEValueV2,
     EdgeSensitivityV2,
     FactorSensitivityV2,
+    FlipStabilityBandV2,
     FragileEdgeV2,
     ISLResponseV2,
     ISLV2Error422,
@@ -760,6 +761,10 @@ async def _analyze_robustness_v2_enhanced(
                         or raw_e_val == float("inf")
                         or raw_e_val > 1e6
                     )
+                    # Track S Phase 1: seed-sweep stability band — additive,
+                    # only present when ISL_FLIP_STABILITY_BANDS is on
+                    # (exclude_none drops it from the wire when absent).
+                    stability_raw = ev.get("stability")
                     edge_e_values_v2.append(
                         EdgeEValueV2(
                             edge_id=ev["edge_id"],
@@ -770,6 +775,9 @@ async def _analyze_robustness_v2_enhanced(
                             flip_direction=ev["flip_direction"],
                             current_mean=ev["current_mean"],
                             flip_mean=ev["flip_mean"],
+                            stability=(
+                                FlipStabilityBandV2(**stability_raw) if stability_raw else None
+                            ),
                         )
                     )
 
