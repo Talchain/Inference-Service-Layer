@@ -2157,6 +2157,13 @@ class RobustnessAnalyzerV2:
         This is expected behavior—use zero_reason="intervention_override"
         to diagnose such cases.
 
+        Lever identity (D-U ruling): a factor is an intervention target if
+        ANY option intervenes on it (union across options), while elasticity
+        itself is measured under the reference (first) option's interventions.
+        A union-lever factor whose measured elasticity under the reference
+        option is nonzero is still published with that elasticity; the
+        zero_reason stamp applies only when elasticity ~ 0.
+
         Debug Fields
         ------------
         - elasticity: Raw (unclamped) value for determinism/audit
@@ -2186,10 +2193,17 @@ class RobustnessAnalyzerV2:
         ref_option = request.options[0]
         baseline_mean = float(np.mean(baseline_outcomes[ref_option.id]))
 
-        # Build set of intervention factor IDs for INTERVENTION_OVERRIDE detection
-        intervention_factor_ids = (
-            set(ref_option.interventions.keys()) if ref_option.interventions else set()
-        )
+        # Build set of intervention factor IDs for INTERVENTION_OVERRIDE detection.
+        # D-U ruling (union-across-options): a factor ANY option intervenes on is a
+        # lever — not just the reference (first) option's targets. Previously this
+        # set was built from options[0] only, so a factor pinned by a non-first
+        # option was published with a non-lever zero_reason while union-side
+        # consumers (CEE, PLoT coaching) suppressed it as a lever.
+        # The set is used for membership tests only, so ordering cannot affect
+        # determinism.
+        intervention_factor_ids = {
+            factor_id for option in request.options for factor_id in (option.interventions or {})
+        }
 
         # Diagnostic: log baseline
         self.logger.info(
@@ -2198,6 +2212,8 @@ class RobustnessAnalyzerV2:
                 "ref_option_id": ref_option.id,
                 "baseline_mean": baseline_mean,
                 "baseline_outcomes_count": len(baseline_outcomes.get(ref_option.id, [])),
+                # Sorted for deterministic log output
+                "intervention_factor_ids": sorted(intervention_factor_ids),
             },
         )
 

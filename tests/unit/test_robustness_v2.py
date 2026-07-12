@@ -5326,6 +5326,245 @@ class TestZeroReasonClassification:
         assert fs.zero_reason == ZeroSensitivityReason.ZERO_DELTA
 
 
+class TestLeverIdentityUnionAcrossOptions:
+    """Lever identity must be the UNION of ALL options' interventions (D-U ruling).
+
+    A factor ANY option intervenes on is a lever. Previously the
+    INTERVENTION_OVERRIDE detection set was built from ``request.options[0]``
+    only, so a factor pinned by a non-first option was published with a
+    non-lever zero_reason (or none) while union-side consumers (CEE, PLoT
+    coaching) suppressed it as a lever — the published-EVPI-while-
+    suppressed-as-lever contradiction.
+
+    The elasticity gate is deliberately preserved: zero_reason is only
+    stamped when |elasticity| < 1e-10. Only the identity SET changed.
+    """
+
+    @staticmethod
+    def _mediated_graph(factor_id="fac_input", mediator_id="mediator", goal_id="goal"):
+        """factor -> mediator -> goal.
+
+        When the reference option intervenes on the mediator (do-semantics
+        sever its structural equation), perturbing the upstream factor cannot
+        reach the goal, so measured elasticity is exactly 0 — while the
+        factor keeps a nonzero structural influence score (0.8 * 0.8), so the
+        DISCONNECTED tail-override does not fire.
+        """
+        return GraphV2(
+            nodes=[
+                NodeV2(
+                    id=factor_id,
+                    kind="factor",
+                    label="Upstream factor",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(id=mediator_id, kind="factor", label="Mediator"),
+                NodeV2(id=goal_id, kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": factor_id, "to": mediator_id},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": mediator_id, "to": goal_id},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+    @staticmethod
+    def _analyze(graph, options, uncertain_node_id, request_id):
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        request = RobustnessRequestV2(
+            request_id=request_id,
+            graph=graph,
+            options=options,
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+            parameter_uncertainties=[
+                ParameterUncertainty(node_id=uncertain_node_id, distribution="normal", std=0.1),
+            ],
+        )
+        return RobustnessAnalyzerV2().analyze(request)
+
+    def test_factor_pinned_by_non_first_option_is_flagged_as_lever(self):
+        """A factor intervened on ONLY by a non-first option is a lever (D-U union).
+
+        RED pre-fix: the id-set came from options[0] only, so this factor got
+        ZERO_OUTCOME_DIFF instead of INTERVENTION_OVERRIDE.
+        """
+        from src.models.response_v2 import ZeroSensitivityReason
+
+        response = self._analyze(
+            graph=self._mediated_graph(),
+            options=[
+                # First (reference) option pins the MEDIATOR, blocking the
+                # factor's causal path (elasticity -> 0).
+                InterventionOption(id="opt_a", label="Opt A", interventions={"mediator": 0.7}),
+                # Second option pins the FACTOR itself -> lever per D-U union.
+                InterventionOption(id="opt_b", label="Opt B", interventions={"fac_input": 0.9}),
+            ],
+            uncertain_node_id="fac_input",
+            request_id="lever-union-non-first-option",
+        )
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        assert abs(fs.elasticity) < 1e-10
+        # Structural influence is intervention-blind, so DISCONNECTED must not fire
+        assert fs.influence_score > 0.0
+        assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
+
+    def test_factor_pinned_by_all_options_is_flagged_as_lever(self):
+        """A factor every option intervenes on stays INTERVENTION_OVERRIDE (regression pin)."""
+        from src.models.response_v2 import ZeroSensitivityReason
+
+        response = self._analyze(
+            graph=self._mediated_graph(),
+            options=[
+                InterventionOption(id="opt_a", label="Opt A", interventions={"fac_input": 0.9}),
+                InterventionOption(id="opt_b", label="Opt B", interventions={"fac_input": 0.4}),
+            ],
+            uncertain_node_id="fac_input",
+            request_id="lever-union-all-options",
+        )
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
+
+    def test_factor_pinned_by_no_option_is_not_flagged(self):
+        """A factor NO option intervenes on must not be flagged (over-flagging guard).
+
+        The second option intervenes on a different node; union must not
+        sweep in un-pinned factors.
+        """
+        response = self._analyze(
+            graph=self._mediated_graph(),
+            options=[
+                InterventionOption(id="opt_a", label="Opt A", interventions={}),
+                InterventionOption(id="opt_b", label="Opt B", interventions={"mediator": 0.7}),
+            ],
+            uncertain_node_id="fac_input",
+            request_id="lever-union-no-option",
+        )
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        # Reference option leaves the path open: real, published sensitivity
+        assert abs(fs.elasticity) > 1e-10
+        assert fs.zero_reason is None
+
+    def test_factor_pinned_by_first_option_only_unchanged(self):
+        """First-option-only pinning behaved correctly before; pin it (regression)."""
+        from src.models.response_v2 import ZeroSensitivityReason
+
+        response = self._analyze(
+            graph=self._mediated_graph(),
+            options=[
+                InterventionOption(id="opt_a", label="Opt A", interventions={"fac_input": 0.9}),
+                InterventionOption(id="opt_b", label="Opt B", interventions={}),
+            ],
+            uncertain_node_id="fac_input",
+            request_id="lever-union-first-only",
+        )
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
+
+    def test_fac_leadership_capacity_scenario_class_regression(self):
+        """ROADMAP 2.20 (8-Jul rider): the ORIGINAL fac_leadership_capacity class.
+
+        Strong proof in a newer graph is not a universal fix — pin the
+        original scenario shape: a multi-option request where the leadership
+        factor is pinned by a NON-first option while the reference option
+        pins the delivery mediator. Includes a same-seed determinism check
+        (the union set must not introduce ordering nondeterminism).
+        """
+        from src.models.response_v2 import ZeroSensitivityReason
+        from src.models.robustness_v2 import ParameterUncertainty
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(
+                    id="fac_leadership_capacity",
+                    kind="factor",
+                    label="Leadership capacity",
+                    observed_state=ObservedState(value=0.5),
+                ),
+                NodeV2(id="fac_team_delivery", kind="factor", label="Team delivery"),
+                NodeV2(id="goal", kind="outcome", label="Project success"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "fac_leadership_capacity", "to": "fac_team_delivery"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.7, std=0.1),
+                ),
+                EdgeV2(
+                    **{"from": "fac_team_delivery", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=0.8, std=0.1),
+                ),
+            ],
+        )
+
+        def build_request():
+            return RobustnessRequestV2(
+                request_id="lever-union-leadership-capacity",
+                graph=graph,
+                options=[
+                    InterventionOption(
+                        id="opt_status_quo",
+                        label="Status quo",
+                        interventions={"fac_team_delivery": 0.6},
+                    ),
+                    InterventionOption(
+                        id="opt_invest_leadership",
+                        label="Invest in leadership",
+                        interventions={"fac_leadership_capacity": 0.9},
+                    ),
+                    InterventionOption(
+                        id="opt_hybrid",
+                        label="Hybrid",
+                        interventions={
+                            "fac_leadership_capacity": 0.7,
+                            "fac_team_delivery": 0.8,
+                        },
+                    ),
+                ],
+                goal_node_id="goal",
+                n_samples=100,
+                seed=42,
+                parameter_uncertainties=[
+                    ParameterUncertainty(
+                        node_id="fac_leadership_capacity", distribution="normal", std=0.1
+                    ),
+                ],
+            )
+
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(build_request())
+
+        assert len(response.factor_sensitivity) == 1
+        fs = response.factor_sensitivity[0]
+        assert fs.node_id == "fac_leadership_capacity"
+        assert fs.zero_reason == ZeroSensitivityReason.INTERVENTION_OVERRIDE
+
+        # Determinism: identical request + seed => identical factor sensitivity
+        response_repeat = RobustnessAnalyzerV2().analyze(build_request())
+        fs_repeat = response_repeat.factor_sensitivity[0]
+        assert fs_repeat.zero_reason == fs.zero_reason
+        assert fs_repeat.elasticity == fs.elasticity
+        assert fs_repeat.influence_score == fs.influence_score
+
+
 class TestFactorSensitivityFieldSerialization:
     """Tests for factor sensitivity field serialization."""
 
