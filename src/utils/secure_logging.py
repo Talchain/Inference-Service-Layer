@@ -74,6 +74,37 @@ MASKABLE_FIELDS: Set[str] = {
     "ip_address",
 }
 
+# Decision-input LABEL fields. These carry free-text decision content authored by
+# the user (e.g. a node label like "Alice Smith salary £125000") and must never
+# reach normal telemetry verbatim. They are hashed to a short, stable identifier so
+# log lines can still be correlated across a request without exposing the raw label.
+DECISION_LABEL_FIELDS: Set[str] = {
+    "node_label",
+    "factor_label",
+    "label",
+}
+
+# Decision-input raw VALUE fields. These are the user's decision magnitudes and the
+# outcomes computed directly from them (baseline means, observed/mean factor values,
+# perturbation deltas / uncertainty spreads, per-evaluation outcomes and the
+# denominators derived from them). They are dropped from normal telemetry entirely —
+# dimensionless derived metrics (elasticity, pct_*_change), status, counts, timing
+# and hashed identifiers are retained so debugging still works.
+DECISION_VALUE_FIELDS: Set[str] = {
+    "mean_value",
+    "baseline_mean",
+    "observed_value",
+    "outcome_high",
+    "outcome_low",
+    "outcome_diff",
+    "delta",
+    "std",
+    "baseline_denom",
+    "factor_denom",
+    "range_min",
+    "range_max",
+}
+
 
 def hash_user_id(user_id: str) -> str:
     """
@@ -90,6 +121,24 @@ def hash_user_id(user_id: str) -> str:
         "a3f2b1c4d5e6f7g8"
     """
     return hashlib.sha256(user_id.encode()).hexdigest()[:16]
+
+
+def hash_label(value: Any) -> str:
+    """
+    Hash a decision-input label for logging privacy.
+
+    Labels carry free-text decision content (names, amounts, descriptions) that must
+    not reach telemetry verbatim. Hashing yields a short, stable identifier that still
+    lets a given label be correlated across log lines without exposing its contents.
+
+    Args:
+        value: Raw label value (coerced to str)
+
+    Returns:
+        A ``"label_<12-hex>"`` token
+    """
+    digest = hashlib.sha256(str(value).encode()).hexdigest()[:12]
+    return f"label_{digest}"
 
 
 def sanitize_model_for_logging(model: Dict[str, Any]) -> Dict[str, Any]:
@@ -319,6 +368,14 @@ def redact_value(value: Any, field_name: str = "") -> Any:
 
     # Completely redact sensitive fields
     if field_lower in SENSITIVE_FIELDS:
+        return "[REDACTED]"
+
+    # Decision-input labels: hash to a stable id instead of leaking the raw label
+    if field_lower in DECISION_LABEL_FIELDS:
+        return hash_label(value)
+
+    # Decision-input raw values: drop from telemetry entirely
+    if field_lower in DECISION_VALUE_FIELDS:
         return "[REDACTED]"
 
     # Partially mask certain fields

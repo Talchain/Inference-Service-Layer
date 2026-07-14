@@ -371,3 +371,156 @@ class TestTimestampFormat:
         assert timestamp.endswith("Z")
         # Should contain T separator
         assert "T" in timestamp
+
+
+class TestDecisionInputMinimisation:
+    """Codex F2: decision-input PII must not reach INFO telemetry.
+
+    Mirrors the ``factor_sensitivity_*`` INFO logs emitted by
+    ``src/services/robustness_analyzer_v2.py`` (the confirmed leak sites), and
+    asserts free-text labels are hashed and raw decision magnitudes are dropped,
+    while hashed ids / status / counts / dimensionless metrics survive.
+    """
+
+    def setup_method(self):
+        secure_logging_module._tracing_module = None
+
+        self.log_stream = StringIO()
+        self.handler = logging.StreamHandler(self.log_stream)
+        self.formatter = CorrelationIDFormatter(
+            "%(levelname)s %(name)s %(message)s",
+            redact_pii=True,
+        )
+        self.handler.setFormatter(self.formatter)
+
+        self.test_logger = logging.getLogger("test.decision_minimise")
+        self.test_logger.handlers = []
+        self.test_logger.addHandler(self.handler)
+        self.test_logger.setLevel(logging.INFO)
+        self.test_logger.propagate = False
+
+        mock_tracing = MagicMock()
+        mock_tracing.get_trace_id.return_value = None
+        mock_tracing.get_user_id.return_value = None
+        secure_logging_module._tracing_module = mock_tracing
+
+    def teardown_method(self):
+        self.log_stream.close()
+        self.test_logger.handlers = []
+        secure_logging_module._tracing_module = None
+
+    def _emit_and_parse(self, message, extra):
+        self.test_logger.info(message, extra=extra)
+        return self.log_stream.getvalue(), json.loads(self.log_stream.getvalue().strip())
+
+    def test_factor_sensitivity_computation_log_drops_label_and_values(self):
+        """The computation INFO log must not carry the raw label or raw values."""
+        raw_label = "Alice Smith salary £125000"
+        raw_output, record = self._emit_and_parse(
+            "factor_sensitivity_computation",
+            {
+                "node_id": "factor_salary",
+                "node_label": raw_label,
+                "baseline_mean": 0.62,
+                "mean_value": 125000,
+                "delta": 5000.0,
+                "outcome_high": 0.71,
+                "outcome_low": 0.55,
+                "outcome_diff": 0.16,
+                "baseline_denom": 0.62,
+                "factor_denom": 125000.0,
+                "pct_outcome_change": 0.258,
+                "pct_factor_change": 0.08,
+                "elasticity": 3.22,
+                "elasticity_display": 3.22,
+                "zero_reason": None,
+                "baseline_near_zero": False,
+            },
+        )
+
+        # Raw label and raw magnitude must appear nowhere in the emitted telemetry.
+        assert "Alice Smith" not in raw_output
+        assert "125000" not in raw_output
+
+        # Label is hashed to a stable, correlatable token (not the raw text).
+        assert record["node_label"].startswith("label_")
+        assert record["node_label"] != raw_label
+
+        # Raw decision values are dropped.
+        for field in (
+            "baseline_mean",
+            "mean_value",
+            "delta",
+            "outcome_high",
+            "outcome_low",
+            "outcome_diff",
+            "baseline_denom",
+            "factor_denom",
+        ):
+            assert (
+                record[field] == "[REDACTED]"
+            ), f"{field} should be redacted, got {record[field]!r}"
+
+        # Retained for debugging: hashed id (node_id is a non-PII graph id),
+        # dimensionless metrics, status flags -- computation/counts untouched.
+        assert record["node_id"] == "factor_salary"
+        assert record["elasticity"] == 3.22
+        assert record["elasticity_display"] == 3.22
+        assert record["baseline_near_zero"] is False
+        assert record["message"] == "factor_sensitivity_computation"
+
+    def test_factor_sensitivity_entry_redacts_nested_uncertainty_params(self):
+        """Nested uncertainty params (std) in the entry log are redacted recursively."""
+        raw_output, record = self._emit_and_parse(
+            "factor_sensitivity_entry",
+            {
+                "has_parameter_uncertainties": True,
+                "num_uncertainties": 1,
+                "uncertainties": [
+                    {"node_id": "factor_salary", "distribution": "normal", "std": 15000.0},
+                ],
+            },
+        )
+
+        assert "15000" not in raw_output
+        entry = record["uncertainties"][0]
+        assert entry["std"] == "[REDACTED]"
+        # Non-sensitive descriptors survive.
+        assert entry["node_id"] == "factor_salary"
+        assert entry["distribution"] == "normal"
+        assert record["num_uncertainties"] == 1
+
+    def test_factor_sensitivity_baseline_log_drops_baseline_value(self):
+        """The baseline INFO log drops baseline_mean but keeps ids and counts."""
+        _, record = self._emit_and_parse(
+            "factor_sensitivity_baseline",
+            {
+                "ref_option_id": "option_a",
+                "baseline_mean": 0.62,
+                "baseline_outcomes_count": 2000,
+                "intervention_factor_ids": ["factor_x", "factor_y"],
+            },
+        )
+
+        assert record["baseline_mean"] == "[REDACTED]"
+        assert record["ref_option_id"] == "option_a"
+        assert record["baseline_outcomes_count"] == 2000
+        assert record["intervention_factor_ids"] == ["factor_x", "factor_y"]
+
+    def test_label_hash_is_deterministic_for_correlation(self):
+        """The same label hashes identically so log lines can be correlated."""
+        _, r1 = self._emit_and_parse("evt_one", {"node_label": "Alice Smith salary £125000"})
+        self.log_stream.truncate(0)
+        self.log_stream.seek(0)
+        _, r2 = self._emit_and_parse("evt_two", {"node_label": "Alice Smith salary £125000"})
+        assert r1["node_label"] == r2["node_label"]
+
+    def test_existing_credential_redaction_unchanged(self):
+        """Green-pin: credential/PII redaction behaviour is not regressed."""
+        _, record = self._emit_and_parse(
+            "auth_event",
+            {"api_key": "secret-key-12345", "password": "hunter2xyz", "email": "user@example.com"},
+        )
+        assert record["api_key"] == "[REDACTED]"
+        assert record["password"] == "[REDACTED]"
+        assert "***" in record["email"]
