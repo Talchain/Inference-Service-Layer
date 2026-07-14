@@ -452,8 +452,11 @@ class TestEVPIBelowResolutionLabelling:
 
     EVPI is a difference of two independent MC proportion estimates, so at the
     500-sample budget cap the estimator noise is ~+/-0.03-0.06. Entries whose
-    |evpi| is inside the noise floor are LABELLED below_resolution; the raw
-    evpi value is never clamped or altered (provisional_doctrine_v0).
+    |evpi| is inside the noise floor are LABELLED below_resolution
+    (provisional_doctrine_v0). Since the F1 producer clamp, a negative raw
+    difference is additionally clamped to 0.0 on the wire (EVPI is
+    definitionally non-negative); the raw components remain auditable via
+    perfect_metric / current_metric.
     """
 
     def test_noise_floor_formula(self):
@@ -509,27 +512,57 @@ class TestEVPIBelowResolutionLabelling:
         for entry in response.factor_evpi:
             assert entry["evpi_status"] == "below_resolution"
 
-    def test_raw_evpi_never_clamped_by_labelling(self):
-        """Label, do NOT clamp: raw evpi stays perfect_metric - current_metric.
+    def test_negative_intermediate_clamped_to_zero_on_wire(self):
+        """F1 producer clamp: negative intermediate EVPI → 0.0 on the wire.
 
-        The deterministic fixture (seed=12345, n=500) produces a raw NEGATIVE
-        evpi entry — the audit's live pattern (e.g. fac_tech_lead -0.004). It
-        must be preserved as-is and labelled, never zeroed or clamped.
+        EVPI is definitionally non-negative (Howard); a negative difference of
+        two MC proportion estimates is estimator noise. The deterministic
+        fixture (seed=12345, n=500) produces a raw NEGATIVE intermediate
+        (perfect_metric - current_metric < 0) — the audit's live pattern
+        (e.g. fac_tech_lead -0.004). The emitted evpi must be clamped to 0.0,
+        flagged evpi_clamped=True, and labelled below_resolution; the raw
+        components stay auditable via perfect_metric / current_metric.
         """
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
         response = RobustnessAnalyzerV2().analyze(request)
         assert response.factor_evpi is not None
+
+        raw_negatives = [
+            e for e in response.factor_evpi if e["perfect_metric"] - e["current_metric"] < 0
+        ]
+        assert raw_negatives, "fixture regression: expected a raw negative EVPI intermediate"
+
         for entry in response.factor_evpi:
+            # Nothing negative ever reaches the wire.
+            assert entry["evpi"] >= 0.0
+            assert entry["evpi_percentage_points"] >= 0.0
+
+        for entry in raw_negatives:
+            assert entry["evpi"] == 0.0
+            assert entry["evpi_percentage_points"] == 0.0
+            assert entry["evpi_clamped"] is True
+            # A clamped-to-zero estimate is by construction below resolution.
+            assert entry["evpi_status"] == "below_resolution"
+
+    def test_positive_evpi_untouched_by_clamp(self):
+        """Positive intermediates pass through the clamp unaltered."""
+        graph = _make_graph()
+        request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
+        response = RobustnessAnalyzerV2().analyze(request)
+        assert response.factor_evpi is not None
+
+        positives = [
+            e for e in response.factor_evpi if e["perfect_metric"] - e["current_metric"] > 0
+        ]
+        assert positives, "fixture regression: expected a positive EVPI intermediate"
+        for entry in positives:
+            assert entry["evpi_clamped"] is False
             assert math.isclose(
                 entry["evpi"],
                 entry["perfect_metric"] - entry["current_metric"],
                 abs_tol=2e-6,
             )
-        negatives = [e for e in response.factor_evpi if e["evpi"] < 0]
-        assert negatives, "fixture regression: expected a raw negative EVPI entry"
-        for entry in negatives:
-            assert entry["evpi_status"] == "below_resolution"
 
 
 # ===========================================================================

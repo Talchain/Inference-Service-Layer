@@ -112,8 +112,15 @@ MARGINAL_K_SAMPLES = 100
 # The worst-case p=0.5 bound is used instead of a plug-in estimate
 # sqrt((p1*(1-p1) + p2*(1-p2)) / n) because the plug-in collapses to 0 when an
 # estimated metric hits 0 or 1 at small n, understating the true uncertainty.
-# Entries with |evpi| < noise_floor are LABELLED below-resolution; the raw evpi
-# value is never altered or clamped (labels over clamps per audit T0-4).
+# Entries with |evpi| < noise_floor are LABELLED below-resolution.
+#
+# F1 producer clamp (2026-07-14, ROADMAP 2.20 residual r1): a NEGATIVE raw
+# difference is clamped to 0.0 on the wire (EVPI is definitionally
+# non-negative; a negative estimate is pure MC noise) and flagged with
+# evpi_clamped=true. Positive values are never altered; the raw components
+# stay auditable via perfect_metric / current_metric. This supersedes the
+# original T0-4 "labels over clamps" stance for the negative case only —
+# labelling is otherwise unchanged.
 EVPI_NOISE_FLOOR_Z = 1.96
 EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
 
@@ -3664,11 +3671,22 @@ class RobustnessAnalyzerV2:
                 recommended_option_id,
             )
 
-            evpi = perfect_metric - baseline_metric
+            evpi_raw = perfect_metric - baseline_metric
+
+            # Producer clamp (F1 residual r1, defense-in-depth): EVPI is
+            # definitionally non-negative (Howard) — a negative difference of
+            # two MC proportion estimates is estimator noise, so clamp it to
+            # 0.0 at the producer rather than relying solely on the PLoT
+            # boundary guard (PR #219). The raw components remain auditable
+            # via perfect_metric / current_metric; evpi_clamped flags the
+            # entries where the clamp fired.
+            evpi_clamped = evpi_raw < 0.0
+            evpi = 0.0 if evpi_clamped else evpi_raw
 
             # Below-resolution labelling (provisional_doctrine_v0): flag EVPI
             # estimates smaller in magnitude than the MC noise floor for this
-            # sample budget. Additive, label-only — the raw evpi is untouched.
+            # sample budget. Applied to the emitted (clamped) value, so a
+            # clamped-to-zero entry is always below_resolution.
             noise_floor = evpi_noise_floor(n_samples)
             below_resolution = abs(evpi) < noise_floor
 
@@ -3689,8 +3707,9 @@ class RobustnessAnalyzerV2:
                     # V2 envelope) and no cross-service consumer parses
                     # these entries strictly (verified 2026-07-07: PLoT has
                     # no factor_evpi reference; DGAI debug export treats it
-                    # as unknown[]). Raw evpi is never clamped or altered.
+                    # as unknown[]).
                     "evpi_status": "below_resolution" if below_resolution else "resolved",
+                    "evpi_clamped": evpi_clamped,
                     "evpi_noise_floor": round(noise_floor, 6),
                     "evpi_noise_floor_method": "z95_worst_case_bernoulli_diff",
                     "evpi_labelling_doctrine": EVPI_LABELLING_DOCTRINE,
