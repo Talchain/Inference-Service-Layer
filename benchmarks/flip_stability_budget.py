@@ -1,8 +1,11 @@
 """
 Runtime-budget measurement for seed-sweep flip-threshold stability bands
-(Track S Phase 1, ISL_FLIP_STABILITY_BANDS).
+(Track S Phase 1 — DEFAULT-ON since 2026-07-17, env gating removed).
 
-Measures full analyze() wall time flag-off vs flag-on (default N=5) on:
+Measures full analyze() wall time with the band sweep disabled (the
+production default before 2026-07-17, simulated by patching
+``_attach_flip_stability_bands`` to a no-op) vs the default path (bands on,
+N=5) on:
 - the three pinned sample_variants graphs (3 nodes / 3 edges, n_samples 200)
   — the same fixtures the science-validation report used, and
 - a larger deterministic synthetic graph (12 nodes / 17 edges, n_samples 500)
@@ -11,25 +14,22 @@ Measures full analyze() wall time flag-off vs flag-on (default N=5) on:
 Run:
     poetry run python benchmarks/flip_stability_budget.py
 
-Prints a per-graph table: median ms flag-off, median ms flag-on, delta and
-ratio. Numbers are recorded in docs/lanes/2026-07-11-flip-stability-bands.md.
-The comparison is analyze()-to-analyze(): it captures exactly what a caller
-pays for turning the flag on, including the base MC that dominates real
-requests. The sweep itself is additionally capped by
-RobustnessAnalyzerV2.FLIP_STABILITY_BUDGET_MS (2000 ms, all-or-nothing).
+Prints a per-graph table: median ms sweep-off (patched), median ms default,
+delta and ratio. Numbers are recorded in
+docs/lanes/2026-07-11-flip-stability-bands.md. The comparison is
+analyze()-to-analyze(): it captures exactly what the default-on sweep adds,
+including the base MC that dominates real requests. The sweep itself is
+additionally capped by RobustnessAnalyzerV2.FLIP_STABILITY_BUDGET_MS
+(2000 ms, all-or-nothing).
 """
 
 import json
-import os
 import statistics
 import time
 from pathlib import Path
 
 from src.models.robustness_v2 import RobustnessRequestV2
-from src.services.robustness_analyzer_v2 import (
-    FLIP_STABILITY_BANDS_ENV,
-    RobustnessAnalyzerV2,
-)
+from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VARIANTS_PATH = REPO_ROOT / "tests" / "benchmarks" / "sample_variants.json"
@@ -117,26 +117,34 @@ def synthetic_request():
     }
 
 
-def median_ms(request_dict, flag_on: bool) -> tuple[float, int]:
+def median_ms(request_dict, sweep_on: bool) -> tuple[float, int]:
     """Median analyze() wall ms over REPETITIONS (plus 1 untimed warm-up).
 
-    Returns (median_ms, n_entries_with_bands) so the flag-on cell also
+    Returns (median_ms, n_entries_with_bands) so the sweep-on cell also
     verifies bands were actually computed (budget not silently exceeded).
+    The sweep-off arm patches the sweep to a no-op — the pre-2026-07-17
+    default path — since there is no runtime switch any more.
     """
-    if flag_on:
-        os.environ[FLIP_STABILITY_BANDS_ENV] = "1"
-    else:
-        os.environ.pop(FLIP_STABILITY_BANDS_ENV, None)
-    request = RobustnessRequestV2(**request_dict)
-    RobustnessAnalyzerV2().analyze(request)  # warm-up
-    times = []
-    banded = 0
-    for _ in range(REPETITIONS):
-        t0 = time.perf_counter()
-        response = RobustnessAnalyzerV2().analyze(request)
-        times.append((time.perf_counter() - t0) * 1000)
-        banded = sum(1 for e in (response.edge_e_values or []) if "stability" in e)
-    return statistics.median(times), banded
+    original_attach = RobustnessAnalyzerV2._attach_flip_stability_bands
+    if not sweep_on:
+        RobustnessAnalyzerV2._attach_flip_stability_bands = (  # type: ignore[method-assign]
+            lambda self, request, evaluator, edge_e_values, master_seed: None
+        )
+    try:
+        request = RobustnessRequestV2(**request_dict)
+        RobustnessAnalyzerV2().analyze(request)  # warm-up
+        times = []
+        banded = 0
+        for _ in range(REPETITIONS):
+            t0 = time.perf_counter()
+            response = RobustnessAnalyzerV2().analyze(request)
+            times.append((time.perf_counter() - t0) * 1000)
+            banded = sum(1 for e in (response.edge_e_values or []) if "stability" in e)
+        return statistics.median(times), banded
+    finally:
+        RobustnessAnalyzerV2._attach_flip_stability_bands = (  # type: ignore[method-assign]
+            original_attach
+        )
 
 
 def main() -> None:
@@ -145,13 +153,12 @@ def main() -> None:
     print(header)
     print("-" * len(header))
     for name, request_dict in list(variant_requests()) + [synthetic_request()]:
-        off_ms, _ = median_ms(request_dict, flag_on=False)
-        on_ms, banded = median_ms(request_dict, flag_on=True)
+        off_ms, _ = median_ms(request_dict, sweep_on=False)
+        on_ms, banded = median_ms(request_dict, sweep_on=True)
         print(
             f"{name:24} {off_ms:9.1f} {on_ms:9.1f} {on_ms - off_ms:8.1f} "
             f"{on_ms / off_ms:6.2f}  {banded}"
         )
-    os.environ.pop(FLIP_STABILITY_BANDS_ENV, None)
 
 
 if __name__ == "__main__":

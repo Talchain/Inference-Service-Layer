@@ -14,7 +14,6 @@ This enables answering:
 import hashlib
 import logging
 import math
-import os
 import statistics
 import time
 import uuid
@@ -130,52 +129,16 @@ EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
 # false stability. The 2026-06-10 PLoT/ISL science-performance report
 # recommends reporting flip thresholds with "a stability band from a small
 # seed sweep (e.g. 5 seeds)" and basing flip confidence on band width.
-# Flag-gated, default OFF: the flag-off wire is byte-identical (pinned by
-# tests/unit/test_flip_stability_bands.py against a base golden fixture).
-FLIP_STABILITY_BANDS_ENV = "ISL_FLIP_STABILITY_BANDS"
-FLIP_STABILITY_SEEDS_ENV = "ISL_FLIP_STABILITY_SEEDS"
-FLIP_STABILITY_DEFAULT_N_SEEDS = 5  # per the 06-10 report recommendation
-FLIP_STABILITY_MIN_N_SEEDS = 2  # a 1-seed "band" is the false stability we're fixing
-FLIP_STABILITY_MAX_N_SEEDS = 20
-_FLIP_STABILITY_TRUTHY = {"1", "true", "yes", "on"}
-
-
-def _flip_stability_bands_enabled() -> bool:
-    """Read the flag at request time (default off) so tests/ops can toggle it."""
-    return os.environ.get(FLIP_STABILITY_BANDS_ENV, "").strip().lower() in _FLIP_STABILITY_TRUTHY
-
-
-def _flip_stability_n_seeds() -> int:
-    """Sweep size N: ISL_FLIP_STABILITY_SEEDS, clamped to [2, 20]; default 5.
-
-    Unparseable or below-minimum values fall back to the default rather than
-    erroring — the sweep is an additive diagnostic and must never fail a
-    request over configuration.
-    """
-    raw = os.environ.get(FLIP_STABILITY_SEEDS_ENV)
-    if raw is None:
-        return FLIP_STABILITY_DEFAULT_N_SEEDS
-    try:
-        n = int(raw.strip())
-    except ValueError:
-        logger.warning(
-            "flip_stability_n_seeds_invalid",
-            extra={"raw": raw, "fallback": FLIP_STABILITY_DEFAULT_N_SEEDS},
-        )
-        return FLIP_STABILITY_DEFAULT_N_SEEDS
-    if n < FLIP_STABILITY_MIN_N_SEEDS:
-        logger.warning(
-            "flip_stability_n_seeds_below_minimum",
-            extra={"raw": raw, "fallback": FLIP_STABILITY_DEFAULT_N_SEEDS},
-        )
-        return FLIP_STABILITY_DEFAULT_N_SEEDS
-    if n > FLIP_STABILITY_MAX_N_SEEDS:
-        logger.warning(
-            "flip_stability_n_seeds_clamped",
-            extra={"raw": raw, "clamped_to": FLIP_STABILITY_MAX_N_SEEDS},
-        )
-        return FLIP_STABILITY_MAX_N_SEEDS
-    return n
+# DEFAULT-ON, no env gating (Paul ruling 2026-07-17: core functionality —
+# the former ISL_FLIP_STABILITY_BANDS / ISL_FLIP_STABILITY_SEEDS env vars
+# are removed; rollback is a revert commit). Bands are computed whenever
+# edge_e_values are; worst case stays inside the all-or-nothing
+# FLIP_STABILITY_BUDGET_MS guard. Additivity vs the pre-bands base wire is
+# pinned by tests/unit/test_flip_stability_bands.py against a base golden.
+# N raised 5 -> 10 by the same ruling's lenient-latency amendment
+# (prioritise analysis quality): a wider sweep is a better stability basis
+# than the 06-10 report's minimum "e.g. 5 seeds" recommendation.
+FLIP_STABILITY_N_SEEDS = 10
 
 
 def evpi_noise_floor(n_samples: int) -> float:
@@ -1194,13 +1157,13 @@ class RobustnessAnalyzerV2:
         if request.include_e_values:
             edge_e_values = self._compute_edge_e_values(request, evaluator)
             # Track S Phase 1: seed-sweep flip-threshold stability bands.
-            # Flag-gated (ISL_FLIP_STABILITY_BANDS, default OFF) and ADDITIVE:
+            # DEFAULT-ON (env gating removed 2026-07-17) and ADDITIVE:
             # attaches a "stability" object to each edge_e_values entry and
-            # never mutates existing keys, so the flag-off wire stays
-            # byte-identical. Uses only fresh SHA-256-derived child RNGs —
-            # no shared RNG stream is consumed, so all other numbers are
-            # unchanged flag-on vs flag-off.
-            if edge_e_values is not None and _flip_stability_bands_enabled():
+            # never mutates existing keys. Uses only fresh SHA-256-derived
+            # child RNGs — no shared RNG stream is consumed, so all other
+            # numbers are unchanged by the sweep. Budget-guarded
+            # all-or-nothing (FLIP_STABILITY_BUDGET_MS).
+            if edge_e_values is not None:
                 self._attach_flip_stability_bands(request, evaluator, edge_e_values, seed)
 
         # Find recommended option (needed before EVPI to fix decision policy)
@@ -3408,7 +3371,11 @@ class RobustnessAnalyzerV2:
     # the base edge_e_values are never affected. Mirrors E_VALUE_BUDGET_MS
     # semantics — band *presence* is budget-gated exactly as edge_e_values
     # presence already is; band *content* is fully deterministic.
-    FLIP_STABILITY_BUDGET_MS = 2000
+    # 30000 ms is the Paul-ruled LENIENT default (17 Jul lenient-latency
+    # amendment, raised from 2000: prioritise analysis quality; when the
+    # budget does trip, the flip_stability_budget_exceeded event disclosing
+    # elapsed_ms is the find-out-it-was-slow signal — never a silent cut).
+    FLIP_STABILITY_BUDGET_MS = 30000
 
     def _attach_flip_stability_bands(
         self,
@@ -3419,7 +3386,9 @@ class RobustnessAnalyzerV2:
     ) -> None:
         """Attach a seed-sweep stability band to each edge_e_values entry.
 
-        Track S Phase 1 (flag-gated by ISL_FLIP_STABILITY_BANDS, default off).
+        Track S Phase 1. DEFAULT-ON: computed whenever edge_e_values are
+        (env gating removed 2026-07-17 per Paul's ruling — core
+        functionality, no flag; rollback is a revert commit).
 
         Why: the single-point flip threshold (flip_mean) is searched against
         ONE background — every other edge held at its expected value — so a
@@ -3447,7 +3416,7 @@ class RobustnessAnalyzerV2:
           and v2 (model) wires carry the same shape.
         """
         t0 = time.time()
-        n_seeds = _flip_stability_n_seeds()
+        n_seeds = FLIP_STABILITY_N_SEEDS
 
         # Child seeds: SHA-256-derived (process-safe, NOT Python hash()) —
         # the same sub-seed pattern as the per-edge marginal-switch and

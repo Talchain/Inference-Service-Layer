@@ -761,7 +761,7 @@
                 "type": "null"
               }
             ],
-            "description": "Seed-sweep stability band for this flip threshold (Track S Phase 1). Only present when ISL_FLIP_STABILITY_BANDS is enabled \u2014 additive, default off."
+            "description": "Seed-sweep stability band for this flip threshold (Track S Phase 1). Default-on, additive. Absent only when the all-or-nothing band budget (FLIP_STABILITY_BUDGET_MS) trips."
           },
           "to_id": {
             "description": "Target node ID",
@@ -1547,7 +1547,7 @@
         "type": "object"
       },
       "FlipStabilityBandV2": {
-        "description": "Seed-sweep stability band for one edge's flip threshold (Track S Phase 1).\n\nFlag-gated (ISL_FLIP_STABILITY_BANDS, default off) and ADDITIVE: only\npresent when the flag is on; the flag-off wire is byte-identical.\n\nThe single-point flip_mean is searched against ONE background (all other\nedges at expected value) and is therefore presented with false stability.\nThis band shows how the flip point moves across N backgrounds sampled\nfrom the graph's own joint uncertainty \u2014 child seeds are SHA-256-derived\nfrom the request seed, so the band is deterministic per request+seed.\nPer the 2026-06-10 science-performance report, flip confidence should be\nbased on band_width, not on the single-point value alone.",
+        "description": "Seed-sweep stability band for one edge's flip threshold (Track S Phase 1).\n\nDEFAULT-ON and ADDITIVE (env gating removed 2026-07-17): present on every\nedge_e_values entry whenever e-values are computed. Absent only when the\nall-or-nothing band budget (FLIP_STABILITY_BUDGET_MS) trips \u2014 then NO\nentry carries a band and the degradation is disclosed via the\nflip_stability_budget_exceeded structured log event.\n\nThe single-point flip_mean is searched against ONE background (all other\nedges at expected value) and is therefore presented with false stability.\nThis band shows how the flip point moves across N backgrounds sampled\nfrom the graph's own joint uncertainty \u2014 child seeds are SHA-256-derived\nfrom the request seed, so the band is deterministic per request+seed.\nPer the 2026-06-10 science-performance report, flip confidence should be\nbased on band_width, not on the single-point value alone.",
         "properties": {
           "band_max": {
             "anyOf": [
@@ -1598,7 +1598,7 @@
             "title": "Band Width"
           },
           "n_seeds": {
-            "description": "Number of child seeds swept (default 5)",
+            "description": "Number of child seeds swept (constant 10, FLIP_STABILITY_N_SEEDS)",
             "minimum": 1.0,
             "title": "N Seeds",
             "type": "integer"

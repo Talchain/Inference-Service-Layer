@@ -368,8 +368,11 @@ class FragileEdgeV2(BaseModel):
 class FlipStabilityBandV2(BaseModel):
     """Seed-sweep stability band for one edge's flip threshold (Track S Phase 1).
 
-    Flag-gated (ISL_FLIP_STABILITY_BANDS, default off) and ADDITIVE: only
-    present when the flag is on; the flag-off wire is byte-identical.
+    DEFAULT-ON and ADDITIVE (env gating removed 2026-07-17): present on every
+    edge_e_values entry whenever e-values are computed. Absent only when the
+    all-or-nothing band budget (FLIP_STABILITY_BUDGET_MS) trips — then NO
+    entry carries a band and the degradation is disclosed via the
+    flip_stability_budget_exceeded structured log event.
 
     The single-point flip_mean is searched against ONE background (all other
     edges at expected value) and is therefore presented with false stability.
@@ -380,7 +383,9 @@ class FlipStabilityBandV2(BaseModel):
     based on band_width, not on the single-point value alone.
     """
 
-    n_seeds: int = Field(..., ge=1, description="Number of child seeds swept (default 5)")
+    n_seeds: int = Field(
+        ..., ge=1, description="Number of child seeds swept (constant 10, FLIP_STABILITY_N_SEEDS)"
+    )
     n_seeds_flipped: int = Field(
         ...,
         ge=0,
@@ -445,7 +450,8 @@ class EdgeEValueV2(BaseModel):
     stability: Optional[FlipStabilityBandV2] = Field(
         None,
         description="Seed-sweep stability band for this flip threshold (Track S Phase 1). "
-        "Only present when ISL_FLIP_STABILITY_BANDS is enabled — additive, default off.",
+        "Default-on, additive. Absent only when the all-or-nothing band budget "
+        "(FLIP_STABILITY_BUDGET_MS) trips.",
     )
 
     model_config = {"extra": "ignore"}
