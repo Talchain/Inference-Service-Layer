@@ -1,5 +1,5 @@
 """
-Track S Phase 1 — seed-sweep flip-threshold stability bands (RED-first).
+Track S Phase 1 — seed-sweep flip-threshold stability bands (DEFAULT-ON).
 
 Why: the 2026-06-10 PLoT/ISL science-performance report found that flip
 thresholds computed from a single seed are presented with false stability,
@@ -9,13 +9,18 @@ small seed sweep (e.g. 5 seeds)" with flip confidence based on band width
 The 2026-07-07 science-validation REPORT.md (§1, §5.1) reinforced that
 single-seed flip evidence is weak.
 
-Contract under test (flag-gated, ADDITIVE only):
+History: bands shipped flag-gated behind ``ISL_FLIP_STABILITY_BANDS`` (+
+``ISL_FLIP_STABILITY_SEEDS``) on 2026-07-11. Per Paul's ruling (2026-07-17:
+core functionality, no flag unless genuinely needed) both env vars are
+REMOVED and bands are computed whenever ``edge_e_values`` are.
 
-- env ``ISL_FLIP_STABILITY_BANDS`` truthy ("1"/"true"/"yes"/"on") -> each
-  ``edge_e_values[]`` entry gains a ``stability`` object::
+Contract under test (default-on, ADDITIVE only):
+
+- with NO environment configuration, each ``edge_e_values[]`` entry gains a
+  ``stability`` object::
 
       {
-        "n_seeds": int,             # seeds swept (default 5)
+        "n_seeds": int,             # seeds swept (constant 10)
         "n_seeds_flipped": int,     # seeds whose background admits a flip
         "band_min": float,          # min flip_mean across flipped seeds
         "band_median": float,       # median flip_mean across flipped seeds
@@ -30,24 +35,35 @@ Contract under test (flag-gated, ADDITIVE only):
   inside seed_flip_means are preserved on both wires (verified: pydantic
   exclude_none does not drop None list elements).
 
-- env ``ISL_FLIP_STABILITY_SEEDS`` overrides N (default 5, per the report's
-  recommendation); invalid values fall back to the default.
-- flag OFF -> the wire is identical to the pre-change baseline, pinned by
-  the golden fixture captured at origin/staging e029cae2d (comparison is
-  modulo the four pre-existing volatile fields and the pre-existing
-  set-ordering leak catalogued in docs/science-validation/REPORT.md §3 —
-  those vary run-to-run/process-to-process on the BASE code already).
+- the legacy env vars are DEAD: setting either has no effect.
+- N is the code constant ``FLIP_STABILITY_N_SEEDS = 10`` (Paul ruling
+  17 Jul raised the 06-10 report's 5 for a better stability basis); there
+  is no runtime override.
+- additivity vs base: stripping every ``stability`` key from the wire must
+  recover the pre-bands base wire exactly, pinned by the golden fixture
+  captured at origin/staging e029cae2d (comparison is modulo the four
+  pre-existing volatile fields and the pre-existing set-ordering leak
+  catalogued in docs/science-validation/REPORT.md §3 — those vary
+  run-to-run/process-to-process on the BASE code already).
+- budget degradation (mechanics unchanged from the flag era; value raised
+  2000 -> 30000 ms by the same 17 Jul ruling): the sweep is capped by
+  ``FLIP_STABILITY_BUDGET_MS``, ALL-OR-NOTHING on exceed — no entry carries
+  a band (partial bands would bias readers toward whichever edges computed
+  first), the base edge_e_values are untouched, and the degradation is
+  disclosed via the ``flip_stability_budget_exceeded`` structured log
+  event carrying ``elapsed_ms``.
 - determinism: the sweep is seeded — child seeds are SHA-256-derived from
   the master (request) seed, so same request+seed -> byte-identical bands.
 
-Regenerate the golden fixture (flag OFF, unmodified base behaviour) with:
+Regenerate the golden fixture (base wire modulo the additive stability key)
+with:
 
     poetry run python -m tests.unit.test_flip_stability_bands
 """
 
 import copy
 import json
-import os
+import logging
 import statistics
 from pathlib import Path
 
@@ -57,18 +73,26 @@ from fastapi.testclient import TestClient
 from src.api.main import app
 from src.models.response_v2 import FlipStabilityBandV2
 from src.models.robustness_v2 import RobustnessRequestV2
-from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.services.robustness_analyzer_v2 import (
+    FLIP_STABILITY_N_SEEDS,
+    RobustnessAnalyzerV2,
+)
 
 ENDPOINT = "/api/v1/robustness/analyze/v2"
 V2_HEADERS = {"X-ISL-Response-Version": "2"}
 
-FLAG_ENV = "ISL_FLIP_STABILITY_BANDS"
-N_SEEDS_ENV = "ISL_FLIP_STABILITY_SEEDS"
-DEFAULT_N_SEEDS = 5  # 06-10 report recommendation: "a small seed sweep (e.g. 5 seeds)"
+# Removed env vars — referenced only to prove they are DEAD.
+LEGACY_FLAG_ENV = "ISL_FLIP_STABILITY_BANDS"
+LEGACY_N_SEEDS_ENV = "ISL_FLIP_STABILITY_SEEDS"
+# Paul ruling 17 Jul (lenient-latency amendment): N raised from the 06-10
+# report's 5 to 10 for a better stability basis, and the sweep budget raised
+# 2000 -> 30000 ms. Both VALUE-pinned here so a silent revert goes RED.
+N_SEEDS = 10
+BUDGET_MS = 30000
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VARIANTS_PATH = REPO_ROOT / "tests" / "benchmarks" / "sample_variants.json"
-GOLDEN_PATH = REPO_ROOT / "tests" / "fixtures" / "flip_stability" / "golden_flag_off_v2.json"
+GOLDEN_PATH = REPO_ROOT / "tests" / "fixtures" / "flip_stability" / "golden_base_v2.json"
 
 STABILITY_REQUIRED_KEYS = {"n_seeds", "n_seeds_flipped", "seed_flip_means"}
 STABILITY_BAND_KEYS = {"band_min", "band_median", "band_max", "band_width"}
@@ -169,15 +193,11 @@ def client():
 
 
 @pytest.fixture
-def flag_off(monkeypatch):
-    monkeypatch.delenv(FLAG_ENV, raising=False)
-    monkeypatch.delenv(N_SEEDS_ENV, raising=False)
-
-
-@pytest.fixture
-def flag_on(monkeypatch):
-    monkeypatch.setenv(FLAG_ENV, "true")
-    monkeypatch.delenv(N_SEEDS_ENV, raising=False)
+def no_env(monkeypatch):
+    """Guarantee NEITHER legacy env var is set — the default-on contract is
+    exactly 'bands present with no environment configuration at all'."""
+    monkeypatch.delenv(LEGACY_FLAG_ENV, raising=False)
+    monkeypatch.delenv(LEGACY_N_SEEDS_ENV, raising=False)
 
 
 def _stability_blocks(response) -> list:
@@ -186,54 +206,101 @@ def _stability_blocks(response) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Flag OFF — the wire must be byte-identical to base (the pin)
+# DEFAULT-ON — bands present with no env var set (the gate-removal pin)
 # ---------------------------------------------------------------------------
 
 
-class TestFlagOff:
-    def test_no_stability_key_on_analyzer_output(self, flag_off):
-        response = RobustnessAnalyzerV2().analyze(_analyzer_request(0))
-        assert response.edge_e_values, "expected edge_e_values to be computed"
-        for entry in response.edge_e_values:
-            assert "stability" not in entry, "flag-off must not attach stability bands"
+class TestDefaultOn:
+    def test_bands_present_with_no_env_vars(self, no_env):
+        """THE gate-removal pin: no environment configuration, bands attached."""
+        response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+        blocks = _stability_blocks(response)
+        assert all(isinstance(b, dict) for b in blocks), (
+            "every edge_e_values entry must carry a stability band by default " "(no env var set)"
+        )
+        for block in blocks:
+            _assert_block_shape(block, N_SEEDS)
 
-    def test_v2_wire_matches_base_golden(self, flag_off, client):
-        """Pin: flag-off wire identical to origin/staging base (golden fixture).
+    def test_bands_on_v2_wire_with_no_env_vars(self, no_env, client):
+        """Same pin at the analyze/v2 HTTP surface."""
+        resp = client.post(ENDPOINT, json=_variant_request(2), headers=V2_HEADERS)
+        assert resp.status_code == 200, resp.text
+        edge_e_values = (resp.json().get("robustness") or {}).get("edge_e_values")
+        assert edge_e_values, "expected edge_e_values on the v2 wire"
+        for entry in edge_e_values:
+            block = entry.get("stability")
+            assert isinstance(block, dict), "default v2 wire must carry stability bands"
+            _assert_block_shape(block, N_SEEDS)
 
-        The golden was captured from UNMODIFIED base code (e029cae2d); this
-        test failing after a src change means the flag-off wire drifted.
+    def test_legacy_env_vars_are_dead(self, monkeypatch):
+        """The removed env vars must have NO effect: an old 'off' value cannot
+        suppress bands, and an old seeds override cannot change N."""
+        monkeypatch.setenv(LEGACY_FLAG_ENV, "0")
+        monkeypatch.setenv(LEGACY_N_SEEDS_ENV, "3")
+        response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+        for block in _stability_blocks(response):
+            _assert_block_shape(block, N_SEEDS)
+
+    def test_n_seeds_constant_value_pinned_at_ten(self):
+        """Paul ruling 17 Jul: n_seeds = 10. Value-pinned — a silent revert
+        to the report-era 5 (or any other value) goes RED here."""
+        assert FLIP_STABILITY_N_SEEDS == 10
+
+    def test_budget_constant_value_pinned_at_30000(self):
+        """Paul ruling 17 Jul: lenient sweep budget = 30000 ms (prioritise
+        analysis quality; disclose slowness rather than silently cut).
+        Value-pinned — a silent revert to the original 2000 goes RED here."""
+        assert RobustnessAnalyzerV2.FLIP_STABILITY_BUDGET_MS == BUDGET_MS
+
+
+# ---------------------------------------------------------------------------
+# Additivity vs BASE — stripping stability recovers the pre-bands wire
+# ---------------------------------------------------------------------------
+
+
+class TestAdditiveVsBase:
+    def test_v2_wire_modulo_stability_matches_base_golden(self, no_env, client):
+        """Pin: the ONLY wire delta vs origin/staging base is the additive
+        ``stability`` key.
+
+        The golden was captured from UNMODIFIED pre-bands base code
+        (e029cae2d); this test failing after a src change means the base wire
+        drifted (not just the additive band surface).
         """
         assert GOLDEN_PATH.exists(), (
-            f"golden fixture missing at {GOLDEN_PATH} — regenerate on BASE code via "
+            f"golden fixture missing at {GOLDEN_PATH} — regenerate via "
             "`poetry run python -m tests.unit.test_flip_stability_bands`"
         )
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
         golden = json.loads(GOLDEN_PATH.read_text())
-        assert normalize_v2_payload(resp.json()) == golden
+        assert _strip_stability(normalize_v2_payload(resp.json())) == golden
 
-    def test_v2_wire_has_no_stability_anywhere(self, flag_off, client):
-        resp = client.post(ENDPOINT, json=_variant_request(2), headers=V2_HEADERS)
+    def test_stability_present_before_stripping(self, no_env, client):
+        """Positive control for the golden pin: the strip in the test above
+        must actually be removing something, or the modulo-stability
+        comparison silently degenerates into 'wire unchanged'."""
+        resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
-        assert _strip_stability(resp.json()) == resp.json()
+        assert _strip_stability(resp.json()) != resp.json()
 
 
 # ---------------------------------------------------------------------------
-# Flag ON — bands attached, additive-only, correct statistics
+# Band shape and statistics
 # ---------------------------------------------------------------------------
 
 
-class TestFlagOnShape:
-    def test_bands_attached_to_every_edge_e_value_entry(self, flag_on):
+class TestBandShape:
+    def test_bands_attached_to_every_edge_e_value_entry(self, no_env):
         response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         blocks = _stability_blocks(response)
         assert all(
             isinstance(b, dict) for b in blocks
-        ), "every edge_e_values entry must carry a stability band when the flag is on"
+        ), "every edge_e_values entry must carry a stability band"
         for block in blocks:
-            _assert_block_shape(block, DEFAULT_N_SEEDS)
+            _assert_block_shape(block, N_SEEDS)
 
-    def test_band_statistics_consistent_with_seed_values(self, flag_on):
+    def test_band_statistics_consistent_with_seed_values(self, no_env):
         response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         for block in _stability_blocks(response):
             flipped = [v for v in block["seed_flip_means"] if v is not None]
@@ -250,7 +317,7 @@ class TestFlagOnShape:
             )
             assert block["band_min"] <= block["band_median"] <= block["band_max"]
 
-    def test_at_least_one_band_has_nonzero_width(self, flag_on):
+    def test_at_least_one_band_has_nonzero_width(self, no_env):
         """The sweep must actually expose threshold uncertainty on this graph.
 
         sample_variants[2] has wide strength stds; a sweep whose bands all
@@ -265,46 +332,20 @@ class TestFlagOnShape:
         assert any(w > 0 for w in widths)
 
 
-class TestFlagOnAdditiveOnly:
-    def test_flag_on_changes_nothing_but_stability(self, monkeypatch):
-        monkeypatch.delenv(FLAG_ENV, raising=False)
-        monkeypatch.delenv(N_SEEDS_ENV, raising=False)
-        response_off = RobustnessAnalyzerV2().analyze(_analyzer_request(0))
-
-        monkeypatch.setenv(FLAG_ENV, "1")
-        response_on = RobustnessAnalyzerV2().analyze(_analyzer_request(0))
-
-        assert any(
-            "stability" in entry for entry in response_on.edge_e_values
-        ), "flag-on must attach at least one stability band"
-
-        def comparable(resp):
-            dump = resp.model_dump()
-            dump["metadata"].pop("execution_time_ms", None)
-            for critique in dump.get("critiques") or []:
-                critique.pop("id", None)
-            return _strip_stability(dump)
-
-        assert comparable(response_on) == comparable(response_off), (
-            "flag-on must be additive-only: stripping 'stability' must recover "
-            "the flag-off response exactly (same process, volatile fields masked)"
-        )
-
-
 # ---------------------------------------------------------------------------
 # Determinism — the sweep itself is seeded
 # ---------------------------------------------------------------------------
 
 
 class TestDeterminism:
-    def test_same_request_same_seed_byte_identical_bands(self, flag_on):
+    def test_same_request_same_seed_byte_identical_bands(self, no_env):
         first = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         second = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         assert json.dumps(_stability_blocks(first), sort_keys=True) == json.dumps(
             _stability_blocks(second), sort_keys=True
         )
 
-    def test_different_master_seed_changes_bands(self, flag_on):
+    def test_different_master_seed_changes_bands(self, no_env):
         """Child seeds derive from the master seed: a different request seed
         must produce a different sweep (different sampled backgrounds)."""
         seed_a = RobustnessAnalyzerV2().analyze(_analyzer_request(2, seed=42))
@@ -313,25 +354,55 @@ class TestDeterminism:
 
 
 # ---------------------------------------------------------------------------
-# N configurability
+# Budget degradation — all-or-nothing, disclosed, base wire untouched
 # ---------------------------------------------------------------------------
 
 
-class TestNSeedsConfig:
-    def test_n_seeds_env_override(self, monkeypatch):
-        monkeypatch.setenv(FLAG_ENV, "1")
-        monkeypatch.setenv(N_SEEDS_ENV, "3")
-        response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
-        for block in _stability_blocks(response):
-            assert block["n_seeds"] == 3
-            assert len(block["seed_flip_means"]) == 3
+class TestBudgetDegradation:
+    """The unchanged honest-degradation contract, now on the DEFAULT path.
 
-    def test_invalid_n_seeds_falls_back_to_default(self, monkeypatch):
-        monkeypatch.setenv(FLAG_ENV, "1")
-        monkeypatch.setenv(N_SEEDS_ENV, "not-a-number")
-        response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
-        for block in _stability_blocks(response):
-            assert block["n_seeds"] == DEFAULT_N_SEEDS
+    On budget exceed the sweep attaches NOTHING (partial bands would bias
+    readers toward whichever edges computed first), never mutates the base
+    edge_e_values, and discloses via the ``flip_stability_budget_exceeded``
+    structured log event. Positive control first: the same request WITHOUT
+    the exhausted budget DOES attach bands — so the absence assertions below
+    are proven able to see a presence.
+    """
+
+    def test_budget_exhaustion_attaches_no_bands_and_discloses(self, no_env, monkeypatch, caplog):
+        # Positive control: bands present under the real budget.
+        control = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+        assert all(
+            isinstance(b, dict) for b in _stability_blocks(control)
+        ), "positive control failed: bands absent even before exhausting the budget"
+
+        # Exhaust the budget: any elapsed wall time exceeds -1 ms immediately.
+        monkeypatch.setattr(RobustnessAnalyzerV2, "FLIP_STABILITY_BUDGET_MS", -1)
+        with caplog.at_level(logging.INFO, logger="src.services.robustness_analyzer_v2"):
+            degraded = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+
+        # All-or-nothing: NO entry carries a band.
+        assert degraded.edge_e_values, "base edge_e_values must survive budget exhaustion"
+        for entry in degraded.edge_e_values:
+            assert (
+                "stability" not in entry
+            ), "budget exhaustion must attach NO bands (all-or-nothing honest absence)"
+        # Honest disclosure: the structured log event fired, WITH elapsed_ms
+        # (Paul ruling 17 Jul: find out when something is slow — the event
+        # must carry how slow).
+        exceeded = [
+            record
+            for record in caplog.records
+            if record.message == "flip_stability_budget_exceeded"
+        ]
+        assert exceeded, "budget degradation must be disclosed via flip_stability_budget_exceeded"
+        assert hasattr(exceeded[0], "elapsed_ms"), "disclosure event must carry elapsed_ms"
+
+    def test_budget_exhaustion_leaves_base_values_untouched(self, no_env, monkeypatch):
+        control = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+        monkeypatch.setattr(RobustnessAnalyzerV2, "FLIP_STABILITY_BUDGET_MS", -1)
+        degraded = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
+        assert _strip_stability(control.edge_e_values) == degraded.edge_e_values
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +411,7 @@ class TestNSeedsConfig:
 
 
 class TestV2Wire:
-    def test_stability_serialised_on_v2_wire_when_flag_on(self, flag_on, client):
+    def test_stability_serialised_on_v2_wire(self, no_env, client):
         resp = client.post(ENDPOINT, json=_variant_request(2), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
         data = resp.json()
@@ -348,8 +419,8 @@ class TestV2Wire:
         assert edge_e_values, "expected edge_e_values on the v2 wire"
         for entry in edge_e_values:
             block = entry.get("stability")
-            assert isinstance(block, dict), "flag-on v2 wire must carry stability bands"
-            _assert_block_shape(block, DEFAULT_N_SEEDS)
+            assert isinstance(block, dict), "default v2 wire must carry stability bands"
+            _assert_block_shape(block, N_SEEDS)
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +446,7 @@ class TestZeroFlipOmission:
             lambda self, request, evaluator, edge, background: None,
         )
 
-    def test_forced_zero_flip_analyzer_branch(self, flag_on, monkeypatch):
+    def test_forced_zero_flip_analyzer_branch(self, no_env, monkeypatch):
         """v1 dict-passthrough shape: band_* keys OMITTED (not null) at zero flips."""
         self._force_no_flip(monkeypatch)
         response = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
@@ -383,12 +454,12 @@ class TestZeroFlipOmission:
         assert blocks, "expected stability blocks on every edge_e_values entry"
         for block in blocks:
             assert block["n_seeds_flipped"] == 0
-            assert block["seed_flip_means"] == [None] * DEFAULT_N_SEEDS
+            assert block["seed_flip_means"] == [None] * N_SEEDS
             # The omission branch itself: exactly the 3 required keys, no band_*
             assert set(block.keys()) == STABILITY_REQUIRED_KEYS
-            _assert_block_shape(block, DEFAULT_N_SEEDS)
+            _assert_block_shape(block, N_SEEDS)
 
-    def test_forced_zero_flip_v2_wire_parity(self, flag_on, client, monkeypatch):
+    def test_forced_zero_flip_v2_wire_parity(self, no_env, client, monkeypatch):
         """v2 model wire (exclude_none) carries the SAME zero-flip shape as v1.
 
         Pins the parity claim end-to-end: band_* omitted by exclude_none,
@@ -404,40 +475,47 @@ class TestZeroFlipOmission:
             assert isinstance(block, dict)
             assert set(block.keys()) == STABILITY_REQUIRED_KEYS
             assert block["n_seeds_flipped"] == 0
-            assert block["seed_flip_means"] == [None] * DEFAULT_N_SEEDS
+            assert block["seed_flip_means"] == [None] * N_SEEDS
 
     def test_flip_stability_band_v2_exclude_none_serialisation(self):
         """Direct model pin: the exact model_dump the v2 wire uses
         (src/api/robustness.py: by_alias=True, exclude_none=True) drops the
         four unset band_* fields but preserves None list elements."""
         band = FlipStabilityBandV2(
-            n_seeds=DEFAULT_N_SEEDS,
+            n_seeds=N_SEEDS,
             n_seeds_flipped=0,
-            seed_flip_means=[None] * DEFAULT_N_SEEDS,
+            seed_flip_means=[None] * N_SEEDS,
         )
         dumped = band.model_dump(by_alias=True, exclude_none=True)
         assert dumped == {
-            "n_seeds": DEFAULT_N_SEEDS,
+            "n_seeds": N_SEEDS,
             "n_seeds_flipped": 0,
-            "seed_flip_means": [None] * DEFAULT_N_SEEDS,
+            "seed_flip_means": [None] * N_SEEDS,
         }
 
 
 # ---------------------------------------------------------------------------
-# Golden capture (run on BASE code only)
+# Golden capture — base wire modulo the additive stability surface
 # ---------------------------------------------------------------------------
 
 
 def _capture_golden() -> None:  # pragma: no cover
-    if os.environ.get(FLAG_ENV):
-        raise SystemExit(f"unset {FLAG_ENV} before capturing the flag-off golden")
+    """Capture the golden as wire-modulo-stability.
+
+    The original golden was captured from UNMODIFIED pre-bands base code with
+    the (then) flag off. Now that bands are default-on, an equivalent golden
+    is the current wire with every additive ``stability`` key stripped — if
+    the modulo-stability wire has drifted from base, regenerating will make
+    the drift visible in the fixture diff rather than hiding it.
+    """
     local_client = TestClient(app)
     resp = local_client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
     if resp.status_code != 200:  # pragma: no cover
         raise SystemExit(f"capture failed: {resp.status_code} {resp.text}")
     GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     GOLDEN_PATH.write_text(
-        json.dumps(normalize_v2_payload(resp.json()), indent=2, sort_keys=True) + "\n"
+        json.dumps(_strip_stability(normalize_v2_payload(resp.json())), indent=2, sort_keys=True)
+        + "\n"
     )
     print(f"golden written: {GOLDEN_PATH}")
 

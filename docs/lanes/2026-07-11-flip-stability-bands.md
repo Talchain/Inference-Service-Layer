@@ -4,6 +4,25 @@
 **Branch:** `claude/flip-stability-bands` · **Date:** 2026-07-11 · **Flag:**
 `ISL_FLIP_STABILITY_BANDS` (default OFF)
 
+> **STATUS UPDATE 2026-07-17 — bands are now DEFAULT-ON; the flag description
+> below is historical.** Per Paul's ruling (17 Jul: core functionality, no
+> flag unless genuinely needed; lenient-latency amendment: prioritise
+> analysis quality), the `ISL_FLIP_STABILITY_BANDS` and
+> `ISL_FLIP_STABILITY_SEEDS` env vars are **REMOVED**. Bands are computed
+> whenever `edge_e_values` are; N is the code constant
+> `FLIP_STABILITY_N_SEEDS = 10` (raised from 5 for a better stability
+> basis; no runtime override, so the old [2, 20] clamp validation is
+> deleted as dead); `FLIP_STABILITY_BUDGET_MS` is raised 2000 → **30000 ms**
+> (Paul-ruled lenient default). The honest degradation MECHANICS are
+> unchanged: all-or-nothing on exceed, base values untouched, disclosed via
+> the `flip_stability_budget_exceeded` log event carrying `elapsed_ms`.
+> Rollback is a revert commit, not a flag flip. The golden fixture is
+> renamed `golden_base_v2.json` and now pins wire-modulo-`stability` ==
+> pre-bands base wire; both new constants are VALUE-pinned by tests so a
+> silent revert goes RED. The runtime-budget table below is the n=5 record;
+> the default-on lane re-measured n=10 (see its PR). Everything below is
+> the accurate record of what #71 shipped on 2026-07-11.
+
 ## Problem
 
 The corpus sweep found which-option flip rates of 25–75% across seeds, yet

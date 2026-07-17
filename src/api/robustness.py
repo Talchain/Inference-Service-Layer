@@ -762,8 +762,8 @@ async def _analyze_robustness_v2_enhanced(
                         or raw_e_val > 1e6
                     )
                     # Track S Phase 1: seed-sweep stability band — additive,
-                    # only present when ISL_FLIP_STABILITY_BANDS is on
-                    # (exclude_none drops it from the wire when absent).
+                    # default-on; absent only when the all-or-nothing band
+                    # budget trips (exclude_none drops it from the wire).
                     stability_raw = ev.get("stability")
                     edge_e_values_v2.append(
                         EdgeEValueV2(
