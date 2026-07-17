@@ -87,10 +87,23 @@ logger = logging.getLogger(__name__)
 # Calibration:
 #   Typical pilot graph (5 nodes, 8 edges, 1000 samples)   = 40K  — well within limit
 #   Upper PoC bound   (12 nodes, 100 edges, 5000 samples)  = 6M   — within limit
+#   Dense mid graph   (40 nodes, 120 edges, 5000 samples)  = 24M  — within limit
 #   Schema max        (50 nodes, 200 edges, 10000 samples)  = 100M — blocked
 #
+# Paul-ruled lenient defaults 2026-07-17: raised 10M → 30M so that deeper
+# sampling (PLoT raising base depth toward the 10k schema max) actually
+# reaches mid/large graphs instead of being silently clamped back by PLoT's
+# mirrored budget (any graph with nodes×edges > budget/K gets its depth
+# adaptively reduced). 30M keeps the worst admissible base call well inside
+# PLoT's 30 s per-call ISL timeout on staging hardware; 100M would not.
+# DEPLOY ORDER: this must deploy BEFORE PLoT raises its request depth
+# (PLoT #229), or dense-graph requests 422 here. PLoT's mirror env
+# (ISL_COMPLEXITY_BUDGET_DEFAULT, same ISL_MAX_COMPUTE_COMPLEXITY env name)
+# must be raised in lockstep. Value pinned by
+# tests/unit/test_lenient_limits.py (silent revert goes RED).
+#
 # Override via ISL_MAX_COMPUTE_COMPLEXITY env var (integer).
-_DEFAULT_MAX_COMPLEXITY = 10_000_000
+_DEFAULT_MAX_COMPLEXITY = 30_000_000
 
 
 def _get_max_complexity() -> int:

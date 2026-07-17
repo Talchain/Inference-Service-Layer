@@ -352,9 +352,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # Get client IP for audit logging
             client_ip = get_client_ip(request)
 
-            # Log rate limit violation via security audit logger
+            # Log rate limit violation via security audit logger.
+            # NOTE (2026-07-17): the former `# type: ignore[call-arg]` here was
+            # suppressing the exact mypy error for a request_id kwarg the
+            # signature did not accept — every rate-limit trip raised TypeError
+            # and callers got a bare 500 instead of this 429. Do not re-add an
+            # ignore at this call site; the signature now accepts request_id.
             settings = get_settings()
-            security_audit.log_rate_limit_exceeded(  # type: ignore[call-arg]
+            security_audit.log_rate_limit_exceeded(
                 client_ip=client_ip,
                 identifier=identifier,
                 limit=settings.RATE_LIMIT_REQUESTS_PER_MINUTE,

@@ -424,8 +424,8 @@ class TestComputeComplexityScore:
         """Complexity exactly at limit is accepted (boundary condition)."""
         from src.api.robustness import compute_complexity_score, _DEFAULT_MAX_COMPLEXITY
 
-        score = compute_complexity_score(10000, 10, 100)
-        assert score == _DEFAULT_MAX_COMPLEXITY  # 10M exactly
+        score = compute_complexity_score(10000, 30, 100)
+        assert score == _DEFAULT_MAX_COMPLEXITY  # 30M exactly (lenient default 2026-07-17)
 
 
 class TestComplexityGuardEndpoint:

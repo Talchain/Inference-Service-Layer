@@ -5,7 +5,7 @@ Runtime-budget measurement for seed-sweep flip-threshold stability bands
 Measures full analyze() wall time with the band sweep disabled (the
 production default before 2026-07-17, simulated by patching
 ``_attach_flip_stability_bands`` to a no-op) vs the default path (bands on,
-N=5) on:
+N = FLIP_STABILITY_N_SEEDS, currently 10) on:
 - the three pinned sample_variants graphs (3 nodes / 3 edges, n_samples 200)
   — the same fixtures the science-validation report used, and
 - a larger deterministic synthetic graph (12 nodes / 17 edges, n_samples 500)
@@ -20,7 +20,7 @@ docs/lanes/2026-07-11-flip-stability-bands.md. The comparison is
 analyze()-to-analyze(): it captures exactly what the default-on sweep adds,
 including the base MC that dominates real requests. The sweep itself is
 additionally capped by RobustnessAnalyzerV2.FLIP_STABILITY_BUDGET_MS
-(2000 ms, all-or-nothing).
+(currently 30000 ms, all-or-nothing).
 """
 
 import json

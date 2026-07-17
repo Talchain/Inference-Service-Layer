@@ -21,7 +21,11 @@ from src.models.robustness_v2 import (
     RobustnessRequestV2,
     StrengthDistribution,
 )
-from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.services.robustness_analyzer_v2 import (
+    EVPI_SAMPLE_CAP,
+    RobustnessAnalyzerV2,
+    evpi_noise_floor,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -444,14 +448,34 @@ class TestEVPI:
             assert "perfect_metric" in evpi
             assert "metric_type" in evpi
             assert "n_evpi_samples" in evpi
-            assert evpi["n_evpi_samples"] <= 500  # Budget cap
+            assert evpi["n_evpi_samples"] <= EVPI_SAMPLE_CAP  # Budget cap
+
+    def test_evpi_cap_binds_at_2000_on_the_wire(self):
+        """A request deeper than the cap gets EVPI at exactly EVPI_SAMPLE_CAP
+        samples, and the disclosed noise floor derives from the capped value
+        (Paul-ruled lenient defaults 2026-07-17, cap 500 → 2000). A silent
+        revert to the old 500 cap turns this RED."""
+        graph = _make_graph()
+        request = _make_request(
+            graph,
+            include_voi=True,
+            include_uncertainties=True,
+            n_samples=4000,
+        )
+        analyzer = RobustnessAnalyzerV2()
+        response = analyzer.analyze(request)
+        assert response.factor_evpi is not None
+        assert len(response.factor_evpi) > 0
+        for evpi in response.factor_evpi:
+            assert evpi["n_evpi_samples"] == EVPI_SAMPLE_CAP == 2000
+            assert evpi["evpi_noise_floor"] == round(evpi_noise_floor(EVPI_SAMPLE_CAP), 6)
 
 
 class TestEVPIBelowResolutionLabelling:
     """T0-4 remediation: below-resolution labelling of EVPI estimates.
 
     EVPI is a difference of two independent MC proportion estimates, so at the
-    500-sample budget cap the estimator noise is ~+/-0.03-0.06. Entries whose
+    2000-sample budget cap the estimator noise is ~+/-0.02-0.03. Entries whose
     |evpi| is inside the noise floor are LABELLED below_resolution
     (provisional_doctrine_v0). Since the F1 producer clamp, a negative raw
     difference is additionally clamped to 0.0 on the wire (EVPI is

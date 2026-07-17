@@ -593,6 +593,7 @@ class SecurityAuditLogger:
         limit: int,
         window_seconds: int,
         path: Optional[str] = None,
+        request_id: Optional[str] = None,
     ) -> None:
         """
         Log a rate limit violation.
@@ -603,6 +604,15 @@ class SecurityAuditLogger:
             limit: Rate limit threshold
             window_seconds: Rate limit window
             path: Request path
+            request_id: Caller-supplied request id for cross-service
+                correlation. Added 2026-07-17: the rate-limiting middleware
+                was already passing this kwarg while the signature lacked it,
+                so every rate-limit trip raised TypeError and callers got a
+                bare 500 instead of the structured 429 (the graceful-
+                degradation path itself was broken; the call site's
+                ``# type: ignore[call-arg]`` had suppressed the mypy error
+                that would have caught it). Pinned RED-first by
+                tests/unit/test_lenient_limits.py.
         """
         tracing = _get_tracing_module()
         trace_id = tracing.get_trace_id() if tracing else None
@@ -616,6 +626,7 @@ class SecurityAuditLogger:
                 "limit": limit,
                 "window_seconds": window_seconds,
                 "path": path,
+                "request_id": request_id,
                 "audit": True,
                 "correlation_id": trace_id,
             },
