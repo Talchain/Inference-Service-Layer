@@ -101,8 +101,15 @@ class Settings(BaseSettings):
     )
 
     # Rate Limiting
+    # Paul-ruled lenient defaults 2026-07-17: raised 100 → 1000. Every PLoT
+    # /v2/run fans out ~11 ISL calls (1 base + ~10 flip probes) through
+    # PLoT's single API key, so 100/min limited the WHOLE deployment to ~9
+    # analyses/min across all users and probe bursts tripped it (2026-07-17
+    # budget-review surprise #1). No Render env override exists on
+    # isl-staging — this code default governs. Value pinned by
+    # tests/unit/test_lenient_limits.py (silent revert goes RED).
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = Field(
-        default=100, description="Maximum requests per minute per client"
+        default=1000, description="Maximum requests per minute per client"
     )
     TRUSTED_PROXIES: str = Field(
         default="", description="Comma-separated list of trusted proxy IPs/CIDRs"

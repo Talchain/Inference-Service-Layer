@@ -106,7 +106,7 @@ MARGINAL_K_SAMPLES = 100
 #
 # The noise floor is the two-sided 95% bound on that worst-case standard error:
 #
-#   noise_floor(n) = 1.96 * sqrt(0.5 / n)    (~0.062 at the n=500 budget cap)
+#   noise_floor(n) = 1.96 * sqrt(0.5 / n)    (~0.031 at the n=2000 budget cap)
 #
 # The worst-case p=0.5 bound is used instead of a plug-in estimate
 # sqrt((p1*(1-p1) + p2*(1-p2)) / n) because the plug-in collapses to 0 when an
@@ -122,6 +122,19 @@ MARGINAL_K_SAMPLES = 100
 # labelling is otherwise unchanged.
 EVPI_NOISE_FLOOR_Z = 1.96
 EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
+
+# Per-factor EVPI Monte Carlo depth cap: EVPI uses min(request.n_samples,
+# EVPI_SAMPLE_CAP) draws per pass. Paul-ruled lenient defaults 2026-07-17:
+# raised 500 → 2000 (EVPI was the noisiest displayed number — a hard 500-
+# sample cap regardless of request depth put ±0.06 noise-floor values next
+# to 4000-sample probabilities, and raising base K did nothing for it; the
+# cap was also completely silent on the wire until n_evpi_samples shipped).
+# 4× depth halves the noise floor (~0.062 → ~0.031). Cost is ~linear in
+# cap × n_factors (~+0.3 s/factor staging) — watch many-factor graphs.
+# n_evpi_samples and evpi_noise_floor on the wire derive from the capped
+# value, so they adapt automatically. Value pinned by
+# tests/unit/test_lenient_limits.py (silent revert goes RED).
+EVPI_SAMPLE_CAP = 2000
 
 # --- Flip-threshold stability bands (Track S Phase 1) ---------------------------
 # A single flip threshold (edge_e_values[].flip_mean) is searched against ONE
@@ -3208,8 +3221,14 @@ class RobustnessAnalyzerV2:
             defaulted_root_node_ids=defaulted_root_node_ids if defaulted_root_node_ids else None,
         )
 
-    # E-value budget: max wall-clock time for the full E-value sweep
-    E_VALUE_BUDGET_MS = 2000
+    # E-value budget: max wall-clock time for the full E-value sweep.
+    # Paul-ruled lenient defaults 2026-07-17: raised 2000 → 8000. On budget
+    # exceed the WHOLE edge_e_values field is omitted from the response
+    # (disclosed only via the e_value_budget_exceeded log event), and bands
+    # vanish with it — 2000 ms risked that silent loss on large graphs on
+    # staging hardware. Value pinned by tests/unit/test_lenient_limits.py
+    # (silent revert goes RED).
+    E_VALUE_BUDGET_MS = 8000
     E_VALUE_BISECT_STEPS = 20  # binary search precision: 2^-20 ≈ 1e-6
 
     def _compute_edge_e_values(
@@ -3414,6 +3433,21 @@ class RobustnessAnalyzerV2:
           The band_* keys are OMITTED (not null) when nothing flips, matching
           the v2 wire's exclude_none serialisation so v1 (dict passthrough)
           and v2 (model) wires carry the same shape.
+
+        BAND MEMBERSHIP SEMANTICS (bytes-checked 2026-07-17, live-proof
+        follow-up): the base flip_mean is NOT a member of this sweep. The
+        sweep's backgrounds are drawn from child seeds
+        sha256(f"{master_seed}:flip_stability:{i}"), i = 0..n_seeds-1 — the
+        master seed itself is never a background — and, stronger, the base
+        flip_mean is not computed under ANY sampled background: it is
+        searched against the expected-value baseline (_compute_edge_e_values
+        holds every other edge at mean × exists_probability). The base point
+        therefore MAY legitimately lie outside [band_min, band_max]
+        (observed live: flip_mean −0.5534 vs band [−0.135, 0.4232] on a
+        4/10-flip edge — expected behaviour, and itself a signal that the
+        flip estimate is background-sensitive). Consumers must NOT assume
+        flip_mean ∈ band; the mirrored consumer warning lives on
+        FlipStabilityBandV2 in src/models/response_v2.py.
         """
         t0 = time.time()
         n_seeds = FLIP_STABILITY_N_SEEDS
@@ -3587,8 +3621,9 @@ class RobustnessAnalyzerV2:
         if not request.parameter_uncertainties:
             return None
 
-        # Budget: cap samples for EVPI to limit latency
-        n_samples = min(request.n_samples, 500)
+        # Budget: cap samples for EVPI to limit latency (see EVPI_SAMPLE_CAP
+        # comment — Paul-ruled lenient defaults 2026-07-17, 500 → 2000).
+        n_samples = min(request.n_samples, EVPI_SAMPLE_CAP)
         constraint_target_nodes = None
         if request.goal_constraints:
             constraint_target_nodes = sorted(set(gc.node_id for gc in request.goal_constraints))

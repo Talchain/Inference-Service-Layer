@@ -129,9 +129,9 @@ class TestSecuritySettings:
     """Test security-related settings."""
 
     def test_default_rate_limit(self):
-        """Test default rate limit setting."""
+        """Default rate limit = 1000 (Paul-ruled lenient defaults 2026-07-17)."""
         settings = Settings()
-        assert settings.RATE_LIMIT_REQUESTS_PER_MINUTE == 100
+        assert settings.RATE_LIMIT_REQUESTS_PER_MINUTE == 1000
 
     def test_custom_rate_limit(self):
         """Test custom rate limit setting."""

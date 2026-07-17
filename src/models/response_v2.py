@@ -381,6 +381,13 @@ class FlipStabilityBandV2(BaseModel):
     from the request seed, so the band is deterministic per request+seed.
     Per the 2026-06-10 science-performance report, flip confidence should be
     based on band_width, not on the single-point value alone.
+
+    MEMBERSHIP: the base flip_mean is NOT a member of the sweep (it is
+    searched against the expected-value background, which is never one of
+    the sampled backgrounds), so flip_mean MAY legitimately lie outside
+    [band_min, band_max] — observed live on low-flip-participation edges.
+    Consumers must NOT assume flip_mean ∈ band (bytes-checked 2026-07-17;
+    producer-side detail on RobustnessAnalyzerV2._attach_flip_stability_bands).
     """
 
     n_seeds: int = Field(
