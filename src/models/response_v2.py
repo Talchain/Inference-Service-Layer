@@ -42,6 +42,20 @@ class InferenceWarning(BaseModel):
     detail: Dict[str, Any] = Field(
         ..., description="Arbitrary context, e.g. {'original': 1000, 'clamped': 1.0}"
     )
+    # Codex F4 (producer half): warnings previously had NO severity, so PLoT
+    # downstream defaulted them to 'info' and the UI hid them. Carry a real,
+    # typed severity. Default 'warning' (the class is InferenceWARNING); the four
+    # degradation codes (E_VALUES_UNAVAILABLE / STABILITY_BANDS_UNAVAILABLE /
+    # EVPI_UNAVAILABLE / PATH_DECOMPOSITION_UNAVAILABLE) are stamped 'warning'
+    # explicitly at their producer. ADDITIVE optional field on the
+    # untyped-passthrough seam: a non-None default so it always rides the wire
+    # under exclude_none, and older consumers ignore it (extra='ignore' on every
+    # V2 model). Vocabulary is the CritiqueV2 subset (no 'blocker' — a warning
+    # never blocks).
+    severity: Literal["info", "warning", "error"] = Field(
+        default="warning",
+        description="Severity for downstream routing/display. Defaults to 'warning'.",
+    )
 
 
 class ZeroSensitivityReason(str, Enum):
