@@ -787,10 +787,36 @@ class RobustnessAnalyzerV2:
     # on its first internal guard check anyway).
     OPTIONAL_PHASE_MIN_BUDGET_MS = 500
 
-    # EVPI has no internal wall-clock budget of its own (unlike the E-value and
-    # band sweeps), so it is gated purely at entry: only started when at least
-    # this much of the overall budget remains.
+    # EVPI is gated at entry (only started when at least this much of the overall
+    # budget remains) AND now carries an internal wall-clock deadline (Codex F7,
+    # below) so it degrades-with-disclosure instead of running unbounded past the
+    # governing budget once started.
     EVPI_MIN_BUDGET_MS = 8000
+
+    # Codex F7: EVPI and path-decomposition were wall-clock ENTRY-gated only —
+    # once started they re-checked NOTHING and could run (n_uncertainties+1) full
+    # MC passes / a dense-DAG path walk UNBOUNDED, cross OVERALL_REQUEST_BUDGET_MS
+    # and PLoT's 60s ISL timeout, and return every row with NO disclosure. They now
+    # carry an INTERNAL wall-clock budget checked mid-loop exactly like the E-value
+    # and band sweeps (min(cap, remaining) measured against a monotonic phase t0),
+    # degrading ALL-OR-NOTHING with disclosure on overrun.
+    #
+    # Both caps default to the governing OVERALL_REQUEST_BUDGET_MS, so the effective
+    # per-phase bound is min(cap, remaining) == remaining: the phase is bounded ONLY
+    # by the governing request deadline, never cut tighter than it (no new false
+    # cuts of runs that succeed today). They exist as the phase-level knobs
+    # (mirroring E_VALUE_BUDGET_MS / FLIP_STABILITY_BUDGET_MS) and as the
+    # internal-trip pins tests drive to -1 (silent revert -> RED via
+    # tests/unit/test_evpi_path_deadline.py).
+    EVPI_BUDGET_MS = OVERALL_REQUEST_BUDGET_MS
+    PATH_DECOMPOSITION_BUDGET_MS = OVERALL_REQUEST_BUDGET_MS
+
+    # Deadline re-check granularity inside the EVPI sample loop / path-decomp walk:
+    # re-check every Nth iteration, not every one (mirrors the E-value per-bisect-
+    # step cadence — time.monotonic() is cheap but not free, and the RNG/compute is
+    # never touched by the guard so byte-output is unchanged when not tripped).
+    EVPI_DEADLINE_CHECK_INTERVAL = 64
+    PATH_DEADLINE_CHECK_INTERVAL = 512
 
     def _optional_phase_unavailable_warning(
         self,
@@ -804,10 +830,20 @@ class RobustnessAnalyzerV2:
         the request budget. Mirrors the LOG-only e_value_budget_exceeded /
         flip_stability_budget_exceeded events onto inference_warnings (the
         channel PLoT reads), carrying elapsed_ms — the #226 gap for
-        flip_thresholds, now closed for the whole optional-phase family."""
+        flip_thresholds, now closed for the whole optional-phase family.
+
+        Codex F4: the four optional-phase degradation codes (E_VALUES_UNAVAILABLE
+        / STABILITY_BANDS_UNAVAILABLE / EVPI_UNAVAILABLE /
+        PATH_DECOMPOSITION_UNAVAILABLE) are the ONLY InferenceWarnings that surface
+        as 'warning' — PLoT maps severity=='warning' to a shown warning and
+        everything else to 'info', so stamp 'warning' HERE explicitly. The ~9
+        benign input-adjustment/default diagnostics (STRENGTH_MEAN_CLAMPED,
+        CONSTRAINT_NODE_DEFAULT_BASE, ROOT_NODE_DEFAULT_VALUE, ...) are built
+        directly and keep InferenceWarning's quiet 'info' default."""
         return InferenceWarning(
             code=code,
             field=field,
+            severity="warning",
             detail={"reason": reason, "elapsed_ms": elapsed_ms, "message": message},
         )
 
@@ -1336,8 +1372,9 @@ class RobustnessAnalyzerV2:
         recommended_option_id = max(option_wins, key=lambda k: option_wins[k])
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
-        # Compute EVPI per factor if requested. OPTIONAL phase — EVPI has no
-        # internal wall-clock budget, so it is gated purely at entry.
+        # Compute EVPI per factor if requested. OPTIONAL phase — gated at entry AND
+        # (Codex F7) governed by an internal wall-clock deadline once started, so it
+        # degrades-with-disclosure instead of running unbounded past the budget.
         factor_evpi = None
         if request.include_voi and factor_sampler.has_uncertainties():
             remaining_ms = _budget_remaining_ms()
@@ -1350,7 +1387,9 @@ class RobustnessAnalyzerV2:
                 inference_warnings.append(
                     self._optional_phase_unavailable_warning(
                         "EVPI_UNAVAILABLE",
-                        "robustness.factor_evpi",
+                        # F4: factor_evpi is TOP-LEVEL on the V2 envelope, not nested
+                        # under robustness.
+                        "factor_evpi",
                         "request_budget_exhausted",
                         elapsed_ms,
                         "EVPI (value-of-information) was skipped: insufficient "
@@ -1358,9 +1397,36 @@ class RobustnessAnalyzerV2:
                     )
                 )
             else:
+                # F7: thread the governing request deadline into EVPI. min(cap,
+                # remaining) measured against EVPI's own monotonic t0 == the
+                # OVERALL_REQUEST_BUDGET_MS deadline (identical maths to the E-value
+                # sweep). On overrun _compute_evpi returns None (all-or-nothing).
                 factor_evpi = self._compute_evpi(
-                    request, sampler, factor_sampler, evaluator, seed, recommended_option_id
+                    request,
+                    sampler,
+                    factor_sampler,
+                    evaluator,
+                    seed,
+                    recommended_option_id,
+                    budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
                 )
+                if factor_evpi is None:
+                    # Reachable ONLY as a deadline trip here: the has_uncertainties()
+                    # guard guarantees parameter_uncertainties is non-empty, so
+                    # _compute_evpi's benign no-uncertainties None is unreachable on
+                    # this path. Discard the partial phase and disclose.
+                    elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                    inference_warnings.append(
+                        self._optional_phase_unavailable_warning(
+                            "EVPI_UNAVAILABLE",
+                            "factor_evpi",
+                            "evpi_budget_exceeded",
+                            elapsed_ms,
+                            "EVPI (value-of-information) exceeded its time budget "
+                            "and was omitted (all-or-nothing). Base analysis is "
+                            "unaffected.",
+                        )
+                    )
 
         # Compute structural pathway decomposition for the recommended option if requested.
         # Pass evaluator.graph — the post-filter graph the SCM actually computed on
@@ -1378,7 +1444,8 @@ class RobustnessAnalyzerV2:
                 inference_warnings.append(
                     self._optional_phase_unavailable_warning(
                         "PATH_DECOMPOSITION_UNAVAILABLE",
-                        "robustness.path_decomposition",
+                        # F4: path_decomposition is TOP-LEVEL on the V2 envelope.
+                        "path_decomposition",
                         "request_budget_exhausted",
                         elapsed_ms,
                         "Path decomposition was skipped: insufficient request "
@@ -1386,9 +1453,28 @@ class RobustnessAnalyzerV2:
                     )
                 )
             else:
+                # F7: thread the governing request deadline into path-decomposition
+                # (previously path-COUNT capped via MAX_DECOMPOSITION_PATHS but never
+                # wall-clock re-checked). On overrun it returns None (all-or-nothing).
                 path_decomposition = self._compute_path_decomposition(
-                    request, recommended_option_id, evaluator.graph
+                    request,
+                    recommended_option_id,
+                    evaluator.graph,
+                    budget_ms=min(self.PATH_DECOMPOSITION_BUDGET_MS, remaining_ms),
                 )
+                if path_decomposition is None:
+                    # Deadline trip — discard the partial phase and disclose.
+                    elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                    inference_warnings.append(
+                        self._optional_phase_unavailable_warning(
+                            "PATH_DECOMPOSITION_UNAVAILABLE",
+                            "path_decomposition",
+                            "path_decomposition_budget_exceeded",
+                            elapsed_ms,
+                            "Path decomposition exceeded its time budget and was "
+                            "omitted (all-or-nothing). Base analysis is unaffected.",
+                        )
+                    )
 
         execution_time = int((time.time() - start_time) * 1000)
 
@@ -3130,7 +3216,8 @@ class RobustnessAnalyzerV2:
         request: RobustnessRequestV2,
         recommended_option_id: str,
         graph: GraphV2,
-    ) -> PathDecomposition:
+        budget_ms: Optional[float] = None,
+    ) -> Optional[PathDecomposition]:
         """
         Structural pathway decomposition for the recommended option's retained
         intervention targets (analytic path tracing).
@@ -3154,6 +3241,13 @@ class RobustnessAnalyzerV2:
         so if the budget is exceeded the result is returned with ``truncated=True`` and no
         ranked paths.  The bound is a path count (not wall-clock), so truncation is
         deterministic for a given graph.
+
+        ``budget_ms`` (Codex F7) additionally bounds wall-clock: the path-count cap is
+        deterministic but a dense DAG can spend real time before hitting it, so the walk
+        re-checks a monotonic deadline mid-enumeration and returns ``None`` (all-or-nothing,
+        distinct from ``truncated``) when it overruns, letting analyze() disclose
+        PATH_DECOMPOSITION_UNAVAILABLE.  ``None`` disables the guard — direct/legacy callers
+        (which pass no budget) are unaffected and always receive a ``PathDecomposition``.
         """
         option = next((o for o in request.options if o.id == recommended_option_id), None)
         if option is None:
@@ -3195,12 +3289,29 @@ class RobustnessAnalyzerV2:
         # most cap+1 paths enumerated). A graph with exactly MAX_DECOMPOSITION_PATHS paths
         # is therefore fully ranked, not truncated — matching the "exceeded the budget"
         # contract on PathDecomposition.truncated.
+        # F7: internal wall-clock deadline. t0 anchors the enumeration phase; budget_ms
+        # is the remaining governing request budget at entry (monotonic — NTP-step-safe).
+        t0 = time.monotonic()
+        deadline_hit = False
+        walk_calls = 0
+
         all_paths: List[Tuple[List[str], float]] = []
         truncated = False
 
         def walk(node: str, effect_so_far: float, path_so_far: List[str], visited: set) -> None:
-            nonlocal truncated
-            if truncated:
+            nonlocal truncated, deadline_hit, walk_calls
+            if truncated or deadline_hit:
+                return
+            # F7: periodic wall-clock deadline re-check inside the recursion (the
+            # MAX_DECOMPOSITION_PATHS count cap is deterministic but not wall-clock).
+            # Unwinds like `truncated`; the caller discards the phase (all-or-nothing).
+            walk_calls += 1
+            if (
+                budget_ms is not None
+                and walk_calls % self.PATH_DEADLINE_CHECK_INTERVAL == 0
+                and (time.monotonic() - t0) * 1000.0 > budget_ms
+            ):
+                deadline_hit = True
                 return
             if node == goal:
                 all_paths.append((path_so_far, effect_so_far))
@@ -3221,14 +3332,37 @@ class RobustnessAnalyzerV2:
                     continue
                 walk(next_node, effect_so_far * coeff, path_so_far + [next_node], visited)
 
+        # F7: bail before enumerating if the budget is already spent at phase entry.
+        if budget_ms is not None and (time.monotonic() - t0) * 1000.0 > budget_ms:
+            self.logger.info(
+                "path_decomposition_budget_exceeded",
+                extra={
+                    "elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+                    "phase": "pre_enumeration",
+                },
+            )
+            return None
+
         for entry in entry_nodes:
-            if truncated:
+            if truncated or deadline_hit:
                 break
             if entry == goal:
                 # Skip the trivial zero-length path (an intervention target that is the
                 # goal contributes no pathway structure).
                 continue
             walk(entry, 1.0, [entry], set())
+
+        if deadline_hit:
+            # Wall-clock deadline tripped mid-enumeration — discard the whole phase
+            # (all-or-nothing, no partial ranking) and let analyze() disclose.
+            self.logger.info(
+                "path_decomposition_budget_exceeded",
+                extra={
+                    "elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+                    "paths_found": len(all_paths),
+                },
+            )
+            return None
 
         if truncated:
             # More simple paths than the budget allows (a path beyond the cap was found).
@@ -3812,6 +3946,7 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
         seed: int,
         recommended_option_id: str,
+        budget_ms: Optional[float] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Compute Expected Value of Perfect Information (EVPI) per factor.
 
@@ -3833,12 +3968,29 @@ class RobustnessAnalyzerV2:
             evaluator: SCM evaluator.
             seed: Global seed for reproducibility.
             recommended_option_id: Fixed decision policy (from main MC run).
+            budget_ms: Internal wall-clock budget for the whole EVPI sweep (Codex
+                F7). None disables the guard. The analyze() orchestrator passes
+                min(EVPI_BUDGET_MS, remaining request budget), so the sweep also
+                respects the governing overall-request deadline. On overrun the
+                WHOLE phase is discarded (return None) — ALL-OR-NOTHING, never
+                partial rows — and analyze() discloses EVPI_UNAVAILABLE.
 
         Returns:
-            List of dicts with EVPI info per factor, or None.
+            List of dicts with EVPI info per factor, or None (no uncertainties, or
+            the internal wall-clock budget was exceeded).
         """
         if not request.parameter_uncertainties:
             return None
+
+        # F7: internal wall-clock deadline (was entry-gated only). t0 anchors the
+        # EVPI phase; budget_ms is the remaining governing request budget at entry,
+        # so (monotonic()-t0)*1000 > budget_ms == the OVERALL_REQUEST_BUDGET_MS
+        # deadline has passed. Monotonic — an NTP step must not corrupt the guard
+        # (mirrors _compute_edge_e_values / _attach_flip_stability_bands).
+        t0 = time.monotonic()
+
+        def _deadline_passed() -> bool:
+            return budget_ms is not None and (time.monotonic() - t0) * 1000.0 > budget_ms
 
         # Budget: cap samples for EVPI to limit latency (see EVPI_SAMPLE_CAP
         # comment — Paul-ruled lenient defaults 2026-07-17, 500 → 2000).
@@ -3846,6 +3998,17 @@ class RobustnessAnalyzerV2:
         constraint_target_nodes = None
         if request.goal_constraints:
             constraint_target_nodes = sorted(set(gc.node_id for gc in request.goal_constraints))
+
+        # Deadline check before the (full-MC-pass) baseline.
+        if _deadline_passed():
+            self.logger.info(
+                "evpi_budget_exceeded",
+                extra={
+                    "elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+                    "phase": "pre_baseline",
+                },
+            )
+            return None
 
         # Baseline: all uncertainties active
         baseline_rng_edge = SeededRNG(seed + 100)
@@ -3862,10 +4025,32 @@ class RobustnessAnalyzerV2:
             n_samples,
             constraint_target_nodes,
             recommended_option_id,
+            deadline_t0=t0,
+            budget_ms=budget_ms,
         )
+        if baseline_metric is None:
+            # Deadline tripped inside the baseline sample loop.
+            self.logger.info(
+                "evpi_budget_exceeded",
+                extra={
+                    "elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+                    "phase": "baseline_metric",
+                },
+            )
+            return None
 
         results: List[Dict[str, Any]] = []
         for uncertainty in request.parameter_uncertainties:
+            # Deadline check at the top of each per-factor MC pass.
+            if _deadline_passed():
+                self.logger.info(
+                    "evpi_budget_exceeded",
+                    extra={
+                        "elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+                        "factors_completed": len(results),
+                    },
+                )
+                return None
             # Create modified uncertainty list: remove this factor's uncertainty
             modified_uncertainties = [
                 u for u in request.parameter_uncertainties if u.node_id != uncertainty.node_id
@@ -3892,7 +4077,20 @@ class RobustnessAnalyzerV2:
                 n_samples,
                 constraint_target_nodes,
                 recommended_option_id,
+                deadline_t0=t0,
+                budget_ms=budget_ms,
             )
+            if perfect_metric is None:
+                # Deadline tripped inside this factor's MC pass — discard the whole
+                # phase (all-or-nothing), do not emit partial EVPI rows.
+                self.logger.info(
+                    "evpi_budget_exceeded",
+                    extra={
+                        "elapsed_ms": round((time.monotonic() - t0) * 1000.0, 1),
+                        "factors_completed": len(results),
+                    },
+                )
+                return None
 
             evpi_raw = perfect_metric - baseline_metric
 
@@ -3952,11 +4150,19 @@ class RobustnessAnalyzerV2:
         n_samples: int,
         constraint_target_nodes: Optional[List[str]],
         recommended_option_id: str,
-    ) -> float:
+        deadline_t0: Optional[float] = None,
+        budget_ms: Optional[float] = None,
+    ) -> Optional[float]:
         """Compute the EVPI metric for a fixed decision policy over n_samples.
 
         Uses recommended_option_id (from the main MC run) as the fixed policy
         to avoid policy-switch confounding across EVPI runs.
+
+        Codex F7: deadline_t0 / budget_ms thread the governing request deadline
+        into the MC sample loop. Returns None when the deadline is exceeded
+        mid-loop so the caller discards the whole EVPI phase (all-or-nothing).
+        None disables the guard (both args None) — direct/legacy callers are
+        unaffected.
         """
         option_outcomes: Dict[str, List[float]] = {opt.id: [] for opt in request.options}
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None
@@ -3965,7 +4171,18 @@ class RobustnessAnalyzerV2:
                 opt.id: {nid: [] for nid in constraint_target_nodes} for opt in request.options
             }
 
-        for _ in range(n_samples):
+        for i in range(n_samples):
+            # F7: periodic wall-clock deadline re-check (mirrors the E-value
+            # per-bisect-step cadence — NOT every evaluate() call; the guard reads
+            # no RNG so byte-output is unchanged when it does not trip). On overrun
+            # return None so the caller discards the whole EVPI phase.
+            if (
+                budget_ms is not None
+                and deadline_t0 is not None
+                and i % self.EVPI_DEADLINE_CHECK_INTERVAL == 0
+                and (time.monotonic() - deadline_t0) * 1000.0 > budget_ms
+            ):
+                return None
             edge_config = sampler.sample_edge_configuration()
             factor_values = factor_sampler.sample_factor_values()
 

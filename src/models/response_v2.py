@@ -42,6 +42,25 @@ class InferenceWarning(BaseModel):
     detail: Dict[str, Any] = Field(
         ..., description="Arbitrary context, e.g. {'original': 1000, 'clamped': 1.0}"
     )
+    # Codex F4 (producer half): warnings previously had NO severity, so PLoT
+    # downstream defaulted them to 'info' and hid them. Carry a real, typed
+    # severity. Default is the QUIET 'info' — the ~9 benign input-adjustment /
+    # default diagnostics (STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE,
+    # ROOT_NODE_DEFAULT_VALUE, ...) are built directly and must STAY 'info' so
+    # PLoT's severity=='warning' ? 'warning' : 'info' mapping keeps them quiet.
+    # ONLY the four optional-phase degradation codes (E_VALUES_UNAVAILABLE /
+    # STABILITY_BANDS_UNAVAILABLE / EVPI_UNAVAILABLE / PATH_DECOMPOSITION_UNAVAILABLE)
+    # opt UP to 'warning', stamped explicitly by
+    # RobustnessAnalyzerV2._optional_phase_unavailable_warning(). ADDITIVE optional
+    # field on the untyped-passthrough seam: a non-None default so it always rides
+    # the wire under exclude_none, and older consumers ignore it (extra='ignore' on
+    # every V2 model). Vocabulary is the CritiqueV2 subset (no 'blocker' — a
+    # warning never blocks).
+    severity: Literal["info", "warning", "error"] = Field(
+        default="info",
+        description="Severity for downstream routing/display. Defaults to the quiet "
+        "'info'; only the optional-phase degradation codes opt up to 'warning'.",
+    )
 
 
 class ZeroSensitivityReason(str, Enum):
