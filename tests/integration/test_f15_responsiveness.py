@@ -1,0 +1,253 @@
+"""PC-A — event-loop responsiveness under CPU offload (Codex F15, the headline).
+
+The whole point of F15: a heavy CPU analysis must run in a *worker process* so the
+Uvicorn event loop stays free to serve ``/health`` (and everything else). Before
+F15 the pure-Python, GIL-bound Monte-Carlo loops ran *inside* ``async def`` and
+froze the loop for the whole analysis.
+
+POSITIVE CONTROL (programme trap #13 — an absence test that never saw a presence
+is vacuous): the same test first runs with the offload DISABLED (in-process
+fallback, ``analysis_pool = None``) and PROVES the event loop is frozen for ~the
+analysis duration — a heartbeat coroutine that ticks every 20 ms records a
+multi-hundred-ms stall, and ``/health`` issued during the window is delayed. Only
+then does it assert the offloaded path keeps the loop responsive.
+
+Uses ``httpx.AsyncClient`` + ``ASGITransport`` (the repo's client fixture pattern),
+which does NOT run the app lifespan, so the pool/governor are installed on
+``app.state`` explicitly by the fixtures here.
+"""
+
+import asyncio
+import time
+
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from src.api.main import app
+from src.services.analysis_pool import create_analysis_pool
+from src.services.compute_governor import ComputeGovernor
+
+pytestmark = pytest.mark.asyncio
+
+HEALTH = "/health"
+ANALYZE = "/api/v1/robustness/analyze/v2"
+
+
+def heavy_request(n_chance: int = 20, n_samples: int = 10000, seed: int = 42) -> dict:
+    """A DAG heavy enough that in-process analysis takes ~1.5 s locally (~2.3M cost
+    units, far under the 24M admission ceiling), so a frozen loop is unmistakable
+    even on faster hardware (>3x margin over the 400 ms control threshold).
+    """
+    nodes = [{"id": "price", "kind": "decision", "label": "Price"}]
+    edges = []
+    prev = "price"
+    for i in range(n_chance):
+        nid = f"c{i}"
+        nodes.append({"id": nid, "kind": "chance", "label": nid})
+        edges.append(
+            {
+                "from": prev,
+                "to": nid,
+                "exists_probability": 0.95,
+                "strength": {"mean": 0.4, "std": 0.1},
+            }
+        )
+        if i >= 2:
+            edges.append(
+                {
+                    "from": f"c{i-2}",
+                    "to": nid,
+                    "exists_probability": 0.9,
+                    "strength": {"mean": 0.3, "std": 0.08},
+                }
+            )
+        prev = nid
+    nodes.append({"id": "revenue", "kind": "outcome", "label": "Revenue"})
+    edges.append(
+        {
+            "from": prev,
+            "to": "revenue",
+            "exists_probability": 1.0,
+            "strength": {"mean": 0.7, "std": 0.05},
+        }
+    )
+    edges.append(
+        {
+            "from": "price",
+            "to": "revenue",
+            "exists_probability": 1.0,
+            "strength": {"mean": 0.45, "std": 0.12},
+        }
+    )
+    return {
+        "request_id": "pc-a-heavy",
+        "graph": {"nodes": nodes, "edges": edges},
+        "options": [
+            {"id": "low", "label": "Low", "interventions": {"price": 0.3}},
+            {"id": "high", "label": "High", "interventions": {"price": 0.7}},
+        ],
+        "goal_node_id": "revenue",
+        "seed": seed,
+        "n_samples": n_samples,
+        "include_e_values": True,
+        "include_voi": False,
+        "include_path_decomposition": True,
+    }
+
+
+@pytest_asyncio.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+
+
+def _install_pool(workers: int = 1):
+    app.state.analysis_workers = workers
+    app.state.governor = ComputeGovernor(workers=workers, queue_max=2 * workers)
+    app.state.analysis_pool = create_analysis_pool(workers)
+
+
+def _install_no_pool(workers: int = 1):
+    # Offload DISABLED: handler self-heals to the in-process path (blocks the loop).
+    app.state.analysis_workers = workers
+    app.state.governor = ComputeGovernor(workers=workers, queue_max=2 * workers)
+    app.state.analysis_pool = None
+
+
+def _teardown_pool():
+    pool = getattr(app.state, "analysis_pool", None)
+    if pool is not None:
+        pool.shutdown(wait=False, cancel_futures=True)
+    for attr in ("analysis_pool", "governor", "analysis_workers"):
+        if hasattr(app.state, attr):
+            delattr(app.state, attr)
+
+
+async def _run_case(client: AsyncClient, *, offload: bool):
+    """Fire one heavy analysis; measure (a) the max event-loop stall via a 20 ms
+    heartbeat, and (b) a /health latency sampled during the analysis. Returns
+    ``(max_stall_s, health_latency_s, health_status, analyze_status)``.
+    """
+    stalls = []
+    health_latency = {"value": None, "status": None}
+    stop = asyncio.Event()
+
+    async def heartbeat():
+        last = time.monotonic()
+        fired_health = False
+        while not stop.is_set():
+            await asyncio.sleep(0.02)
+            now = time.monotonic()
+            stalls.append(now - last)
+            last = now
+            # Once we've seen the loop is alive, sample /health mid-analysis.
+            if not fired_health:
+                fired_health = True
+                t0 = time.monotonic()
+                r = await client.get(HEALTH)
+                health_latency["value"] = time.monotonic() - t0
+                health_latency["status"] = r.status_code
+
+    hb = asyncio.create_task(heartbeat())
+    # Give the heartbeat one tick head-start so the analyze doesn't win the very
+    # first scheduling slot.
+    await asyncio.sleep(0.03)
+    resp = await client.post(ANALYZE, json=heavy_request(), headers={"X-ISL-Response-Version": "2"})
+    stop.set()
+    await hb
+    max_stall = max(stalls) if stalls else 0.0
+    return max_stall, health_latency["value"], health_latency["status"], resp.status_code
+
+
+class TestPCAResponsiveness:
+    async def test_positive_control_in_process_blocks_the_loop(self, client):
+        """POSITIVE CONTROL: with the offload OFF the loop IS frozen for ~the
+        analysis duration — proving the responsiveness assertion below can see the
+        blocking it claims F15 removes."""
+        _install_no_pool(workers=1)
+        try:
+            max_stall, health_lat, health_status, analyze_status = await _run_case(
+                client, offload=False
+            )
+        finally:
+            _teardown_pool()
+        assert analyze_status == 200, "heavy analysis should still succeed in-process"
+        # The loop was frozen for a big chunk of the ~1s analysis: a single
+        # heartbeat gap far exceeds the 20ms cadence (and the 100ms SLA).
+        assert max_stall > 0.4, (
+            f"expected a >400ms loop stall in-process, saw {max_stall*1000:.0f}ms — "
+            "the blocking this test asserts F15 removes was not visible (vacuous)"
+        )
+
+    async def test_offload_keeps_event_loop_responsive(self, client):
+        """THE FIX: with the offload ON the loop stays responsive — no multi-hundred
+        -ms stall, and /health returns 200 fast while the heavy analysis runs."""
+        _install_pool(workers=1)
+        try:
+            max_stall, health_lat, health_status, analyze_status = await _run_case(
+                client, offload=True
+            )
+        finally:
+            _teardown_pool()
+        assert analyze_status == 200, "heavy analysis should succeed via the pool"
+        assert health_status == 200, "/health must be served during the analysis"
+        # The loop never froze for anywhere near the ~1.5s compute.
+        assert max_stall < 0.2, (
+            f"event loop stalled {max_stall*1000:.0f}ms with offload on — "
+            "expected < 200ms (loop should be free during worker compute)"
+        )
+        # /health, sampled mid-analysis, returns well under the 100ms SLA.
+        assert health_lat is not None and health_lat < 0.1, (
+            f"/health took {(health_lat or 0)*1000:.0f}ms during the analysis — "
+            "expected < 100ms while the worker computes"
+        )
+
+
+class TestPCBWireOverload:
+    """PC-B at the wire: a saturated governor makes the endpoint return a typed
+    503 + Retry-After IMMEDIATELY (not a hung connection), on BOTH the v2-enhanced
+    and v1-legacy handler paths (both were modified)."""
+
+    async def _saturate_and_request(self, client, headers):
+        # queue_max=0 → admission bound = workers(1). Occupy the single slot with a
+        # held admit so the real HTTP request is rejected deterministically before
+        # any offload — no real compute needed, so the 503 is instant.
+        gov = ComputeGovernor(workers=1, queue_max=0)
+        app.state.analysis_workers = 1
+        app.state.governor = gov
+        app.state.analysis_pool = None  # unused: we 503 before offload
+        release = asyncio.Event()
+
+        async def occupy():
+            async with gov.admit(cost_units=1, api_key="occupier"):
+                await release.wait()
+
+        occ = asyncio.create_task(occupy())
+        try:
+            await asyncio.sleep(0.05)  # ensure the slot is held
+            t0 = time.monotonic()
+            resp = await client.post(
+                ANALYZE, json=heavy_request(n_chance=4, n_samples=400), headers=headers
+            )
+            elapsed = time.monotonic() - t0
+            return resp, elapsed
+        finally:
+            release.set()
+            await occ
+            _teardown_pool()
+
+    async def test_v2_enhanced_returns_503_retry_after(self, client):
+        resp, elapsed = await self._saturate_and_request(client, {"X-ISL-Response-Version": "2"})
+        assert resp.status_code == 503
+        assert resp.headers.get("Retry-After"), "503 must carry Retry-After"
+        assert elapsed < 1.0, "overload must be rejected immediately, not hung"
+        body = resp.json()
+        assert body["code"] == "ISL_SERVICE_UNAVAILABLE"
+        assert body["retryable"] is True
+
+    async def test_v1_legacy_returns_503_retry_after(self, client):
+        resp, elapsed = await self._saturate_and_request(client, {"X-ISL-Response-Version": "1"})
+        assert resp.status_code == 503
+        assert resp.headers.get("Retry-After"), "503 must carry Retry-After"
+        assert elapsed < 1.0, "overload must be rejected immediately, not hung"

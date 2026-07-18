@@ -968,6 +968,219 @@
         "title": "EdgeV2",
         "type": "object"
       },
+      "ErrorResponse": {
+        "description": "Olumi Error Response (v1.0) - ISL Implementation.\n\nFollows the canonical error schema for all Olumi services.\nSee platform error schema standard for full specification.",
+        "examples": [
+          {
+            "title": "DAG Structure Error",
+            "value": {
+              "code": "ISL_DAG_CYCLIC",
+              "degraded": false,
+              "edge_count": 6,
+              "message": "DAG contains cycles and cannot be processed",
+              "node_count": 5,
+              "reason": "cycle_detected",
+              "recovery": {
+                "example": "If A\u2192B\u2192C\u2192A exists, remove one edge",
+                "hints": [
+                  "Check for circular dependencies in your model",
+                  "Use a DAG visualization tool to identify cycles"
+                ],
+                "suggestion": "Remove edges that create cycles"
+              },
+              "request_id": "req_abc123def456",
+              "retryable": false,
+              "source": "isl",
+              "validation_failures": [
+                "Cycle: Price \u2192 Revenue \u2192 CustomerSatisfaction \u2192 Price"
+              ]
+            }
+          },
+          {
+            "title": "Validation Error",
+            "value": {
+              "attempted_methods": [
+                "backdoor",
+                "front_door",
+                "do_calculus"
+              ],
+              "code": "ISL_CAUSAL_NOT_IDENTIFIABLE",
+              "degraded": false,
+              "message": "Causal effect cannot be identified",
+              "reason": "unmeasured_confounding",
+              "recovery": {
+                "hints": [
+                  "Add measured confounders to the model",
+                  "Consider using instrumental variables",
+                  "Explore front-door criterion"
+                ],
+                "suggestion": "Measure and include confounding variables"
+              },
+              "request_id": "req_xyz789",
+              "retryable": false,
+              "source": "isl"
+            }
+          },
+          {
+            "title": "Timeout Error",
+            "value": {
+              "code": "ISL_TIMEOUT",
+              "degraded": false,
+              "message": "Computation exceeded time budget",
+              "recovery": {
+                "hints": [
+                  "Simplify your causal model",
+                  "Reduce Monte Carlo iterations"
+                ],
+                "suggestion": "Retry with a simpler model"
+              },
+              "request_id": "req_timeout123",
+              "retryable": true,
+              "source": "isl"
+            }
+          }
+        ],
+        "properties": {
+          "attempted_methods": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identification methods attempted (for validation errors)",
+            "title": "Attempted Methods"
+          },
+          "code": {
+            "description": "Error code (e.g., 'ISL_INVALID_DAG')",
+            "title": "Code",
+            "type": "string"
+          },
+          "degraded": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "description": "Result is partial/incomplete",
+            "title": "Degraded"
+          },
+          "edge_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of edges in DAG (for structure errors)",
+            "title": "Edge Count"
+          },
+          "message": {
+            "description": "Human-readable error message",
+            "title": "Message",
+            "type": "string"
+          },
+          "missing_nodes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "List of missing nodes referenced in equations",
+            "title": "Missing Nodes"
+          },
+          "node_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Number of nodes in DAG (for structure errors)",
+            "title": "Node Count"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fine-grained reason code for the error",
+            "title": "Reason"
+          },
+          "recovery": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecoveryHints"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recovery suggestions and hints"
+          },
+          "request_id": {
+            "description": "Request ID for correlation (from X-Request-Id header)",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "retryable": {
+            "description": "Can client retry this request?",
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "source": {
+            "default": "isl",
+            "description": "Service that generated error",
+            "title": "Source",
+            "type": "string"
+          },
+          "validation_failures": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "List of validation failures (ISL-specific)",
+            "title": "Validation Failures"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
       "FACETRobustnessAnalysis": {
         "description": "Complete FACET robustness analysis result.\n\nContains robust intervention region(s), outcome guarantees,\nrobustness metrics, and fragility warnings.",
         "example": {
@@ -3419,6 +3632,42 @@
         "title": "PathDecompositionV2",
         "type": "object"
       },
+      "RecoveryHints": {
+        "description": "Recovery hints for error resolution.",
+        "properties": {
+          "example": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Example fix",
+            "title": "Example"
+          },
+          "hints": {
+            "description": "List of actionable hints",
+            "items": {
+              "type": "string"
+            },
+            "title": "Hints",
+            "type": "array"
+          },
+          "suggestion": {
+            "description": "Primary suggestion",
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hints",
+          "suggestion"
+        ],
+        "title": "RecoveryHints",
+        "type": "object"
+      },
       "RequestEchoV2": {
         "description": "Echo of request parameters for debugging (no sensitive data).",
         "properties": {
@@ -4759,6 +5008,22 @@
               ],
               "title": "X-Request-Id"
             }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
           }
         ],
         "requestBody": {
@@ -4855,6 +5120,22 @@
             }
           },
           {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          },
+          {
             "description": "Alternative way to specify response version via header",
             "in": "header",
             "name": "X-ISL-Response-Version",
@@ -4907,8 +5188,38 @@
             },
             "description": "Validation error with structured critiques"
           },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Caller concurrency limit exceeded \u2014 retry after Retry-After"
+          },
           "500": {
             "description": "Internal computation error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service at compute capacity \u2014 retry after Retry-After"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Analysis exceeded the hard compute deadline and was terminated"
           }
         },
         "summary": "Analyze robustness with dual uncertainty (v2.2 schema)",
