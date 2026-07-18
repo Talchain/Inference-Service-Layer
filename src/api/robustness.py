@@ -14,7 +14,6 @@ Response versioning:
 
 import logging
 import math
-import os
 import uuid
 from typing import Any, Dict, Optional, Union
 
@@ -55,7 +54,14 @@ from src.models.robustness_v2 import (
     detect_schema_version,
 )
 from src.services.robustness_analyzer import RobustnessAnalyzer
-from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2, compute_effective_seed
+from src.services.robustness_analyzer_v2 import (
+    COMPLEXITY_FORMULA_VERSION,
+    RobustnessAnalyzerV2,
+    WeightedCost,
+    compute_effective_seed,
+    compute_weighted_cost,
+    get_max_cost_units,
+)
 from src.config.stability_thresholds import (
     compute_factor_confidence,
     compute_graph_structural_confidence,
@@ -77,53 +83,63 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Request complexity guard (DoS protection)
+# Request complexity guard (DoS protection) — Codex F8 weighted cost model
 # ---------------------------------------------------------------------------
-# Complexity score = n_samples × n_nodes × n_edges.
-# This is a conservative heuristic using the three dominant cost factors.
-# Parameter uncertainty count and robustness passes are second-order effects
-# at PoC scale and are not included in the formula.
-#
-# Calibration:
-#   Typical pilot graph (5 nodes, 8 edges, 1000 samples)   = 40K  — well within limit
-#   Upper PoC bound   (12 nodes, 100 edges, 5000 samples)  = 6M   — within limit
-#   Dense mid graph   (40 nodes, 120 edges, 5000 samples)  = 24M  — within limit
-#   Schema max        (50 nodes, 200 edges, 10000 samples)  = 100M — blocked
-#
-# Paul-ruled lenient defaults 2026-07-17: raised 10M → 30M so that deeper
-# sampling (PLoT raising base depth toward the 10k schema max) actually
-# reaches mid/large graphs instead of being silently clamped back by PLoT's
-# mirrored budget (any graph with nodes×edges > budget/K gets its depth
-# adaptively reduced). 30M keeps the worst admissible base call well inside
-# PLoT's 30 s per-call ISL timeout on staging hardware; 100M would not.
-# DEPLOY ORDER: this must deploy BEFORE PLoT raises its request depth
-# (PLoT #229), or dense-graph requests 422 here. PLoT's mirror env
-# (ISL_COMPLEXITY_BUDGET_DEFAULT, same ISL_MAX_COMPUTE_COMPLEXITY env name)
-# must be raised in lockstep. Value pinned by
-# tests/unit/test_lenient_limits.py (silent revert goes RED).
-#
-# Override via ISL_MAX_COMPUTE_COMPLEXITY env var (integer).
-_DEFAULT_MAX_COMPLEXITY = 30_000_000
+# The admission gate uses compute_weighted_cost(request) and get_max_cost_units()
+# from src.services.robustness_analyzer_v2 (the single source of truth for the
+# weights + ceiling, also advertised on /health). The pre-F8 scalar
+# n_samples*n_nodes*n_edges heuristic (and its ISL_MAX_COMPUTE_COMPLEXITY env)
+# is REPLACED: it omitted the option multiplier, used the wrong x-edges shape,
+# and priced none of the optional phases. See the cost-model block in
+# robustness_analyzer_v2.py for the formula and calibration provenance.
 
 
-def _get_max_complexity() -> int:
-    """Read complexity limit from env, falling back to default."""
-    val = os.environ.get("ISL_MAX_COMPUTE_COMPLEXITY")
-    if val is not None:
-        try:
-            return int(val)
-        except ValueError:
-            logger.warning(
-                "ISL_MAX_COMPUTE_COMPLEXITY env var is not a valid integer (%s), using default %d",
-                val,
-                _DEFAULT_MAX_COMPLEXITY,
-            )
-    return _DEFAULT_MAX_COMPLEXITY
+def _admission_suggestion(request: RobustnessRequestV2, cost: WeightedCost) -> str:
+    """Actionable reduction hint keyed on the dominant cost term."""
+    dominant = cost.dominant_term
+    n_uncertainties = len(request.parameter_uncertainties or [])
+    if dominant == "evpi":
+        return (
+            f"EVPI dominates: reduce n_samples (currently {request.n_samples}), "
+            f"options (currently {len(request.options)}), or parameter_uncertainties "
+            f"(currently {n_uncertainties}); or set include_voi=false."
+        )
+    if dominant == "sensitivity":
+        return (
+            f"Edge sensitivity dominates: reduce n_samples (currently {request.n_samples}) "
+            "or remove 'sensitivity' from analysis_types."
+        )
+    if dominant in ("e_values", "bands"):
+        return (
+            f"E-value/stability-band analysis dominates: reduce edge count "
+            f"(currently {len(request.graph.edges)}) or set include_e_values=false."
+        )
+    if dominant == "path_decomposition":
+        return (
+            f"Path decomposition dominates: reduce edge count "
+            f"(currently {len(request.graph.edges)}) or set include_path_decomposition=false."
+        )
+    # base_mc (default)
+    return (
+        f"Base Monte-Carlo dominates: reduce n_samples (currently {request.n_samples}), "
+        f"options (currently {len(request.options)}), or graph size "
+        f"(currently {len(request.graph.nodes)} nodes, {len(request.graph.edges)} edges)."
+    )
 
 
-def compute_complexity_score(n_samples: int, n_nodes: int, n_edges: int) -> int:
-    """Compute a heuristic complexity score for a robustness request."""
-    return n_samples * n_nodes * n_edges
+def _admission_error_body(request: RobustnessRequestV2, cost: WeightedCost, max_cost: int) -> dict:
+    """Structured 422 body reporting the weighted cost + which term dominated."""
+    return {
+        "detail": "Request compute cost exceeds limit",
+        "cost_units": cost.total,
+        "limit": max_cost,
+        "dominant_term": cost.dominant_term,
+        "cost_breakdown": cost.terms,
+        "complexity_formula_version": COMPLEXITY_FORMULA_VERSION,
+        # Back-compat aliases for any consumer that read the pre-F8 keys.
+        "complexity_score": cost.total,
+        "suggestion": _admission_suggestion(request, cost),
+    }
 
 
 # Initialize services
@@ -351,35 +367,30 @@ async def _analyze_robustness_v2_legacy(
 ) -> RobustnessResponseV2:
     """Legacy V1 response handler (backward compatible)."""
     try:
-        # Complexity guard — reject oversized requests early (DoS protection)
+        # Compute-admission guard (Codex F8 weighted cost) — reject oversized
+        # requests early (DoS protection).
         n_nodes = len(request.graph.nodes)
         n_edges = len(request.graph.edges)
-        complexity = compute_complexity_score(request.n_samples, n_nodes, n_edges)
-        max_complexity = _get_max_complexity()
+        cost = compute_weighted_cost(request)
+        max_cost = get_max_cost_units()
         logger.info(
             "robustness_v2_complexity",
             extra={
                 "request_id": request_id,
-                "complexity_score": complexity,
-                "limit": max_complexity,
+                "cost_units": cost.total,
+                "limit": max_cost,
+                "dominant_term": cost.dominant_term,
+                "cost_breakdown": cost.terms,
                 "n_samples": request.n_samples,
+                "n_options": len(request.options),
                 "n_nodes": n_nodes,
                 "n_edges": n_edges,
             },
         )
-        if complexity > max_complexity:
+        if cost.total > max_cost:
             raise HTTPException(
                 status_code=422,
-                detail={
-                    "detail": "Request complexity exceeds limit",
-                    "complexity_score": complexity,
-                    "limit": max_complexity,
-                    "suggestion": (
-                        f"Reduce n_samples (currently {request.n_samples}), "
-                        f"node count (currently {n_nodes}), "
-                        f"or edge count (currently {n_edges})"
-                    ),
-                },
+                detail=_admission_error_body(request, cost, max_cost),
             )
 
         # Enhanced logging for parameter uncertainty debugging
@@ -495,35 +506,30 @@ async def _analyze_robustness_v2_enhanced(
     )
 
     try:
-        # Complexity guard — reject oversized requests early (DoS protection)
+        # Compute-admission guard (Codex F8 weighted cost) — reject oversized
+        # requests early (DoS protection).
         n_nodes = len(request.graph.nodes)
         n_edges = len(request.graph.edges)
-        complexity = compute_complexity_score(request.n_samples, n_nodes, n_edges)
-        max_complexity = _get_max_complexity()
+        cost = compute_weighted_cost(request)
+        max_cost = get_max_cost_units()
         logger.info(
             "robustness_v2_complexity",
             extra={
                 "request_id": request_id,
-                "complexity_score": complexity,
-                "limit": max_complexity,
+                "cost_units": cost.total,
+                "limit": max_cost,
+                "dominant_term": cost.dominant_term,
+                "cost_breakdown": cost.terms,
                 "n_samples": request.n_samples,
+                "n_options": len(request.options),
                 "n_nodes": n_nodes,
                 "n_edges": n_edges,
             },
         )
-        if complexity > max_complexity:
+        if cost.total > max_cost:
             return JSONResponse(
                 status_code=422,
-                content={
-                    "detail": "Request complexity exceeds limit",
-                    "complexity_score": complexity,
-                    "limit": max_complexity,
-                    "suggestion": (
-                        f"Reduce n_samples (currently {request.n_samples}), "
-                        f"node count (currently {n_nodes}), "
-                        f"or edge count (currently {n_edges})"
-                    ),
-                },
+                content=_admission_error_body(request, cost, max_cost),
                 headers={"X-Request-Id": request_id},
             )
 

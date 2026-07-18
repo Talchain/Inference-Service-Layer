@@ -94,3 +94,23 @@ FACTOR_SENSITIVITY_VALUE_EPSILON = 0.01  # Min denominator for factor mean_value
 # Maximum elasticity magnitude for presentation (prevents extreme UX values)
 # Elasticity beyond this is clamped to ±ELASTICITY_CLAMP_MAX
 ELASTICITY_CLAMP_MAX = 100.0
+
+
+# =============================================================================
+# Request size caps (compute-admission — Codex F8)
+# =============================================================================
+#
+# Single source of truth for the request-shape ceilings. These are enforced as
+# pydantic ``max_length`` constraints on RobustnessRequestV2 (fail-closed at
+# parse time) AND advertised on ``/health.compute_admission.caps`` so PLoT can
+# plan against them without hand-mirroring (derive, don't mirror — see the
+# programme's memory-trap #12). Because the model field and the /health
+# advertisement both import THESE constants, the advertised cap can never drift
+# from the enforced cap.
+#
+# Values match the pre-F8 literals that were inline on the model fields; F8 adds
+# MAX_PARAMETER_UNCERTAINTIES (previously unbounded — the duplicate free-ride).
+MAX_GRAPH_NODES = 50
+MAX_GRAPH_EDGES = 200
+MAX_OPTIONS = 10
+MAX_PARAMETER_UNCERTAINTIES = 50

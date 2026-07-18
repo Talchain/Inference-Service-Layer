@@ -105,10 +105,17 @@ class TestPaulRuledLenientValuePins:
         # Pin the field default itself so an ambient env var cannot mask a revert.
         assert Settings.model_fields["RATE_LIMIT_REQUESTS_PER_MINUTE"].default == 1000
 
-    def test_max_complexity_default_pinned_at_30m(self):
-        from src.api.robustness import _DEFAULT_MAX_COMPLEXITY
+    def test_compute_admission_ceiling_pinned(self):
+        # Codex F8 (2026-07-18) REPLACED the scalar complexity ceiling
+        # (_DEFAULT_MAX_COMPLEXITY = 30M, in scalar n_samples*n_nodes*n_edges
+        # units) with the weighted cost model's DEFAULT_MAX_COST_UNITS (in cost
+        # units — a DIFFERENT scale). PROVISIONAL, Paul-DIRECTED 24M (the more-
+        # lenient choice); staging recalibration still owed. Canonical pin +
+        # positive controls live in test_admission_calibration.py; this asserts the
+        # same constant so a silent revert of the lenient ceiling turns RED here too.
+        from src.services.robustness_analyzer_v2 import DEFAULT_MAX_COST_UNITS
 
-        assert _DEFAULT_MAX_COMPLEXITY == 30_000_000
+        assert DEFAULT_MAX_COST_UNITS == 24_000_000
 
     def test_evpi_sample_cap_pinned_at_2000(self):
         from src.services.robustness_analyzer_v2 import EVPI_SAMPLE_CAP

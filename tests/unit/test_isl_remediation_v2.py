@@ -393,94 +393,77 @@ class TestWinnerTieBreaking:
 
 
 # =============================================================================
-# Task 9 — Request complexity guard
+# Task 9 — Request compute-admission guard (Codex F8 weighted cost model)
 # =============================================================================
+# The pre-F8 scalar compute_complexity_score(S,N,E) = S*N*E was REPLACED by the
+# weighted compute_weighted_cost(request) (it omitted the option multiplier and
+# used the wrong x-edges shape). The formula/ceiling pins + full positive
+# controls live in tests/unit/test_admission_calibration.py; the tests below
+# preserve the original pilot/schema-max admit-vs-reject intent, re-expressed
+# against the weighted model.
 
 
-class TestComputeComplexityScore:
-    """Unit tests for compute_complexity_score function."""
+def _admission_request(n_nodes: int, n_edges: int, n_samples: int, n_options: int = 2):
+    """Minimal valid v2 request (layered DAG) for admission-cost checks."""
+    nodes = [{"id": f"n{i}", "kind": "factor", "label": f"Node {i}"} for i in range(n_nodes)]
+    nodes[-1]["kind"] = "outcome"
+    edges: list = []
+    for j in range(1, n_nodes):
+        for i in range(j):
+            if len(edges) >= n_edges:
+                break
+            edges.append(
+                {
+                    "from": f"n{i}",
+                    "to": f"n{j}",
+                    "exists_probability": 0.9,
+                    "strength": {"mean": 0.5, "std": 0.1},
+                }
+            )
+        if len(edges) >= n_edges:
+            break
+    options = [
+        {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.3 + 0.1 * k}}
+        for k in range(n_options)
+    ]
+    return RobustnessRequestV2(
+        graph={"nodes": nodes, "edges": edges},
+        options=options,
+        goal_node_id=f"n{n_nodes - 1}",
+        n_samples=n_samples,
+        analysis_types=["comparison", "robustness"],  # sensitivity off → pure base term
+    )
 
-    def test_typical_pilot_graph(self):
-        """Typical pilot (5 nodes, 8 edges, 1000 samples) = 40K — well within limit."""
-        from src.api.robustness import compute_complexity_score
 
-        assert compute_complexity_score(1000, 5, 8) == 40_000
+class TestWeightedAdmissionCost:
+    """Unit tests for compute_weighted_cost (replaces TestComputeComplexityScore)."""
 
-    def test_upper_poc_bound(self):
-        """Upper PoC (12 nodes, 100 edges, 5000 samples) = 6M — within limit."""
-        from src.api.robustness import compute_complexity_score
+    def test_base_cost_is_S_times_O_times_N_plus_E(self):
+        from src.services.robustness_analyzer_v2 import compute_weighted_cost
 
-        assert compute_complexity_score(5000, 12, 100) == 6_000_000
+        req = _admission_request(5, 8, 1000, 2)
+        wc = compute_weighted_cost(req)
+        assert wc.terms["base_mc"] == 1000 * 2 * (len(req.graph.nodes) + len(req.graph.edges))
 
-    def test_schema_max_exceeds_limit(self):
-        """Schema max (50 nodes, 200 edges, 10000 samples) = 100M — exceeds limit."""
-        from src.api.robustness import compute_complexity_score, _DEFAULT_MAX_COMPLEXITY
+    def test_option_multiplier_priced(self):
+        """The pre-F8 defect: cost had NO option term; now it is O-linear."""
+        from src.services.robustness_analyzer_v2 import compute_weighted_cost
 
-        score = compute_complexity_score(10000, 50, 200)
-        assert score == 100_000_000
-        assert score > _DEFAULT_MAX_COMPLEXITY
+        one = compute_weighted_cost(_admission_request(12, 30, 5000, 1)).total
+        four = compute_weighted_cost(_admission_request(12, 30, 5000, 4)).total
+        assert four == 4 * one
 
-    def test_boundary_at_limit(self):
-        """Complexity exactly at limit is accepted (boundary condition)."""
-        from src.api.robustness import compute_complexity_score, _DEFAULT_MAX_COMPLEXITY
+    def test_schema_max_rejects(self):
+        from src.services.robustness_analyzer_v2 import compute_weighted_cost, get_max_cost_units
 
-        score = compute_complexity_score(10000, 30, 100)
-        assert score == _DEFAULT_MAX_COMPLEXITY  # 30M exactly (lenient default 2026-07-17)
+        req = _admission_request(50, 200, 10000, 10)
+        assert compute_weighted_cost(req).total > get_max_cost_units()
 
+    def test_typical_pilot_admits(self):
+        from src.services.robustness_analyzer_v2 import compute_weighted_cost, get_max_cost_units
 
-class TestComplexityGuardEndpoint:
-    """Integration tests: complexity guard returns 422 for oversized requests."""
-
-    def _build_request_dict(self, n_nodes: int, n_edges: int, n_samples: int) -> dict:
-        """Build a minimal valid v2 request dict."""
-        # Build a linear chain of nodes
-        nodes = [{"id": f"n{i}", "kind": "factor", "label": f"Node {i}"} for i in range(n_nodes)]
-        nodes[-1]["kind"] = "outcome"  # last node is outcome
-        # Chain edges: n0→n1→...→n_{n-1}, then fill remaining edge budget with n0→n_{last}
-        edges = []
-        for i in range(min(n_nodes - 1, n_edges)):
-            src = f"n{i % (n_nodes - 1)}"
-            dst = f"n{(i + 1) % n_nodes}"
-            if src != dst:
-                edges.append(
-                    {
-                        "from": src,
-                        "to": dst,
-                        "exists_probability": 0.9,
-                        "strength": {"mean": 0.5, "std": 0.1},
-                    }
-                )
-        # Dedupe edges
-        seen = set()
-        deduped = []
-        for e in edges:
-            key = (e["from"], e["to"])
-            if key not in seen:
-                seen.add(key)
-                deduped.append(e)
-        return {
-            "graph": {"nodes": nodes, "edges": deduped},
-            "options": [
-                {"id": "opt_a", "label": "A", "interventions": {"n0": 0.3}},
-                {"id": "opt_b", "label": "B", "interventions": {"n0": 0.7}},
-            ],
-            "goal_node_id": f"n{n_nodes - 1}",
-            "n_samples": n_samples,
-        }
-
-    def test_within_limit_accepted(self):
-        """Request within limit is not rejected by complexity guard."""
-        from src.api.robustness import compute_complexity_score, _DEFAULT_MAX_COMPLEXITY
-
-        score = compute_complexity_score(1000, 5, 4)
-        assert score < _DEFAULT_MAX_COMPLEXITY
-
-    def test_exceeding_limit_detected(self):
-        """Oversized request scores above the limit."""
-        from src.api.robustness import compute_complexity_score, _DEFAULT_MAX_COMPLEXITY
-
-        score = compute_complexity_score(10000, 100, 300)
-        assert score > _DEFAULT_MAX_COMPLEXITY
+        req = _admission_request(5, 4, 1000, 2)
+        assert compute_weighted_cost(req).total <= get_max_cost_units()
 
 
 # =============================================================================

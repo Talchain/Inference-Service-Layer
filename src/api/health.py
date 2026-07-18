@@ -13,7 +13,8 @@ from src.__version__ import __version__
 from src.config import get_settings, GIT_COMMIT_SHA, GIT_COMMIT_SHORT
 from src.infrastructure.memory_cache import get_memory_cache
 from src.models.metadata import generate_config_fingerprint
-from src.models.responses import HealthResponse
+from src.models.responses import ComputeAdmissionInfo, HealthResponse
+from src.services.robustness_analyzer_v2 import build_compute_admission
 from src.utils.error_recovery import health_monitor
 
 router = APIRouter()
@@ -43,6 +44,7 @@ async def health_check() -> HealthResponse:
         build_full=GIT_COMMIT_SHA if GIT_COMMIT_SHA != "unknown" else None,
         timestamp=datetime.utcnow().isoformat() + "Z",
         config_fingerprint=generate_config_fingerprint(),
+        compute_admission=ComputeAdmissionInfo(**build_compute_admission()),
     )
 
 
@@ -72,6 +74,7 @@ async def readiness_check() -> HealthResponse:
         build_full=GIT_COMMIT_SHA if GIT_COMMIT_SHA != "unknown" else None,
         timestamp=datetime.utcnow().isoformat() + "Z",
         config_fingerprint=generate_config_fingerprint(),
+        compute_admission=ComputeAdmissionInfo(**build_compute_admission()),
     )
 
 
