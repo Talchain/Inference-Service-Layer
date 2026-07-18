@@ -23,6 +23,20 @@
 > the default-on lane re-measured n=10 (see its PR). Everything below is
 > the accurate record of what #71 shipped on 2026-07-11.
 
+> **STATUS UPDATE 2026-07-18 — band budget degradation now ALSO rides the
+> wire (A3 remediation).** The 07-17 note above says the honest degradation
+> is "disclosed via the `flip_stability_budget_exceeded` LOG event" — that is
+> now INCOMPLETE. A band budget trip (and the new governing-request-budget
+> skip) additionally emits a structured `STABILITY_BANDS_UNAVAILABLE`
+> `inference_warning` carrying `elapsed_ms`, so the absence is visible on the
+> response wire PLoT reads — not log-only (the #226 gap for `flip_thresholds`,
+> now closed for bands). The sweep also runs under a governing
+> `OVERALL_REQUEST_BUDGET_MS` (50000 ms, below PLoT's 60s ISL timeout): base MC
+> + core robustness are always returned; the optional phases degrade-and-
+> disclose. All-or-nothing band mechanics and byte-identical determinism are
+> unchanged. See `RobustnessAnalyzerV2.analyze` and
+> `tests/unit/test_request_budget.py`.
+
 ## Problem
 
 The corpus sweep found which-option flip rates of 25–75% across seeds, yet

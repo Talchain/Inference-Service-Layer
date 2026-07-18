@@ -765,6 +765,52 @@ class RobustnessAnalyzerV2:
         # adaptive timing. None = use adaptive budget (production default).
         self._n_bootstrap_override: Optional[int] = None
 
+    # ---- Governing request budget (A3 remediation 2026-07-18) ---------------
+    # An overall wall-clock budget for the whole robustness request, governing
+    # the OPTIONAL sequential phases (E-values, stability bands, EVPI, path
+    # decomposition). Base MC + core robustness are NEVER gated. Each optional
+    # phase checks the remaining budget and DEGRADES-WITHIN / SKIPS-WITH-
+    # DISCLOSURE when insufficient, so ISL always returns a clean 200-with-
+    # partial instead of being aborted mid-compute and losing everything.
+    #
+    # Sized BELOW PLoT's ISL_TIMEOUT_MS (60000): PLoT's caller timeout sits
+    # under ISL's 90s route guillotine (src/api/main.py /
+    # middleware/request_limits.py), so without this an over-long stack of
+    # optional phases orphans compute — the whole analysis is lost, silently.
+    # 50000 leaves a ~10s margin for the base-call round trip + PLoT overhead so
+    # ISL returns first (ALTITUDE hunt 1 — the inverted timeout order).
+    # Value pinned by tests/unit/test_request_budget.py (silent revert -> RED).
+    OVERALL_REQUEST_BUDGET_MS = 50000
+
+    # Minimum remaining budget below which an optional phase is not even
+    # attempted (avoids paying a phase's setup cost for a sweep that would trip
+    # on its first internal guard check anyway).
+    OPTIONAL_PHASE_MIN_BUDGET_MS = 500
+
+    # EVPI has no internal wall-clock budget of its own (unlike the E-value and
+    # band sweeps), so it is gated purely at entry: only started when at least
+    # this much of the overall budget remains.
+    EVPI_MIN_BUDGET_MS = 8000
+
+    def _optional_phase_unavailable_warning(
+        self,
+        code: str,
+        field: str,
+        reason: str,
+        elapsed_ms: float,
+        message: str,
+    ) -> "InferenceWarning":
+        """Build the wire disclosure for an optional phase skipped/tripped under
+        the request budget. Mirrors the LOG-only e_value_budget_exceeded /
+        flip_stability_budget_exceeded events onto inference_warnings (the
+        channel PLoT reads), carrying elapsed_ms — the #226 gap for
+        flip_thresholds, now closed for the whole optional-phase family."""
+        return InferenceWarning(
+            code=code,
+            field=field,
+            detail={"reason": reason, "elapsed_ms": elapsed_ms, "message": message},
+        )
+
     def analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
         """
         Perform complete robustness analysis.
@@ -776,6 +822,12 @@ class RobustnessAnalyzerV2:
             Complete analysis response
         """
         start_time = time.time()
+        # Monotonic anchor for the governing request budget (NTP-step-safe).
+        # start_time (wall clock) is kept only for the reported execution_time.
+        budget_start = time.monotonic()
+
+        def _budget_remaining_ms() -> float:
+            return self.OVERALL_REQUEST_BUDGET_MS - (time.monotonic() - budget_start) * 1000.0
 
         # Generate request_id if not provided
         request_id = request.request_id or f"robustness-{uuid.uuid4().hex[:12]}"
@@ -1165,30 +1217,150 @@ class RobustnessAnalyzerV2:
             defaulted_root_node_ids=defaulted_root_node_ids,
         )
 
-        # Compute E-value analogue per edge if requested
+        # Compute E-value analogue per edge if requested. OPTIONAL phase —
+        # governed by the overall request budget: skipped-with-disclosure when
+        # insufficient budget remains, so the base + robustness results above
+        # are never lost to a stacked-phase timeout.
         edge_e_values = None
         if request.include_e_values:
-            edge_e_values = self._compute_edge_e_values(request, evaluator)
-            # Track S Phase 1: seed-sweep flip-threshold stability bands.
-            # DEFAULT-ON (env gating removed 2026-07-17) and ADDITIVE:
-            # attaches a "stability" object to each edge_e_values entry and
-            # never mutates existing keys. Uses only fresh SHA-256-derived
-            # child RNGs — no shared RNG stream is consumed, so all other
-            # numbers are unchanged by the sweep. Budget-guarded
-            # all-or-nothing (FLIP_STABILITY_BUDGET_MS).
-            if edge_e_values is not None:
-                self._attach_flip_stability_bands(request, evaluator, edge_e_values, seed)
+            remaining_ms = _budget_remaining_ms()
+            if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
+                # Not enough budget to run the E-value sweep (and the bands that
+                # ride on it) — disclose both on the wire.
+                elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                self.logger.info(
+                    "e_value_budget_exceeded",
+                    extra={"elapsed_ms": elapsed_ms, "reason": "request_budget_exhausted"},
+                )
+                inference_warnings.append(
+                    self._optional_phase_unavailable_warning(
+                        "E_VALUES_UNAVAILABLE",
+                        "robustness.edge_e_values",
+                        "request_budget_exhausted",
+                        elapsed_ms,
+                        "E-value analysis was skipped: the request budget was "
+                        "exhausted before it could run. Base analysis is unaffected.",
+                    )
+                )
+                inference_warnings.append(
+                    self._optional_phase_unavailable_warning(
+                        "STABILITY_BANDS_UNAVAILABLE",
+                        "robustness.edge_e_values[].stability",
+                        "e_values_unavailable",
+                        elapsed_ms,
+                        "Flip-stability bands were skipped: they ride on the "
+                        "E-value sweep, which the request budget could not fund.",
+                    )
+                )
+            else:
+                edge_e_values = self._compute_edge_e_values(
+                    request, evaluator, budget_ms=min(self.E_VALUE_BUDGET_MS, remaining_ms)
+                )
+                if edge_e_values is None:
+                    # Internal E-value budget tripped mid-sweep — disclose on the
+                    # wire (formerly a log-only event) and, since bands ride on
+                    # E-values, disclose their absence too.
+                    elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                    inference_warnings.append(
+                        self._optional_phase_unavailable_warning(
+                            "E_VALUES_UNAVAILABLE",
+                            "robustness.edge_e_values",
+                            "e_value_budget_exceeded",
+                            elapsed_ms,
+                            "E-value analysis exceeded its time budget and was "
+                            "omitted. Base analysis is unaffected.",
+                        )
+                    )
+                    inference_warnings.append(
+                        self._optional_phase_unavailable_warning(
+                            "STABILITY_BANDS_UNAVAILABLE",
+                            "robustness.edge_e_values[].stability",
+                            "e_values_unavailable",
+                            elapsed_ms,
+                            "Flip-stability bands were omitted: the E-value sweep "
+                            "they ride on exceeded its time budget.",
+                        )
+                    )
+                else:
+                    # Track S Phase 1: seed-sweep flip-threshold stability bands.
+                    # DEFAULT-ON (env gating removed 2026-07-17) and ADDITIVE:
+                    # attaches a "stability" object to each edge_e_values entry and
+                    # never mutates existing keys. Uses only fresh SHA-256-derived
+                    # child RNGs — no shared RNG stream is consumed, so all other
+                    # numbers are unchanged by the sweep. All-or-nothing, and
+                    # OPTIONAL — gated by the remaining request budget.
+                    remaining_ms = _budget_remaining_ms()
+                    if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
+                        elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                        self.logger.info(
+                            "flip_stability_budget_exceeded",
+                            extra={
+                                "elapsed_ms": elapsed_ms,
+                                "reason": "request_budget_exhausted",
+                            },
+                        )
+                        inference_warnings.append(
+                            self._optional_phase_unavailable_warning(
+                                "STABILITY_BANDS_UNAVAILABLE",
+                                "robustness.edge_e_values[].stability",
+                                "request_budget_exhausted",
+                                elapsed_ms,
+                                "Flip-stability bands were skipped: the request "
+                                "budget was exhausted before the sweep could run.",
+                            )
+                        )
+                    else:
+                        bands_attached = self._attach_flip_stability_bands(
+                            request,
+                            evaluator,
+                            edge_e_values,
+                            seed,
+                            budget_ms=min(self.FLIP_STABILITY_BUDGET_MS, remaining_ms),
+                        )
+                        if not bands_attached:
+                            # Internal band budget tripped — the #226 gap
+                            # (log-only) now rides the wire.
+                            elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                            inference_warnings.append(
+                                self._optional_phase_unavailable_warning(
+                                    "STABILITY_BANDS_UNAVAILABLE",
+                                    "robustness.edge_e_values[].stability",
+                                    "flip_stability_budget_exceeded",
+                                    elapsed_ms,
+                                    "Flip-stability bands exceeded their time "
+                                    "budget and were omitted (all-or-nothing).",
+                                )
+                            )
 
         # Find recommended option (needed before EVPI to fix decision policy)
         recommended_option_id = max(option_wins, key=lambda k: option_wins[k])
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
-        # Compute EVPI per factor if requested
+        # Compute EVPI per factor if requested. OPTIONAL phase — EVPI has no
+        # internal wall-clock budget, so it is gated purely at entry.
         factor_evpi = None
         if request.include_voi and factor_sampler.has_uncertainties():
-            factor_evpi = self._compute_evpi(
-                request, sampler, factor_sampler, evaluator, seed, recommended_option_id
-            )
+            remaining_ms = _budget_remaining_ms()
+            if remaining_ms < self.EVPI_MIN_BUDGET_MS:
+                elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                self.logger.info(
+                    "evpi_budget_exceeded",
+                    extra={"elapsed_ms": elapsed_ms, "reason": "request_budget_exhausted"},
+                )
+                inference_warnings.append(
+                    self._optional_phase_unavailable_warning(
+                        "EVPI_UNAVAILABLE",
+                        "robustness.factor_evpi",
+                        "request_budget_exhausted",
+                        elapsed_ms,
+                        "EVPI (value-of-information) was skipped: insufficient "
+                        "request budget remained. Base analysis is unaffected.",
+                    )
+                )
+            else:
+                factor_evpi = self._compute_evpi(
+                    request, sampler, factor_sampler, evaluator, seed, recommended_option_id
+                )
 
         # Compute structural pathway decomposition for the recommended option if requested.
         # Pass evaluator.graph — the post-filter graph the SCM actually computed on
@@ -1196,9 +1368,27 @@ class RobustnessAnalyzerV2:
         # decomposition explains exactly the structure the analysis used, not raw request.graph.
         path_decomposition = None
         if request.include_path_decomposition:
-            path_decomposition = self._compute_path_decomposition(
-                request, recommended_option_id, evaluator.graph
-            )
+            remaining_ms = _budget_remaining_ms()
+            if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
+                elapsed_ms = round((time.monotonic() - budget_start) * 1000.0, 1)
+                self.logger.info(
+                    "path_decomposition_budget_exceeded",
+                    extra={"elapsed_ms": elapsed_ms, "reason": "request_budget_exhausted"},
+                )
+                inference_warnings.append(
+                    self._optional_phase_unavailable_warning(
+                        "PATH_DECOMPOSITION_UNAVAILABLE",
+                        "robustness.path_decomposition",
+                        "request_budget_exhausted",
+                        elapsed_ms,
+                        "Path decomposition was skipped: insufficient request "
+                        "budget remained. Base analysis is unaffected.",
+                    )
+                )
+            else:
+                path_decomposition = self._compute_path_decomposition(
+                    request, recommended_option_id, evaluator.graph
+                )
 
         execution_time = int((time.time() - start_time) * 1000)
 
@@ -3235,6 +3425,7 @@ class RobustnessAnalyzerV2:
         self,
         request: RobustnessRequestV2,
         evaluator: SCMEvaluatorV2,
+        budget_ms: Optional[float] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Compute E-value analogue for each edge: minimum strength perturbation to flip winner.
 
@@ -3244,11 +3435,17 @@ class RobustnessAnalyzerV2:
         Args:
             request: The robustness request.
             evaluator: SCM evaluator instance.
+            budget_ms: Effective wall-clock budget for this sweep. Defaults to
+                E_VALUE_BUDGET_MS; the analyze() orchestrator passes
+                min(E_VALUE_BUDGET_MS, remaining request budget) so the sweep
+                also respects the governing overall-request deadline.
 
         Returns:
             List of dicts with e_value info per edge, or None if budget exceeded.
         """
-        t0 = time.time()
+        budget = budget_ms if budget_ms is not None else self.E_VALUE_BUDGET_MS
+        # Monotonic clock: an NTP step must not corrupt the elapsed guard.
+        t0 = time.monotonic()
 
         # Build expected-value baseline config
         baseline_config = {
@@ -3273,8 +3470,8 @@ class RobustnessAnalyzerV2:
                 continue
 
             # Budget check per edge
-            elapsed_ms = (time.time() - t0) * 1000
-            if elapsed_ms > self.E_VALUE_BUDGET_MS:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            if elapsed_ms > budget:
                 self.logger.info(
                     "e_value_budget_exceeded",
                     extra={"elapsed_ms": round(elapsed_ms, 1), "edges_completed": len(results)},
@@ -3310,11 +3507,11 @@ class RobustnessAnalyzerV2:
                 # Binary search for the flip point
                 for _ in range(self.E_VALUE_BISECT_STEPS):
                     # Inner budget check — abort if time exceeded mid-search
-                    if (time.time() - t0) * 1000 > self.E_VALUE_BUDGET_MS:
+                    if (time.monotonic() - t0) * 1000 > budget:
                         self.logger.info(
                             "e_value_budget_exceeded",
                             extra={
-                                "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                                "elapsed_ms": round((time.monotonic() - t0) * 1000, 1),
                                 "edges_completed": len(results),
                             },
                         )
@@ -3402,8 +3599,16 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
         edge_e_values: List[Dict[str, Any]],
         master_seed: int,
-    ) -> None:
+        budget_ms: Optional[float] = None,
+    ) -> bool:
         """Attach a seed-sweep stability band to each edge_e_values entry.
+
+        Returns True when the full sweep completed and bands were attached;
+        False when the wall-clock budget tripped (all-or-nothing: NOTHING is
+        attached, and the caller discloses STABILITY_BANDS_UNAVAILABLE on the
+        wire). ``budget_ms`` defaults to FLIP_STABILITY_BUDGET_MS; the analyze()
+        orchestrator passes min(FLIP_STABILITY_BUDGET_MS, remaining request
+        budget) so the sweep also respects the governing overall deadline.
 
         Track S Phase 1. DEFAULT-ON: computed whenever edge_e_values are
         (env gating removed 2026-07-17 per Paul's ruling — core
@@ -3449,7 +3654,9 @@ class RobustnessAnalyzerV2:
         flip_mean ∈ band; the mirrored consumer warning lives on
         FlipStabilityBandV2 in src/models/response_v2.py.
         """
-        t0 = time.time()
+        budget = budget_ms if budget_ms is not None else self.FLIP_STABILITY_BUDGET_MS
+        # Monotonic clock: an NTP step must not corrupt the elapsed guard.
+        t0 = time.monotonic()
         n_seeds = FLIP_STABILITY_N_SEEDS
 
         # Child seeds: SHA-256-derived (process-safe, NOT Python hash()) —
@@ -3479,16 +3686,16 @@ class RobustnessAnalyzerV2:
 
             seed_flip_means: List[Optional[float]] = []
             for background in backgrounds:
-                if (time.time() - t0) * 1000 > self.FLIP_STABILITY_BUDGET_MS:
+                if (time.monotonic() - t0) * 1000 > budget:
                     self.logger.info(
                         "flip_stability_budget_exceeded",
                         extra={
-                            "elapsed_ms": round((time.time() - t0) * 1000, 1),
+                            "elapsed_ms": round((time.monotonic() - t0) * 1000, 1),
                             "edges_completed": len(bands),
                             "n_seeds": n_seeds,
                         },
                     )
-                    return  # all-or-nothing: attach nothing
+                    return False  # all-or-nothing: attach nothing
                 flip_mean = self._flip_mean_under_background(request, evaluator, edge, background)
                 seed_flip_means.append(round(flip_mean, 6) if flip_mean is not None else None)
 
@@ -3511,6 +3718,7 @@ class RobustnessAnalyzerV2:
         for entry, computed_band in zip(edge_e_values, bands):
             if computed_band is not None:
                 entry["stability"] = computed_band
+        return True
 
     def _flip_mean_under_background(
         self,
@@ -3550,9 +3758,20 @@ class RobustnessAnalyzerV2:
             return sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))[0][0]
 
         def winner_at(mean_value: float) -> str:
-            test_config = dict(baseline_config)
-            test_config[edge_key] = mean_value * ep
-            return winner_under(test_config)
+            # In-place: mutate the single edge_key, evaluate, restore in finally.
+            # evaluator.evaluate() only READS edge_strengths (never mutates it),
+            # so this is byte-identical to copying baseline_config every call —
+            # the dict contents seen by evaluate() are the same {background,
+            # edge_key: mean_value*ep} — but without rebuilding a fresh dict per
+            # bisection step (~44 copies/call, E×10×44 across a sweep). The
+            # finally restore keeps baseline_config a valid shared background for
+            # the next step (edge_key returns to its entry value current_mean*ep).
+            original = baseline_config[edge_key]
+            baseline_config[edge_key] = mean_value * ep
+            try:
+                return winner_under(baseline_config)
+            finally:
+                baseline_config[edge_key] = original
 
         baseline_winner = winner_under(baseline_config)
 
