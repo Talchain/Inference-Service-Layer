@@ -223,6 +223,22 @@ With the helper's stamp reverted the four degradation codes fall back to the mod
 'info' and every "is warning" assertion goes RED; the benign-stays-info half is unaffected
 (it never depended on the helper). Load-bearing and correctly scoped.
 
+## OpenAPI spec regeneration (CI "Validate OpenAPI Specification")
+
+CI's `poetry run python scripts/generate_openapi.py --check` was RED (committed `openapi.json`
+missing the new field). Regenerated the committed repo-root `openapi.json`.
+
+Drift-isolation before committing (so no pre-existing spec drift is bundled): regenerated on
+the **pristine base** `933c3404` first → **zero diff**, `--check` **OK** (base spec was already
+in sync). Therefore the branch diff is attributable solely to this PR's only API-surface change,
+`InferenceWarning.severity`.
+
+Branch diff = **severity-only, +11 / -0 lines, 8 paths unchanged**: a single new `severity`
+property on the `InferenceWarning` component schema —
+`{default:"info", enum:["info","warning","error"], type:"string"}`, not in `required`. The only
+other schema carrying `severity` is the pre-existing `CritiqueV2`; no other schema/path moved.
+`generate_openapi.py --check` now exits **0** ("OK: openapi.json is up to date").
+
 ## Scope NOT covered (deliberate)
 
 - PLoT's InferenceWarning mirror + UI severity templates (F4 consumer halves) — separate

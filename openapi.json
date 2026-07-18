@@ -2356,6 +2356,17 @@
             "description": "Stable field path, e.g. 'edges[revenue_growth\u2192market_share].strength.mean'",
             "title": "Field",
             "type": "string"
+          },
+          "severity": {
+            "default": "info",
+            "description": "Severity for downstream routing/display. Defaults to the quiet 'info'; only the optional-phase degradation codes opt up to 'warning'.",
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
           }
         },
         "required": [
