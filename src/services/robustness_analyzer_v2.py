@@ -200,18 +200,21 @@ W_PATH_COEF = 1  # path decomposition: analytic, bounded by MAX_DECOMPOSITION_PA
 
 # PROVISIONAL admission ceiling in cost units.
 #
-# ⚠ PROVISIONAL — NOT Paul-signed-off. Starting envelope from the F8 design's
-#   worked table (12M for base+EVPI), widened after including ALL phase terms
-#   AND applying Paul's leniency directive (2026-07-18): err toward ADMITTING
-#   legitimate deep/large user graphs; reject only genuinely abusive
-#   multi-option x multi-EVPI combos. Calibrated indicatively on local hardware
-#   (benchmarks/admission_calibration.py) toward TARGET_WALL_MS = 25000 (half
-#   of OVERALL_REQUEST_BUDGET_MS). STAGING RECALIBRATION IS OWED before this is
-#   finalized — local hardware != Render isl-staging instance. Env-adjustable
-#   via ISL_MAX_COST_UNITS (a NEW env name — deliberately NOT the old
-#   ISL_MAX_COMPUTE_COMPLEXITY, whose value would be in the OLD scalar units and
-#   would silently mis-bound this formula).
-DEFAULT_MAX_COST_UNITS = 20_000_000
+# ⚠ PROVISIONAL, Paul-DIRECTED (2026-07-18) but still pending STAGING recalibration.
+#   Starting envelope from the F8 design's worked table (12M for base+EVPI),
+#   widened after including ALL phase terms; Paul then reviewed the admit/reject
+#   table and chose the MORE LENIENT ceiling (20M -> 24M) to admit the
+#   dense-mid-10opt case (23.7M). At 24M the heaviest ADMITTED case
+#   (schema-max-1opt, ~22.5M, measured ~24.7s local) still completes well inside
+#   ISL's OVERALL_REQUEST_BUDGET_MS = 50000 and PLoT's 60s timeout, so it returns
+#   cleanly; F15's compute governor is the next line of resource defense. Only the
+#   genuinely abusive combos (multi-option x multi-EVPI ~35M, schema-max 45M) reject.
+#   Calibrated indicatively on local hardware (benchmarks/admission_calibration.py);
+#   local hardware != Render isl-staging, so STAGING RECALIBRATION IS OWED before
+#   this is locked. Env-adjustable via ISL_MAX_COST_UNITS (a NEW env name —
+#   deliberately NOT the old ISL_MAX_COMPUTE_COMPLEXITY, whose value would be in the
+#   OLD scalar units and would silently mis-bound this formula).
+DEFAULT_MAX_COST_UNITS = 24_000_000
 
 # Wall-clock target the ceiling is calibrated against (see harness).
 TARGET_WALL_MS = 25000

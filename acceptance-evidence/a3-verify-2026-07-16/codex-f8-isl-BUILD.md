@@ -76,7 +76,7 @@ fresh blobless clone; gate driven with the project venv + `ISL_AUTH_DISABLED=tru
 - **PC-3** deep single 40n/120e/10000s/1opt: OLD scalar = 48,000,000 > 30M →
   **wrongly rejects** (the `x-edges` shape defect).
 
-## AFTER-fix behaviour (provisional ceiling = 20,000,000 cost units)
+## AFTER-fix behaviour (Paul-directed provisional ceiling = 24,000,000 cost units)
 
 | request | cost_units | dominant | verdict | pre-F8 scalar |
 |---|---|---|---|---|
@@ -85,7 +85,8 @@ fresh blobless clone; gate driven with the project venv + `ISL_AUTH_DISABLED=tru
 | Dense-mid 40n/120e/10000s/4opt | 14,080,000 | sensitivity | **ADMIT** | 48M → today 422 |
 | PC-3 deep single 40n/120e/10000s/1opt | 9,280,000 | sensitivity | **ADMIT** | 48M → today 422 |
 | PC-2 dense-mid 40n/120e/5000s/1opt | 8,480,000 | sensitivity | ADMIT | 24M admit |
-| Dense-mid 40n/120e/10000s/10opt | 23,680,000 | base_mc | REJECT | 48M reject |
+| Dense-mid 40n/120e/10000s/10opt | 23,680,000 | base_mc | **ADMIT** (24M ceiling) | 48M reject |
+| Schema-max-1opt 50n/200e/10000s/1opt (~24.7s) | 22,500,000 | sensitivity | **ADMIT** (24M; <50s budget) | — |
 | PC-2 dense-mid 40n/120e/5000s/10opt + EVPI5 | 34,880,000 | evpi | **REJECT** | 24M → today admit (free-ride) |
 | Schema-max 50n/200e/10000s/10opt | 45,000,000 | base_mc | REJECT | 100M reject |
 
@@ -103,8 +104,12 @@ Full table + admit/reject-at-candidate-ceilings in **`admission-calibration.md`*
   structural shape tracks wall-clock; ~3x spread is phase-mix (base-heavy low,
   sensitivity-heavy high).
 - Aggregate 25s-target ceiling ≈ 31.5M, but sensitivity-heavy graphs hit 25s at a
-  LOWER cost (`schema-max-1opt` 22.5M measured **24.7s**), so the ceiling must sit
-  below the aggregate. **Shipped provisional 20M.**
+  LOWER cost (`schema-max-1opt` 22.5M measured **24.7s**). **Shipped: Paul-directed
+  provisional 24M** (the more-lenient reviewed candidate) — admits the two heavy
+  cases (`dense-mid-10opt` 23.68M, `schema-max-1opt` 22.5M/24.7s), which still
+  complete inside ISL's 50s OVERALL_REQUEST_BUDGET_MS and PLoT's 60s timeout;
+  rejects only the abusive combos (34.88M, 45M). F15's governor is the next
+  resource-defense line.
 
 ## Mutation checks (throwaway copies; PYTHONPATH-loaded, verified isl-mut/isl-mut-b)
 
@@ -118,19 +123,23 @@ Full table + admit/reject-at-candidate-ceilings in **`admission-calibration.md`*
 - **Mutation C** — revert the `_compute_evpi` defensive dedup (iterate the raw
   list): the defence-in-depth dedup test goes **RED** (3 rows, not 1).
 
-## Provisional ceiling — for Paul's leniency sign-off
+## Provisional ceiling — Paul's decision (2026-07-18)
 
-- **Shipped provisional `DEFAULT_MAX_COST_UNITS = 20,000,000`** (env-adjustable via
-  `ISL_MAX_COST_UNITS`). **PROVISIONAL, NOT finalized** — local-hardware fit only.
-- **Leniency shape:** admits every realistic user graph up to dense-mid at max
-  sampling depth (`dense-mid-4opt-deep` 14.08M, measured ~9–11s local); rejects only
-  the genuinely heavy combos: 10-option base at max depth (23.68M) and the
-  multi-option × multi-EVPI free-ride (34.88M). Schema-max sensitivity-heavy
-  (22.5M) measured **~26s local — already over the 25s target**, confirming rejection
-  is correct, not over-strict.
-- **Decision for Paul:** the single borderline case is `dense-mid-10opt` (23.68M,
-  ~14.6s local) — rejected at 20M. Admitting it would need ~24M, which is within
-  ~1M of schema-max (22.5M/26s, which must reject). Candidates: **15M** (stricter),
-  **20M** (shipped), **~30M** (local-25s aggregate fit — too lenient for
-  sensitivity-heavy graphs). Recommend keeping 20M provisional; finalize after
-  staging recalibration.
+- **Shipped provisional `DEFAULT_MAX_COST_UNITS = 24,000,000`** (env-adjustable via
+  `ISL_MAX_COST_UNITS`). **PROVISIONAL, NOT locked** — Paul-DIRECTED (the more-lenient
+  reviewed candidate); local-hardware fit; **staging recalibration still owed.**
+- **Leniency shape at 24M:** admits every realistic user graph AND both heavy cases
+  — `dense-mid-10opt` (23.68M, ~13s local) and `schema-max-1opt` (22.5M, **~24.7s
+  local**). The 24.7s worst-admitted case still completes well inside ISL's
+  `OVERALL_REQUEST_BUDGET_MS = 50000` and PLoT's 60s timeout, so it returns cleanly
+  (optional phases degrade-and-disclose if long); **F15's compute governor is the
+  next line of resource defense** for concurrency. Only the genuinely-abusive
+  multi-option × multi-EVPI combos reject: 34.88M and 45M.
+- **Why Paul chose 24M over 20M:** 20M rejected the borderline `dense-mid-10opt`
+  (10 options × 10000 samples, but only ~13s local); Paul's leniency directive is
+  to admit legitimate deep/large user analysis and lean on F15's governor for
+  concurrency defense rather than reject at admission. **~30M** (aggregate fit) was
+  not chosen — it would also admit the two abusive combos.
+- **STAGING RECALIBRATION OWED:** re-measure on the Render isl-staging instance
+  (slower class → the 24.7s local worst-case grows) and confirm it stays inside the
+  50s budget before locking the number.

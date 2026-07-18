@@ -21,7 +21,9 @@ reachable-goal graphs). **LOCAL HARDWARE — indicative only.**
   But this aggregate is pulled UP by the cheap base-heavy cells; a
   **sensitivity-heavy** graph reaches 25s at a *lower* cost (`schema-max-1opt`
   = 22.5M units measured **24.7s**), so a single ceiling should sit **below** the
-  aggregate suggestion. **Shipped provisional: `DEFAULT_MAX_COST_UNITS = 20,000,000`.**
+  aggregate suggestion. **Shipped (Paul-directed, provisional):
+  `DEFAULT_MAX_COST_UNITS = 24,000,000`** — the more-lenient of the reviewed
+  candidates (see below).
 - Codex option-anchor (1opt→10opt runtime): **1.38x** here vs Codex's ~4.13x.
   Explanation (not a model error): my anchor cells are *sensitivity-dominated*
   (option-independent phase), so total runtime is not 4x from options; the base
@@ -55,13 +57,13 @@ reachable-goal graphs). **LOCAL HARDWARE — indicative only.**
 | evalues+path | 20 | 60 | 5000 | 3 | 0 | ev,path | 3,163,200 | sensitivity | 2969.4 | 9.39e-04 |
 | full-load | 30 | 90 | 5000 | 4 | 4 | ev,path | 11,607,300 | evpi | 8662.0 | 7.46e-04 |
 
-## Admit/reject vs candidate ceilings (for Paul's leniency sign-off)
+## Admit/reject vs candidate ceilings (Paul reviewed → chose 24M)
 
-Sorted by cost. Local wall-clock shown where measured. `15M` stricter · **`20M`
-shipped** · `24M` most-lenient-safe · `30M` aggregate-fit (too lenient for
-sensitivity-heavy).
+Sorted by cost. Local wall-clock shown where measured. `15M` stricter · `20M`
+conservative-lenient · **`24M` SHIPPED (Paul-directed, more lenient)** · `30M`
+aggregate-fit.
 
-| graph (realistic?) | cost_units | local t | 15M | **20M** | 24M | 30M |
+| graph (realistic?) | cost_units | local t | 15M | 20M | **24M** | 30M |
 |---|---|---|---|---|---|---|
 | pilot 5n/8e/1000s/2opt (yes) | 67,600 | 0.04s | ✅ | ✅ | ✅ | ✅ |
 | upper-poc 12n/100e/5000s/3opt (yes) | 3,229,200 | 3.3s | ✅ | ✅ | ✅ | ✅ |
@@ -71,28 +73,26 @@ sensitivity-heavy).
 | full-load 30n/90e/5000s/4opt+evpi4+ev+path (yes) | 11,607,300 | 8.7s | ✅ | ✅ | ✅ | ✅ |
 | dense-mid-4opt-deep 40n/120e/10000s/4opt (yes) | 14,080,000 | 12.7s | ✅ | ✅ | ✅ | ✅ |
 | evpi-5f-dense 40n/120e/5000s/4opt+evpi5 (yes) | 18,560,000 | 13.7s | ❌ | ✅ | ✅ | ✅ |
-| schema-max-1opt 50n/200e/10000s/1opt (borderline) | 22,500,000 | **24.7s** | ❌ | ❌ | ❌ | ✅ |
-| dense-mid-10opt 40n/120e/10000s/10opt (borderline) | 23,680,000 | 12.8s | ❌ | ❌ | ✅ | ✅ |
+| schema-max-1opt 50n/200e/10000s/1opt (heavy) | 22,500,000 | **24.7s** | ❌ | ❌ | **✅** | ✅ |
+| dense-mid-10opt 40n/120e/10000s/10opt (heavy) | 23,680,000 | 12.8s | ❌ | ❌ | **✅** | ✅ |
 | PC-2 dense-mid 40n/120e/5000s/10opt+evpi5 (abuse) | 34,880,000 | ~28s* | ❌ | ❌ | ❌ | ❌ |
 | schema-max 50n/200e/10000s/10opt (abuse) | 45,000,000 | ~30s+* | ❌ | ❌ | ❌ | ❌ |
 
 `*` extrapolated (exceeds the internal OVERALL_REQUEST_BUDGET_MS optional-phase
 degrade points).
 
-### Reading the table (recommendation)
+### Reading the table (Paul's decision)
 
-- **20M (shipped provisional)** admits every clearly-realistic user graph
-  (≤ dense-mid at max depth, and a 4-option + EVPI5 dense graph at 18.56M/13.7s)
-  and rejects only the two abusive combos + the two borderline heavies.
-- The single genuinely-borderline case is **`dense-mid-10opt`** (23.68M, measured
-  12.8s — under budget locally, but 10 options × 10000 samples). Admitting it
-  needs **24M**, which is ~1.5M above `schema-max-1opt` (22.5M, **24.7s — must
-  reject**); at 24M both would flip the wrong way relative to their wall-clock.
-  This is the leniency knob for Paul.
-- **30M** (the aggregate fit) is **too lenient**: it would admit `schema-max-1opt`
-  which already burns 24.7s locally (and more on slower staging).
-- On the leniency directive ("err toward admitting; reject only abusive
-  multi-option × multi-EVPI"), **20M is the conservative-lenient choice** and
-  leaves headroom for a slower staging instance. Recommend keeping 20M until
-  staging recalibration; Paul to confirm whether `dense-mid-10opt` should admit
-  (→ 24M) or reject (→ 20M).
+- **24M (SHIPPED, Paul-directed 2026-07-18)** — Paul reviewed the candidates and
+  chose the more-lenient ceiling. At 24M every graph up to and including the two
+  "heavy" cases **admits**: `dense-mid-10opt` (23.68M, 12.8s) and `schema-max-1opt`
+  (22.5M, **24.7s**). The 24.7s worst-admitted case still completes **well inside
+  ISL's OVERALL_REQUEST_BUDGET_MS = 50000 and PLoT's 60s timeout**, so it returns
+  cleanly (the optional phases degrade-and-disclose if they run long); **F15's
+  compute governor is the next line of resource defense** for concurrency.
+- Only the genuinely-abusive multi-option × multi-EVPI combos reject:
+  PC-2 10opt+EVPI5 (34.88M) and schema-max 10opt (45M).
+- **Still PROVISIONAL** — this is a LOCAL-hardware fit; **staging recalibration is
+  owed** (the Render isl-staging instance is a different, typically slower class,
+  so the 24.7s local worst-case will be larger there — re-measure before locking,
+  and confirm it stays inside the 50s budget on staging).

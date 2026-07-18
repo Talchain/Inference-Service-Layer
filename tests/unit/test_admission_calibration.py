@@ -209,9 +209,10 @@ class TestPC3ShapeFix:
 # ---------------------------------------------------------------------------
 class TestCalibrationPins:
     def test_provisional_ceiling_pinned(self):
-        """PROVISIONAL — staging recalibration + Paul sign-off owed. A silent
-        change must turn this RED so the number is never altered unnoticed."""
-        assert DEFAULT_MAX_COST_UNITS == 20_000_000
+        """PROVISIONAL — Paul-DIRECTED 24M (2026-07-18, the more-lenient choice),
+        staging recalibration still owed. A silent change must turn this RED so the
+        number is never altered unnoticed."""
+        assert DEFAULT_MAX_COST_UNITS == 24_000_000
 
     def test_weight_coefficients_pinned(self):
         assert BASE_COST_COEF == 1
