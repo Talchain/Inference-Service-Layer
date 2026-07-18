@@ -877,6 +877,33 @@ class SensitivityAnalysisResponse(BaseModel):
     }
 
 
+class ComputeAdmissionInfo(BaseModel):
+    """Compute-admission capability advertised on /health (Codex F8).
+
+    Lets a planning consumer (PLoT) size requests against ISL's LIVE admission
+    ceiling and formula instead of hand-mirroring the numbers. Every value is
+    read from the same ISL module constants the admission gate and request model
+    enforce (src.services.robustness_analyzer_v2 / src.constants), so the
+    advertisement can never drift from enforcement. Consumers MUST version-guard
+    on complexity_formula_version and fall back conservatively on an unknown
+    version (the formula SHAPE is shared; only the numbers are advertised).
+    """
+
+    max_cost_units: int = Field(
+        ..., description="Admission ceiling in cost units (env-resolved; ISL_MAX_COST_UNITS)."
+    )
+    complexity_formula_version: str = Field(
+        ..., description="Version tag of the weighted cost formula shape."
+    )
+    weights: Dict[str, int] = Field(
+        ..., description="Per-phase structural coefficients used by the cost formula."
+    )
+    caps: Dict[str, int] = Field(
+        ...,
+        description="Request-shape ceilings enforced by the request model (max nodes/edges/etc).",
+    )
+
+
 class HealthResponse(BaseModel):
     """Response model for health check endpoint."""
 
@@ -887,6 +914,11 @@ class HealthResponse(BaseModel):
     timestamp: str = Field(..., description="Current timestamp")
     config_fingerprint: Optional[str] = Field(
         default=None, description="Config fingerprint for determinism verification"
+    )
+    compute_admission: Optional[ComputeAdmissionInfo] = Field(
+        default=None,
+        description="Weighted compute-admission capability (ceiling, formula version, "
+        "weights, caps) for planning consumers (Codex F8).",
     )
 
     model_config = {

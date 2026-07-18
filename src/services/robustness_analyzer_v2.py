@@ -14,6 +14,7 @@ This enables answering:
 import hashlib
 import logging
 import math
+import os
 import statistics
 import time
 import uuid
@@ -55,6 +56,10 @@ from src.constants import (
     ELASTICITY_CLAMP_MAX,
     FACTOR_SENSITIVITY_BASELINE_EPSILON,
     FACTOR_SENSITIVITY_VALUE_EPSILON,
+    MAX_GRAPH_EDGES,
+    MAX_GRAPH_NODES,
+    MAX_OPTIONS,
+    MAX_PARAMETER_UNCERTAINTIES,
     ZERO_VARIANCE_TOLERANCE,
 )
 from src.models.critique import (
@@ -152,6 +157,183 @@ EVPI_SAMPLE_CAP = 2000
 # (prioritise analysis quality): a wider sweep is a better stability basis
 # than the 06-10 report's minimum "e.g. 5 seeds" recommendation.
 FLIP_STABILITY_N_SEEDS = 10
+
+
+# =============================================================================
+# Weighted compute-admission cost model (Codex F8)
+# =============================================================================
+#
+# Replaces the pre-F8 scalar admission `n_samples * n_nodes * n_edges`, which
+# (a) omitted the OPTION multiplier — the base MC loop evaluates every sample
+#     once PER OPTION (up to MAX_OPTIONS), so a 10-option request did ~10x the
+#     work the scalar priced;
+# (b) used the wrong structural shape (`x n_edges`): each SCM evaluate() walks
+#     n_nodes + n_edges work, not n_nodes * n_edges, so the scalar over-priced
+#     edge-dense graphs (wrongly 422-ing benign deep single graphs) and
+#     under-priced sample/option depth;
+# (c) priced NONE of the optional phases (EVPI, sensitivity, e-values, bands,
+#     path), the two heaviest of which — base MC and EVPI — are exactly the
+#     uncapped, option-multiplying ones.
+#
+# The cost is expressed in "cost units" where 1 unit ~= one node-evaluation-
+# equivalent, derived structurally from the actual loop bodies (see the phase
+# inventory in the F8 design). The structural SHAPE is correct-by-construction;
+# the numeric CEILING is calibrated by benchmarks/admission_calibration.py.
+#
+# SINGLE SOURCE OF TRUTH: these constants are read by BOTH the admission gate
+# (src/api/robustness.py) AND the /health advertisement (src/api/health.py), so
+# /health can never advertise a formula that differs from what admission
+# enforces (derive, don't mirror — programme memory-trap #12). PLoT reads the
+# /health block instead of hand-copying the numbers.
+
+# Formula version — advertised on /health so a version-guarded consumer (PLoT)
+# can fail loud on an unknown future shape rather than silently mis-plan.
+COMPLEXITY_FORMULA_VERSION = "v2-weighted-2026-07"
+
+# Per-phase structural weights (provisional; the calibration harness is the
+# source of truth for refining them — do not hand-tune without re-running it).
+BASE_COST_COEF = 1  # base MC: 1 unit per sample x option x (nodes+edges) evaluate()
+W_SENS_COEF = 4  # edge sensitivity: 4 sub-sweeps per edge (existence +/- , magnitude +/-)
+W_EVAL_COEF = 20  # e-values: ~binary-search depth per edge (wall-clock-capped, so flat)
+W_BANDS_COEF = 200  # stability bands: 10 seeds x ~20 search per edge (capped, so flat)
+W_PATH_COEF = 1  # path decomposition: analytic, bounded by MAX_DECOMPOSITION_PATHS
+
+# PROVISIONAL admission ceiling in cost units.
+#
+# ⚠ PROVISIONAL — NOT Paul-signed-off. Starting envelope from the F8 design's
+#   worked table (12M for base+EVPI), widened after including ALL phase terms
+#   AND applying Paul's leniency directive (2026-07-18): err toward ADMITTING
+#   legitimate deep/large user graphs; reject only genuinely abusive
+#   multi-option x multi-EVPI combos. Calibrated indicatively on local hardware
+#   (benchmarks/admission_calibration.py) toward TARGET_WALL_MS = 25000 (half
+#   of OVERALL_REQUEST_BUDGET_MS). STAGING RECALIBRATION IS OWED before this is
+#   finalized — local hardware != Render isl-staging instance. Env-adjustable
+#   via ISL_MAX_COST_UNITS (a NEW env name — deliberately NOT the old
+#   ISL_MAX_COMPUTE_COMPLEXITY, whose value would be in the OLD scalar units and
+#   would silently mis-bound this formula).
+DEFAULT_MAX_COST_UNITS = 20_000_000
+
+# Wall-clock target the ceiling is calibrated against (see harness).
+TARGET_WALL_MS = 25000
+
+
+def get_max_cost_units() -> int:
+    """Return the admission ceiling in cost units (env-resolved).
+
+    Reads ``ISL_MAX_COST_UNITS`` (NEW env name in the new cost units) if set,
+    else ``DEFAULT_MAX_COST_UNITS``. The old ``ISL_MAX_COMPUTE_COMPLEXITY`` env
+    (scalar units) is intentionally NOT read here — reusing it would silently
+    repurpose an old-units value against the new formula.
+    """
+    val = os.environ.get("ISL_MAX_COST_UNITS")
+    if val is not None:
+        try:
+            return int(val)
+        except ValueError:
+            logger.warning(
+                "ISL_MAX_COST_UNITS env var is not a valid integer (%s), using default %d",
+                val,
+                DEFAULT_MAX_COST_UNITS,
+            )
+    return DEFAULT_MAX_COST_UNITS
+
+
+@dataclass(frozen=True)
+class WeightedCost:
+    """Result of compute_weighted_cost: the total plus a per-term breakdown.
+
+    ``dominant_term`` names the single largest contributing phase, so the 422
+    body can tell the caller which part of their request drove the rejection.
+    """
+
+    total: int
+    terms: Dict[str, int]
+
+    @property
+    def dominant_term(self) -> str:
+        if not self.terms:
+            return "base_mc"
+        return max(self.terms, key=lambda k: self.terms[k])
+
+
+def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
+    """Weighted compute-admission cost for a v2 request, in cost units.
+
+        cost = S*O*W                                       (base MC, always)
+             + (U+1)*min(S, EVPI_SAMPLE_CAP)*O*W           (EVPI, if include_voi & U>0)
+             + W_SENS_COEF*E*min(100, S//10)*W             (edge sensitivity)
+             + W_EVAL_COEF*E*O                             (e-values, if include_e_values)
+             + W_BANDS_COEF*E*O                            (bands, ride on e-values)
+             + W_PATH_COEF*min(MAX_DECOMPOSITION_PATHS, E*E) (path decomp)
+
+    where S=n_samples, O=len(options), N=n_nodes, E=n_edges, W=N+E (per-evaluate()
+    structural work), U=number of UNIQUE parameter_uncertainties. Every term
+    mirrors an actual loop body in the analyzer (see the F8 design phase
+    inventory). Optional-phase enable conditions match analyze():
+      - EVPI: request.include_voi AND at least one parameter_uncertainty
+      - edge sensitivity: "sensitivity" in analysis_types
+      - e-values / bands: request.include_e_values (bands are default-on with e-values)
+      - path decomposition: request.include_path_decomposition
+    """
+    S = request.n_samples
+    O = len(request.options)
+    N = len(request.graph.nodes)
+    E = len(request.graph.edges)
+    W = N + E
+
+    terms: Dict[str, int] = {"base_mc": BASE_COST_COEF * S * O * W}
+
+    # EVPI — priced on the DEDUPLICATED factor count (uniqueness is enforced at
+    # parse time, but count unique defensively so admission never over-prices a
+    # duplicate that somehow reached here).
+    if request.include_voi and request.parameter_uncertainties:
+        u = len({pu.node_id for pu in request.parameter_uncertainties})
+        if u > 0:
+            terms["evpi"] = (u + 1) * min(S, EVPI_SAMPLE_CAP) * O * W
+
+    # Edge sensitivity — reference option only (not multiplied by O).
+    if "sensitivity" in request.analysis_types:
+        terms["sensitivity"] = W_SENS_COEF * E * min(100, S // 10) * W
+
+    # E-values and the stability bands that ride on them (bands default-on).
+    if request.include_e_values:
+        terms["e_values"] = W_EVAL_COEF * E * O
+        terms["bands"] = W_BANDS_COEF * E * O
+
+    # Path decomposition — analytic, path-count bounded.
+    if request.include_path_decomposition:
+        terms["path_decomposition"] = W_PATH_COEF * min(MAX_DECOMPOSITION_PATHS, E * E)
+
+    total = sum(terms.values())
+    return WeightedCost(total=total, terms=terms)
+
+
+def build_compute_admission() -> Dict[str, Any]:
+    """Assemble the /health `compute_admission` block from the module constants.
+
+    Single source of truth: /health reads THIS, so the advertised ceiling,
+    weights, and caps are exactly what the admission gate and the model enforce.
+    ``max_cost_units`` is env-resolved (matches the live enforced ceiling).
+    """
+    return {
+        "max_cost_units": get_max_cost_units(),
+        "complexity_formula_version": COMPLEXITY_FORMULA_VERSION,
+        "weights": {
+            "base_per_sample_per_option_per_struct": BASE_COST_COEF,
+            "evpi_sample_cap": EVPI_SAMPLE_CAP,
+            "sensitivity_coef": W_SENS_COEF,
+            "evalue_coef": W_EVAL_COEF,
+            "bands_coef": W_BANDS_COEF,
+            "path_coef": W_PATH_COEF,
+            "max_decomposition_paths": MAX_DECOMPOSITION_PATHS,
+        },
+        "caps": {
+            "max_options": MAX_OPTIONS,
+            "max_nodes": MAX_GRAPH_NODES,
+            "max_edges": MAX_GRAPH_EDGES,
+            "max_parameter_uncertainties": MAX_PARAMETER_UNCERTAINTIES,
+        },
+    }
 
 
 def evpi_noise_floor(n_samples: int) -> float:
@@ -3982,6 +4164,15 @@ class RobustnessAnalyzerV2:
         if not request.parameter_uncertainties:
             return None
 
+        # F8 defensive dedup (defence-in-depth): the model validator already
+        # rejects duplicate parameter_uncertainties node_ids with a 422 at parse
+        # time, but a direct internal caller could bypass it. Dedup by node_id,
+        # keeping first-seen order (dict preserves insertion order → deterministic)
+        # so a repeated node_id can never re-trigger the EVPI multiplier here.
+        unique_uncertainties = list(
+            {u.node_id: u for u in request.parameter_uncertainties}.values()
+        )
+
         # F7: internal wall-clock deadline (was entry-gated only). t0 anchors the
         # EVPI phase; budget_ms is the remaining governing request budget at entry,
         # so (monotonic()-t0)*1000 > budget_ms == the OVERALL_REQUEST_BUDGET_MS
@@ -4015,7 +4206,7 @@ class RobustnessAnalyzerV2:
         baseline_rng_factor = SeededRNG(seed + 101)
         baseline_sampler = DualUncertaintySampler(request.graph.edges, baseline_rng_edge)
         baseline_factor_sampler = FactorSampler(
-            request.graph.nodes, request.parameter_uncertainties, baseline_rng_factor
+            request.graph.nodes, unique_uncertainties, baseline_rng_factor
         )
         baseline_metric = self._compute_evpi_metric(
             request,
@@ -4040,7 +4231,7 @@ class RobustnessAnalyzerV2:
             return None
 
         results: List[Dict[str, Any]] = []
-        for uncertainty in request.parameter_uncertainties:
+        for uncertainty in unique_uncertainties:
             # Deadline check at the top of each per-factor MC pass.
             if _deadline_passed():
                 self.logger.info(
@@ -4053,7 +4244,7 @@ class RobustnessAnalyzerV2:
                 return None
             # Create modified uncertainty list: remove this factor's uncertainty
             modified_uncertainties = [
-                u for u in request.parameter_uncertainties if u.node_id != uncertainty.node_id
+                u for u in unique_uncertainties if u.node_id != uncertainty.node_id
             ]
 
             # Deterministic seed per factor

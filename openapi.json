@@ -156,6 +156,45 @@
         "title": "ClampMetrics",
         "type": "object"
       },
+      "ComputeAdmissionInfo": {
+        "description": "Compute-admission capability advertised on /health (Codex F8).\n\nLets a planning consumer (PLoT) size requests against ISL's LIVE admission\nceiling and formula instead of hand-mirroring the numbers. Every value is\nread from the same ISL module constants the admission gate and request model\nenforce (src.services.robustness_analyzer_v2 / src.constants), so the\nadvertisement can never drift from enforcement. Consumers MUST version-guard\non complexity_formula_version and fall back conservatively on an unknown\nversion (the formula SHAPE is shared; only the numbers are advertised).",
+        "properties": {
+          "caps": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Request-shape ceilings enforced by the request model (max nodes/edges/etc).",
+            "title": "Caps",
+            "type": "object"
+          },
+          "complexity_formula_version": {
+            "description": "Version tag of the weighted cost formula shape.",
+            "title": "Complexity Formula Version",
+            "type": "string"
+          },
+          "max_cost_units": {
+            "description": "Admission ceiling in cost units (env-resolved; ISL_MAX_COST_UNITS).",
+            "title": "Max Cost Units",
+            "type": "integer"
+          },
+          "weights": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Per-phase structural coefficients used by the cost formula.",
+            "title": "Weights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "max_cost_units",
+          "complexity_formula_version",
+          "weights",
+          "caps"
+        ],
+        "title": "ComputeAdmissionInfo",
+        "type": "object"
+      },
       "ConditionalWinner": {
         "description": "Conditional win probability analysis for a single factor.\n\nSplits MC samples at the factor's median value and computes win probabilities\nin each half. When the winner differs between halves, the decision is sensitive\nto this factor's value range.\n\nLimitations:\n- Median split is simplistic. Does not detect non-monotonic effects or\n  factor interactions.\n- Flips at extreme quantiles (top/bottom 10%) may be missed by a 50/50 split.",
         "properties": {
@@ -1913,6 +1952,17 @@
             ],
             "description": "Full Git commit SHA (40 chars)",
             "title": "Build Full"
+          },
+          "compute_admission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComputeAdmissionInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Weighted compute-admission capability (ceiling, formula version, weights, caps) for planning consumers (Codex F8)."
           },
           "config_fingerprint": {
             "anyOf": [
@@ -3863,13 +3913,14 @@
                 "items": {
                   "$ref": "#/components/schemas/ParameterUncertainty"
                 },
+                "maxItems": 50,
                 "type": "array"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Uncertainty specifications for factor node values. If not provided, factor nodes use observed_state.value as fixed values.",
+            "description": "Uncertainty specifications for factor node values. If not provided, factor nodes use observed_state.value as fixed values. Each node_id may appear at most once (duplicates are redundant: EVPI on a repeated node_id produces byte-identical rows).",
             "title": "Parameter Uncertainties"
           },
           "request_id": {

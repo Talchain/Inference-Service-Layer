@@ -15,7 +15,13 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 import re
 
-from src.constants import DEFAULT_EXISTS_PROBABILITY
+from src.constants import (
+    DEFAULT_EXISTS_PROBABILITY,
+    MAX_GRAPH_EDGES,
+    MAX_GRAPH_NODES,
+    MAX_OPTIONS,
+    MAX_PARAMETER_UNCERTAINTIES,
+)
 
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
 from src.models.response_v2 import (
@@ -420,9 +426,11 @@ class GraphV2(BaseModel):
     uncertainty (strength distribution).
     """
 
-    nodes: List[NodeV2] = Field(..., min_length=1, max_length=50, description="List of graph nodes")
+    nodes: List[NodeV2] = Field(
+        ..., min_length=1, max_length=MAX_GRAPH_NODES, description="List of graph nodes"
+    )
     edges: List[EdgeV2] = Field(
-        ..., max_length=200, description="List of directed edges with dual uncertainty"
+        ..., max_length=MAX_GRAPH_EDGES, description="List of directed edges with dual uncertainty"
     )
 
     @field_validator("nodes")
@@ -624,7 +632,7 @@ class RobustnessRequestV2(BaseModel):
     )
     graph: GraphV2 = Field(..., description="Causal graph with dual uncertainty edges")
     options: List[InterventionOption] = Field(
-        ..., min_length=1, max_length=10, description="Decision options to compare"
+        ..., min_length=1, max_length=MAX_OPTIONS, description="Decision options to compare"
     )
     goal_node_id: str = Field(..., description="Target outcome node to optimize")
 
@@ -670,10 +678,17 @@ class RobustnessRequestV2(BaseModel):
     )
 
     # Factor uncertainty configuration (Phase 2A Part 2)
+    # F8: capped at MAX_PARAMETER_UNCERTAINTIES (eligible nodes <= graph.nodes cap).
+    # Previously unbounded, which let duplicate/oversized lists multiply EVPI MC
+    # passes at zero admitted cost (the "duplicate free-ride"). Uniqueness is
+    # enforced by validate_parameter_uncertainties_reference_nodes below.
     parameter_uncertainties: Optional[List[ParameterUncertainty]] = Field(
         None,
+        max_length=MAX_PARAMETER_UNCERTAINTIES,
         description="Uncertainty specifications for factor node values. "
-        "If not provided, factor nodes use observed_state.value as fixed values.",
+        "If not provided, factor nodes use observed_state.value as fixed values. "
+        "Each node_id may appear at most once (duplicates are redundant: EVPI on a "
+        "repeated node_id produces byte-identical rows).",
     )
 
     # Goal threshold configuration (single constraint, legacy)
@@ -756,14 +771,32 @@ class RobustnessRequestV2(BaseModel):
 
     @model_validator(mode="after")
     def validate_parameter_uncertainties_reference_nodes(self) -> "RobustnessRequestV2":
-        """Validate all parameter uncertainty node_ids exist in graph."""
+        """Validate parameter_uncertainties: node existence AND uniqueness (F8).
+
+        Uniqueness is enforced here (fail-closed at parse time → typed 422 before
+        any compute) because a repeated node_id is definitionally redundant: EVPI
+        seeds each per-factor pass on ``f"{seed}:evpi:{node_id}"``, so duplicate
+        node_ids produce byte-identical factor_evpi rows while still costing a full
+        Monte Carlo pass each. Rejecting duplicates removes the free-ride and lets
+        the admission gate price only the deduplicated factor count.
+        """
         if self.parameter_uncertainties:
             node_ids = {node.id for node in self.graph.nodes}
+            seen: set[str] = set()
+            duplicates: list[str] = []
             for uncertainty in self.parameter_uncertainties:
                 if uncertainty.node_id not in node_ids:
                     raise ValueError(
                         f"ParameterUncertainty references non-existent node: {uncertainty.node_id}"
                     )
+                if uncertainty.node_id in seen:
+                    duplicates.append(uncertainty.node_id)
+                seen.add(uncertainty.node_id)
+            if duplicates:
+                raise ValueError(
+                    "Duplicate parameter_uncertainties node_ids (each node may appear "
+                    f"at most once): {sorted(set(duplicates))}"
+                )
         return self
 
     @model_validator(mode="after")
