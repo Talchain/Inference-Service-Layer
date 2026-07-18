@@ -174,6 +174,55 @@ the 4 trip-independent tests stay GREEN (the mutation is discriminating, not a b
 break — the entry-skip F4 field/severity corrections and the additive severity default are
 correctly independent of the internal deadline).
 
+## Review delta — F4 severity MAPPING (coordinator, on top of the fix commit)
+
+Review finding: defaulting `InferenceWarning.severity = "warning"` inverted the ~9 benign
+input-adjustment/default codes (STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE,
+ROOT_NODE_DEFAULT_VALUE, ...) to "warning" — PLoT's `severity==='warning' ? 'warning' :
+'info'` would surface them. Intent: ONLY the four degradation codes are "warning".
+
+Surgical change (nothing else in #79 touched):
+1. `response_v2.py` — `InferenceWarning.severity` default `"warning"` -> **`"info"`** (quiet
+   default; benign diagnostics stay info).
+2. `robustness_analyzer_v2.py` `_optional_phase_unavailable_warning()` — dropped the severity
+   param and stamp **`severity="warning"` explicitly** in the one place the four degradation
+   codes are built (entry-skip AND overrun paths both flow through it).
+3. New pin `TestSeverityMappingDegradationVsBenign` — one budget-exhausted run over a graph
+   with an out-of-range edge (`strength.mean=1000` -> STRENGTH_MEAN_CLAMPED) so all four
+   degradation codes AND a benign code are present in one response; asserts (positive control)
+   all five present, then the four are `severity=="warning"` and STRENGTH_MEAN_CLAMPED is
+   `severity=="info"`, on both the model and the `model_dump(by_alias, exclude_none)` wire.
+   The additive test was adjusted to the new quiet default.
+
+RED-first (delta) — updated tests vs the pre-delta commit `3fcead6` (default still "warning"):
+
+```
+2 failed  (== RED-first for the delta)
+FAILED  TestSeverityMappingDegradationVsBenign::...   assert 'warning' == 'info'   (STRENGTH_MEAN_CLAMPED)
+FAILED  TestSeverityIsAdditiveOnWire::...             assert 'warning' == 'info'   (quiet default)
+```
+The positive control (all five codes present) and the four `=="warning"` assertions pass on
+the pre-delta code — the failing assertion is exactly the benign-stays-info inversion.
+
+Gate (delta, fixed tree): `mypy src/` clean (134 files); `black --check` clean; targeted
+regression across every warning-emitting test file + the new file = **484 passed, 1 failed**
+— the 1 is the same pre-existing `test_metadata_populated` timing flake (unrelated). New file
+now **9 passed** (+1 vs the 8 before the delta).
+
+Mutation-check (delta) — throwaway `--detach` worktree off the delta commit, reverted ONLY
+the explicit `severity="warning"` in the helper (-> falls back to the model default "info"):
+
+```
+4 failed  (DISCRIMINATING — the explicit "warning" stamp is load-bearing)
+FAILED  TestSeverityMappingDegradationVsBenign   assert 'info' == 'warning'   (the 4 codes)
+FAILED  test_evpi_disclosure_severity_and_top_level_field   assert 'info' == 'warning'
+FAILED  test_path_disclosure_severity_and_top_level_field   assert 'info' == 'warning'
+FAILED  test_entry_skip_fields_top_level_and_severity        assert 'info' == 'warning'
+```
+With the helper's stamp reverted the four degradation codes fall back to the model default
+'info' and every "is warning" assertion goes RED; the benign-stays-info half is unaffected
+(it never depended on the helper). Load-bearing and correctly scoped.
+
 ## Scope NOT covered (deliberate)
 
 - PLoT's InferenceWarning mirror + UI severity templates (F4 consumer halves) — separate

@@ -199,7 +199,87 @@ class TestSeverityIsAdditiveOnWire:
         ignore it (extra='ignore'). Proven on a real disclosure warning."""
         from src.models.response_v2 import InferenceWarning
 
-        w = InferenceWarning(code="EVPI_UNAVAILABLE", field="factor_evpi", detail={})
-        assert w.severity == "warning", "sensible default"
-        dumped = w.model_dump(by_alias=True, exclude_none=True)
-        assert dumped.get("severity") == "warning", "severity rides the wire, not dropped"
+        # Directly-constructed warnings default to the QUIET 'info' (the benign
+        # diagnostics path). The non-None default always rides the wire.
+        w_default = InferenceWarning(code="STRENGTH_MEAN_CLAMPED", field="edges[a→b]", detail={})
+        assert w_default.severity == "info", "quiet default for benign diagnostics"
+        dumped_default = w_default.model_dump(by_alias=True, exclude_none=True)
+        assert dumped_default.get("severity") == "info", "severity rides the wire, not dropped"
+
+        # An explicit 'warning' (the degradation-code path) also serialises.
+        w_warn = InferenceWarning(
+            code="EVPI_UNAVAILABLE", field="factor_evpi", detail={}, severity="warning"
+        )
+        dumped_warn = w_warn.model_dump(by_alias=True, exclude_none=True)
+        assert dumped_warn.get("severity") == "warning"
+
+
+# ---------------------------------------------------------------------------
+# F4 — the severity MAPPING: exactly the 4 degradation codes are 'warning';
+# the benign input-adjustment diagnostics stay 'info' (coordinator delta).
+# ---------------------------------------------------------------------------
+
+import copy  # noqa: E402
+
+DEGRADATION_CODES = (
+    "E_VALUES_UNAVAILABLE",
+    "STABILITY_BANDS_UNAVAILABLE",
+    "EVPI_UNAVAILABLE",
+    "PATH_DECOMPOSITION_UNAVAILABLE",
+)
+
+
+def _request_clamped_edge_all_phases():
+    """Graph idx=2 with edges[0].strength.mean forced out of [-1, 1] so parsing
+    emits the benign STRENGTH_MEAN_CLAMPED, plus every optional phase enabled so a
+    budget-exhausted run also emits all four degradation codes."""
+    v = _variants()
+    graph = copy.deepcopy(v["graphs"][2])
+    graph["edges"][0]["strength"]["mean"] = 1000.0  # clamped -> STRENGTH_MEAN_CLAMPED
+    return RobustnessRequestV2(
+        request_id="severity-mapping-test",
+        graph=graph,
+        options=v["options"],
+        goal_node_id=v["goal_node_id"],
+        seed=42,
+        n_samples=v["n_samples"],
+        include_e_values=True,
+        include_voi=True,
+        include_path_decomposition=True,
+        parameter_uncertainties=[{"node_id": "demand", "distribution": "normal", "std": 0.1}],
+    )
+
+
+class TestSeverityMappingDegradationVsBenign:
+    def test_only_degradation_codes_are_warning_benign_stays_info(self, monkeypatch):
+        # Budget exhausted -> all four optional phases entry-skip and disclose.
+        monkeypatch.setattr(RobustnessAnalyzerV2, "OVERALL_REQUEST_BUDGET_MS", 0)
+        resp = RobustnessAnalyzerV2().analyze(_request_clamped_edge_all_phases())
+
+        # POSITIVE CONTROL: the four degradation codes AND the benign
+        # STRENGTH_MEAN_CLAMPED are all present, so the severity assertions below
+        # can see a presence (trap-13).
+        codes = _codes(resp)
+        for c in DEGRADATION_CODES:
+            assert c in codes, f"positive control: {c} must be present"
+        assert "STRENGTH_MEAN_CLAMPED" in codes, "positive control: benign code must be present"
+
+        # The four degradation codes opt UP to 'warning'.
+        for c in DEGRADATION_CODES:
+            assert _warn(resp, c).severity == "warning", f"{c} must be 'warning'"
+
+        # The benign input-adjustment diagnostic STAYS 'info' (the inversion the
+        # default-'warning' code caused). RED-first: fails while the default is
+        # 'warning'.
+        assert (
+            _warn(resp, "STRENGTH_MEAN_CLAMPED").severity == "info"
+        ), "benign STRENGTH_MEAN_CLAMPED must stay 'info', not be stamped 'warning'"
+
+        # Pin the mapping on the SERIALISED wire too.
+        by_code = {
+            w["code"]: w
+            for w in resp.model_dump(by_alias=True, exclude_none=True)["inference_warnings"]
+        }
+        for c in DEGRADATION_CODES:
+            assert by_code[c]["severity"] == "warning"
+        assert by_code["STRENGTH_MEAN_CLAMPED"]["severity"] == "info"

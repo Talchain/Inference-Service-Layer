@@ -825,7 +825,6 @@ class RobustnessAnalyzerV2:
         reason: str,
         elapsed_ms: float,
         message: str,
-        severity: Literal["info", "warning", "error"] = "warning",
     ) -> "InferenceWarning":
         """Build the wire disclosure for an optional phase skipped/tripped under
         the request budget. Mirrors the LOG-only e_value_budget_exceeded /
@@ -833,12 +832,18 @@ class RobustnessAnalyzerV2:
         channel PLoT reads), carrying elapsed_ms — the #226 gap for
         flip_thresholds, now closed for the whole optional-phase family.
 
-        Codex F4: stamps a real severity ('warning' by default) so PLoT/UI no
-        longer default a missing severity to 'info' and hide the disclosure."""
+        Codex F4: the four optional-phase degradation codes (E_VALUES_UNAVAILABLE
+        / STABILITY_BANDS_UNAVAILABLE / EVPI_UNAVAILABLE /
+        PATH_DECOMPOSITION_UNAVAILABLE) are the ONLY InferenceWarnings that surface
+        as 'warning' — PLoT maps severity=='warning' to a shown warning and
+        everything else to 'info', so stamp 'warning' HERE explicitly. The ~9
+        benign input-adjustment/default diagnostics (STRENGTH_MEAN_CLAMPED,
+        CONSTRAINT_NODE_DEFAULT_BASE, ROOT_NODE_DEFAULT_VALUE, ...) are built
+        directly and keep InferenceWarning's quiet 'info' default."""
         return InferenceWarning(
             code=code,
             field=field,
-            severity=severity,
+            severity="warning",
             detail={"reason": reason, "elapsed_ms": elapsed_ms, "message": message},
         )
 
