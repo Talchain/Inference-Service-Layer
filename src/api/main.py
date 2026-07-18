@@ -159,18 +159,47 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
 
     Handles initialization on startup and cleanup on shutdown.
     """
+    # --- Codex F15: CPU-analysis process pool + compute governor -------------
+    # The offload is UNCONDITIONAL (Paul ruling 18 Jul — no env kill-switch); the
+    # pool is created here for every environment. If construction fails, handlers
+    # fall back to the in-process path (self-heal), so a broken pool subsystem can
+    # never brick analysis. Constants are hardcoded (no env vars).
+    from src.services.analysis_pool import create_analysis_pool
+    from src.services.compute_governor import (
+        ANALYSIS_QUEUE_MAX,
+        ANALYSIS_WORKERS,
+        ComputeGovernor,
+    )
+
+    app.state.analysis_workers = ANALYSIS_WORKERS
+    app.state.governor = ComputeGovernor(workers=ANALYSIS_WORKERS, queue_max=ANALYSIS_QUEUE_MAX)
+    try:
+        app.state.analysis_pool = create_analysis_pool(ANALYSIS_WORKERS)
+    except Exception:
+        logger.exception("analysis_pool_init_failed")
+        app.state.analysis_pool = None
+
     # Startup
     logger.info(
         "application_startup",
         extra={
             "version": settings.VERSION,
             "environment": "production" if not settings.RELOAD else "development",
+            "analysis_workers": ANALYSIS_WORKERS,
+            "analysis_queue_max": ANALYSIS_QUEUE_MAX,
+            "analysis_offload": app.state.analysis_pool is not None,
         },
     )
 
     yield
 
     # Shutdown
+    pool = getattr(app.state, "analysis_pool", None)
+    if pool is not None:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # pragma: no cover - best-effort shutdown
+            logger.exception("analysis_pool_shutdown_failed")
     logger.info("application_shutdown")
 
 

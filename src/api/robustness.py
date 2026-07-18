@@ -18,7 +18,7 @@ import uuid
 from typing import Any, Dict, Optional, Union
 
 import numpy as np
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -47,12 +47,15 @@ from src.models.response_v2 import (
     PathDecompositionV2,
     RobustnessResultV2,
 )
+from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
 from src.models.robustness import RobustnessRequest, RobustnessResponse
 from src.models.robustness_v2 import (
     RobustnessRequestV2,
     RobustnessResponseV2,
     detect_schema_version,
 )
+from src.services.analysis_pool import AnalysisDeadlineExceeded, run_offloaded
+from src.services.compute_governor import RETRY_AFTER_SECONDS, ComputeGovernor, Overload
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import (
     COMPLEXITY_FORMULA_VERSION,
@@ -140,6 +143,80 @@ def _admission_error_body(request: RobustnessRequestV2, cost: WeightedCost, max_
         "complexity_score": cost.total,
         "suggestion": _admission_suggestion(request, cost),
     }
+
+
+# ---------------------------------------------------------------------------
+# Compute-governor overload + hard-deadline responses (Codex F15)
+# ---------------------------------------------------------------------------
+# The governor returns EARLY and TYPED on overload rather than leaving a caller
+# hanging on a saturated pool: 429 when the caller's own concurrency is the cause,
+# 503 when the service as a whole is busy. The hard deadline (worker terminated)
+# returns 504. All three carry Retry-After and the canonical ErrorResponse body.
+
+
+def _ensure_governor(app: Any) -> ComputeGovernor:
+    """Return the app's compute governor, lazily creating a default if absent.
+
+    Production installs the governor in the lifespan; a test using the
+    ASGITransport client (no lifespan) has none. Lazily attaching a single default
+    instance keeps the endpoint working (and bounded) rather than 500-ing on a
+    missing attribute — part of the "analysis can never brick" guarantee.
+    """
+    gov = getattr(app.state, "governor", None)
+    if gov is None:
+        gov = ComputeGovernor()
+        app.state.governor = gov
+    return gov
+
+
+def _overload_error_response(overload: Overload, request_id: str) -> ErrorResponse:
+    """Typed body for a governor 429/503 (caller-concurrency / service-busy)."""
+    if overload.status_code == 429:
+        code = ErrorCode.RATE_LIMIT_EXCEEDED.value
+        message = "Too many concurrent analyses from this caller. Retry shortly."
+        hints = [
+            "Reduce the number of simultaneous /analyze requests you issue",
+            "Retry after the Retry-After interval",
+        ]
+    else:
+        code = ErrorCode.SERVICE_UNAVAILABLE.value
+        message = "Analysis service is at compute capacity. Retry shortly."
+        hints = [
+            "Retry after the Retry-After interval",
+            "Consider smaller or fewer concurrent analyses",
+        ]
+    return ErrorResponse(
+        code=code,
+        message=message,
+        reason=overload.reason,
+        recovery=RecoveryHints(hints=hints, suggestion="Retry after Retry-After seconds"),
+        retryable=True,
+        source="isl",
+        request_id=request_id,
+    )
+
+
+def _deadline_error_response(deadline: AnalysisDeadlineExceeded, request_id: str) -> ErrorResponse:
+    """Typed 504 body for an analysis that blew the hard compute deadline."""
+    return ErrorResponse(
+        code=ErrorCode.TIMEOUT.value,
+        message=(
+            f"Analysis exceeded the {deadline.deadline_s:.0f}s hard compute deadline "
+            "and was terminated."
+        ),
+        reason="analysis_hard_deadline_exceeded",
+        recovery=RecoveryHints(
+            hints=[
+                "Reduce n_samples, options, or graph size",
+                "Disable optional phases (include_voi / include_e_values / "
+                "include_path_decomposition)",
+            ],
+            suggestion="Retry with a smaller analysis",
+        ),
+        retryable=True,
+        source="isl",
+        request_id=request_id,
+    )
 
 
 # Initialize services
@@ -305,11 +382,24 @@ async def analyze_robustness(
             "model": ISLV2Error422,
             "description": "Validation error with structured critiques",
         },
+        429: {
+            "model": ErrorResponse,
+            "description": "Caller concurrency limit exceeded — retry after Retry-After",
+        },
+        503: {
+            "model": ErrorResponse,
+            "description": "Service at compute capacity — retry after Retry-After",
+        },
+        504: {
+            "model": ErrorResponse,
+            "description": "Analysis exceeded the hard compute deadline and was terminated",
+        },
         500: {"description": "Internal computation error"},
     },
 )
 async def analyze_robustness_v2(
     request: RobustnessRequestV2,
+    http_request: Request,
     response_version: int = Query(
         default=DEFAULT_RESPONSE_VERSION,
         ge=1,
@@ -321,6 +411,7 @@ async def analyze_robustness_v2(
         description="Include detailed diagnostics (V2 only)",
     ),
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
     x_isl_response_version: Optional[int] = Header(
         default=None,
         alias="X-ISL-Response-Version",
@@ -355,16 +446,20 @@ async def analyze_robustness_v2(
 
     # For V1 responses, use the legacy handler
     if version == 1:
-        return await _analyze_robustness_v2_legacy(request, request_id)
+        return await _analyze_robustness_v2_legacy(request, request_id, http_request.app, x_api_key)
 
     # V2 response format with validation and structured output
-    return await _analyze_robustness_v2_enhanced(request, request_id, include_diagnostics)
+    return await _analyze_robustness_v2_enhanced(
+        request, request_id, include_diagnostics, http_request.app, x_api_key
+    )
 
 
 async def _analyze_robustness_v2_legacy(
     request: RobustnessRequestV2,
     request_id: str,
-) -> RobustnessResponseV2:
+    app: Any,
+    api_key: Optional[str],
+) -> Union[RobustnessResponseV2, JSONResponse]:
     """Legacy V1 response handler (backward compatible)."""
     try:
         # Compute-admission guard (Codex F8 weighted cost) — reject oversized
@@ -417,8 +512,38 @@ async def _analyze_robustness_v2_legacy(
             },
         )
 
-        # Perform v2 analysis
-        response = robustness_analyzer_v2.analyze(request)
+        # Perform v2 analysis — offloaded to the process pool via the compute
+        # governor (Codex F15). The governor rejects EARLY + TYPED on overload
+        # (429/503 + Retry-After); the offload self-heals on worker crash and
+        # enforces the hard deadline (504 + Retry-After). These are returned
+        # INLINE as JSONResponse (not raised) so the canonical ErrorResponse body
+        # AND the Retry-After header survive — the global HTTPException handler
+        # rebuilds responses and drops custom headers, so a raised HTTPException
+        # would lose Retry-After.
+        governor = _ensure_governor(app)
+        try:
+            async with governor.admit(cost.total, api_key):
+                response = await run_offloaded(app, request, request_id)
+        except Overload as overload:
+            body = _overload_error_response(overload, request_id)
+            return JSONResponse(
+                status_code=overload.status_code,
+                content=body.model_dump(exclude_none=True),
+                headers={
+                    "Retry-After": str(overload.retry_after),
+                    "X-Request-Id": request_id,
+                },
+            )
+        except AnalysisDeadlineExceeded as deadline:
+            body = _deadline_error_response(deadline, request_id)
+            return JSONResponse(
+                status_code=504,
+                content=body.model_dump(exclude_none=True),
+                headers={
+                    "Retry-After": str(RETRY_AFTER_SECONDS),
+                    "X-Request-Id": request_id,
+                },
+            )
 
         # Track metrics
         track_robustness_analysis(
@@ -478,6 +603,8 @@ async def _analyze_robustness_v2_enhanced(
     request: RobustnessRequestV2,
     request_id: str,
     include_diagnostics: bool,
+    app: Any,
+    api_key: Optional[str],
 ) -> JSONResponse:
     """Enhanced V2 response handler with validation and structured output."""
     # Build request echo (no sensitive data)
@@ -608,8 +735,35 @@ async def _analyze_robustness_v2_enhanced(
             },
         )
 
-        # Run analysis
-        v1_response = robustness_analyzer_v2.analyze(request)
+        # Run analysis — offloaded to the process pool via the compute governor
+        # (Codex F15). On overload the governor returns EARLY + TYPED (429/503 +
+        # Retry-After); the hard deadline returns 504. These are returned inline
+        # as JSONResponse so the outer `except Exception -> 500` never mis-maps
+        # them. run_offloaded self-heals on worker crash (in-process fallback).
+        governor = _ensure_governor(app)
+        try:
+            async with governor.admit(cost.total, api_key):
+                v1_response = await run_offloaded(app, request, request_id)
+        except Overload as overload:
+            body = _overload_error_response(overload, request_id)
+            return JSONResponse(
+                status_code=overload.status_code,
+                content=body.model_dump(exclude_none=True),
+                headers={
+                    "Retry-After": str(overload.retry_after),
+                    "X-Request-Id": request_id,
+                },
+            )
+        except AnalysisDeadlineExceeded as deadline:
+            body = _deadline_error_response(deadline, request_id)
+            return JSONResponse(
+                status_code=504,
+                content=body.model_dump(exclude_none=True),
+                headers={
+                    "Retry-After": str(RETRY_AFTER_SECONDS),
+                    "X-Request-Id": request_id,
+                },
+            )
 
         # Reproducibility hardening: the envelope must report the seed the
         # analyzer actually used. Both derive from compute_effective_seed, so
@@ -1101,7 +1255,9 @@ async def _analyze_robustness_v2_enhanced(
 )
 async def analyze_robustness_unified(
     request: Dict[str, Any],
+    http_request: Request,
     x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
 ) -> Union[RobustnessResponse, RobustnessResponseV2]:
     """
     Unified robustness analysis endpoint supporting both v1 and v2 schemas.
@@ -1142,7 +1298,9 @@ async def analyze_robustness_unified(
             validated_request.request_id = validated_request.request_id or request_id
             return await analyze_robustness_v2(  # type: ignore[no-any-return]
                 validated_request,
+                http_request=http_request,
                 x_request_id=request_id,
+                x_api_key=x_api_key,
             )
         else:
             # Validate and process v1 request
