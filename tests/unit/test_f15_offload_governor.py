@@ -200,7 +200,9 @@ class TestGovernorGates:
     async def test_weighted_cost_budget_503(self):
         """Gate 3: the weighted in-flight cost budget (= F8 cost_units) rejects with
         503 when Σ admitted cost would exceed it. Driven via a small max_cost
-        override (at the real ceiling it never binds tighter than the slot gate)."""
+        override. (At the real ceiling budget = workers × max_cost, so gate 3 binds
+        FIRST for near-max_cost bursts — capped at ≈workers — while the slot gate
+        dominates for cheap jobs; see the corrected compute_governor gate-3 note.)"""
         gov = ComputeGovernor(workers=4, queue_max=4, max_cost=100)
         release = asyncio.Event()
 

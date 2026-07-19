@@ -8,23 +8,33 @@ to prevent DoS attacks and ensure robust input validation.
 from typing import Dict, List, Any, Optional
 from pydantic import validator, Field
 
+from src.constants import MAX_GRAPH_EDGES, MAX_GRAPH_NODES, MAX_OPTIONS
 
-# Global limits to prevent DoS attacks — aligned with platform contract
-MAX_OPTIONS = 10
+
+# Global limits to prevent DoS attacks — aligned with platform contract.
+# MAX_OPTIONS / MAX_GRAPH_NODES / MAX_GRAPH_EDGES are the single source of truth in
+# src.constants (imported above; also advertised on /health.compute_admission.caps),
+# so this module can never drift from the enforced caps (derive, don't mirror).
+# MAX_CRITERIA / MAX_PARAMETERS / MAX_SWEEP_POINTS are local to request validation.
 MAX_CRITERIA = 10
 MAX_PARAMETERS = 20
 MAX_SWEEP_POINTS = 200
 
 
 class RequestSizeLimits:
-    """Centralized request size limits for all ISL endpoints."""
+    """Centralized request size limits for all ISL endpoints.
 
-    MAX_OPTIONS = 10
-    MAX_CRITERIA = 10
-    MAX_PARAMETERS = 20
-    MAX_SWEEP_POINTS = 200
-    MAX_GRAPH_NODES = 50
-    MAX_GRAPH_EDGES = 200
+    The graph/option ceilings (MAX_OPTIONS / MAX_GRAPH_NODES / MAX_GRAPH_EDGES)
+    derive from src.constants; MAX_CRITERIA / MAX_PARAMETERS / MAX_SWEEP_POINTS
+    are local to request validation.
+    """
+
+    MAX_OPTIONS = MAX_OPTIONS
+    MAX_CRITERIA = MAX_CRITERIA
+    MAX_PARAMETERS = MAX_PARAMETERS
+    MAX_SWEEP_POINTS = MAX_SWEEP_POINTS
+    MAX_GRAPH_NODES = MAX_GRAPH_NODES
+    MAX_GRAPH_EDGES = MAX_GRAPH_EDGES
 
 
 def validate_option_count(options: List[Any], context: str = "options") -> None:

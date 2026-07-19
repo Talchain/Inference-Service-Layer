@@ -14,11 +14,29 @@ from src.config import get_settings, GIT_COMMIT_SHA, GIT_COMMIT_SHORT
 from src.infrastructure.memory_cache import get_memory_cache
 from src.models.metadata import generate_config_fingerprint
 from src.models.responses import ComputeAdmissionInfo, HealthResponse
-from src.services.robustness_analyzer_v2 import build_compute_admission
+from src.services.robustness_analyzer_v2 import build_compute_admission, get_max_cost_units
 from src.utils.error_recovery import health_monitor
 
 router = APIRouter()
 settings = get_settings()
+
+# Precompute the STATIC compute-admission block once at import. Weights, caps, and
+# complexity_formula_version are module constants (never change at runtime); only
+# max_cost_units is env-resolved and must stay live per poll. Derived from
+# build_compute_admission() (still the single source) so this cannot drift.
+_STATIC_COMPUTE_ADMISSION = {
+    k: v for k, v in build_compute_admission().items() if k != "max_cost_units"
+}
+
+
+def _compute_admission_info() -> ComputeAdmissionInfo:
+    """Build the /health compute_admission block: static part precomputed at
+    import, max_cost_units re-resolved live from the env each poll. Response is
+    byte-identical to ComputeAdmissionInfo(**build_compute_admission())."""
+    return ComputeAdmissionInfo(
+        max_cost_units=get_max_cost_units(),
+        **_STATIC_COMPUTE_ADMISSION,
+    )
 
 
 @router.get(
@@ -44,7 +62,7 @@ async def health_check() -> HealthResponse:
         build_full=GIT_COMMIT_SHA if GIT_COMMIT_SHA != "unknown" else None,
         timestamp=datetime.utcnow().isoformat() + "Z",
         config_fingerprint=generate_config_fingerprint(),
-        compute_admission=ComputeAdmissionInfo(**build_compute_admission()),
+        compute_admission=_compute_admission_info(),
     )
 
 
@@ -74,7 +92,7 @@ async def readiness_check() -> HealthResponse:
         build_full=GIT_COMMIT_SHA if GIT_COMMIT_SHA != "unknown" else None,
         timestamp=datetime.utcnow().isoformat() + "Z",
         config_fingerprint=generate_config_fingerprint(),
-        compute_admission=ComputeAdmissionInfo(**build_compute_admission()),
+        compute_admission=_compute_admission_info(),
     )
 
 
