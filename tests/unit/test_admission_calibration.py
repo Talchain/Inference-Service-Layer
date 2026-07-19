@@ -13,8 +13,6 @@ The CEILING is PROVISIONAL (local-hardware calibration; staging recalibration
 owed). This file pins the SHIPPED provisional value: changing it must be a
 conscious edit, surfaced in review, not a silent drift.
 """
-import json
-
 from fastapi.testclient import TestClient
 
 from src.api.main import app
@@ -170,20 +168,56 @@ class TestPC2OptionRepricing:
         assert data["complexity_formula_version"] == COMPLEXITY_FORMULA_VERSION
 
     def test_ten_option_evpi_legacy_endpoint_returns_422(self):
-        """Legacy (v1) handler raises the same admission 422 (HTTPException path).
+        """Legacy (v1) handler returns the SAME normalised admission 422 as v2.
 
-        The v1 path raises HTTPException, which the app's custom handler reshapes
-        into the Olumi Error Schema (the structured admission body is stringified
-        into `message`). The clean structured body is served on the v2 path (which
-        PLoT uses); this test just proves the v1 path also rejects with the cost
-        reported.
+        /simplify (19 Jul): the v1 path formerly raised HTTPException, which the
+        app's custom handler reshaped into the Olumi Error Schema (stringifying the
+        structured admission body into `message`). Both v2 handlers now go through
+        the shared _admission_cost_guard helper and return the flat structured
+        body directly — so cost_units / limit / dominant_term are top-level JSON
+        numbers, not buried in a stringified `message`.
         """
         client = TestClient(app)
         body = _request_dict(40, 120, 5000, 10, evpi_factors=5)
         resp = client.post(ENDPOINT, json=body)  # default response_version=1
         assert resp.status_code == 422
-        blob = json.dumps(resp.json())
-        assert "cost_units" in blob and "compute cost exceeds limit" in blob
+        data = resp.json()
+        # Flat structured body (the shape the enhanced/v2 handler serves), NOT the
+        # Olumi Error Schema wrapper — data["cost_units"] would KeyError on the old
+        # stringified-into-message form, so this discriminates the normalisation.
+        assert data["detail"] == "Request compute cost exceeds limit"
+        assert data["cost_units"] > data["limit"]
+        assert data["dominant_term"] == "evpi"
+
+    def test_admission_422_preserves_x_request_id_both_handlers(self):
+        """Both v2 handlers' compute-cost 422 echo X-Request-Id + serve the flat
+        structured body (regression guard for the /simplify legacy↔enhanced fix).
+
+        Before the fix the legacy (v1) path raised HTTPException and the global
+        handler rebuilt the response into the Olumi Error Schema; both paths now go
+        through the shared _admission_cost_guard. (X-Request-Id is additionally
+        backstopped by TracingMiddleware; the sharper discriminator here is the
+        flat cost body, which the old wrapped shape lacked.)
+        """
+        client = TestClient(app)
+        body = _request_dict(40, 120, 5000, 10, evpi_factors=5)  # over the ceiling
+        rid = "req-simplify-xrid-probe"
+
+        # Legacy (response_version=1, default)
+        legacy = client.post(ENDPOINT, json=body, headers={"X-Request-Id": rid})
+        assert legacy.status_code == 422
+        assert legacy.headers.get("X-Request-Id") == rid
+        assert legacy.json()["cost_units"] > legacy.json()["limit"]
+
+        # Enhanced (response_version=2)
+        enhanced = client.post(
+            ENDPOINT,
+            json=body,
+            headers={"X-Request-Id": rid, "X-ISL-Response-Version": "2"},
+        )
+        assert enhanced.status_code == 422
+        assert enhanced.headers.get("X-Request-Id") == rid
+        assert enhanced.json()["cost_units"] > enhanced.json()["limit"]
 
 
 # ---------------------------------------------------------------------------

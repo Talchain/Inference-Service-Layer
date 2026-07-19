@@ -20,10 +20,18 @@ the check-and-reserve block below runs with no interleaving):
 3. **Weighted in-flight cost** (Σ admitted ``cost_units`` + new > budget) → 503
    ``service_busy_cost_budget``. The weight **is the F8 ``cost_units``** (via
    ``compute_weighted_cost`` / ``get_max_cost_units`` — one source of truth, no
-   second cost model). At the real ceiling the budget is ``workers × max_cost``,
-   so it never binds tighter than gate 1 (every admitted job is already
-   ≤ ``max_cost``); it exists as real, tested plumbing that binds if the ceiling
-   or worker count changes, and tests drive it via the ``max_cost`` override.
+   second cost model). At the real ceiling the budget is ``workers × max_cost``.
+   When gate 3 binds (corrected 19 Jul — the earlier "never binds tighter than
+   gate 1" note was WRONG): gate 1 admits up to ``workers + queue_max``
+   (= ``3 × workers`` with the defaults here) jobs, and each admitted job is
+   ≤ ``max_cost``, so the admitted cost can reach ``3 × workers × max_cost`` —
+   THREE times this budget. Gate 3 therefore binds FIRST for expensive jobs: a
+   burst of near-``max_cost`` analyses is capped at ≈``workers`` admitted
+   (Σ cost ≤ ``workers × max_cost``), well below gate 1's ``3 × workers``. Gate 1
+   dominates only for cheap jobs (mean cost ≲ ``max_cost / 3``). The old note
+   assumed the budget equalled gate 1's aggregate; it is one-third of it. This is
+   real, tested plumbing (tests drive it via the ``max_cost`` override); it also
+   binds if the ceiling or worker count changes.
 
 The semaphore (sized to ``workers``) enforces "in-flight never exceeds workers"
 (PC-B). Reservations are taken synchronously at admit and released in a ``finally``

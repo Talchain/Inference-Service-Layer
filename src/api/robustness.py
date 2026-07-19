@@ -219,6 +219,91 @@ def _deadline_error_response(deadline: AnalysisDeadlineExceeded, request_id: str
     )
 
 
+def _admission_cost_guard(
+    request: RobustnessRequestV2, request_id: str
+) -> tuple[WeightedCost, Optional[JSONResponse]]:
+    """Compute the weighted admission cost, log it, and gate oversized requests.
+
+    Shared by both v2 handlers (dedup + normalisation). Returns ``(cost, error)``
+    where ``error`` is a 422 ``JSONResponse`` carrying the structured
+    cost-breakdown body + ``X-Request-Id`` when the request exceeds the
+    compute-cost ceiling, else ``None``. Both handlers now return the SAME
+    normalised 422 — the legacy path previously ``raise``d ``HTTPException``,
+    which the global handler rebuilt into the Olumi Error Schema (stringifying the
+    structured body into ``message``) and dropped ``X-Request-Id``. Legacy is off
+    the live V5 path, so this only tightens an already-rejected error shape.
+    """
+    n_nodes = len(request.graph.nodes)
+    n_edges = len(request.graph.edges)
+    cost = compute_weighted_cost(request)
+    max_cost = get_max_cost_units()
+    logger.info(
+        "robustness_v2_complexity",
+        extra={
+            "request_id": request_id,
+            "cost_units": cost.total,
+            "limit": max_cost,
+            "dominant_term": cost.dominant_term,
+            "cost_breakdown": cost.terms,
+            "n_samples": request.n_samples,
+            "n_options": len(request.options),
+            "n_nodes": n_nodes,
+            "n_edges": n_edges,
+        },
+    )
+    if cost.total > max_cost:
+        return cost, JSONResponse(
+            status_code=422,
+            content=_admission_error_body(request, cost, max_cost),
+            headers={"X-Request-Id": request_id},
+        )
+    return cost, None
+
+
+async def _admit_and_run(
+    app: Any,
+    request: RobustnessRequestV2,
+    request_id: str,
+    api_key: Optional[str],
+    cost: WeightedCost,
+) -> tuple[Optional[RobustnessResponseV2], Optional[JSONResponse]]:
+    """Admit through the compute governor and run the analysis offloaded.
+
+    Shared by both v2 handlers. Returns ``(response, error)``: on success
+    ``(response, None)``; on governor overload (429/503) or hard-deadline breach
+    (504), ``(None, error)`` where ``error`` is the typed ``JSONResponse``
+    carrying ``Retry-After`` + ``X-Request-Id``. The error is returned INLINE
+    (not raised) so the canonical ErrorResponse body and the ``Retry-After``
+    header survive — the global HTTPException handler rebuilds responses and
+    drops custom headers. Exactly one of the two returned values is non-None.
+    """
+    governor = _ensure_governor(app)
+    try:
+        async with governor.admit(cost.total, api_key):
+            response = await run_offloaded(app, request, request_id)
+    except Overload as overload:
+        body = _overload_error_response(overload, request_id)
+        return None, JSONResponse(
+            status_code=overload.status_code,
+            content=body.model_dump(exclude_none=True),
+            headers={
+                "Retry-After": str(overload.retry_after),
+                "X-Request-Id": request_id,
+            },
+        )
+    except AnalysisDeadlineExceeded as deadline:
+        body = _deadline_error_response(deadline, request_id)
+        return None, JSONResponse(
+            status_code=504,
+            content=body.model_dump(exclude_none=True),
+            headers={
+                "Retry-After": str(RETRY_AFTER_SECONDS),
+                "X-Request-Id": request_id,
+            },
+        )
+    return response, None
+
+
 # Initialize services
 robustness_analyzer = RobustnessAnalyzer()
 robustness_analyzer_v2 = RobustnessAnalyzerV2()
@@ -463,30 +548,12 @@ async def _analyze_robustness_v2_legacy(
     """Legacy V1 response handler (backward compatible)."""
     try:
         # Compute-admission guard (Codex F8 weighted cost) — reject oversized
-        # requests early (DoS protection).
-        n_nodes = len(request.graph.nodes)
-        n_edges = len(request.graph.edges)
-        cost = compute_weighted_cost(request)
-        max_cost = get_max_cost_units()
-        logger.info(
-            "robustness_v2_complexity",
-            extra={
-                "request_id": request_id,
-                "cost_units": cost.total,
-                "limit": max_cost,
-                "dominant_term": cost.dominant_term,
-                "cost_breakdown": cost.terms,
-                "n_samples": request.n_samples,
-                "n_options": len(request.options),
-                "n_nodes": n_nodes,
-                "n_edges": n_edges,
-            },
-        )
-        if cost.total > max_cost:
-            raise HTTPException(
-                status_code=422,
-                detail=_admission_error_body(request, cost, max_cost),
-            )
+        # requests early (DoS protection). Shared with the enhanced handler; the
+        # 422 is now the normalised structured body + X-Request-Id (was a raised
+        # HTTPException that the global handler reshaped and stripped the header).
+        cost, cost_error = _admission_cost_guard(request, request_id)
+        if cost_error is not None:
+            return cost_error
 
         # Enhanced logging for parameter uncertainty debugging
         param_uncertainties = request.parameter_uncertainties or []
@@ -513,37 +580,14 @@ async def _analyze_robustness_v2_legacy(
         )
 
         # Perform v2 analysis — offloaded to the process pool via the compute
-        # governor (Codex F15). The governor rejects EARLY + TYPED on overload
-        # (429/503 + Retry-After); the offload self-heals on worker crash and
-        # enforces the hard deadline (504 + Retry-After). These are returned
-        # INLINE as JSONResponse (not raised) so the canonical ErrorResponse body
-        # AND the Retry-After header survive — the global HTTPException handler
-        # rebuilds responses and drops custom headers, so a raised HTTPException
-        # would lose Retry-After.
-        governor = _ensure_governor(app)
-        try:
-            async with governor.admit(cost.total, api_key):
-                response = await run_offloaded(app, request, request_id)
-        except Overload as overload:
-            body = _overload_error_response(overload, request_id)
-            return JSONResponse(
-                status_code=overload.status_code,
-                content=body.model_dump(exclude_none=True),
-                headers={
-                    "Retry-After": str(overload.retry_after),
-                    "X-Request-Id": request_id,
-                },
-            )
-        except AnalysisDeadlineExceeded as deadline:
-            body = _deadline_error_response(deadline, request_id)
-            return JSONResponse(
-                status_code=504,
-                content=body.model_dump(exclude_none=True),
-                headers={
-                    "Retry-After": str(RETRY_AFTER_SECONDS),
-                    "X-Request-Id": request_id,
-                },
-            )
+        # governor (Codex F15). Overload (429/503) and the hard deadline (504) are
+        # returned INLINE as typed JSONResponses so the canonical ErrorResponse
+        # body AND Retry-After + X-Request-Id survive the global handler. Shared
+        # with the enhanced handler.
+        response, run_error = await _admit_and_run(app, request, request_id, api_key, cost)
+        if run_error is not None:
+            return run_error
+        assert response is not None  # _admit_and_run returns exactly one non-None
 
         # Track metrics
         track_robustness_analysis(
@@ -634,31 +678,10 @@ async def _analyze_robustness_v2_enhanced(
 
     try:
         # Compute-admission guard (Codex F8 weighted cost) — reject oversized
-        # requests early (DoS protection).
-        n_nodes = len(request.graph.nodes)
-        n_edges = len(request.graph.edges)
-        cost = compute_weighted_cost(request)
-        max_cost = get_max_cost_units()
-        logger.info(
-            "robustness_v2_complexity",
-            extra={
-                "request_id": request_id,
-                "cost_units": cost.total,
-                "limit": max_cost,
-                "dominant_term": cost.dominant_term,
-                "cost_breakdown": cost.terms,
-                "n_samples": request.n_samples,
-                "n_options": len(request.options),
-                "n_nodes": n_nodes,
-                "n_edges": n_edges,
-            },
-        )
-        if cost.total > max_cost:
-            return JSONResponse(
-                status_code=422,
-                content=_admission_error_body(request, cost, max_cost),
-                headers={"X-Request-Id": request_id},
-            )
+        # requests early (DoS protection). Shared with the legacy handler.
+        cost, cost_error = _admission_cost_guard(request, request_id)
+        if cost_error is not None:
+            return cost_error
 
         # Convert request to dict for validation
         graph_dict = {
@@ -735,35 +758,15 @@ async def _analyze_robustness_v2_enhanced(
             },
         )
 
-        # Run analysis — offloaded to the process pool via the compute governor
-        # (Codex F15). On overload the governor returns EARLY + TYPED (429/503 +
-        # Retry-After); the hard deadline returns 504. These are returned inline
-        # as JSONResponse so the outer `except Exception -> 500` never mis-maps
-        # them. run_offloaded self-heals on worker crash (in-process fallback).
-        governor = _ensure_governor(app)
-        try:
-            async with governor.admit(cost.total, api_key):
-                v1_response = await run_offloaded(app, request, request_id)
-        except Overload as overload:
-            body = _overload_error_response(overload, request_id)
-            return JSONResponse(
-                status_code=overload.status_code,
-                content=body.model_dump(exclude_none=True),
-                headers={
-                    "Retry-After": str(overload.retry_after),
-                    "X-Request-Id": request_id,
-                },
-            )
-        except AnalysisDeadlineExceeded as deadline:
-            body = _deadline_error_response(deadline, request_id)
-            return JSONResponse(
-                status_code=504,
-                content=body.model_dump(exclude_none=True),
-                headers={
-                    "Retry-After": str(RETRY_AFTER_SECONDS),
-                    "X-Request-Id": request_id,
-                },
-            )
+        # Run analysis — offloaded via the compute governor (Codex F15). Overload
+        # (429/503) and the hard deadline (504) are returned INLINE as typed
+        # JSONResponses so the outer `except Exception -> 500` never mis-maps them
+        # and Retry-After + X-Request-Id survive. run_offloaded self-heals on
+        # worker crash (in-process fallback). Shared with the legacy handler.
+        v1_response, run_error = await _admit_and_run(app, request, request_id, api_key, cost)
+        if run_error is not None:
+            return run_error
+        assert v1_response is not None  # _admit_and_run returns exactly one non-None
 
         # Reproducibility hardening: the envelope must report the seed the
         # analyzer actually used. Both derive from compute_effective_seed, so
