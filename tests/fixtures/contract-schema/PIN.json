@@ -1,0 +1,9 @@
+{
+  "_comment_what": "THE single pin for the @talchain/schemas contract artifact used by the ISL drift check (tests/contract_drift/). The committed artifact talchain-schemas.json in this directory MUST be byte-identical to what scripts/contract_schema/refresh_contract_schema.sh regenerates from this pin — CI's contract-drift freshness gate enforces that. Change the contract snapshot ONLY by editing this file and running the refresh script; hand-editing talchain-schemas.json is exactly the hand-maintained-mirror defect this check exists to kill.",
+  "_comment_upstream": "INTENDED upstream is the JSON-Schema export artifact being built on olumi-schemas branch 'a3-json-schema-publish' (draft PR, parallel A3 lane). That branch did not exist on the remote when this check was built (verified 2026-07-20, git ls-remote), so per the lane's settled fallback the artifact is generated locally from the schemas repo at the pinned ref below by scripts/contract_schema/generate_contract_schema.mjs. When the schemas PR merges and publishes, bump 'ref' here to that release tag (the brief anticipated a 0.19.x tag; main already carries package version 0.20.0, so in practice the next published tag) and, if the published artifact format differs, switch the refresh script to fetch it instead of generating.",
+  "repo": "Talchain/olumi-schemas",
+  "ref": "1b936ecaf9ddde0ee09566d13d686e07b8877751",
+  "ref_kind": "commit — origin/main tip at generation time (package.json version 0.20.0)",
+  "package_version_expected": "0.20.0",
+  "zod_to_json_schema_version": "3.22.5"
+}
