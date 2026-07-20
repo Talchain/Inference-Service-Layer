@@ -73,3 +73,25 @@ jobs:
         # perf-tests workflow with ISL_PERF_STRICT=1. Correctness assertions in
         # mixed tests remain in this suite; see tests/perf_utils.py.
         run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -x -q -m "not perf"
+
+  contract-drift:
+    name: Contract schema freshness gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # DERIVE, DON'T MIRROR: the committed contract JSON-Schema artifact
+      # (tests/fixtures/contract-schema/talchain-schemas.json) is consumed by
+      # the tests/contract_drift/ suite in the test job above. This gate
+      # re-derives it from Talchain/olumi-schemas at the ref pinned in
+      # tests/fixtures/contract-schema/PIN.json and FAILS LOUD on any byte
+      # difference — a committed copy without this gate would be exactly the
+      # hand-maintained mirror the drift check exists to kill. It never
+      # rewrites the artifact (no self-heal).
+      - name: Re-derive contract artifact from pinned ref and fail on byte drift
+        run: bash scripts/contract_schema/refresh_contract_schema.sh --check
