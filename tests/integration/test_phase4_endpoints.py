@@ -273,6 +273,13 @@ class TestSequentialAnalysisEndpoint:
         assert "expected_total_value" in policy
         assert "value_distribution" in policy
 
+        # Value-correct (hand-derived, neutral, d=0.95):
+        #   V(market)  = 0.6*0.95*100000 + 0.4*0.95*(-20000) = 57000 - 7600 = 49400
+        #   V(invest)  = max(-10000 + 0.95*49400, wait=0)    = 36930
+        # (This fixture graph has no chance/decision stage collision, so 36930 holds
+        # before and after the same-stage fix; it anchors correct behaviour.)
+        assert policy["expected_total_value"] == pytest.approx(36930.0)
+
         # Check value of flexibility is non-negative
         assert data["value_of_flexibility"] >= 0
 
@@ -321,6 +328,83 @@ class TestSequentialAnalysisEndpoint:
         )
 
         assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_sequential_same_stage_collision_matches_control(self, client):
+        """Served-path guard for the A2 same-stage backward-induction drop.
+
+        A chance node and the decision it feeds sharing a stage_index (the request
+        schema's OWN canonical example: market:1, pricing:1) must NOT collapse the
+        favorable subtree to 0. This posts the identical decision problem in two
+        layouts -- collision (pricing at stage 1) and control (pricing at its own
+        stage 2) -- and asserts both yield the correct +1893.75 with market
+        continuation 54625. If the drop ever returns, the collision layout goes RED
+        (-58122.5 / continuation -8550). Hand-derivation: NOTES.md sec 2 and
+        tests/unit/test_sequential_decision.py.
+        """
+
+        def payload(pricing_stage):
+            terminal_stage = pricing_stage + 1
+            stages = [
+                {"stage_index": 0, "stage_label": "Investment", "decision_nodes": ["invest"]}
+            ]
+            if pricing_stage == 1:
+                stages.append({
+                    "stage_index": 1, "stage_label": "Pricing",
+                    "decision_nodes": ["pricing"], "resolution_nodes": ["market"],
+                })
+            else:
+                stages.append({
+                    "stage_index": 1, "stage_label": "Market",
+                    "decision_nodes": [], "resolution_nodes": ["market"],
+                })
+                stages.append({
+                    "stage_index": 2, "stage_label": "Pricing", "decision_nodes": ["pricing"],
+                })
+            stages.append({
+                "stage_index": terminal_stage, "stage_label": "Terminal", "decision_nodes": [],
+            })
+            return {
+                "graph": {
+                    "nodes": [
+                        {"id": "invest", "type": "decision", "label": "Invest"},
+                        {"id": "market", "type": "chance", "label": "Market"},
+                        {"id": "pricing", "type": "decision", "label": "Pricing"},
+                        {"id": "high_return", "type": "terminal", "label": "High", "payoff": 100000},
+                        {"id": "low_return", "type": "terminal", "label": "Low", "payoff": 20000},
+                        {"id": "loss", "type": "terminal", "label": "Loss", "payoff": -30000},
+                    ],
+                    "edges": [
+                        {"from": "invest", "to": "market", "action": "invest", "immediate_payoff": -50000},
+                        {"from": "market", "to": "pricing", "outcome": "favorable", "probability": 0.7},
+                        {"from": "market", "to": "loss", "outcome": "unfavorable", "probability": 0.3},
+                        {"from": "pricing", "to": "high_return", "action": "premium"},
+                        {"from": "pricing", "to": "low_return", "action": "economy"},
+                    ],
+                    "stage_assignments": {
+                        "invest": 0, "market": 1, "pricing": pricing_stage,
+                        "high_return": terminal_stage, "low_return": terminal_stage,
+                        "loss": terminal_stage,
+                    },
+                },
+                "stages": stages,
+                "discount_factor": 0.95,
+                "risk_tolerance": "neutral",
+            }
+
+        collision = await client.post("/api/v1/analysis/sequential", json=payload(1))
+        control = await client.post("/api/v1/analysis/sequential", json=payload(2))
+        assert collision.status_code == 200
+        assert control.status_code == 200
+
+        control_val = control.json()["optimal_policy"]["expected_total_value"]
+        collision_val = collision.json()["optimal_policy"]["expected_total_value"]
+        assert control_val == pytest.approx(1893.75)
+        assert collision_val == pytest.approx(1893.75)
+
+        # market continuation seen by invest must be 54625, never -8550
+        invest_option = collision.json()["stage_analyses"][0]["options_at_stage"][0]
+        assert invest_option["continuation_value"] == pytest.approx(54625.0)
 
 
 class TestPolicyTreeEndpoint:
@@ -446,8 +530,9 @@ class TestPhase4Integration:
         assert response3.status_code == 200
         sensitivity = response3.json()
 
-        # Verify consistency
-        assert analysis["optimal_policy"]["expected_total_value"] is not None
+        # Verify consistency (value-correct, not just presence: same fixture as
+        # test_sequential_analysis_success, hand-derived expected_total_value 36930).
+        assert analysis["optimal_policy"]["expected_total_value"] == pytest.approx(36930.0)
         assert tree["root"]["expected_value"] is not None
         assert sensitivity["overall_robustness"] >= 0
 

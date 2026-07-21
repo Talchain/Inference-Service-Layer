@@ -735,3 +735,227 @@ class TestEdgeCases:
 
         # Expected value should be 0.5 * 100 + 0.5 * 0 = 50
         assert result.optimal_policy.expected_total_value == pytest.approx(50, rel=0.1)
+
+
+# ---------------------------------------------------------------------------
+# Regression: same-stage backward-induction drop (A2 defect, 2026-07-22)
+# ---------------------------------------------------------------------------
+#
+# Defect: _backward_induction valued a chance node BEFORE the decision node it
+# feeds when the two share a stage_index -- exactly the shape of the
+# SequentialAnalysisRequest schema's OWN canonical example (market:1, pricing:1).
+# The chance branch read the not-yet-valued decision child's continuation as 0,
+# so the entire favorable subtree silently contributed 0 and sign-inverted the
+# root expected value.
+#
+# Discriminating pair (identical decision problem; only pricing's stage differs):
+#   collision layout (pricing at stage 1, sharing market's stage): BUGGY -58122.5
+#   control   layout (pricing at its own stage 2):                 correct +1893.75
+#
+# Hand-derivation (neutral risk, discount d=0.95):
+#   terminals: high_return=100000, low_return=20000, loss=-30000
+#   V(pricing) = max(0.95*100000, 0.95*20000) = 95000                (action premium)
+#   V(market)  = 0.7*(0 + 0.95*95000) + 0.3*(0 + 0.95*(-30000))
+#              = 0.7*90250 + 0.3*(-28500) = 63175 - 8550 = 54625
+#   V(invest)  = -50000 + 0.95*54625 = -50000 + 51893.75 = 1893.75
+# Both layouts describe the SAME problem, so both MUST yield market-continuation
+# 54625 and root total 1893.75. The buggy -8550 == 0.3*0.95*(-30000) is the
+# loss-branch-only value that proves the +95000 favorable subtree was dropped.
+
+
+def _canonical_decision_graph(pricing_stage: int):
+    """Build the canonical invest -> market -> pricing decision graph.
+
+    ``market`` is a chance node at stage 1; ``pricing`` is the decision it feeds.
+    ``pricing_stage=1`` reproduces the schema's own example (collision with
+    market); ``pricing_stage=2`` gives pricing its own stage (control). The two
+    layouts encode the identical decision problem and MUST agree.
+    """
+    nodes = [
+        SequentialGraphNode(id="invest", type="decision", label="Invest"),
+        SequentialGraphNode(id="market", type="chance", label="Market"),
+        SequentialGraphNode(id="pricing", type="decision", label="Pricing"),
+        SequentialGraphNode(id="high_return", type="terminal", label="High", payoff=100000),
+        SequentialGraphNode(id="low_return", type="terminal", label="Low", payoff=20000),
+        SequentialGraphNode(id="loss", type="terminal", label="Loss", payoff=-30000),
+    ]
+    edges = [
+        SequentialGraphEdge(
+            from_node="invest", to_node="market", action="invest", immediate_payoff=-50000
+        ),
+        SequentialGraphEdge(
+            from_node="market", to_node="pricing", outcome="favorable", probability=0.7
+        ),
+        SequentialGraphEdge(
+            from_node="market", to_node="loss", outcome="unfavorable", probability=0.3
+        ),
+        SequentialGraphEdge(from_node="pricing", to_node="high_return", action="premium"),
+        SequentialGraphEdge(from_node="pricing", to_node="low_return", action="economy"),
+    ]
+    terminal_stage = pricing_stage + 1
+    graph = SequentialGraph(
+        nodes=nodes,
+        edges=edges,
+        stage_assignments={
+            "invest": 0,
+            "market": 1,
+            "pricing": pricing_stage,
+            "high_return": terminal_stage,
+            "low_return": terminal_stage,
+            "loss": terminal_stage,
+        },
+    )
+    stages = [DecisionStage(stage_index=0, stage_label="Investment", decision_nodes=["invest"])]
+    if pricing_stage == 1:
+        # collision: market resolves and pricing is decided at the same stage
+        stages.append(
+            DecisionStage(
+                stage_index=1,
+                stage_label="Pricing",
+                decision_nodes=["pricing"],
+                resolution_nodes=["market"],
+            )
+        )
+    else:
+        # control: market resolves at stage 1, pricing decided at stage 2
+        stages.append(
+            DecisionStage(
+                stage_index=1,
+                stage_label="Market",
+                decision_nodes=[],
+                resolution_nodes=["market"],
+            )
+        )
+        stages.append(
+            DecisionStage(stage_index=2, stage_label="Pricing", decision_nodes=["pricing"])
+        )
+    stages.append(
+        DecisionStage(stage_index=terminal_stage, stage_label="Terminal", decision_nodes=[])
+    )
+    return graph, stages
+
+
+class TestSameStageBackwardInductionRegression:
+    """Children must be valued before parents regardless of stage bookkeeping."""
+
+    def test_collision_matches_control_root_value(self, engine):
+        """Same-stage (market:1, pricing:1) MUST equal the separate-stage control.
+
+        RED at HEAD: the collision layout produces -58122.5 (favorable subtree
+        dropped to 0) while the control produces +1893.75.
+        """
+        collision_graph, collision_stages = _canonical_decision_graph(pricing_stage=1)
+        control_graph, control_stages = _canonical_decision_graph(pricing_stage=2)
+
+        collision = engine.analyze(
+            SequentialAnalysisRequest(
+                graph=collision_graph,
+                stages=collision_stages,
+                discount_factor=0.95,
+                risk_tolerance="neutral",
+            )
+        )
+        control = engine.analyze(
+            SequentialAnalysisRequest(
+                graph=control_graph,
+                stages=control_stages,
+                discount_factor=0.95,
+                risk_tolerance="neutral",
+            )
+        )
+
+        # The control is already correct; pin it as the reference.
+        assert control.optimal_policy.expected_total_value == pytest.approx(1893.75)
+        # The collision layout describes the SAME problem -> SAME value.
+        assert collision.optimal_policy.expected_total_value == pytest.approx(1893.75)
+        assert collision.optimal_policy.expected_total_value == pytest.approx(
+            control.optimal_policy.expected_total_value
+        )
+
+    def test_collision_market_continuation_is_54625(self, engine):
+        """The market continuation seen by invest MUST be 54625, not -8550.
+
+        -8550 == 0.3 * 0.95 * (-30000) is the loss-branch-only value, i.e. proof
+        that the favorable subtree (worth +95000 at stage 1) was silently dropped.
+        """
+        graph, stages = _canonical_decision_graph(pricing_stage=1)
+        result = engine.analyze(
+            SequentialAnalysisRequest(
+                graph=graph, stages=stages, discount_factor=0.95, risk_tolerance="neutral"
+            )
+        )
+        invest_option = result.stage_analyses[0].options_at_stage[0]
+        assert invest_option.option_id == "invest"
+        assert invest_option.continuation_value == pytest.approx(54625.0)
+        assert invest_option.total_value == pytest.approx(1893.75)
+
+    def test_control_layout_value_preserved(self, engine):
+        """Guard existing-correct behaviour: the control layout stays 54625 / +1893.75."""
+        graph, stages = _canonical_decision_graph(pricing_stage=2)
+        result = engine.analyze(
+            SequentialAnalysisRequest(
+                graph=graph, stages=stages, discount_factor=0.95, risk_tolerance="neutral"
+            )
+        )
+        invest_option = result.stage_analyses[0].options_at_stage[0]
+        assert invest_option.continuation_value == pytest.approx(54625.0)
+        assert result.optimal_policy.expected_total_value == pytest.approx(1893.75)
+
+    def test_dangling_edge_fails_loud(self, engine):
+        """An edge to a node absent from `nodes` MUST raise, never resolve to 0.
+
+        RED at HEAD: the chance/decision branches read the missing child as
+        continuation 0 and return a fabricated value with no error.
+        """
+        nodes = [
+            SequentialGraphNode(id="root", type="decision", label="Root"),
+            SequentialGraphNode(id="win", type="terminal", label="Win", payoff=100),
+        ]
+        edges = [
+            # 'ghost' is never defined as a node -> dangling edge
+            SequentialGraphEdge(from_node="root", to_node="ghost", action="risky"),
+            SequentialGraphEdge(from_node="root", to_node="win", action="safe"),
+        ]
+        graph = SequentialGraph(
+            nodes=nodes, edges=edges, stage_assignments={"root": 0, "win": 1}
+        )
+        stages = [
+            DecisionStage(stage_index=0, stage_label="Root", decision_nodes=["root"]),
+            DecisionStage(stage_index=1, stage_label="Terminal", decision_nodes=[]),
+        ]
+        with pytest.raises(ValueError):
+            engine.analyze(
+                SequentialAnalysisRequest(graph=graph, stages=stages, discount_factor=0.95)
+            )
+
+    def test_cycle_fails_loud(self, engine):
+        """A cycle MUST raise, not silently read a not-yet-valued node as 0.
+
+        RED at HEAD: the iterative stage sweep never recurses, so the cycle is
+        tolerated (one node read as 0) and no error is raised.
+        """
+        nodes = [
+            SequentialGraphNode(id="a", type="decision", label="A"),
+            SequentialGraphNode(id="b", type="chance", label="B"),
+            SequentialGraphNode(id="end", type="terminal", label="End", payoff=10),
+        ]
+        edges = [
+            SequentialGraphEdge(from_node="a", to_node="b", action="go"),
+            SequentialGraphEdge(from_node="b", to_node="a", outcome="loop", probability=0.5),
+            SequentialGraphEdge(from_node="b", to_node="end", outcome="done", probability=0.5),
+        ]
+        graph = SequentialGraph(
+            nodes=nodes, edges=edges, stage_assignments={"a": 0, "b": 1, "end": 2}
+        )
+        stages = [
+            DecisionStage(stage_index=0, stage_label="A", decision_nodes=["a"]),
+            DecisionStage(
+                stage_index=1, stage_label="B", decision_nodes=[], resolution_nodes=["b"]
+            ),
+            DecisionStage(stage_index=2, stage_label="Terminal", decision_nodes=[]),
+        ]
+        with pytest.raises(ValueError):
+            engine.analyze(
+                SequentialAnalysisRequest(graph=graph, stages=stages, discount_factor=0.95)
+            )
+
