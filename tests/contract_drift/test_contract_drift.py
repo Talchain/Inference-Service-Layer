@@ -22,10 +22,18 @@ from pathlib import Path
 import pytest
 
 from tests.contract_drift.allowlist import ALLOWLIST, ALLOWLISTED_KEYS
+from tests.contract_drift.drift_baseline import (
+    BASELINE_PATH,
+    OMISSION_BASELINE,
+    OMISSION_BASELINE_KEYS,
+    SUPERSET_BASELINE,
+    SUPERSET_BASELINE_KEYS,
+)
 from tests.contract_drift.drift_core import (
     ARTIFACT_PATH,
     PAIRINGS,
     PIN_PATH,
+    DriftReport,
     load_artifact,
     load_pin,
     pydantic_properties,
@@ -35,6 +43,20 @@ from tests.contract_drift.drift_core import (
 
 def _fixture_digests() -> dict:
     return {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (ARTIFACT_PATH, PIN_PATH)}
+
+
+def _new_omissions(report: DriftReport) -> list:
+    """Omissions in the live report whose (model, location, prop) identity is
+    NOT accepted in the committed baseline — i.e. a contract field ISL has just
+    stopped emitting (rename/removal at source)."""
+    return [o for o in report.omissions if (o[0], o[1], o[2]) not in OMISSION_BASELINE_KEYS]
+
+
+def _new_supersets(report: DriftReport) -> list:
+    """Supersets in the live report not accepted in the committed baseline —
+    i.e. a key ISL has just started emitting that no contract pair carries
+    (the renamed-to name lands here)."""
+    return [s for s in report.supersets if s not in SUPERSET_BASELINE_KEYS]
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +305,155 @@ def test_workflow_carries_the_freshness_gate() -> None:
         "the contract-drift freshness gate was removed from pr-ci.yml — the "
         "committed artifact is now an unguarded mirror; restore the gate"
     )
+
+
+# ---------------------------------------------------------------------------
+# 6. THE OMISSION / SUPERSET RATCHET (F3 fix).
+#
+# PR #83 gated ONLY name collisions; omissions and supersets were reported but
+# never failed, so a rename/removal of a field ISL emits (Codex's mutation:
+# FactorSensitivityV2.elasticity -> elasticity_renamed) moved the counts and
+# still passed CI — the silent-alarm class. These tests ratchet BOTH directions
+# against tests/contract_drift/drift_baseline.json exactly as allowlist.py
+# ratchets collisions: any drift not in the derived-once baseline fails loud.
+#
+# Positive controls come FIRST (trap #13): a ratchet that cannot SEE a NEW
+# omission/superset would pass every green below it vacuously.
+# ---------------------------------------------------------------------------
+
+
+class TestRatchetPositiveControls:
+    """Feed a report the engine derived from a deliberately mutated schema/
+    model pair; the ratchet MUST classify the planted change as NEW (absent
+    from the baseline). The planted keys are chosen to NOT be in the baseline,
+    proving the baseline cannot swallow a new defect."""
+
+    def test_control_ratchet_sees_new_omission(self) -> None:
+        # Add a field to the contract that ISL cannot emit -> a NEW omission.
+        artifact = copy.deepcopy(load_artifact())
+        target = artifact["modules"]["index"]["FactorSensitivitySchema"]
+        target.setdefault("required", []).append("drift_control_ratchet_omission")
+        target["properties"]["drift_control_ratchet_omission"] = {"type": "string"}
+        report = run_drift_check(artifact=artifact)
+        new = _new_omissions(report)
+        assert any(
+            o[2] == "drift_control_ratchet_omission" for o in new
+        ), "omission ratchet failed to classify a planted new omission as NEW"
+
+    def test_control_ratchet_sees_new_superset(self) -> None:
+        # Inject an ISL-side property no contract pair carries -> a NEW superset.
+        isl_props = {model.__name__: pydantic_properties(model) for model in PAIRINGS}
+        from tests.contract_drift.drift_core import TypeSummary
+
+        isl_props["FactorSensitivityV2"] = dict(isl_props["FactorSensitivityV2"])
+        isl_props["FactorSensitivityV2"]["drift_control_ratchet_superset"] = TypeSummary(
+            kinds=frozenset({"string"}), enum=None
+        )
+        report = run_drift_check(isl_properties=isl_props)
+        new = _new_supersets(report)
+        assert (
+            "FactorSensitivityV2",
+            "drift_control_ratchet_superset",
+        ) in new, "superset ratchet failed to classify a planted new superset as NEW"
+
+
+def test_no_new_required_omissions() -> None:
+    """FAIL LOUD when ISL stops emitting a contract field it used to emit — a
+    rename/removal at source. The baseline records EVERY known omission (not
+    only required ones), because 'required in ISL' is invisible once the field
+    is gone; a required contract field vanishing is the sharpest case and is
+    called out explicitly."""
+    report = run_drift_check()
+    new = _new_omissions(report)
+    if new:
+        lines = []
+        for model, contract_label, prop, required in new:
+            sev = "REQUIRED in contract" if required else "optional in contract"
+            lines.append(f"    {model} no longer emits {contract_label}.{prop} [{sev}]")
+        pytest.fail(
+            "NEW omission(s) — ISL stopped emitting field(s) the contract "
+            "carries (a rename/removal at source, the exact class that passed "
+            "CI before this ratchet). Name(s):\n"
+            + "\n".join(lines)
+            + "\n\nAdd to tests/contract_drift/drift_baseline.json ONLY with a "
+            "decision ref (re-run scripts/contract_schema/refresh_drift_baseline.py "
+            "--refresh-baseline on the reviewed, intentional change), or fix the "
+            "drift.\n\nFull report:\n" + report.render()
+        )
+
+
+def test_no_new_supersets() -> None:
+    """FAIL LOUD when ISL starts emitting a key no contract pair carries — the
+    renamed-to name lands here, and an un-tracked superset is drift the
+    contract will silently drop."""
+    report = run_drift_check()
+    new = _new_supersets(report)
+    if new:
+        lines = [f"    {model}.{prop}" for model, prop in new]
+        pytest.fail(
+            "NEW superset key(s) — ISL emits field(s) absent from the paired "
+            "contract schema (a renamed-to field or an un-adopted addition "
+            "lands here). Name(s):\n"
+            + "\n".join(lines)
+            + "\n\nAdd to tests/contract_drift/drift_baseline.json ONLY with a "
+            "decision ref (re-run scripts/contract_schema/refresh_drift_baseline.py "
+            "--refresh-baseline on the reviewed, intentional change), or fix the "
+            "drift.\n\nFull report:\n" + report.render()
+        )
+
+
+def test_baseline_has_no_stale_entries() -> None:
+    """Every baseline entry must still match a LIVE omission/superset. A stale
+    entry means the drift was resolved (ISL now emits it, or the contract
+    dropped/adopted it) — re-run the refresh script so the baseline stays
+    minimal and honest, exactly like the collision allowlist's hygiene gate."""
+    report = run_drift_check()
+    live_omissions = {(o[0], o[1], o[2]) for o in report.omissions}
+    live_supersets = set(report.supersets)
+    stale_omissions = sorted(k for k in OMISSION_BASELINE_KEYS if k not in live_omissions)
+    stale_supersets = sorted(k for k in SUPERSET_BASELINE_KEYS if k not in live_supersets)
+    assert not stale_omissions and not stale_supersets, (
+        "stale drift-baseline entries (drift resolved? re-run "
+        "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline):\n"
+        f"  omissions: {stale_omissions}\n  supersets: {stale_supersets}"
+    )
+
+
+def test_baseline_matches_current_report_exactly() -> None:
+    """On the committed, unmutated tree the baseline must be EXACTLY the live
+    two-way drift — no new entries, no stale entries. This is the derive-don't-
+    mirror invariant: the committed baseline is the generated truth, not a
+    hand-edited approximation of it."""
+    report = run_drift_check()
+    assert not _new_omissions(report)
+    assert not _new_supersets(report)
+    assert len(OMISSION_BASELINE) == len(report.omissions)
+    assert len(SUPERSET_BASELINE) == len(report.supersets)
+
+
+def test_ratchet_does_not_self_heal_the_baseline() -> None:
+    """Running the whole drift check must leave drift_baseline.json byte-
+    identical and must not import the refresh script (F6-class self-heal:
+    a gate that rewrites its own baseline ratifies whatever drift just landed).
+    Regeneration lives ONLY in scripts/contract_schema/refresh_drift_baseline.py,
+    run by a human."""
+    before = hashlib.sha256(BASELINE_PATH.read_bytes()).hexdigest()
+    run_drift_check()
+    after = hashlib.sha256(BASELINE_PATH.read_bytes()).hexdigest()
+    assert before == after, "drift check mutated its own baseline (self-heal)"
+    refresh_modules = [m for m in sys.modules if "refresh_drift_baseline" in m]
+    assert not refresh_modules, (
+        f"baseline-generation machinery must never be importable from the "
+        f"check: {refresh_modules}"
+    )
+
+
+def test_baseline_meta_matches_the_pinned_contract() -> None:
+    """The baseline self-describes as generated from exactly the pinned ref, so
+    a baseline generated against a drifted contract cannot masquerade as fresh."""
+    from tests.contract_drift.drift_baseline import BASELINE_META
+
+    pin = load_pin()
+    assert BASELINE_META.get("source_ref") == pin["ref"]
+    assert BASELINE_META.get("source_repo") == pin["repo"]
+    assert BASELINE_META.get("package_version") == pin["package_version_expected"]
