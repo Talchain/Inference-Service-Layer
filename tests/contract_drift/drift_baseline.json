@@ -1,0 +1,640 @@
+{
+  "_meta": {
+    "purpose": "Ratchet baseline of KNOWN two-way drift (omissions + supersets) between ISL V2 response models and @talchain/schemas. Any drift NOT listed here fails CI loud. Add a new entry ONLY with a decision ref by re-running the refresh script on an intentional change; otherwise fix the drift.",
+    "generated_by": "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline",
+    "source_repo": "Talchain/olumi-schemas",
+    "source_ref": "1b936ecaf9ddde0ee09566d13d686e07b8877751",
+    "package_name": "@talchain/schemas",
+    "package_version": "0.20.0",
+    "omission_count": 42,
+    "superset_count": 66
+  },
+  "omissions": [
+    {
+      "isl_model": "ConstraintResultV2",
+      "contract_location": "boundary.EnrichmentConstraintResultSchema",
+      "prop": "constraint_id",
+      "required": true,
+      "reason": "REQUIRED in contract (boundary.EnrichmentConstraintResultSchema) — ISL does not emit constraint_id; confirm PLoT synthesises it, else it is a silent drop at source"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "contract_location": "boundary.EnrichmentConstraintResultSchema",
+      "prop": "probability",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentConstraintResultSchema) — ISL omits probability (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "CritiqueV2",
+      "contract_location": "boundary.EnrichmentCritiqueSchema",
+      "prop": "blocks_analysis",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentCritiqueSchema) — ISL omits blocks_analysis (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "CritiqueV2",
+      "contract_location": "boundary.EnrichmentCritiqueSchema",
+      "prop": "user_message",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentCritiqueSchema) — ISL omits user_message (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "EdgeEValueV2",
+      "contract_location": "boundary.EnrichmentEdgeEValueSchema",
+      "prop": "_normalised",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentEdgeEValueSchema) — ISL omits _normalised (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "EdgeEValueV2",
+      "contract_location": "boundary.EnrichmentEdgeEValueSchema",
+      "prop": "from_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentEdgeEValueSchema) — ISL omits from_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "EdgeEValueV2",
+      "contract_location": "boundary.EnrichmentEdgeEValueSchema",
+      "prop": "to_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentEdgeEValueSchema) — ISL omits to_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "contract_location": "index.FactorSensitivitySchema",
+      "prop": "confidence_components",
+      "required": false,
+      "reason": "optional in contract (index.FactorSensitivitySchema) — ISL omits confidence_components (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "FragileEdgeV2",
+      "contract_location": "boundary.EnrichmentRobustnessEdgeSchema",
+      "prop": "alternative_winner_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessEdgeSchema) — ISL omits alternative_winner_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "FragileEdgeV2",
+      "contract_location": "boundary.EnrichmentRobustnessEdgeSchema",
+      "prop": "from_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessEdgeSchema) — ISL omits from_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "FragileEdgeV2",
+      "contract_location": "boundary.EnrichmentRobustnessEdgeSchema",
+      "prop": "severity",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessEdgeSchema) — ISL omits severity (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "FragileEdgeV2",
+      "contract_location": "boundary.EnrichmentRobustnessEdgeSchema",
+      "prop": "to_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessEdgeSchema) — ISL omits to_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "conditional_probabilities",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits conditional_probabilities (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "confidence_tier",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits confidence_tier (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "constraint_results",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits constraint_results (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "constraints_status",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits constraints_status (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "decision_brief",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits decision_brief (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "decision_review",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits decision_review (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "drivers_status",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits drivers_status (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "edge_e_values",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits edge_e_values (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "flip_thresholds",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits flip_thresholds (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "m1_coaching",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits m1_coaching (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "option_comparison",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits option_comparison (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "option_comparison_status",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits option_comparison_status (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "results",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits results (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "InferenceWarning",
+      "contract_location": "boundary.EnrichmentInferenceWarningSchema",
+      "prop": "message",
+      "required": true,
+      "reason": "REQUIRED in contract (boundary.EnrichmentInferenceWarningSchema) — ISL does not emit message; confirm PLoT synthesises it, else it is a silent drop at source"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "confidence_interval",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits confidence_interval (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "constraint_probabilities",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits constraint_probabilities (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "expected_outcome",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits expected_outcome (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "goal_fit_basis",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits goal_fit_basis (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "option_id",
+      "required": true,
+      "reason": "REQUIRED in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL does not emit option_id; confirm PLoT synthesises it, else it is a silent drop at source"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "option_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits option_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "probability_of_joint_goal",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits probability_of_joint_goal (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "display_verdict",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits display_verdict (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "display_verdict_reason",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits display_verdict_reason (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "explanation",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits explanation (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "near_tie",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits near_tie (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "normalization_errors",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits normalization_errors (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "recommended_option_id",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits recommended_option_id (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "recommended_option_label",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits recommended_option_label (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "contract_location": "boundary.EnrichmentRobustnessSchema",
+      "prop": "score",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentRobustnessSchema) — ISL omits score (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    }
+  ],
+  "supersets": [
+    {
+      "isl_model": "ConstraintAnalysisV2",
+      "prop": "conditional_probabilities",
+      "reason": "ISL superset — ConstraintAnalysisV2.conditional_probabilities is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintAnalysisV2",
+      "prop": "constraints",
+      "reason": "ISL superset — ConstraintAnalysisV2.constraints is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintAnalysisV2",
+      "prop": "joint_probability",
+      "reason": "ISL superset — ConstraintAnalysisV2.joint_probability is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "binding",
+      "reason": "ISL superset — ConstraintResultV2.binding is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "failure_margin_median",
+      "reason": "ISL superset — ConstraintResultV2.failure_margin_median is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "label",
+      "reason": "ISL superset — ConstraintResultV2.label is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "near_miss_fraction",
+      "reason": "ISL superset — ConstraintResultV2.near_miss_fraction is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "prob_satisfied",
+      "reason": "ISL superset — ConstraintResultV2.prob_satisfied is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "threshold",
+      "reason": "ISL superset — ConstraintResultV2.threshold is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeEValueV2",
+      "prop": "is_unflippable",
+      "reason": "ISL superset — EdgeEValueV2.is_unflippable is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "direction",
+      "reason": "ISL superset — EdgeSensitivityV2.direction is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "edge_id",
+      "reason": "ISL superset — EdgeSensitivityV2.edge_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "elasticity",
+      "reason": "ISL superset — EdgeSensitivityV2.elasticity is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "from_id",
+      "reason": "ISL superset — EdgeSensitivityV2.from_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "importance_rank",
+      "reason": "ISL superset — EdgeSensitivityV2.importance_rank is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "interpretation",
+      "reason": "ISL superset — EdgeSensitivityV2.interpretation is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "sensitivity_score",
+      "reason": "ISL superset — EdgeSensitivityV2.sensitivity_score is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "sensitivity_type",
+      "reason": "ISL superset — EdgeSensitivityV2.sensitivity_type is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeSensitivityV2",
+      "prop": "to_id",
+      "reason": "ISL superset — EdgeSensitivityV2.to_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "attribution_stability",
+      "reason": "ISL superset — FactorSensitivityV2.attribution_stability is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "baseline_near_zero",
+      "reason": "ISL superset — FactorSensitivityV2.baseline_near_zero is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "confidence_source",
+      "reason": "ISL superset — FactorSensitivityV2.confidence_source is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "elasticity_display",
+      "reason": "ISL superset — FactorSensitivityV2.elasticity_display is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "elasticity_std",
+      "reason": "ISL superset — FactorSensitivityV2.elasticity_std is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "influence_rank",
+      "reason": "ISL superset — FactorSensitivityV2.influence_rank is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "influence_score",
+      "reason": "ISL superset — FactorSensitivityV2.influence_score is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "interpretation",
+      "reason": "ISL superset — FactorSensitivityV2.interpretation is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "observed_value",
+      "reason": "ISL superset — FactorSensitivityV2.observed_value is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "rank_flip_rate",
+      "reason": "ISL superset — FactorSensitivityV2.rank_flip_rate is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "stability_method",
+      "reason": "ISL superset — FactorSensitivityV2.stability_method is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "value_defaulted",
+      "reason": "ISL superset — FactorSensitivityV2.value_defaulted is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "value_extraction_type",
+      "reason": "ISL superset — FactorSensitivityV2.value_extraction_type is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "value_source",
+      "reason": "ISL superset — FactorSensitivityV2.value_source is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "FactorSensitivityV2",
+      "prop": "zero_reason",
+      "reason": "ISL superset — FactorSensitivityV2.zero_reason is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "auto_noise_applied",
+      "reason": "ISL superset — ISLResponseV2.auto_noise_applied is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "build",
+      "reason": "ISL superset — ISLResponseV2.build is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "conditional_winners",
+      "reason": "ISL superset — ISLResponseV2.conditional_winners is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "diagnostics",
+      "reason": "ISL superset — ISLResponseV2.diagnostics is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "endpoint_version",
+      "reason": "ISL superset — ISLResponseV2.endpoint_version is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "engine_version",
+      "reason": "ISL superset — ISLResponseV2.engine_version is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "factor_evpi",
+      "reason": "ISL superset — ISLResponseV2.factor_evpi is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "factor_sensitivity_status",
+      "reason": "ISL superset — ISLResponseV2.factor_sensitivity_status is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "options",
+      "reason": "ISL superset — ISLResponseV2.options is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "path_decomposition",
+      "reason": "ISL superset — ISLResponseV2.path_decomposition is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "processing_time_ms",
+      "reason": "ISL superset — ISLResponseV2.processing_time_ms is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "request_echo",
+      "reason": "ISL superset — ISLResponseV2.request_echo is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "request_id",
+      "reason": "ISL superset — ISLResponseV2.request_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "seed_source",
+      "reason": "ISL superset — ISLResponseV2.seed_source is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "seed_used",
+      "reason": "ISL superset — ISLResponseV2.seed_used is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "sensitivity_reference_option_id",
+      "reason": "ISL superset — ISLResponseV2.sensitivity_reference_option_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "stability_thresholds",
+      "reason": "ISL superset — ISLResponseV2.stability_thresholds is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "timestamp",
+      "reason": "ISL superset — ISLResponseV2.timestamp is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "version",
+      "reason": "ISL superset — ISLResponseV2.version is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "InferenceWarning",
+      "prop": "detail",
+      "reason": "ISL superset — InferenceWarning.detail is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "InferenceWarning",
+      "prop": "field",
+      "reason": "ISL superset — InferenceWarning.field is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "prop": "constraint_analysis",
+      "reason": "ISL superset — OptionResultV2.constraint_analysis is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "OutcomeDistributionV2",
+      "prop": "percentiles_source",
+      "reason": "ISL superset — OutcomeDistributionV2.percentiles_source is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "prop": "defaulted_root_node_ids",
+      "reason": "ISL superset — RobustnessResultV2.defaulted_root_node_ids is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "prop": "edge_e_values",
+      "reason": "ISL superset — RobustnessResultV2.edge_e_values is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "prop": "edge_sensitivity",
+      "reason": "ISL superset — RobustnessResultV2.edge_sensitivity is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "prop": "fragile_edges_v1",
+      "reason": "ISL superset — RobustnessResultV2.fragile_edges_v1 is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "prop": "sensitive_factors",
+      "reason": "ISL superset — RobustnessResultV2.sensitive_factors is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "RobustnessResultV2",
+      "prop": "stability_penalty_factor",
+      "reason": "ISL superset — RobustnessResultV2.stability_penalty_factor is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "SensitiveFactorV2",
+      "prop": "effect_on_ranking",
+      "reason": "ISL superset — SensitiveFactorV2.effect_on_ranking is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "SensitiveFactorV2",
+      "prop": "node_id",
+      "reason": "ISL superset — SensitiveFactorV2.node_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "SensitiveFactorV2",
+      "prop": "sensitivity_score",
+      "reason": "ISL superset — SensitiveFactorV2.sensitivity_score is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    }
+  ]
+}
