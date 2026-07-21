@@ -959,3 +959,38 @@ class TestSameStageBackwardInductionRegression:
                 SequentialAnalysisRequest(graph=graph, stages=stages, discount_factor=0.95)
             )
 
+
+class TestAverseRiskAdjustmentBlowUp:
+    """DIAGNOSIS + guard for a SEPARATE, UNFIXED risk-adjustment bug.
+
+    `_risk_adjust_value` averse branch computes ``mean - 0.5 * variance`` with
+    variance in currency^2 units, so a +/-100k problem is inflated to ~1e8. This
+    is a distinct defect from the same-stage drop and is intentionally NOT fixed
+    here: the correct risk model (variance vs std; the aversion coefficient) is a
+    modeling-doctrine decision, not a mechanical fix. See NOTES.md sec 4.
+    """
+
+    def test_averse_blowup_is_independent_of_same_stage_fix(self, engine):
+        """Prove the averse blow-up is independent of the same-stage drop (verdict (b)).
+
+        Uses the CONTROL layout (pricing at its own stage 2 -> NO collision), where
+        pricing is correctly valued at 80000, yet market still blows up. Because the
+        same-stage fix is a no-op on this layout, this value is IDENTICAL before and
+        after that fix, which is exactly what makes it an independence proof.
+
+        The asserted numbers are KNOWN-WRONG (dimensional blow-up). They are pinned
+        so that ANY future change to the risk model FAILS THIS TEST and forces a
+        conscious record update. Do NOT read them as correct.
+        """
+        graph, stages = _canonical_decision_graph(pricing_stage=2)  # control: no collision
+        result = engine.analyze(
+            SequentialAnalysisRequest(
+                graph=graph, stages=stages, discount_factor=0.8, risk_tolerance="averse"
+            )
+        )
+        invest_option = result.stage_analyses[0].options_at_stage[0]
+        # positive control: the blow-up IS present (orders of magnitude off scale)
+        max_abs_payoff = 100000
+        assert abs(invest_option.continuation_value) > 100 * max_abs_payoff
+        # characterization of the exact CURRENT (wrong) value, hand-derived in NOTES sec 4
+        assert invest_option.continuation_value == pytest.approx(-813082400.0)
