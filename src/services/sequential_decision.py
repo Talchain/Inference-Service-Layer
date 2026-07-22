@@ -275,28 +275,45 @@ class SequentialDecisionEngine:
                 payoff = node.get("payoff", 0) or 0
                 node_values[node_id] = self._risk_adjust_value(payoff, 0, risk_tolerance)
 
-        # Sort stages in reverse order
+        # Sort stages so the driver visits nodes end-to-beginning (ordering is no
+        # longer required for correctness; kept for stable, low-surprise iteration).
         sorted_stages = sorted(stages, key=lambda s: s.stage_index, reverse=True)
 
-        # Process stages from end to beginning
-        for stage in sorted_stages:
-            # Get all nodes at this stage
-            stage_nodes = [
-                node_id for node_id, s in stage_assignments.items() if s == stage.stage_index
-            ]
+        # Valuation is dependency-ordered, NOT stage-ordered: a node is valued by
+        # first (recursively) valuing every child it feeds. This guarantees
+        # children-before-parents even when a chance node and the decision it feeds
+        # share a stage_index (the request schema's OWN canonical example:
+        # market:1, pricing:1). The previous reverse-stage sweep valued nodes in
+        # arbitrary intra-stage order and read a not-yet-valued child as
+        # continuation 0, silently dropping its entire subtree and sign-inverting
+        # the root value. A child that genuinely cannot be resolved (dangling edge
+        # or cycle) now FAILS LOUD instead of being fabricated as 0.
+        resolving: Set[str] = set()
 
-            for node_id in stage_nodes:
-                if node_id in node_values:
-                    continue  # Already processed (terminal)
+        def resolve(node_id: str) -> float:
+            if node_id in node_values:
+                return node_values[node_id]  # terminal (pre-seeded) or already valued
+            if node_id not in nodes:
+                raise ValueError(
+                    f"Sequential graph references undefined node '{node_id}' "
+                    f"(dangling edge); cannot value backward induction."
+                )
+            if node_id in resolving:
+                raise ValueError(
+                    f"Sequential graph contains a cycle through node '{node_id}'; "
+                    f"backward induction requires a directed acyclic graph."
+                )
 
-                node = nodes[node_id]
-                outgoing = edges.get(node_id, [])
+            node = nodes[node_id]
+            outgoing = edges.get(node_id, [])
 
-                if not outgoing:
-                    # No outgoing edges - treat as terminal with 0 payoff
-                    node_values[node_id] = 0.0
-                    continue
+            if not outgoing:
+                # No outgoing edges - treat as terminal with 0 payoff
+                node_values[node_id] = 0.0
+                return 0.0
 
+            resolving.add(node_id)
+            try:
                 if node["type"] == "decision":
                     # Decision node: maximize over actions
                     best_value = float("-inf")
@@ -305,11 +322,7 @@ class SequentialDecisionEngine:
                     for edge in outgoing:
                         child_id = edge["to"]
                         immediate = edge.get("immediate_payoff", 0) or 0
-
-                        if child_id in node_values:
-                            continuation = node_values[child_id]
-                        else:
-                            continuation = 0
+                        continuation = resolve(child_id)
 
                         total = immediate + discount_factor * continuation
 
@@ -319,6 +332,7 @@ class SequentialDecisionEngine:
 
                     node_values[node_id] = best_value
                     optimal_actions[node_id] = best_action
+                    return best_value
 
                 elif node["type"] == "chance":
                     # Chance node: expected value over outcomes
@@ -329,11 +343,7 @@ class SequentialDecisionEngine:
                         child_id = edge["to"]
                         prob = edge.get("probability", 1.0 / len(outgoing))
                         immediate = edge.get("immediate_payoff", 0) or 0
-
-                        if child_id in node_values:
-                            continuation = node_values[child_id]
-                        else:
-                            continuation = 0
+                        continuation = resolve(child_id)
 
                         expected_value += prob * (immediate + discount_factor * continuation)
                         total_prob += prob
@@ -346,9 +356,29 @@ class SequentialDecisionEngine:
                     variance = self._estimate_outcome_variance(
                         outgoing, node_values, discount_factor
                     )
-                    node_values[node_id] = self._risk_adjust_value(
-                        expected_value, variance, risk_tolerance
-                    )
+                    value = self._risk_adjust_value(expected_value, variance, risk_tolerance)
+                    node_values[node_id] = value
+                    return value
+
+                # Unsupported node type - unreachable through the pattern-validated
+                # request model (type is one of decision/chance/terminal), but fail
+                # loud rather than fabricate a value if one ever slips through.
+                raise ValueError(
+                    f"Sequential graph node '{node_id}' has unsupported type "
+                    f"'{node['type']}'."
+                )
+            finally:
+                resolving.discard(node_id)
+
+        # Drive valuation over the same node set the previous stage sweep covered:
+        # every node assigned to a stage that appears in `stages`. resolve() values
+        # any reachable child on demand, so intra-stage ordering no longer matters.
+        for stage in sorted_stages:
+            stage_nodes = [
+                node_id for node_id, s in stage_assignments.items() if s == stage.stage_index
+            ]
+            for node_id in stage_nodes:
+                resolve(node_id)
 
         return node_values, optimal_actions
 
