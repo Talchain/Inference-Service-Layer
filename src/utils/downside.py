@@ -20,7 +20,7 @@ Two families:
 from __future__ import annotations
 
 import math
-from typing import Dict, Sequence
+from typing import Dict, Mapping, Sequence
 
 import numpy as np
 
@@ -60,7 +60,7 @@ def cvar_from_samples(samples: Sequence[float], level: float = CVAR_LEVEL) -> fl
 
 
 def expected_regret_per_option(
-    option_samples: Dict[str, Sequence[float]],
+    option_samples: Mapping[str, Sequence[float]],
 ) -> Dict[str, float]:
     """Joint expected regret per option from CRN-aligned per-option samples.
 

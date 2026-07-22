@@ -35,6 +35,7 @@ from src.models.response_v2 import (
     ConstraintAnalysisV2,
     ConstraintResultV2,
     DiagnosticsV2,
+    DownsideV2,
     EdgeEValueV2,
     EdgeSensitivityV2,
     FactorSensitivityV2,
@@ -79,6 +80,7 @@ from src.utils.response_builder import (
     determine_option_status,
     hash_node_id,
 )
+from src.utils.downside import cvar_from_samples, expected_regret_per_option
 from src.utils.numerical_stability import validate_mc_samples
 from src.utils.tracing import sanitize_request_id
 from src.validation.degenerate_detector import detect_degenerate_outcomes
@@ -835,6 +837,21 @@ async def _analyze_robustness_v2_enhanced(
         # Task 3: Build option label lookup for propagation to V2 response
         option_label_map = {opt.id: opt.label for opt in request.options}
 
+        # B2 downside — JOINT expected regret. The v2 engine draws per-option
+        # outcome samples against SHARED (Common Random Numbers) draws, so
+        # option_outcomes[o][i] are index-aligned across options. Pre-collect the
+        # raw sample arrays for every option that has them and compute the joint
+        # regret once (best-per-sample minus each option, per-index finite mask).
+        # cvar_10 / p05 are marginal and computed per option inside the loop.
+        # Absent → {} when no option has samples; keyed by option_id otherwise.
+        downside_raw_samples = {
+            r.option_id: r.outcome_distribution.samples
+            for r in v1_response.results
+            if r.outcome_distribution.samples is not None
+            and len(r.outcome_distribution.samples) > 0
+        }
+        expected_regret_map = expected_regret_per_option(downside_raw_samples)
+
         # Convert V1 response to V2 option results
         option_results = []
         for result in v1_response.results:
@@ -893,16 +910,28 @@ async def _analyze_robustness_v2_enhanced(
             #
             # CIL 0.2: return null when true percentiles unavailable, not
             #          mislabelled CI bounds. See code review C3.
+            # B2 downside — computed from the SAME finite_cleaned population as
+            # the percentiles; present exactly when percentiles_source=="samples".
+            downside: Optional[DownsideV2] = None
             if dist.samples is not None and len(dist.samples) > 0:
                 # Use cleaned_samples (from validate_mc_samples above) filtered
                 # to finite values — identical population to n_valid_samples.
                 finite_cleaned = cleaned_samples[np.isfinite(cleaned_samples)]
                 if len(finite_cleaned) > 0:
-                    # Task 4: single np.percentile call for efficiency
-                    p10_val, p50_val, p90_val = (
-                        float(v) for v in np.percentile(finite_cleaned, [10, 50, 90])
+                    # Task 4: single np.percentile call for efficiency. B2 adds
+                    # p05, extending the p10/p50/p90 family downward with the SAME
+                    # percentile machinery/convention (no reimplementation).
+                    p05_val, p10_val, p50_val, p90_val = (
+                        float(v) for v in np.percentile(finite_cleaned, [5, 10, 50, 90])
                     )
                     percentiles_source = "samples"
+                    # cvar_10 (mean of the worst decile) from the same finite
+                    # population; expected_regret from the pre-computed joint map.
+                    downside = DownsideV2(
+                        cvar_10=cvar_from_samples(finite_cleaned),
+                        p05=p05_val,
+                        expected_regret=expected_regret_map[result.option_id],
+                    )
                 else:
                     # All samples non-finite — cannot compute true percentiles
                     p10_val = None
@@ -932,6 +961,7 @@ async def _analyze_robustness_v2_enhanced(
                         validity_ratio=validity_ratio,
                         percentiles_source=percentiles_source,
                     ),
+                    downside=downside,
                     win_probability=result.win_probability,
                     probability_of_goal=result.probability_of_goal,
                     constraint_analysis=constraint_analysis_v2,
