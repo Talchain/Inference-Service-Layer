@@ -454,6 +454,25 @@ class TestSequentialAnalysisEndpoint:
         assert response.status_code == 200
         assert response.json()["optimal_policy"]["expected_total_value"] == pytest.approx(50.0)
 
+    @pytest.mark.asyncio
+    async def test_sequential_does_not_leak_into_module_cache(
+        self, client, sequential_analysis_request
+    ):
+        """F-4: the live sequential path must not write to an unbounded module-level
+        cache. `_policy_cache` was write-only on the live path (its only reader is
+        the DARK policy-tree route, which in fact recomputes and never reads it), so
+        with the mount it grew on every request. It is removed until policy-tree is
+        verified and mounted. RED at HEAD: the module still carries `_policy_cache`.
+        """
+        from src.api import phase4
+
+        response = await client.post(
+            "/api/v1/analysis/sequential", json=sequential_analysis_request
+        )
+        assert response.status_code == 200
+        # No unbounded module-level request/result cache remains on the live path.
+        assert not hasattr(phase4, "_policy_cache")
+
 
 class TestPolicyTreeEndpoint:
     """Tests for POST /api/v1/analysis/policy-tree"""

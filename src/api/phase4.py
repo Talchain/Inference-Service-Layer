@@ -45,8 +45,12 @@ logger = logging.getLogger(__name__)
 conditional_engine = ConditionalRecommendationEngine()
 sequential_engine = SequentialDecisionEngine()
 
-# Cache for policy trees (in production, use Redis)
-_policy_cache: dict = {}
+# F-4: the former module-level `_policy_cache` was an unbounded, never-evicted,
+# write-only dict — populated on every live sequential request (key derived from a
+# client-controllable X-Request-Id), with zero readers (the dark policy-tree route
+# recomputes rather than reading it). With the mount that was a monotonic memory
+# leak. It is removed. When the policy-tree route is verified and mounted, it can
+# reintroduce a properly-bounded cache (TTL/LRU or Redis) as part of that change.
 
 
 @router.post(
@@ -195,12 +199,8 @@ async def analyze_sequential_decision(
 
         result = sequential_engine.analyze(request)
 
-        # Cache for policy-tree endpoint
-        cache_key = f"seq_{request_id}"
-        _policy_cache[cache_key] = {
-            "request": request,
-            "result": result,
-        }
+        # F-4: no _policy_cache write — the former write-only cache was an unbounded
+        # leak with no live reader (see the module-level note). policy-tree recomputes.
 
         logger.info(
             "sequential_analysis_completed",
