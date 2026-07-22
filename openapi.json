@@ -4283,7 +4283,7 @@
         "type": "object"
       },
       "Policy": {
-        "description": "Optimal policy across all stages.",
+        "description": "Optimal policy across all stages.\n\nA3 (2026-07-22): `value_distribution` is OMITTED \u2014 it reported normal params\nwith std = 0.2 * |expected_total_value|, a fabricated spread presented as if\nmeasured (backward induction is deterministic). A real policy-value\ndistribution is a modeling roadmap item.",
         "example": {
           "expected_total_value": 45000.0,
           "stages": [
@@ -4296,14 +4296,7 @@
               "stage_index": 0,
               "stage_label": "Investment"
             }
-          ],
-          "value_distribution": {
-            "parameters": {
-              "mean": 45000,
-              "std": 15000
-            },
-            "type": "normal"
-          }
+          ]
         },
         "properties": {
           "expected_total_value": {
@@ -4318,53 +4311,13 @@
             },
             "title": "Stages",
             "type": "array"
-          },
-          "value_distribution": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PolicyDistribution"
-              }
-            ],
-            "description": "Distribution of total value"
           }
         },
         "required": [
           "stages",
-          "expected_total_value",
-          "value_distribution"
+          "expected_total_value"
         ],
         "title": "Policy",
-        "type": "object"
-      },
-      "PolicyDistribution": {
-        "description": "Distribution of policy values.",
-        "example": {
-          "parameters": {
-            "mean": 45000,
-            "std": 15000
-          },
-          "type": "normal"
-        },
-        "properties": {
-          "parameters": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "description": "Distribution parameters",
-            "title": "Parameters",
-            "type": "object"
-          },
-          "type": {
-            "description": "Distribution type",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "parameters"
-        ],
-        "title": "PolicyDistribution",
         "type": "object"
       },
       "PredictionResults": {
@@ -5763,7 +5716,6 @@
               "pricing": 1
             }
           },
-          "monte_carlo_samples": 1000,
           "risk_tolerance": "neutral",
           "stages": [
             {
@@ -5806,14 +5758,6 @@
               }
             ],
             "description": "Sequential decision graph"
-          },
-          "monte_carlo_samples": {
-            "default": 1000,
-            "description": "Number of Monte Carlo samples for uncertainty",
-            "maximum": 10000.0,
-            "minimum": 100.0,
-            "title": "Monte Carlo Samples",
-            "type": "integer"
           },
           "risk_tolerance": {
             "anyOf": [
@@ -5879,20 +5823,12 @@
                 "stage_index": 1,
                 "stage_label": "Pricing"
               }
-            ],
-            "value_distribution": {
-              "parameters": {
-                "mean": 45000,
-                "std": 15000
-              },
-              "type": "normal"
-            }
+            ]
           },
           "schema_version": "sequential.v1",
           "sensitivity_to_timing": "medium",
           "stage_analyses": [
             {
-              "information_value": 15000.0,
               "optimal_waiting_value": 20000.0,
               "options_at_stage": [
                 {
@@ -5903,6 +5839,7 @@
                   "total_value": 45000
                 }
               ],
+              "resolved_uncertainty": 15000.0,
               "stage_index": 0,
               "stage_label": "Investment Decision"
             }
@@ -6250,9 +6187,8 @@
         "type": "object"
       },
       "StageAnalysis": {
-        "description": "Analysis for a single stage.",
+        "description": "Analysis for a single stage.\n\nA3 (2026-07-22): `information_value` was relabeled `resolved_uncertainty`\n(F4c) \u2014 the quantity is sqrt(\u03a3 variance) of the chance nodes resolving at this\nstage (a payoff-unit magnitude of outcome dispersion), NOT a value of\ninformation (E[value|info] \u2212 E[value]). The old name and its \"difference\nbetween value with and without information\" claim were unsupported.",
         "example": {
-          "information_value": 15000.0,
           "optimal_waiting_value": 20000.0,
           "options_at_stage": [
             {
@@ -6270,15 +6206,11 @@
               "total_value": 20000
             }
           ],
+          "resolved_uncertainty": 15000.0,
           "stage_index": 0,
           "stage_label": "Investment Decision"
         },
         "properties": {
-          "information_value": {
-            "description": "Value of information revealed at this stage",
-            "title": "Information Value",
-            "type": "number"
-          },
           "optimal_waiting_value": {
             "anyOf": [
               {
@@ -6288,7 +6220,7 @@
                 "type": "null"
               }
             ],
-            "description": "Value of delaying decision (if applicable)",
+            "description": "Proxy for the value of delaying the stage-0 decision, computed as discount_factor \u00d7 the next stage's `resolved_uncertainty`. It is a discounted outcome-dispersion magnitude, NOT a true option value (the difference between the wait-and-decide and commit-now policies).",
             "title": "Optimal Waiting Value"
           },
           "options_at_stage": {
@@ -6298,6 +6230,11 @@
             },
             "title": "Options At Stage",
             "type": "array"
+          },
+          "resolved_uncertainty": {
+            "description": "Magnitude of outcome dispersion resolved at this stage: sqrt of the summed variance of the chance nodes that resolve here, in payoff units. This is NOT a value of information (E[value|info] \u2212 E[value]); it does not compare a with-information policy to a without-information one.",
+            "title": "Resolved Uncertainty",
+            "type": "number"
           },
           "stage_index": {
             "description": "Stage index",
@@ -6315,7 +6252,7 @@
           "stage_index",
           "stage_label",
           "options_at_stage",
-          "information_value"
+          "resolved_uncertainty"
         ],
         "title": "StageAnalysis",
         "type": "object"

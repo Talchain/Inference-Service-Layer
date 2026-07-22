@@ -388,11 +388,13 @@ class TestDiscountFactor:
         assert result.optimal_policy.expected_total_value is not None
 
 
-class TestInformationValue:
-    """Tests for information value computation."""
+class TestResolvedUncertainty:
+    """Tests for the resolved-uncertainty magnitude (F4c: was misnamed
+    `information_value`; it is sqrt(Σ variance), not value-of-information)."""
 
-    def test_information_value_computation(self, engine, two_stage_simple_graph):
-        """Stage with uncertainty resolution should have info value."""
+    def test_resolved_uncertainty_computation(self, engine, two_stage_simple_graph):
+        """A stage that resolves chance nodes has a non-negative outcome-dispersion
+        magnitude."""
         graph, stages = two_stage_simple_graph
 
         request = SequentialAnalysisRequest(
@@ -404,9 +406,10 @@ class TestInformationValue:
 
         result = engine.analyze(request)
 
-        # Stage with resolution_nodes should have information value
+        # The honest field is `resolved_uncertainty`; the misnamed one is gone.
         for analysis in result.stage_analyses:
-            assert analysis.information_value >= 0
+            assert analysis.resolved_uncertainty >= 0
+            assert not hasattr(analysis, "information_value")
 
 
 class TestStageAnalyses:

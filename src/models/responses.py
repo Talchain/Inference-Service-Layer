@@ -3052,27 +3052,19 @@ class StagePolicy(BaseModel):
     }
 
 
-class PolicyDistribution(BaseModel):
-    """Distribution of policy values."""
-
-    type: str = Field(..., description="Distribution type")
-    parameters: Dict[str, float] = Field(..., description="Distribution parameters")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {"type": "normal", "parameters": {"mean": 45000, "std": 15000}}
-        }
-    }
-
-
 class Policy(BaseModel):
-    """Optimal policy across all stages."""
+    """Optimal policy across all stages.
+
+    A3 (2026-07-22): `value_distribution` is OMITTED — it reported normal params
+    with std = 0.2 * |expected_total_value|, a fabricated spread presented as if
+    measured (backward induction is deterministic). A real policy-value
+    distribution is a modeling roadmap item.
+    """
 
     stages: List[StagePolicy] = Field(..., description="Policy for each stage")
     expected_total_value: float = Field(
         ..., description="Expected total value following this policy"
     )
-    value_distribution: PolicyDistribution = Field(..., description="Distribution of total value")
 
     model_config = {
         "json_schema_extra": {
@@ -3086,10 +3078,6 @@ class Policy(BaseModel):
                     }
                 ],
                 "expected_total_value": 45000.0,
-                "value_distribution": {
-                    "type": "normal",
-                    "parameters": {"mean": 45000, "std": 15000},
-                },
             }
         }
     }
@@ -3118,16 +3106,34 @@ class StageOption(BaseModel):
 
 
 class StageAnalysis(BaseModel):
-    """Analysis for a single stage."""
+    """Analysis for a single stage.
+
+    A3 (2026-07-22): `information_value` was relabeled `resolved_uncertainty`
+    (F4c) — the quantity is sqrt(Σ variance) of the chance nodes resolving at this
+    stage (a payoff-unit magnitude of outcome dispersion), NOT a value of
+    information (E[value|info] − E[value]). The old name and its "difference
+    between value with and without information" claim were unsupported.
+    """
 
     stage_index: int = Field(..., description="Stage index", ge=0)
     stage_label: str = Field(..., description="Human-readable stage label")
     options_at_stage: List[StageOption] = Field(
         ..., description="Options available at this stage with analysis"
     )
-    information_value: float = Field(..., description="Value of information revealed at this stage")
+    resolved_uncertainty: float = Field(
+        ...,
+        description="Magnitude of outcome dispersion resolved at this stage: "
+        "sqrt of the summed variance of the chance nodes that resolve here, in "
+        "payoff units. This is NOT a value of information (E[value|info] − "
+        "E[value]); it does not compare a with-information policy to a "
+        "without-information one.",
+    )
     optimal_waiting_value: Optional[float] = Field(
-        default=None, description="Value of delaying decision (if applicable)"
+        default=None,
+        description="Proxy for the value of delaying the stage-0 decision, "
+        "computed as discount_factor × the next stage's `resolved_uncertainty`. "
+        "It is a discounted outcome-dispersion magnitude, NOT a true option value "
+        "(the difference between the wait-and-decide and commit-now policies).",
     )
 
     model_config = {
@@ -3151,7 +3157,7 @@ class StageAnalysis(BaseModel):
                         "total_value": 20000,
                     },
                 ],
-                "information_value": 15000.0,
+                "resolved_uncertainty": 15000.0,
                 "optimal_waiting_value": 20000.0,
             }
         }
@@ -3208,10 +3214,6 @@ class SequentialAnalysisResponse(BaseModel):
                         },
                     ],
                     "expected_total_value": 45000.0,
-                    "value_distribution": {
-                        "type": "normal",
-                        "parameters": {"mean": 45000, "std": 15000},
-                    },
                 },
                 "stage_analyses": [
                     {
@@ -3226,7 +3228,7 @@ class SequentialAnalysisResponse(BaseModel):
                                 "total_value": 45000,
                             }
                         ],
-                        "information_value": 15000.0,
+                        "resolved_uncertainty": 15000.0,
                         "optimal_waiting_value": 20000.0,
                     }
                 ],
