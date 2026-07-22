@@ -816,3 +816,48 @@ class TestSequentialEngineErrorMapping:
         assert body["reason"] == "validation_failed"
         assert body["source"] == "isl"
         assert "cycle" in body["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_mis_staged_decision_node_returns_422_envelope(self, sequential_error_client):
+        """F-2: a decision node in stage.decision_nodes but absent from
+        stage_assignments (never driven, unreachable) is a client-input STAGING
+        defect -> 422 naming the node, NOT a KeyError 500.
+
+        RED at HEAD: _build_policy processes 'c2' (the sole decision node of stage 1),
+        reads node_values['c2child'] for its unvalued non-terminal child -> KeyError
+        -> generic 500. `decision_nodes` is never cross-validated against
+        stage_assignments, so this is a served, Pydantic-valid request.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                    {"id": "c2", "type": "decision", "label": "C2"},
+                    {"id": "c2child", "type": "chance", "label": "C2 Child"},
+                    {"id": "c2gc", "type": "terminal", "label": "C2 GC", "payoff": 5},
+                ],
+                "edges": [
+                    {"from": "root", "to": "win", "action": "safe"},
+                    {"from": "c2", "to": "c2child", "action": "risky"},
+                    {"from": "c2child", "to": "c2gc", "outcome": "x", "probability": 1.0},
+                ],
+                # c2 and c2child deliberately absent from stage_assignments ->
+                # backward induction never drives c2, and nothing reaches it.
+                "stage_assignments": {"root": 0, "win": 1, "c2gc": 2},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root"]},
+                {"stage_index": 1, "stage_label": "Mis-staged", "decision_nodes": ["c2"]},
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 0.95,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "c2" in body["message"]

@@ -1018,19 +1018,22 @@ class TestBuildPolicyFailsLoudOnUnvaluedChild:
     """RW-6b (fail-loud corollary): `_build_policy` must NOT fabricate continuation
     0 for a child missing from node_values.
 
-    INVARIANT: every child of a staged decision node is valued by backward
-    induction before _build_policy runs (resolve() values each edge's child). A
-    child missing from node_values is therefore an internal invariant breach — it
-    must fail loud (KeyError), never be silently read as continuation 0 (the
-    absent-as-0 class this lane kills; cf. _estimate_outcome_variance in RW-6a).
+    The mis-staging that leaves a decision node unvalued is caught UP FRONT by the
+    F-2 guard (raising an actionable ValueError -> 422); see
+    TestSequentialEngineErrorMapping::test_mis_staged_decision_node_returns_422_envelope.
+    This direct-call test pins the last-resort child index PAST that guard: with the
+    decision node present in node_values but a child absent (an artificial state,
+    unreachable in practice since a valued node has all children valued), the index
+    must still fail loud (KeyError), never fabricate continuation 0 (the absent-as-0
+    class this lane kills; cf. _estimate_outcome_variance in RW-6a).
     """
 
     def test_build_policy_raises_on_child_absent_from_node_values(self, engine):
         """RED against `node_values.get(child_id, 0)`: it fabricates 0 and returns a
         Policy. Direct-indexing must raise KeyError instead.
 
-        Calls _build_policy directly with a doctored node_values that OMITS the
-        decision node's child, reproducing the invariant breach.
+        node_values contains the decision node 'root' (so it clears the F-2 guard)
+        but OMITS its child 'child_a', isolating the child-index line.
         """
         graph = SequentialGraph(
             nodes=[
@@ -1044,12 +1047,12 @@ class TestBuildPolicyFailsLoudOnUnvaluedChild:
         )
         stages = [DecisionStage(stage_index=0, stage_label="Root", decision_nodes=["root"])]
         graph_data = engine._build_graph_data(graph)
-        # Doctored node_values deliberately OMITS child_a (invariant breach).
+        # 'root' present (clears the F-2 guard); 'child_a' deliberately OMITTED.
         with pytest.raises(KeyError):
             engine._build_policy(
                 graph_data,
                 stages,
-                node_values={},
+                node_values={"root": 95.0},
                 optimal_actions={},
                 discount_factor=0.95,
             )

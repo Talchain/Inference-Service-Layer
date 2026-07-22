@@ -527,6 +527,25 @@ class SequentialDecisionEngine:
                 if node["type"] != "decision":
                     continue
 
+                # F-2: `decision_nodes` is an independent list that the request
+                # model never cross-validates against `stage_assignments`. A
+                # decision node listed here but absent from the driven staging (not
+                # in stage_assignments under an analysed stage, and unreachable from
+                # any staged node) is never valued by backward induction -> its
+                # children are absent from node_values. That is a client-input
+                # STAGING defect, not an internal failure: fail loud with an
+                # actionable message so the router maps it to 422 (D-12), rather
+                # than letting the child index below raise a mislabeled KeyError-500.
+                if node_id not in node_values:
+                    raise ValueError(
+                        f"Sequential staging defect: decision node '{node_id}' is "
+                        f"listed in a stage's decision_nodes but backward induction "
+                        f"never valued it — its stage_assignments entry is missing "
+                        f"(or maps to a stage not among the analysed `stages`), and "
+                        f"it is unreachable from any staged node. Assign '{node_id}' "
+                        f"to an analysed stage so its subtree can be valued."
+                    )
+
                 # Get optimal action
                 default_action = optimal_actions.get(node_id, "none")
 
@@ -544,13 +563,13 @@ class SequentialDecisionEngine:
                     # (and the discount) for every already-valued child (post-#85:
                     # always).
                     #
-                    # INVARIANT (fail-loud, NOT node_values.get(child_id, 0)): every
-                    # child of a staged decision node is valued by backward
-                    # induction before _build_policy runs (resolve() values each
-                    # edge's child). A child missing from node_values is an internal
-                    # invariant breach and MUST fail loud (KeyError) -- never be
-                    # fabricated as continuation 0 (the absent-as-0 class this lane
-                    # kills; cf. _estimate_outcome_variance's fail-loud in RW-6a).
+                    # Direct-index node_values[child_id], NOT .get(child_id, 0): the
+                    # F-2 guard above proved this decision node was resolved by
+                    # backward induction, and resolve() values every child before
+                    # returning, so each child here is guaranteed present. Past that
+                    # guard a KeyError would be a true internal invariant breach --
+                    # still fail loud, never fabricate continuation 0 (the
+                    # absent-as-0 class this lane kills; cf. RW-6a's fail-loud).
                     immediate = edge.get("immediate_payoff", 0) or 0
                     ev = _discounted_edge_value(
                         immediate, discount_factor, node_values[child_id]
