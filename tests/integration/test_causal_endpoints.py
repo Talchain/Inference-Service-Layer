@@ -6,6 +6,8 @@ Uses httpx.AsyncClient with pytest-asyncio.
 """
 
 import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
 
 
 @pytest.mark.asyncio
@@ -127,3 +129,128 @@ async def test_counterfactual_deterministic(client, sample_structural_model):
         data1["prediction"]["confidence_interval"]["upper"]
         == data2["prediction"]["confidence_interval"]["upper"]
     )
+
+
+# ---------------------------------------------------------------------------
+# D-12(cf): counterfactual-engine input-rejection ValueErrors -> 422, not 500.
+# ---------------------------------------------------------------------------
+#
+# The counterfactual engine fails loud (ValueError) on client-input defects the
+# request model cannot catch: a structural equation referencing an undefined
+# variable, a malformed equation, or circular equation dependencies. The router
+# previously mapped any Exception -> 500 (group-a-verify cf_bad.resp.json). D-12
+# maps these client-input rejections to the repo's 422 validation-error envelope,
+# matching the sequential (phase4) D-12 mapping and the robustness v2 handler
+# (`except ValueError: HTTPException(422, str(e))`).
+#
+# This fixture mounts the counterfactual router with the PRODUCTION exception handlers
+# on a local app so the ValueError->422 mapping is exercised at the router level
+# regardless of whether the global app has mounted the route yet (C1 precedes the
+# C3 selective mount). It asserts the real Olumi ErrorResponse envelope.
+
+
+@pytest_asyncio.fixture
+async def counterfactual_error_client():
+    """Local app: counterfactual route + production HTTPException/Exception handlers."""
+    from fastapi import FastAPI, HTTPException
+
+    from src.api import main as isl_main
+    from src.api.causal import counterfactual_router
+
+    test_app = FastAPI()
+    test_app.include_router(counterfactual_router, prefix="/api/v1/causal")
+    test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
+    test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
+
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as ac:
+        yield ac
+
+
+class TestCounterfactualEngineErrorMapping:
+    """D-12(cf): engine ValueError (bad equation / cycle) -> 422, not 500."""
+
+    @pytest.mark.asyncio
+    async def test_malformed_equation_undefined_var_returns_422_envelope(
+        self, counterfactual_error_client
+    ):
+        """RED at HEAD: undefined variable in a structural equation -> 500.
+
+        This is the group-a-verify cf_bad.json case (`"Revenue": "500 * NopeVar"`,
+        NopeVar undefined). AST evaluation fails loud (ValueError). Pydantic's
+        equation validator only blocks unsafe characters, not undefined-variable
+        references, so the request reaches the engine. That is a client-input
+        rejection -> 422 (Olumi envelope), never a 500.
+        """
+        request = {
+            "model": {
+                "variables": ["Price", "Revenue"],
+                "equations": {"Revenue": "500 * NopeVar"},
+                "distributions": {},
+            },
+            "intervention": {"Price": 15},
+            "outcome": "Revenue",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert body["code"] == "ISL_VALIDATION_ERROR"
+        # message carries the engine's diagnostic naming the offending equation
+        assert "NopeVar" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_circular_equation_dependencies_returns_422_envelope(
+        self, counterfactual_error_client
+    ):
+        """RED at HEAD: circular equation dependencies -> 500.
+
+        `A = B + 1`, `B = A + 1` is a dependency cycle; topological ordering of the
+        structural equations fails loud. -> 422, not 500.
+        """
+        request = {
+            "model": {
+                "variables": ["A", "B"],
+                "equations": {"A": "B + 1", "B": "A + 1"},
+                "distributions": {},
+            },
+            "intervention": {},
+            "outcome": "A",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "circular" in body["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_malformed_equation_syntax_returns_422_envelope(
+        self, counterfactual_error_client
+    ):
+        """RED at HEAD: a syntactically malformed equation -> 500.
+
+        `"500 * "` is not a parseable expression; AST parsing raises SyntaxError
+        which the engine converts to a fail-loud ValueError. -> 422, not 500.
+        """
+        request = {
+            "model": {
+                "variables": ["Price", "Revenue"],
+                "equations": {"Revenue": "500 * "},
+                "distributions": {},
+            },
+            "intervention": {"Price": 15},
+            "outcome": "Revenue",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "equation" in body["message"].lower()

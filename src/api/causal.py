@@ -54,6 +54,17 @@ from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
 
 router = APIRouter()
+
+# Selective mount (R-12, 2026-07-22): ONLY POST /counterfactual is runtime-verified
+# (A3 flip: engine math verified sound 22 Jul + D-12(cf) 422 mapping + C2 cache-leak
+# removal) and goes live. It lives on its OWN router so main.py can mount exactly
+# POST /api/v1/causal/counterfactual while the rest of `router` (validate,
+# counterfactual/batch, counterfactual/conformal, transport, validate/strategies,
+# discover/*, experiment/recommend, parameter-recommendations, sensitivity/detailed,
+# extract-factors) stays dark pending its own runtime verification. Do NOT move other
+# routes onto counterfactual_router.
+counterfactual_router = APIRouter()
+
 logger = logging.getLogger(__name__)
 
 # Initialize services
@@ -207,7 +218,7 @@ async def validate_causal_model(
         )
 
 
-@router.post(
+@counterfactual_router.post(
     "/counterfactual",
     response_model=CounterfactualResponse,
     summary="Perform counterfactual analysis",
@@ -275,6 +286,22 @@ async def analyze_counterfactual(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        # D-12(cf): the counterfactual engine fails loud (ValueError) on client-input
+        # defects the request model cannot catch — a structural equation referencing
+        # an undefined variable, a malformed/unparseable equation, or circular
+        # equation dependencies. These are client errors, not internal failures. Fail
+        # closed with 422 (matching the phase4 sequential D-12 mapping and the
+        # robustness v2 handler) so a malformed structural model surfaces as a clean
+        # validation error, never a 500. All client-reachable engine ValueErrors are
+        # input defects; the one internal-only ValueError source (unknown distribution
+        # type) is unreachable — DistributionType is a Pydantic-validated enum, so an
+        # unknown type is rejected with 422 before the engine runs.
+        logger.warning(
+            "counterfactual_invalid_input",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error("counterfactual_error", exc_info=True)
         raise HTTPException(

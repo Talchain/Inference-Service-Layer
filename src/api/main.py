@@ -31,6 +31,14 @@ from src.utils.tracing import TracingMiddleware, get_trace_id
 # === Active routers (used by PLoT integration) ===
 from .health import router as health_router
 from .metrics import router as metrics_router
+
+# Selective mount (R-12, 2026-07-22): ONLY the counterfactual route of the causal
+# router is runtime-verified (A3 flip) and mounted live, via its own
+# counterfactual_router. The rest of the causal router (validate, counterfactual/batch,
+# counterfactual/conformal, transport, discover, etc.) stays dark — see the commented
+# causal include below.
+from .causal import counterfactual_router as causal_counterfactual_router
+
 # Selective mount (R-12, 2026-07-22): ONLY the sequential-analysis route of phase4
 # is runtime-verified (A2 flip) and mounted live, via its own sequential_router.
 # The rest of the phase4 router (conditional-recommend, policy-tree,
@@ -745,6 +753,17 @@ app.include_router(
     phase4_sequential_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
     tags=["Phase 4: Sequential Decisions"],
+)
+# Selective mount (R-12, 2026-07-22): ONLY POST /api/v1/causal/counterfactual goes
+# live (A3 flip — engine math verified sound + D-12(cf) 422 mapping + C2 cache-leak
+# removal). The other causal routes (validate, counterfactual/batch,
+# counterfactual/conformal, transport, discover, experiment/recommend, sensitivity,
+# extract-factors) stay dark on the unmounted causal `router` below, pending their
+# own runtime verification.
+app.include_router(
+    causal_counterfactual_router,
+    prefix=f"{settings.API_V1_PREFIX}/causal",
+    tags=["Causal Inference"],
 )
 
 # === Disabled for pilot — orphaned endpoints not used by PLoT integration ===

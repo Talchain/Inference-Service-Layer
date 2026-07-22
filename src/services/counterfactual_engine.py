@@ -9,7 +9,6 @@ import ast
 import logging
 import operator
 import re
-from functools import lru_cache
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
@@ -36,6 +35,18 @@ from src.utils.rng import SeededRNG
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+# C2(cf): bound for the topological-sort cache. The former cache was an unbounded dict
+# keyed by json.dumps(equations) (client-controllable), never evicted, on the live
+# request path (this engine is a module-level singleton in causal.py) — a monotonic
+# memory leak (same class as phase4's removed _policy_cache). It is a real read-through
+# optimisation (repeated identical models reuse the sort — including the several
+# re-sorts within one adaptive-MC request), and it is exercised as a feature by
+# tests/performance/test_optimization_gains.py, so it is BOUNDED rather than removed:
+# at capacity the oldest-inserted entry is evicted, capping growth regardless of how
+# many distinct models are seen. Entries are small ((var, equation) lists) and
+# content-addressed, so a cache hit is always correct for that exact equation set.
+_TOPO_SORT_CACHE_MAX = 128
+
 
 class CounterfactualEngine:
     """
@@ -56,7 +67,9 @@ class CounterfactualEngine:
         self.num_iterations = settings.MAX_MONTE_CARLO_ITERATIONS
         self.enable_adaptive_sampling = enable_adaptive_sampling
 
-        # Cache for topological sort results
+        # Bounded read-through cache for topological-sort results (see
+        # _TOPO_SORT_CACHE_MAX): capped so it cannot grow unbounded on the live
+        # request path.
         self._topo_sort_cache: Dict[str, List[Tuple[str, str]]] = {}
 
     def analyze(self, request: CounterfactualRequest) -> CounterfactualResponse:
@@ -129,7 +142,8 @@ class CounterfactualEngine:
         """
         Topologically sort equations based on variable dependencies.
 
-        OPTIMIZATION: Results are cached to avoid recomputation for identical models.
+        OPTIMIZATION: Results are cached (bounded, see _TOPO_SORT_CACHE_MAX) to avoid
+        recomputation for identical models.
 
         Args:
             equations: Dict mapping variable names to equations
@@ -177,8 +191,12 @@ class CounterfactualEngine:
         if len(sorted_vars) != len(equations):
             raise ValueError("Circular dependencies detected in structural equations")
 
-        # Cache the result
+        # Cache the result, evicting the oldest-inserted entry at capacity so the
+        # cache cannot grow unbounded on a client-controllable key (dict preserves
+        # insertion order, Python 3.7+).
         result = [(var, equations[var]) for var in sorted_vars]
+        if len(self._topo_sort_cache) >= _TOPO_SORT_CACHE_MAX:
+            self._topo_sort_cache.pop(next(iter(self._topo_sort_cache)))
         self._topo_sort_cache[cache_key] = result
 
         return result
