@@ -1014,6 +1014,47 @@ class TestConditionalActionExpectedValue:
         assert small.expected_value_if_taken == pytest.approx(51.0)
 
 
+class TestBuildPolicyFailsLoudOnUnvaluedChild:
+    """RW-6b (fail-loud corollary): `_build_policy` must NOT fabricate continuation
+    0 for a child missing from node_values.
+
+    INVARIANT: every child of a staged decision node is valued by backward
+    induction before _build_policy runs (resolve() values each edge's child). A
+    child missing from node_values is therefore an internal invariant breach — it
+    must fail loud (KeyError), never be silently read as continuation 0 (the
+    absent-as-0 class this lane kills; cf. _estimate_outcome_variance in RW-6a).
+    """
+
+    def test_build_policy_raises_on_child_absent_from_node_values(self, engine):
+        """RED against `node_values.get(child_id, 0)`: it fabricates 0 and returns a
+        Policy. Direct-indexing must raise KeyError instead.
+
+        Calls _build_policy directly with a doctored node_values that OMITS the
+        decision node's child, reproducing the invariant breach.
+        """
+        graph = SequentialGraph(
+            nodes=[
+                SequentialGraphNode(id="root", type="decision", label="Root"),
+                SequentialGraphNode(id="child_a", type="terminal", label="A", payoff=10),
+            ],
+            edges=[
+                SequentialGraphEdge(from_node="root", to_node="child_a", action="go"),
+            ],
+            stage_assignments={"root": 0, "child_a": 1},
+        )
+        stages = [DecisionStage(stage_index=0, stage_label="Root", decision_nodes=["root"])]
+        graph_data = engine._build_graph_data(graph)
+        # Doctored node_values deliberately OMITS child_a (invariant breach).
+        with pytest.raises(KeyError):
+            engine._build_policy(
+                graph_data,
+                stages,
+                node_values={},
+                optimal_actions={},
+                discount_factor=0.95,
+            )
+
+
 class TestVarianceHelperFailsLoudOnUnvaluedChild:
     """RW-6a: `_estimate_outcome_variance` must not fabricate a continuation of 0
     for a child missing from node_values (absent != zero).

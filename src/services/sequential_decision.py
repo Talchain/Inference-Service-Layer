@@ -523,13 +523,21 @@ class SequentialDecisionEngine:
                     child_id = edge["to"]
 
                     # RW-6b: the value of taking this action is the edge's own
-                    # value -- immediate payoff plus discounted continuation --
-                    # the same convention `edge_value`/StageOption use. Reporting
-                    # the bare child value dropped the immediate payoff (and the
-                    # discount) for every already-valued child (post-#85: always).
+                    # value -- immediate payoff plus discounted continuation.
+                    # Reporting the bare child value dropped the immediate payoff
+                    # (and the discount) for every already-valued child (post-#85:
+                    # always).
+                    #
+                    # INVARIANT (fail-loud, NOT node_values.get(child_id, 0)): every
+                    # child of a staged decision node is valued by backward
+                    # induction before _build_policy runs (resolve() values each
+                    # edge's child). A child missing from node_values is an internal
+                    # invariant breach and MUST fail loud (KeyError) -- never be
+                    # fabricated as continuation 0 (the absent-as-0 class this lane
+                    # kills; cf. _estimate_outcome_variance's fail-loud in RW-6a).
                     immediate = edge.get("immediate_payoff", 0) or 0
                     ev = _discounted_edge_value(
-                        immediate, discount_factor, node_values.get(child_id, 0)
+                        immediate, discount_factor, node_values[child_id]
                     )
 
                     # Add as conditional action if not default
