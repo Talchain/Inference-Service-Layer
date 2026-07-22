@@ -38,6 +38,45 @@ from src.models.responses import (
 logger = logging.getLogger(__name__)
 
 
+def _discounted_edge_value(immediate: float, discount_factor: float, child_value: float) -> float:
+    """Value of traversing an edge: its immediate payoff plus the discounted
+    continuation value of the child it points to.
+
+    This is the single edge-valuation convention used throughout the engine --
+    the backward-induction decision (max) and chance (expectation) branches and
+    the policy's conditional-action values all read an edge's worth the same way.
+    Keeping the formula in one place stops any consumer silently reporting
+    continuation-only and dropping the edge's immediate payoff (RW-6b).
+    """
+    return immediate + discount_factor * child_value
+
+
+def _edge_probability(edge: Dict[str, Any], num_siblings: int) -> float:
+    """Transition probability for a chance edge, defaulting an UNSPECIFIED
+    probability to an equal split across the node's outgoing edges.
+
+    The request model's `probability` field is Optional with default None, and
+    `_build_graph_data` always writes the key -- so `edge.get("probability",
+    1/len)` returned None (key present, F-3), and `None * value` raised TypeError
+    while the equal-split fallback was dead code. Treat None as 'unspecified' here,
+    at every probability read, so omitting a probability means an equal split.
+    """
+    prob = edge.get("probability")
+    if prob is None:
+        return 1.0 / num_siblings
+    return float(prob)
+
+
+# Risk-aversion coefficient for the mean-standard-deviation adjustment applied to a
+# chance node's value under risk_tolerance="averse": value = mean - k * sqrt(variance).
+# DOCTRINE-PENDING(Neil): ruling D-13 fixes only the UNITS here — variance (currency^2)
+# -> sqrt(variance) (sigma / currency units), symmetric with the 'seeking' branch and
+# _calculate_information_value, both of which already use sqrt(variance). That is a
+# consistency restoration, not a modeling change. The coefficient VALUE (k=0.5) is a
+# risk-modeling decision reserved for Neil; do NOT read 0.5 as ratified.
+RISK_AVERSION_COEFFICIENT = 0.5
+
+
 class SequentialDecisionEngine:
     """
     Engine for solving sequential decision problems via backward induction.
@@ -70,7 +109,9 @@ class SequentialDecisionEngine:
         )
 
         # Build optimal policy
-        policy = self._build_policy(graph_data, request.stages, node_values, optimal_actions)
+        policy = self._build_policy(
+            graph_data, request.stages, node_values, optimal_actions, request.discount_factor
+        )
 
         # Generate stage analyses
         stage_analyses = self._generate_stage_analyses(
@@ -300,10 +341,10 @@ class SequentialDecisionEngine:
             """Immediate payoff plus the discounted continuation value of the
             edge's child. Shared by the decision (max) and chance (expectation)
             branches so the `immediate + discount_factor * resolve(child)` formula
-            lives in exactly one place. Closes over resolve(), defined below."""
+            lives in exactly one place (the module-level `_discounted_edge_value`).
+            Closes over resolve(), defined below."""
             immediate = edge.get("immediate_payoff", 0) or 0
-            total: float = immediate + discount_factor * resolve(edge["to"])
-            return total
+            return _discounted_edge_value(immediate, discount_factor, resolve(edge["to"]))
 
         def resolve(node_id: str) -> float:
             if node_id in node_values:
@@ -350,7 +391,7 @@ class SequentialDecisionEngine:
                     total_prob: float = 0.0
 
                     for edge in outgoing:
-                        prob = edge.get("probability", 1.0 / len(outgoing))
+                        prob = _edge_probability(edge, len(outgoing))
                         expected_value += prob * edge_value(edge)
                         total_prob += prob
 
@@ -400,8 +441,11 @@ class SequentialDecisionEngine:
         if risk_tolerance == "neutral" or variance == 0:
             return mean
         elif risk_tolerance == "averse":
-            # Mean-variance with risk aversion coefficient
-            return mean - 0.5 * variance
+            # Mean-standard-deviation penalty (sigma units), symmetric with the
+            # 'seeking' branch and _calculate_information_value which already use
+            # sqrt(variance). D-13 units fix; coefficient is DOCTRINE-PENDING(Neil).
+            # (variance == 0 is handled by the first branch, so sqrt is safe here.)
+            return float(mean - RISK_AVERSION_COEFFICIENT * np.sqrt(variance))
         elif risk_tolerance == "seeking":
             # Risk-seeking: slight bonus for variance
             return mean + 0.1 * np.sqrt(variance) if variance > 0 else mean
@@ -419,13 +463,25 @@ class SequentialDecisionEngine:
 
         for edge in outgoing_edges:
             child_id = edge["to"]
-            prob = edge.get("probability", 1.0 / len(outgoing_edges))
+            prob = _edge_probability(edge, len(outgoing_edges))
             immediate = edge.get("immediate_payoff", 0) or 0
 
-            if child_id in node_values:
-                value = immediate + discount_factor * node_values[child_id]
-            else:
-                value = immediate
+            if child_id not in node_values:
+                # RW-6a: absent != zero. A child missing from node_values has an
+                # UNKNOWN continuation, not a zero one. The backward-induction
+                # caller resolves every child before computing variance, so this
+                # only fires from _calculate_information_value when a resolution
+                # chance node feeds a non-terminal that induction never valued.
+                # Fabricating `value = immediate` (treating the unknown
+                # continuation as 0) silently corrupts information_value. Fail
+                # loud, matching the engine's absent-as-0 doctrine (see resolve()).
+                raise ValueError(
+                    f"Sequential variance estimate references unvalued node "
+                    f"'{child_id}': its continuation value is unknown (absent from "
+                    f"backward induction), not zero. The node must be reachable "
+                    f"from a staged node before its variance can be estimated."
+                )
+            value = _discounted_edge_value(immediate, discount_factor, node_values[child_id])
 
             values.append(value)
             probs.append(prob)
@@ -441,12 +497,37 @@ class SequentialDecisionEngine:
 
         return float(variance)
 
+    @staticmethod
+    def _require_valued_decision_node(node_id: str, node_values: Dict[str, float]) -> None:
+        """Fail loud (F-2 / F-1a) when a decision node listed in a stage's
+        decision_nodes was never valued by backward induction.
+
+        `decision_nodes` is an independent list the request model never
+        cross-validates against `stage_assignments`; a node listed here but not
+        driven (missing from stage_assignments under an analysed stage, and
+        unreachable from any staged node) is a client-input STAGING defect, not an
+        internal failure. Raising ValueError maps it to 422 via D-12 with an
+        actionable message, instead of a mislabeled KeyError-500 (F-2) or a
+        fabricated absent-as-0 StageOption (F-1a). Single source of the message so
+        both call sites stay in lockstep.
+        """
+        if node_id not in node_values:
+            raise ValueError(
+                f"Sequential staging defect: decision node '{node_id}' is listed in "
+                f"a stage's decision_nodes but backward induction never valued it — "
+                f"its stage_assignments entry is missing (or maps to a stage not "
+                f"among the analysed `stages`), and it is unreachable from any staged "
+                f"node. Assign '{node_id}' to an analysed stage so its subtree can be "
+                f"valued."
+            )
+
     def _build_policy(
         self,
         graph_data: Dict[str, Any],
         stages: List[DecisionStage],
         node_values: Dict[str, float],
         optimal_actions: Dict[str, str],
+        discount_factor: float,
     ) -> Policy:
         """Build policy from backward induction results."""
         stage_policies = []
@@ -470,6 +551,10 @@ class SequentialDecisionEngine:
                 if node["type"] != "decision":
                     continue
 
+                # F-2: fail loud on a mis-staged decision node before the child
+                # index below can raise a mislabeled KeyError-500 (-> 422 via D-12).
+                self._require_valued_decision_node(node_id, node_values)
+
                 # Get optimal action
                 default_action = optimal_actions.get(node_id, "none")
 
@@ -481,10 +566,23 @@ class SequentialDecisionEngine:
                     action = edge.get("action", edge["to"])
                     child_id = edge["to"]
 
-                    if child_id in node_values:
-                        ev = node_values[child_id]
-                    else:
-                        ev = edge.get("immediate_payoff", 0) or 0
+                    # RW-6b: the value of taking this action is the edge's own
+                    # value -- immediate payoff plus discounted continuation.
+                    # Reporting the bare child value dropped the immediate payoff
+                    # (and the discount) for every already-valued child (post-#85:
+                    # always).
+                    #
+                    # Direct-index node_values[child_id], NOT .get(child_id, 0): the
+                    # F-2 guard above proved this decision node was resolved by
+                    # backward induction, and resolve() values every child before
+                    # returning, so each child here is guaranteed present. Past that
+                    # guard a KeyError would be a true internal invariant breach --
+                    # still fail loud, never fabricate continuation 0 (the
+                    # absent-as-0 class this lane kills; cf. RW-6a's fail-loud).
+                    immediate = edge.get("immediate_payoff", 0) or 0
+                    ev = _discounted_edge_value(
+                        immediate, discount_factor, node_values[child_id]
+                    )
 
                     # Add as conditional action if not default
                     if action != default_action:
@@ -544,24 +642,44 @@ class SequentialDecisionEngine:
             return f"If {action or 'alternative'}"
 
     def _get_root_value(self, graph_data: Dict[str, Any], node_values: Dict[str, float]) -> float:
-        """Get value at root node (earliest stage decision)."""
+        """Get value at the root node (the stage-0 decision, else any stage-0 node).
+
+        F-1b: absent != zero. The prior `.get(node_id, 0)` / `max(...)` / `return 0`
+        fallbacks fabricated expected_total_value 0.0 whenever there was no root to
+        read — no node assigned to stage 0, or a stage-0 root that backward
+        induction never valued (stage 0 omitted from the analysed `stages`). Both
+        are client-input STAGING defects; fail loud (-> 422 via D-12) instead. A
+        root LEGITIMATELY worth 0.0 is present in node_values and is returned
+        normally below — only a genuinely-absent root raises.
+        """
         stage_assignments = graph_data["stage_assignments"]
         nodes = graph_data["nodes"]
 
-        # Find decision node at stage 0
+        # Prefer the stage-0 decision node (the true root); else any stage-0 node.
+        root_id: Optional[str] = None
         for node_id, stage in stage_assignments.items():
             if stage == 0 and nodes[node_id]["type"] == "decision":
-                return node_values.get(node_id, 0)
+                root_id = node_id
+                break
+        if root_id is None:
+            for node_id, stage in stage_assignments.items():
+                if stage == 0:
+                    root_id = node_id
+                    break
 
-        # Fallback to any stage 0 node
-        for node_id, stage in stage_assignments.items():
-            if stage == 0:
-                return node_values.get(node_id, 0)
-
-        # Last resort
-        if node_values:
-            return max(node_values.values())
-        return 0
+        if root_id is None:
+            raise ValueError(
+                "Sequential staging defect: no node is assigned to stage 0, so the "
+                "decision problem has no root stage and expected_total_value is "
+                "undefined. Assign the initial decision to stage_index 0."
+            )
+        if root_id not in node_values:
+            raise ValueError(
+                f"Sequential staging defect: the stage-0 root node '{root_id}' was "
+                f"not valued by backward induction (stage 0 is not among the analysed "
+                f"`stages`, or the node is unreachable). Ensure stage 0 is analysed."
+            )
+        return node_values[root_id]
 
     def _generate_stage_analyses(
         self,
@@ -587,6 +705,12 @@ class SequentialDecisionEngine:
                 if node["type"] != "decision":
                     continue
 
+                # F-1a: _build_policy `break`s after the FIRST decision node per
+                # stage, so a second mis-staged decision node in decision_nodes
+                # reaches only here. Fail loud on it too (same guard, -> 422) rather
+                # than fabricating a StageOption from an unvalued continuation.
+                self._require_valued_decision_node(node_id, node_values)
+
                 # Analyze each available action
                 outgoing = edges.get(node_id, [])
 
@@ -595,7 +719,11 @@ class SequentialDecisionEngine:
                     child_id = edge["to"]
                     immediate = edge.get("immediate_payoff", 0) or 0
 
-                    continuation = node_values.get(child_id, 0)
+                    # Direct-index, NOT node_values.get(child_id, 0): past the guard
+                    # above this decision node is valued, so every child is present
+                    # (resolve() values them all). A missing child is a breach -->
+                    # fail loud, never fabricate continuation 0 (absent != zero).
+                    continuation = node_values[child_id]
                     total = immediate + discount_factor * continuation
 
                     options.append(

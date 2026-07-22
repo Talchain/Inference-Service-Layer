@@ -406,6 +406,73 @@ class TestSequentialAnalysisEndpoint:
         invest_option = collision.json()["stage_analyses"][0]["options_at_stage"][0]
         assert invest_option["continuation_value"] == pytest.approx(54625.0)
 
+    @pytest.mark.asyncio
+    async def test_sequential_omitted_probability_equal_split(self, client):
+        """F-3: chance edges with OMITTED probability default to an equal split.
+
+        The probability field's Pydantic default is None; omitting it must mean
+        'unspecified' -> equal split across the node's outgoing edges, NOT a
+        TypeError-500. RED at HEAD: `edge.get('probability', 1/len)` returns the
+        present-but-None value -> None*float -> 500.
+
+        Hand-derivation (d=1.0, neutral, coin has 2 outgoing edges -> 0.5 each):
+          V(coin)  = 0.5*100 + 0.5*0 = 50
+          V(decide)= max(play=0 + 1.0*50, skip=0) = 50
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "decide", "type": "decision", "label": "Decide"},
+                    {"id": "coin", "type": "chance", "label": "Coin"},
+                    {"id": "heads", "type": "terminal", "label": "Heads", "payoff": 100},
+                    {"id": "tails", "type": "terminal", "label": "Tails", "payoff": 0},
+                    {"id": "skip", "type": "terminal", "label": "Skip", "payoff": 0},
+                ],
+                "edges": [
+                    {"from": "decide", "to": "coin", "action": "play"},
+                    {"from": "decide", "to": "skip", "action": "skip"},
+                    # probability OMITTED on both -> equal split expected
+                    {"from": "coin", "to": "heads", "outcome": "h"},
+                    {"from": "coin", "to": "tails", "outcome": "t"},
+                ],
+                "stage_assignments": {
+                    "decide": 0, "coin": 1, "heads": 2, "tails": 2, "skip": 1,
+                },
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Decide", "decision_nodes": ["decide"]},
+                {
+                    "stage_index": 1, "stage_label": "Coin",
+                    "decision_nodes": [], "resolution_nodes": ["coin"],
+                },
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+            "risk_tolerance": "neutral",
+        }
+        response = await client.post("/api/v1/analysis/sequential", json=request)
+        assert response.status_code == 200
+        assert response.json()["optimal_policy"]["expected_total_value"] == pytest.approx(50.0)
+
+    @pytest.mark.asyncio
+    async def test_sequential_does_not_leak_into_module_cache(
+        self, client, sequential_analysis_request
+    ):
+        """F-4: the live sequential path must not write to an unbounded module-level
+        cache. `_policy_cache` was write-only on the live path (its only reader is
+        the DARK policy-tree route, which in fact recomputes and never reads it), so
+        with the mount it grew on every request. It is removed until policy-tree is
+        verified and mounted. RED at HEAD: the module still carries `_policy_cache`.
+        """
+        from src.api import phase4
+
+        response = await client.post(
+            "/api/v1/analysis/sequential", json=sequential_analysis_request
+        )
+        assert response.status_code == 200
+        # No unbounded module-level request/result cache remains on the live path.
+        assert not hasattr(phase4, "_policy_cache")
+
 
 class TestPolicyTreeEndpoint:
     """Tests for POST /api/v1/analysis/policy-tree"""
@@ -650,3 +717,251 @@ class TestPhase4ResponseTimes:
         assert response.status_code == 200
         # Should be under 2s for 3-stage problem
         assert elapsed < 5.0  # Allow 5s for CI environments
+
+
+# ---------------------------------------------------------------------------
+# D-12: engine input-rejection ValueErrors must surface as 422, never 500.
+# ---------------------------------------------------------------------------
+#
+# The sequential engine fails loud (ValueError) on dangling edges and cycles
+# (A2 fix). The router previously mapped any Exception -> 500; D-12 maps these
+# client-input rejections to the repo's 422 validation-error envelope, matching
+# the robustness v2 handler (`except ValueError: HTTPException(422, str(e))`).
+#
+# This fixture mounts the phase4 router with the PRODUCTION exception handlers on
+# a local app so the ValueError->422 mapping is exercised at the router level
+# regardless of whether the global app has mounted the route yet (C4 precedes the
+# C5 selective mount). It asserts the real Olumi ErrorResponse envelope.
+
+
+@pytest_asyncio.fixture
+async def sequential_error_client():
+    """Local app: phase4 sequential route + production HTTPException/Exception handlers."""
+    from fastapi import FastAPI, HTTPException
+
+    from src.api import main as isl_main
+    from src.api.phase4 import sequential_router as phase4_sequential_router
+
+    test_app = FastAPI()
+    test_app.include_router(phase4_sequential_router, prefix="/api/v1/analysis")
+    test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
+    test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://test"
+    ) as ac:
+        yield ac
+
+
+class TestSequentialEngineErrorMapping:
+    """D-12: engine ValueError (dangling edge / cycle) -> 422, not 500."""
+
+    @pytest.mark.asyncio
+    async def test_dangling_edge_returns_422_envelope(self, sequential_error_client):
+        """RED at HEAD: dangling edge -> ValueError -> generic 500.
+
+        `root -> ghost` where `ghost` is never defined as a node. Pydantic does not
+        validate edge endpoints against `nodes`, so the request reaches the engine,
+        which fails loud. That is a client-input rejection -> 422 (Olumi envelope),
+        never a 500.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                ],
+                "edges": [
+                    {"from": "root", "to": "ghost", "action": "risky"},
+                    {"from": "root", "to": "win", "action": "safe"},
+                ],
+                "stage_assignments": {"root": 0, "win": 1},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root"]},
+                {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 0.95,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert body["code"] == "ISL_VALIDATION_ERROR"
+        # message carries the engine's diagnostic naming the dangling node
+        assert "ghost" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_cycle_returns_422_envelope(self, sequential_error_client):
+        """RED at HEAD: a cycle -> ValueError -> generic 500.
+
+        a -> b -> a is a directed cycle; backward induction requires a DAG and
+        fails loud. -> 422, not 500.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "a", "type": "decision", "label": "A"},
+                    {"id": "b", "type": "chance", "label": "B"},
+                    {"id": "end", "type": "terminal", "label": "End", "payoff": 10},
+                ],
+                "edges": [
+                    {"from": "a", "to": "b", "action": "go"},
+                    {"from": "b", "to": "a", "outcome": "loop", "probability": 0.5},
+                    {"from": "b", "to": "end", "outcome": "done", "probability": 0.5},
+                ],
+                "stage_assignments": {"a": 0, "b": 1, "end": 2},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "A", "decision_nodes": ["a"]},
+                {
+                    "stage_index": 1,
+                    "stage_label": "B",
+                    "decision_nodes": [],
+                    "resolution_nodes": ["b"],
+                },
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 0.95,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "cycle" in body["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_mis_staged_decision_node_returns_422_envelope(self, sequential_error_client):
+        """F-2: a decision node in stage.decision_nodes but absent from
+        stage_assignments (never driven, unreachable) is a client-input STAGING
+        defect -> 422 naming the node, NOT a KeyError 500.
+
+        RED at HEAD: _build_policy processes 'c2' (the sole decision node of stage 1),
+        reads node_values['c2child'] for its unvalued non-terminal child -> KeyError
+        -> generic 500. `decision_nodes` is never cross-validated against
+        stage_assignments, so this is a served, Pydantic-valid request.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                    {"id": "c2", "type": "decision", "label": "C2"},
+                    {"id": "c2child", "type": "chance", "label": "C2 Child"},
+                    {"id": "c2gc", "type": "terminal", "label": "C2 GC", "payoff": 5},
+                ],
+                "edges": [
+                    {"from": "root", "to": "win", "action": "safe"},
+                    {"from": "c2", "to": "c2child", "action": "risky"},
+                    {"from": "c2child", "to": "c2gc", "outcome": "x", "probability": 1.0},
+                ],
+                # c2 and c2child deliberately absent from stage_assignments ->
+                # backward induction never drives c2, and nothing reaches it.
+                "stage_assignments": {"root": 0, "win": 1, "c2gc": 2},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root"]},
+                {"stage_index": 1, "stage_label": "Mis-staged", "decision_nodes": ["c2"]},
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 0.95,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "c2" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_second_decision_node_unvalued_returns_422(self, sequential_error_client):
+        """F-1(a): a SECOND mis-staged decision node in decision_nodes (which
+        _build_policy skips via its post-first `break`) reaches _generate_stage_
+        analyses and must fail loud, NOT fabricate a StageOption with continuation 0.
+
+        RED at HEAD: 200 with a fabricated option (continuation_value 0.0) for d2's
+        unvalued chance child. d2 is second in stage 0's decision_nodes and absent
+        from stage_assignments.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                    {"id": "d2", "type": "decision", "label": "D2"},
+                    {"id": "d2child", "type": "chance", "label": "D2 Child"},
+                    {"id": "d2gc", "type": "terminal", "label": "D2 GC", "payoff": 5},
+                ],
+                "edges": [
+                    {"from": "root", "to": "win", "action": "safe"},
+                    {"from": "d2", "to": "d2child", "action": "risky", "immediate_payoff": 7},
+                    {"from": "d2child", "to": "d2gc", "outcome": "x", "probability": 1.0},
+                ],
+                # d2 and d2child absent from stage_assignments
+                "stage_assignments": {"root": 0, "win": 1, "d2gc": 2},
+            },
+            "stages": [
+                # d2 is the SECOND decision node -> _build_policy breaks before it
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root", "d2"]},
+                {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "d2" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_no_stage_zero_returns_422(self, sequential_error_client):
+        """F-1(b): `_get_root_value` must fail loud when there is no valued root,
+        NOT fabricate expected_total_value 0.0.
+
+        RED at HEAD: `stages` omits stage_index 0, so the stage-0 root is never
+        driven/valued; _get_root_value's `.get(root, 0)` fabricated 0.0 -> 200.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "mid", "type": "chance", "label": "Mid"},
+                    {"id": "a", "type": "terminal", "label": "A", "payoff": 100},
+                    {"id": "b", "type": "terminal", "label": "B", "payoff": 0},
+                ],
+                "edges": [
+                    {"from": "root", "to": "mid", "action": "go"},
+                    {"from": "mid", "to": "a", "outcome": "x", "probability": 0.5},
+                    {"from": "mid", "to": "b", "outcome": "y", "probability": 0.5},
+                ],
+                "stage_assignments": {"root": 0, "mid": 1, "a": 2, "b": 2},
+            },
+            "stages": [
+                # stage_index 0 deliberately OMITTED -> root never driven/valued
+                {
+                    "stage_index": 1, "stage_label": "Mid",
+                    "decision_nodes": [], "resolution_nodes": ["mid"],
+                },
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "root" in body["message"]

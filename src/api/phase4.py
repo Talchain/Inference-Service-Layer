@@ -30,14 +30,27 @@ from src.services.conditional_recommender import ConditionalRecommendationEngine
 from src.services.sequential_decision import SequentialDecisionEngine
 
 router = APIRouter()
+
+# Selective mount (R-12): ONLY the sequential-analysis route is runtime-verified
+# (A2 flip: honest engine + served-path value pins + D-12 422 mapping) and goes
+# live. It lives on its OWN router so main.py can mount exactly
+# POST /api/v1/analysis/sequential while the rest of `router`
+# (conditional-recommend, policy-tree, stage-sensitivity) stays dark pending its
+# own runtime verification. Do NOT move other routes onto sequential_router.
+sequential_router = APIRouter()
+
 logger = logging.getLogger(__name__)
 
 # Initialize services
 conditional_engine = ConditionalRecommendationEngine()
 sequential_engine = SequentialDecisionEngine()
 
-# Cache for policy trees (in production, use Redis)
-_policy_cache: dict = {}
+# F-4: the former module-level `_policy_cache` was an unbounded, never-evicted,
+# write-only dict — populated on every live sequential request (key derived from a
+# client-controllable X-Request-Id), with zero readers (the dark policy-tree route
+# recomputes rather than reading it). With the mount that was a monotonic memory
+# leak. It is removed. When the policy-tree route is verified and mounted, it can
+# reintroduce a properly-bounded cache (TTL/LRU or Redis) as part of that change.
 
 
 @router.post(
@@ -127,7 +140,7 @@ async def generate_conditional_recommendations(
         )
 
 
-@router.post(
+@sequential_router.post(
     "/sequential",
     response_model=SequentialAnalysisResponse,
     summary="Analyze sequential decision problem",
@@ -186,12 +199,8 @@ async def analyze_sequential_decision(
 
         result = sequential_engine.analyze(request)
 
-        # Cache for policy-tree endpoint
-        cache_key = f"seq_{request_id}"
-        _policy_cache[cache_key] = {
-            "request": request,
-            "result": result,
-        }
+        # F-4: no _policy_cache write — the former write-only cache was an unbounded
+        # leak with no live reader (see the module-level note). policy-tree recomputes.
 
         logger.info(
             "sequential_analysis_completed",
@@ -210,6 +219,19 @@ async def analyze_sequential_decision(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        # D-12: the engine fails loud (ValueError) on client-input defects the
+        # request model cannot catch — dangling edges (to_node not validated
+        # against nodes), cycles (backward induction requires a DAG), or an
+        # unsupported node type. These are client errors, not internal failures.
+        # Fail closed with 422 (matching the robustness v2 handler) so a
+        # dangling-edge-behind-p=0 graph surfaces as a clean validation error,
+        # never a 500 or a plausible-looking 200.
+        logger.warning(
+            "sequential_analysis_invalid_input",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(
             "sequential_analysis_error",

@@ -195,6 +195,38 @@
         "title": "ComputeAdmissionInfo",
         "type": "object"
       },
+      "ConditionalAction": {
+        "description": "A conditional action in a decision rule.",
+        "example": {
+          "action": "expand",
+          "condition": "If demand_signal > 0.7",
+          "expected_value_if_taken": 85000.0
+        },
+        "properties": {
+          "action": {
+            "description": "Action to take if condition is met",
+            "title": "Action",
+            "type": "string"
+          },
+          "condition": {
+            "description": "Human-readable condition string",
+            "title": "Condition",
+            "type": "string"
+          },
+          "expected_value_if_taken": {
+            "description": "Expected value if this action is taken",
+            "title": "Expected Value If Taken",
+            "type": "number"
+          }
+        },
+        "required": [
+          "condition",
+          "action",
+          "expected_value_if_taken"
+        ],
+        "title": "ConditionalAction",
+        "type": "object"
+      },
       "ConditionalWinner": {
         "description": "Conditional win probability analysis for a single factor.\n\nSplits MC samples at the factor's median value and computes win probabilities\nin each half. When the winner differs between halves, the decision is sensitive\nto this factor's value range.\n\nLimitations:\n- Median split is simplistic. Does not detect non-monotonic effects or\n  factor interactions.\n- Flips at extreme quantiles (top/bottom 10%) may be missed by a 50/50 split.",
         "properties": {
@@ -683,6 +715,108 @@
           "source"
         ],
         "title": "CritiqueV2",
+        "type": "object"
+      },
+      "DecisionRule": {
+        "description": "Conditional decision rule based on observed state.",
+        "example": {
+          "conditional_actions": [
+            {
+              "action": "expand",
+              "condition": "If market_favorable",
+              "expected_value_if_taken": 85000.0
+            },
+            {
+              "action": "exit",
+              "condition": "If market_unfavorable",
+              "expected_value_if_taken": 10000.0
+            }
+          ],
+          "default_action": "wait"
+        },
+        "properties": {
+          "conditional_actions": {
+            "description": "List of conditional actions",
+            "items": {
+              "$ref": "#/components/schemas/ConditionalAction"
+            },
+            "title": "Conditional Actions",
+            "type": "array"
+          },
+          "default_action": {
+            "description": "Default action if no conditions are met",
+            "title": "Default Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default_action"
+        ],
+        "title": "DecisionRule",
+        "type": "object"
+      },
+      "DecisionStage": {
+        "description": "A stage in a sequential decision problem.",
+        "example": {
+          "decision_nodes": [
+            "invest_decision"
+          ],
+          "resolution_nodes": [],
+          "stage_index": 0,
+          "stage_label": "Initial Investment Decision",
+          "time_horizon": "immediate"
+        },
+        "properties": {
+          "decision_nodes": {
+            "description": "Node IDs that are decisions at this stage",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Decision Nodes",
+            "type": "array"
+          },
+          "resolution_nodes": {
+            "description": "Uncertainty nodes resolved by this stage",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "title": "Resolution Nodes",
+            "type": "array"
+          },
+          "stage_index": {
+            "description": "Zero-based stage index",
+            "minimum": 0.0,
+            "title": "Stage Index",
+            "type": "integer"
+          },
+          "stage_label": {
+            "description": "Human-readable label for the stage",
+            "maxLength": 200,
+            "title": "Stage Label",
+            "type": "string"
+          },
+          "time_horizon": {
+            "anyOf": [
+              {
+                "pattern": "^(immediate|short_term|long_term)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time horizon: 'immediate', 'short_term', 'long_term'",
+            "title": "Time Horizon"
+          }
+        },
+        "required": [
+          "stage_index",
+          "stage_label",
+          "decision_nodes"
+        ],
+        "title": "DecisionStage",
         "type": "object"
       },
       "DiagnosticsV2": {
@@ -3664,6 +3798,91 @@
         "title": "PathDecompositionV2",
         "type": "object"
       },
+      "Policy": {
+        "description": "Optimal policy across all stages.",
+        "example": {
+          "expected_total_value": 45000.0,
+          "stages": [
+            {
+              "contingent_on": [],
+              "decision_rule": {
+                "conditional_actions": [],
+                "default_action": "invest"
+              },
+              "stage_index": 0,
+              "stage_label": "Investment"
+            }
+          ],
+          "value_distribution": {
+            "parameters": {
+              "mean": 45000,
+              "std": 15000
+            },
+            "type": "normal"
+          }
+        },
+        "properties": {
+          "expected_total_value": {
+            "description": "Expected total value following this policy",
+            "title": "Expected Total Value",
+            "type": "number"
+          },
+          "stages": {
+            "description": "Policy for each stage",
+            "items": {
+              "$ref": "#/components/schemas/StagePolicy"
+            },
+            "title": "Stages",
+            "type": "array"
+          },
+          "value_distribution": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PolicyDistribution"
+              }
+            ],
+            "description": "Distribution of total value"
+          }
+        },
+        "required": [
+          "stages",
+          "expected_total_value",
+          "value_distribution"
+        ],
+        "title": "Policy",
+        "type": "object"
+      },
+      "PolicyDistribution": {
+        "description": "Distribution of policy values.",
+        "example": {
+          "parameters": {
+            "mean": 45000,
+            "std": 15000
+          },
+          "type": "normal"
+        },
+        "properties": {
+          "parameters": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Distribution parameters",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "type": {
+            "description": "Distribution type",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "parameters"
+        ],
+        "title": "PolicyDistribution",
+        "type": "object"
+      },
       "RecoveryHints": {
         "description": "Recovery hints for error resolution.",
         "properties": {
@@ -4840,6 +5059,538 @@
         "title": "SensitivityResult",
         "type": "object"
       },
+      "SequentialAnalysisRequest": {
+        "description": "Request model for sequential decision analysis endpoint.",
+        "example": {
+          "discount_factor": 0.95,
+          "graph": {
+            "edges": [
+              {
+                "action": "invest",
+                "from": "invest",
+                "immediate_payoff": -50000,
+                "to": "market"
+              },
+              {
+                "from": "market",
+                "outcome": "favorable",
+                "probability": 0.7,
+                "to": "pricing"
+              },
+              {
+                "from": "market",
+                "outcome": "unfavorable",
+                "probability": 0.3,
+                "to": "loss"
+              },
+              {
+                "action": "premium",
+                "from": "pricing",
+                "to": "high_return"
+              },
+              {
+                "action": "economy",
+                "from": "pricing",
+                "to": "low_return"
+              }
+            ],
+            "nodes": [
+              {
+                "id": "invest",
+                "label": "Invest Decision",
+                "type": "decision"
+              },
+              {
+                "id": "market",
+                "label": "Market Outcome",
+                "type": "chance"
+              },
+              {
+                "id": "pricing",
+                "label": "Pricing Decision",
+                "type": "decision"
+              },
+              {
+                "id": "high_return",
+                "label": "High Return",
+                "payoff": 100000,
+                "type": "terminal"
+              },
+              {
+                "id": "low_return",
+                "label": "Low Return",
+                "payoff": 20000,
+                "type": "terminal"
+              },
+              {
+                "id": "loss",
+                "label": "Loss",
+                "payoff": -30000,
+                "type": "terminal"
+              }
+            ],
+            "stage_assignments": {
+              "high_return": 2,
+              "invest": 0,
+              "loss": 2,
+              "low_return": 2,
+              "market": 1,
+              "pricing": 1
+            }
+          },
+          "monte_carlo_samples": 1000,
+          "risk_tolerance": "neutral",
+          "stages": [
+            {
+              "decision_nodes": [
+                "invest"
+              ],
+              "stage_index": 0,
+              "stage_label": "Investment"
+            },
+            {
+              "decision_nodes": [
+                "pricing"
+              ],
+              "resolution_nodes": [
+                "market"
+              ],
+              "stage_index": 1,
+              "stage_label": "Pricing"
+            },
+            {
+              "decision_nodes": [],
+              "stage_index": 2,
+              "stage_label": "Terminal"
+            }
+          ]
+        },
+        "properties": {
+          "discount_factor": {
+            "default": 0.95,
+            "description": "Time preference discount factor (0-1)",
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Discount Factor",
+            "type": "number"
+          },
+          "graph": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SequentialGraph"
+              }
+            ],
+            "description": "Sequential decision graph"
+          },
+          "monte_carlo_samples": {
+            "default": 1000,
+            "description": "Number of Monte Carlo samples for uncertainty",
+            "maximum": 10000.0,
+            "minimum": 100.0,
+            "title": "Monte Carlo Samples",
+            "type": "integer"
+          },
+          "risk_tolerance": {
+            "anyOf": [
+              {
+                "pattern": "^(averse|neutral|seeking)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "neutral",
+            "description": "Risk tolerance: 'averse', 'neutral', 'seeking'",
+            "title": "Risk Tolerance"
+          },
+          "stages": {
+            "description": "Definition of decision stages",
+            "items": {
+              "$ref": "#/components/schemas/DecisionStage"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Stages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "graph",
+          "stages"
+        ],
+        "title": "SequentialAnalysisRequest",
+        "type": "object"
+      },
+      "SequentialAnalysisResponse": {
+        "description": "Response model for sequential decision analysis.",
+        "example": {
+          "optimal_policy": {
+            "expected_total_value": 45000.0,
+            "stages": [
+              {
+                "contingent_on": [],
+                "decision_rule": {
+                  "conditional_actions": [],
+                  "default_action": "invest"
+                },
+                "stage_index": 0,
+                "stage_label": "Investment"
+              },
+              {
+                "contingent_on": [
+                  "market_outcome"
+                ],
+                "decision_rule": {
+                  "conditional_actions": [
+                    {
+                      "action": "premium",
+                      "condition": "If market_favorable",
+                      "expected_value_if_taken": 100000
+                    }
+                  ],
+                  "default_action": "standard"
+                },
+                "stage_index": 1,
+                "stage_label": "Pricing"
+              }
+            ],
+            "value_distribution": {
+              "parameters": {
+                "mean": 45000,
+                "std": 15000
+              },
+              "type": "normal"
+            }
+          },
+          "schema_version": "sequential.v1",
+          "sensitivity_to_timing": "medium",
+          "stage_analyses": [
+            {
+              "information_value": 15000.0,
+              "optimal_waiting_value": 20000.0,
+              "options_at_stage": [
+                {
+                  "continuation_value": 95000,
+                  "immediate_value": -50000,
+                  "label": "Make Investment",
+                  "option_id": "invest",
+                  "total_value": 45000
+                }
+              ],
+              "stage_index": 0,
+              "stage_label": "Investment Decision"
+            }
+          ],
+          "value_of_flexibility": 25000.0
+        },
+        "properties": {
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          },
+          "optimal_policy": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Policy"
+              }
+            ],
+            "description": "Optimal policy across all stages"
+          },
+          "schema_version": {
+            "default": "sequential.v1",
+            "description": "Schema version for this response",
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "sensitivity_to_timing": {
+            "description": "How sensitive results are to timing",
+            "pattern": "^(high|medium|low)$",
+            "title": "Sensitivity To Timing",
+            "type": "string"
+          },
+          "stage_analyses": {
+            "description": "Detailed analysis for each stage",
+            "items": {
+              "$ref": "#/components/schemas/StageAnalysis"
+            },
+            "title": "Stage Analyses",
+            "type": "array"
+          },
+          "value_of_flexibility": {
+            "description": "Value of waiting vs committing now",
+            "title": "Value Of Flexibility",
+            "type": "number"
+          }
+        },
+        "required": [
+          "optimal_policy",
+          "stage_analyses",
+          "value_of_flexibility",
+          "sensitivity_to_timing"
+        ],
+        "title": "SequentialAnalysisResponse",
+        "type": "object"
+      },
+      "SequentialGraph": {
+        "description": "Sequential decision graph structure.",
+        "example": {
+          "edges": [
+            {
+              "action": "invest",
+              "from": "start",
+              "immediate_payoff": -10000,
+              "to": "market"
+            },
+            {
+              "from": "market",
+              "outcome": "favorable",
+              "probability": 0.6,
+              "to": "expand"
+            },
+            {
+              "from": "market",
+              "outcome": "unfavorable",
+              "probability": 0.4,
+              "to": "failure"
+            },
+            {
+              "action": "expand",
+              "from": "expand",
+              "to": "success"
+            },
+            {
+              "action": "exit",
+              "from": "expand",
+              "to": "failure"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "start",
+              "label": "Initial Investment",
+              "type": "decision"
+            },
+            {
+              "id": "market",
+              "label": "Market Outcome",
+              "type": "chance"
+            },
+            {
+              "id": "expand",
+              "label": "Expand Decision",
+              "type": "decision"
+            },
+            {
+              "id": "success",
+              "label": "Success",
+              "payoff": 100000,
+              "type": "terminal"
+            },
+            {
+              "id": "failure",
+              "label": "Failure",
+              "payoff": -20000,
+              "type": "terminal"
+            }
+          ],
+          "stage_assignments": {
+            "expand": 1,
+            "failure": 2,
+            "market": 1,
+            "start": 0,
+            "success": 2
+          }
+        },
+        "properties": {
+          "edges": {
+            "description": "List of directed edges",
+            "items": {
+              "$ref": "#/components/schemas/SequentialGraphEdge"
+            },
+            "maxItems": 300,
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "description": "List of graph nodes",
+            "items": {
+              "$ref": "#/components/schemas/SequentialGraphNode"
+            },
+            "maxItems": 100,
+            "minItems": 2,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "stage_assignments": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Mapping of node IDs to stage indices",
+            "title": "Stage Assignments",
+            "type": "object"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "stage_assignments"
+        ],
+        "title": "SequentialGraph",
+        "type": "object"
+      },
+      "SequentialGraphEdge": {
+        "description": "Edge in a sequential decision graph.",
+        "example": {
+          "action": "invest",
+          "from": "invest_decision",
+          "immediate_payoff": -10000,
+          "to": "market_outcome"
+        },
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Action label (for decision edges)",
+            "title": "Action"
+          },
+          "from": {
+            "description": "Source node ID",
+            "maxLength": 100,
+            "title": "From",
+            "type": "string"
+          },
+          "immediate_payoff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 0.0,
+            "description": "Immediate payoff for this transition",
+            "title": "Immediate Payoff"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outcome label (for chance edges)",
+            "title": "Outcome"
+          },
+          "probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transition probability",
+            "title": "Probability"
+          },
+          "to": {
+            "description": "Target node ID",
+            "maxLength": 100,
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "title": "SequentialGraphEdge",
+        "type": "object"
+      },
+      "SequentialGraphNode": {
+        "description": "Node in a sequential decision graph.",
+        "example": {
+          "id": "invest_decision",
+          "label": "Investment Decision",
+          "type": "decision"
+        },
+        "properties": {
+          "id": {
+            "description": "Unique node identifier",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "Human-readable label",
+            "maxLength": 200,
+            "title": "Label",
+            "type": "string"
+          },
+          "payoff": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Payoff value (for terminal nodes)",
+            "title": "Payoff"
+          },
+          "probabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outcome probabilities (for chance nodes)",
+            "title": "Probabilities"
+          },
+          "type": {
+            "description": "Node type: 'decision', 'chance', or 'terminal'",
+            "pattern": "^(decision|chance|terminal)$",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label"
+        ],
+        "title": "SequentialGraphNode",
+        "type": "object"
+      },
       "StabilityThresholdsResponse": {
         "description": "Threshold metadata for attribution_stability classification.\n\nProvisional \u2014 pending scientific review. NOT included in response_hash.",
         "properties": {
@@ -4871,6 +5622,179 @@
           "provisional"
         ],
         "title": "StabilityThresholdsResponse",
+        "type": "object"
+      },
+      "StageAnalysis": {
+        "description": "Analysis for a single stage.",
+        "example": {
+          "information_value": 15000.0,
+          "optimal_waiting_value": 20000.0,
+          "options_at_stage": [
+            {
+              "continuation_value": 95000,
+              "immediate_value": -50000,
+              "label": "Make Investment",
+              "option_id": "invest",
+              "total_value": 45000
+            },
+            {
+              "continuation_value": 20000,
+              "immediate_value": 0,
+              "label": "Wait and See",
+              "option_id": "wait",
+              "total_value": 20000
+            }
+          ],
+          "stage_index": 0,
+          "stage_label": "Investment Decision"
+        },
+        "properties": {
+          "information_value": {
+            "description": "Value of information revealed at this stage",
+            "title": "Information Value",
+            "type": "number"
+          },
+          "optimal_waiting_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value of delaying decision (if applicable)",
+            "title": "Optimal Waiting Value"
+          },
+          "options_at_stage": {
+            "description": "Options available at this stage with analysis",
+            "items": {
+              "$ref": "#/components/schemas/StageOption"
+            },
+            "title": "Options At Stage",
+            "type": "array"
+          },
+          "stage_index": {
+            "description": "Stage index",
+            "minimum": 0.0,
+            "title": "Stage Index",
+            "type": "integer"
+          },
+          "stage_label": {
+            "description": "Human-readable stage label",
+            "title": "Stage Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_index",
+          "stage_label",
+          "options_at_stage",
+          "information_value"
+        ],
+        "title": "StageAnalysis",
+        "type": "object"
+      },
+      "StageOption": {
+        "description": "Analysis of a single option at a stage.",
+        "example": {
+          "continuation_value": 95000,
+          "immediate_value": -50000,
+          "label": "Make Investment",
+          "option_id": "invest",
+          "total_value": 45000
+        },
+        "properties": {
+          "continuation_value": {
+            "description": "Expected value of future stages",
+            "title": "Continuation Value",
+            "type": "number"
+          },
+          "immediate_value": {
+            "description": "Immediate payoff of choosing this option",
+            "title": "Immediate Value",
+            "type": "number"
+          },
+          "label": {
+            "description": "Human-readable label",
+            "title": "Label",
+            "type": "string"
+          },
+          "option_id": {
+            "description": "Option identifier",
+            "title": "Option Id",
+            "type": "string"
+          },
+          "total_value": {
+            "description": "Total value (immediate + discounted continuation)",
+            "title": "Total Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "option_id",
+          "label",
+          "immediate_value",
+          "continuation_value",
+          "total_value"
+        ],
+        "title": "StageOption",
+        "type": "object"
+      },
+      "StagePolicy": {
+        "description": "Optimal decision policy for a single stage.",
+        "example": {
+          "contingent_on": [
+            "market_outcome"
+          ],
+          "decision_rule": {
+            "conditional_actions": [
+              {
+                "action": "premium_pricing",
+                "condition": "If market_favorable",
+                "expected_value_if_taken": 100000.0
+              }
+            ],
+            "default_action": "standard_pricing"
+          },
+          "stage_index": 1,
+          "stage_label": "Pricing Decision"
+        },
+        "properties": {
+          "contingent_on": {
+            "description": "What must be observed before this stage",
+            "items": {
+              "type": "string"
+            },
+            "title": "Contingent On",
+            "type": "array"
+          },
+          "decision_rule": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DecisionRule"
+              }
+            ],
+            "description": "Decision rule for this stage"
+          },
+          "stage_index": {
+            "description": "Stage index",
+            "minimum": 0.0,
+            "title": "Stage Index",
+            "type": "integer"
+          },
+          "stage_label": {
+            "description": "Human-readable stage label",
+            "title": "Stage Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stage_index",
+          "stage_label",
+          "decision_rule"
+        ],
+        "title": "StagePolicy",
         "type": "object"
       },
       "StrengthDistribution": {
@@ -4954,6 +5878,72 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/analysis/sequential": {
+      "post": {
+        "description": "Solve multi-stage decision problems using backward induction.\n\n    Many strategic decisions are sequential: \"If we launch, then we'll need to\n    decide on pricing. If pricing works, we'll decide on expansion.\"\n    Optimal strategy requires reasoning backward from final outcomes.\n\n    **Algorithm:**\n    1. Start from final stage (terminal payoffs)\n    2. For each state at stage T, compute optimal action and value\n    3. Move backward, computing optimal action given immediate payoff + continuation value\n    4. Repeat until stage 0\n\n    **Value of Flexibility:**\n    Compares optimal policy (deciding at each stage with information) vs\n    committing upfront (ignoring future information).\n\n    **Use when:** Planning multi-stage strategies with uncertainty resolution.",
+        "operationId": "analyze_sequential_decision_api_v1_analysis_sequential_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Request-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SequentialAnalysisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SequentialAnalysisResponse"
+                }
+              }
+            },
+            "description": "Sequential analysis completed successfully"
+          },
+          "400": {
+            "description": "Invalid input (e.g., invalid graph structure)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal computation error"
+          }
+        },
+        "summary": "Analyze sequential decision problem",
+        "tags": [
+          "Phase 4: Sequential Decisions"
+        ]
+      }
+    },
     "/api/v1/robustness/analyze": {
       "post": {
         "description": "Verifies whether proposed intervention robustly achieves target outcomes\n    by exploring intervention space and identifying robust regions.\n\n    **FACET (Region-Based Robustness Analysis)**\n\n    Instead of asking \"What if price = \u00a355?\", FACET answers:\n    - \"Which price ranges reliably achieve \u00a395k-\u00a3105k revenue?\"\n    - \"How fragile is this recommendation to small changes?\"\n    - \"Do I have flexibility in implementation?\"\n\n    **Use this when:**\n    - Making high-stakes decisions\n    - Need confidence in recommendations\n    - Want to understand operating ranges\n    - Assessing strategy fragility\n\n    **Returns:**\n    - Robust intervention regions (e.g., \"price \u00a352-\u00a358 works\")\n    - Outcome guarantees (e.g., \"revenue \u00a395k-\u00a3105k\")\n    - Robustness score (0-1, higher = more robust)\n    - Fragility warnings\n    - Actionable recommendations\n\n    **Performance:** 1-5 seconds depending on samples and dimensions\n\n    **Example workflow:**\n    1. Get counterfactual: \"price=\u00a355 \u2192 revenue=\u00a3100k\"\n    2. Check robustness: Is this recommendation stable?\n    3. Receive: \"Any price \u00a352-\u00a358 works\" (robust) or \"Only \u00a354.8-\u00a355.2 works\" (fragile)\n    4. Decide: Proceed with confidence or revise strategy",

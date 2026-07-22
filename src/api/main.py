@@ -31,6 +31,11 @@ from src.utils.tracing import TracingMiddleware, get_trace_id
 # === Active routers (used by PLoT integration) ===
 from .health import router as health_router
 from .metrics import router as metrics_router
+# Selective mount (R-12, 2026-07-22): ONLY the sequential-analysis route of phase4
+# is runtime-verified (A2 flip) and mounted live, via its own sequential_router.
+# The rest of the phase4 router (conditional-recommend, policy-tree,
+# stage-sensitivity) stays dark — see the commented phase4 include below.
+from .phase4 import sequential_router as phase4_sequential_router
 from .robustness import router as robustness_router
 
 # === Disabled for pilot — orphaned endpoints not used by PLoT integration ===
@@ -731,6 +736,15 @@ app.include_router(
     robustness_router,
     prefix=f"{settings.API_V1_PREFIX}/robustness",
     tags=["FACET Robustness"],
+)
+# Selective mount (R-12, 2026-07-22): ONLY POST /api/v1/analysis/sequential goes
+# live (A2 flip — honest engine + served-path value pins + D-12 422 mapping). The
+# other phase4 routes (conditional-recommend, policy-tree, stage-sensitivity) stay
+# dark on the unmounted phase4 `router` below, pending their own verification.
+app.include_router(
+    phase4_sequential_router,
+    prefix=f"{settings.API_V1_PREFIX}/analysis",
+    tags=["Phase 4: Sequential Decisions"],
 )
 
 # === Disabled for pilot — orphaned endpoints not used by PLoT integration ===
