@@ -84,14 +84,43 @@ class TestDownsideOnWire:
             )
 
     def test_tail_ordering_on_wire(self, client):
-        """cvar_10 <= p05 <= p10 <= p50 (MC regime): worst decile mean below the
-        5th pct, which is below the 10th, which is below the median."""
+        """cvar_10 <= p10 <= p50 — the THEOREM chain only (adversarial F1).
+
+        cvar_10 <= p05 is deliberately NOT asserted here: it is NOT a theorem
+        (a plateau in the lower tail inverts it — proven live-reachable via a
+        point-mass-heavy chance-goal graph, cvar_10=0.4727 > p05=0.0, HTTP 200,
+        values correct). Asserting the non-theorem on wire output would mis-fire
+        RED on a legitimate future engine change (broken-alarm class). The full
+        chain for the continuous MC regime is covered on seeded fixtures in
+        test_downside_metrics.py.
+        """
         body = post_v2(client, base_request())
         for opt in body["options"]:
             d = opt["downside"]
             o = opt["outcome"]
-            assert d["cvar_10"] <= d["p05"] <= o["p10"] <= o["p50"], (
+            assert d["cvar_10"] <= o["p10"] <= o["p50"], (
                 opt["id"], d, o["p10"], o["p50"])
+            assert d["p05"] <= o["p10"], (opt["id"], d, o["p10"])
+
+    def test_p05_wire_value_pin(self, client):
+        """Wire-exact p05 VALUE pin (adversarial O2): the emission constant has
+        no other wire-exact guard — a 5→4 typo in the np.percentile call would
+        pass every other test. The wire does not emit raw samples, so an
+        in-test recompute is impossible without vacuity; instead pin the
+        seed-42 deterministic values (captured from this exact request via an
+        independent in-process run, module __file__ pinned to this tree).
+        Mutation-proven: percentile 5→4 REDs this pin; determinism of the
+        seeded request is covered by the existing determinism tests.
+        """
+        expected_p05 = {
+            "low": -0.23213546863616197,
+            "high": -0.48139036523706824,
+        }
+        body = post_v2(client, base_request())
+        for opt in body["options"]:
+            assert opt["downside"]["p05"] == pytest.approx(
+                expected_p05[opt["id"]], rel=1e-12
+            ), (opt["id"], opt["downside"]["p05"])
 
     def test_expected_regret_nonneg(self, client):
         body = post_v2(client, base_request())
