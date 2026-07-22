@@ -437,10 +437,22 @@ class SequentialDecisionEngine:
             prob = edge.get("probability", 1.0 / len(outgoing_edges))
             immediate = edge.get("immediate_payoff", 0) or 0
 
-            if child_id in node_values:
-                value = immediate + discount_factor * node_values[child_id]
-            else:
-                value = immediate
+            if child_id not in node_values:
+                # RW-6a: absent != zero. A child missing from node_values has an
+                # UNKNOWN continuation, not a zero one. The backward-induction
+                # caller resolves every child before computing variance, so this
+                # only fires from _calculate_information_value when a resolution
+                # chance node feeds a non-terminal that induction never valued.
+                # Fabricating `value = immediate` (treating the unknown
+                # continuation as 0) silently corrupts information_value. Fail
+                # loud, matching the engine's absent-as-0 doctrine (see resolve()).
+                raise ValueError(
+                    f"Sequential variance estimate references unvalued node "
+                    f"'{child_id}': its continuation value is unknown (absent from "
+                    f"backward induction), not zero. The node must be reachable "
+                    f"from a staged node before its variance can be estimated."
+                )
+            value = _discounted_edge_value(immediate, discount_factor, node_values[child_id])
 
             values.append(value)
             probs.append(prob)

@@ -1014,6 +1014,65 @@ class TestConditionalActionExpectedValue:
         assert small.expected_value_if_taken == pytest.approx(51.0)
 
 
+class TestVarianceHelperFailsLoudOnUnvaluedChild:
+    """RW-6a: `_estimate_outcome_variance` must not fabricate a continuation of 0
+    for a child missing from node_values (absent != zero).
+
+    The backward-induction caller always values every child before computing
+    variance, so the fabrication is unreachable there. It IS reachable from
+    `_calculate_information_value`: a chance node named in a stage's
+    `resolution_nodes` that feeds a NON-terminal node which backward induction
+    never valued (not staged, not reachable from a staged node). Terminals are
+    pre-seeded, so only a non-terminal child triggers it. The old `else:
+    value = immediate` silently corrupted information_value; the fix fails loud.
+    """
+
+    def test_information_value_path_fails_loud_on_unvalued_child(self, engine):
+        """RED at HEAD: analyze() returns normally, fabricating the orphan chance
+        node's variance (pending decision read as continuation 0). After the fix it
+        raises ValueError naming the unvalued node.
+
+        Graph: root->win is the only staged/valued flow. `orphan` (chance) is named
+        in stage 1's resolution_nodes but is neither staged nor reachable from root,
+        and it feeds `pending` (a decision node) that induction never values.
+        `_calculate_information_value` therefore calls `_estimate_outcome_variance`
+        on orphan's edges, hitting the unvalued `pending`.
+        """
+        nodes = [
+            SequentialGraphNode(id="root", type="decision", label="Root"),
+            SequentialGraphNode(id="win", type="terminal", label="Win", payoff=100),
+            SequentialGraphNode(id="orphan", type="chance", label="Orphan"),
+            SequentialGraphNode(id="pending", type="decision", label="Pending"),
+            SequentialGraphNode(id="t2", type="terminal", label="T2", payoff=50),
+        ]
+        edges = [
+            SequentialGraphEdge(from_node="root", to_node="win", action="safe"),
+            # orphan is a chance node feeding an unvalued decision + a terminal
+            SequentialGraphEdge(from_node="orphan", to_node="pending", outcome="a", probability=0.5),
+            SequentialGraphEdge(from_node="orphan", to_node="t2", outcome="b", probability=0.5),
+        ]
+        # orphan/pending/t2 deliberately absent from stage_assignments -> orphan is
+        # never driven and `pending` is never valued.
+        graph = SequentialGraph(
+            nodes=nodes, edges=edges, stage_assignments={"root": 0, "win": 1}
+        )
+        stages = [
+            DecisionStage(stage_index=0, stage_label="Root", decision_nodes=["root"]),
+            DecisionStage(
+                stage_index=1,
+                stage_label="Resolve",
+                decision_nodes=[],
+                resolution_nodes=["orphan"],
+            ),
+        ]
+        with pytest.raises(ValueError, match="pending"):
+            engine.analyze(
+                SequentialAnalysisRequest(
+                    graph=graph, stages=stages, discount_factor=0.9, risk_tolerance="neutral"
+                )
+            )
+
+
 class TestAverseRiskAdjustmentBlowUp:
     """DIAGNOSIS + guard for a SEPARATE, UNFIXED risk-adjustment bug.
 
