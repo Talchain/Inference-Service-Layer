@@ -335,9 +335,27 @@ class CounterfactualEngine:
 
         # Sample exogenous variables from their distributions
         for var_name, dist in request.model.distributions.items():
-            samples[var_name] = self._sample_distribution(
-                dist.type.value, dist.parameters, num_samples, rng
-            )
+            try:
+                samples[var_name] = self._sample_distribution(
+                    dist.type.value, dist.parameters, num_samples, rng
+                )
+            except KeyError as e:
+                # Input hardening (A3, 2026-07-22): `_sample_distribution`
+                # dereferences ONLY the client-supplied distribution parameters
+                # (`params[...]`); the RNG `*_array` helpers it calls take positional
+                # floats and access no dict (src/utils/rng.py). A KeyError here is
+                # therefore UNAMBIGUOUSLY a missing required parameter for this
+                # exogenous variable's distribution — a client-input defect, not an
+                # internal bug — so re-raise it as ValueError (route D-12(cf) -> 422)
+                # naming the variable and the exact missing parameter DERIVED from the
+                # KeyError (not a hand-maintained required-params mirror). Scoped to
+                # this single call so a genuine internal KeyError elsewhere still
+                # surfaces as a 500.
+                missing = e.args[0] if e.args else str(e)
+                raise ValueError(
+                    f"Exogenous distribution for variable '{var_name}' (type "
+                    f"'{dist.type.value}') is missing required parameter '{missing}'."
+                ) from e
 
         # Apply intervention (set intervened variables to fixed values)
         for var_name, value in request.intervention.items():

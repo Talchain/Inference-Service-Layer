@@ -328,3 +328,68 @@ class TestCounterfactualUndefinedOutcome:
         assert response.status_code == 200
         body = response.json()
         assert "point_estimate" in body["prediction"]
+
+
+class TestCounterfactualMissingDistributionParameter:
+    """Shape 2: an exogenous distribution spec omitting a required parameter -> 422,
+    not 500.
+
+    `_sample_distribution` dereferences the client-supplied distribution parameters
+    positionally (`params["std"]`, `params["max"]`, ...). A missing key raises
+    KeyError -> a mislabeled 500. This is a client-input defect. The fix re-raises
+    it as ValueError (route D-12(cf) -> 422) naming the variable and the exact
+    missing parameter, DERIVED from the KeyError (not a hand-maintained
+    required-params mirror), so the two dist types below prove it is not hardcoded
+    to one parameter name.
+    """
+
+    @pytest.mark.asyncio
+    async def test_normal_missing_std_returns_422_envelope(self, counterfactual_error_client):
+        """RED at HEAD: a `normal` distribution without `std` -> 500 (KeyError 'std'
+        @ counterfactual_engine.py:340). -> 422 after the guard.
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "10 + 2 * X"},
+                "distributions": {"X": {"type": "normal", "parameters": {"mean": 5}}},
+            },
+            "intervention": {},
+            "outcome": "Y",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert body["code"] == "ISL_VALIDATION_ERROR"
+        # message names the offending variable AND the exact missing parameter
+        assert "X" in body["message"]
+        assert "std" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_uniform_missing_max_returns_422_envelope(self, counterfactual_error_client):
+        """RED at HEAD: a `uniform` distribution without `max` -> 500 (KeyError
+        'max'). Proves the missing-parameter name is DERIVED from the real
+        dereference, not hardcoded to 'std'.
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "10 + 2 * X"},
+                "distributions": {"X": {"type": "uniform", "parameters": {"min": 0}}},
+            },
+            "intervention": {},
+            "outcome": "Y",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "X" in body["message"]
+        assert "max" in body["message"]
