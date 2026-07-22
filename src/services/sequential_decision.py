@@ -38,6 +38,19 @@ from src.models.responses import (
 logger = logging.getLogger(__name__)
 
 
+def _discounted_edge_value(immediate: float, discount_factor: float, child_value: float) -> float:
+    """Value of traversing an edge: its immediate payoff plus the discounted
+    continuation value of the child it points to.
+
+    This is the single edge-valuation convention used throughout the engine --
+    the backward-induction decision (max) and chance (expectation) branches and
+    the policy's conditional-action values all read an edge's worth the same way.
+    Keeping the formula in one place stops any consumer silently reporting
+    continuation-only and dropping the edge's immediate payoff (RW-6b).
+    """
+    return immediate + discount_factor * child_value
+
+
 class SequentialDecisionEngine:
     """
     Engine for solving sequential decision problems via backward induction.
@@ -70,7 +83,9 @@ class SequentialDecisionEngine:
         )
 
         # Build optimal policy
-        policy = self._build_policy(graph_data, request.stages, node_values, optimal_actions)
+        policy = self._build_policy(
+            graph_data, request.stages, node_values, optimal_actions, request.discount_factor
+        )
 
         # Generate stage analyses
         stage_analyses = self._generate_stage_analyses(
@@ -300,10 +315,10 @@ class SequentialDecisionEngine:
             """Immediate payoff plus the discounted continuation value of the
             edge's child. Shared by the decision (max) and chance (expectation)
             branches so the `immediate + discount_factor * resolve(child)` formula
-            lives in exactly one place. Closes over resolve(), defined below."""
+            lives in exactly one place (the module-level `_discounted_edge_value`).
+            Closes over resolve(), defined below."""
             immediate = edge.get("immediate_payoff", 0) or 0
-            total: float = immediate + discount_factor * resolve(edge["to"])
-            return total
+            return _discounted_edge_value(immediate, discount_factor, resolve(edge["to"]))
 
         def resolve(node_id: str) -> float:
             if node_id in node_values:
@@ -447,6 +462,7 @@ class SequentialDecisionEngine:
         stages: List[DecisionStage],
         node_values: Dict[str, float],
         optimal_actions: Dict[str, str],
+        discount_factor: float,
     ) -> Policy:
         """Build policy from backward induction results."""
         stage_policies = []
@@ -481,10 +497,15 @@ class SequentialDecisionEngine:
                     action = edge.get("action", edge["to"])
                     child_id = edge["to"]
 
-                    if child_id in node_values:
-                        ev = node_values[child_id]
-                    else:
-                        ev = edge.get("immediate_payoff", 0) or 0
+                    # RW-6b: the value of taking this action is the edge's own
+                    # value -- immediate payoff plus discounted continuation --
+                    # the same convention `edge_value`/StageOption use. Reporting
+                    # the bare child value dropped the immediate payoff (and the
+                    # discount) for every already-valued child (post-#85: always).
+                    immediate = edge.get("immediate_payoff", 0) or 0
+                    ev = _discounted_edge_value(
+                        immediate, discount_factor, node_values.get(child_id, 0)
+                    )
 
                     # Add as conditional action if not default
                     if action != default_action:

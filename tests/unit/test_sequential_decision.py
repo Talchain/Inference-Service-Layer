@@ -960,6 +960,60 @@ class TestSameStageBackwardInductionRegression:
             )
 
 
+class TestConditionalActionExpectedValue:
+    """RW-6b: Policy.conditional_actions[].expected_value_if_taken must include the
+    edge's immediate payoff and discounted continuation, not the bare child value.
+
+    The field reports the value of taking a NON-default action. Correct semantics
+    are the edge's own value: ``immediate_payoff + discount_factor * V(child)`` --
+    the same convention every other edge valuation in the engine uses. The prior
+    code returned ``node_values[child]`` alone, dropping the immediate payoff (and
+    the discount) whenever the child was already valued (post-#85: always).
+    """
+
+    def test_expected_value_if_taken_includes_immediate_and_discount(self, engine):
+        """RED at HEAD: the non-default action reports V(child) only.
+
+        Root decision, discount 0.9:
+          action "big":   immediate 0,  child terminal payoff 200 -> total 0 + 0.9*200 = 180 (default)
+          action "small": immediate 42, child terminal payoff 10  -> total 42 + 0.9*10 = 51 (non-default)
+        expected_value_if_taken for "small" MUST be 51 (immediate 42 + discount 0.9 * 10),
+        NOT the bare child value 10 that HEAD reports.
+        """
+        nodes = [
+            SequentialGraphNode(id="root", type="decision", label="Root"),
+            SequentialGraphNode(id="big_win", type="terminal", label="Big", payoff=200),
+            SequentialGraphNode(id="small_win", type="terminal", label="Small", payoff=10),
+        ]
+        edges = [
+            SequentialGraphEdge(
+                from_node="root", to_node="big_win", action="big", immediate_payoff=0
+            ),
+            SequentialGraphEdge(
+                from_node="root", to_node="small_win", action="small", immediate_payoff=42
+            ),
+        ]
+        graph = SequentialGraph(
+            nodes=nodes,
+            edges=edges,
+            stage_assignments={"root": 0, "big_win": 1, "small_win": 1},
+        )
+        stages = [
+            DecisionStage(stage_index=0, stage_label="Root", decision_nodes=["root"]),
+            DecisionStage(stage_index=1, stage_label="Terminal", decision_nodes=[]),
+        ]
+        result = engine.analyze(
+            SequentialAnalysisRequest(
+                graph=graph, stages=stages, discount_factor=0.9, risk_tolerance="neutral"
+            )
+        )
+        rule = result.optimal_policy.stages[0].decision_rule
+        assert rule.default_action == "big"
+        small = next(ca for ca in rule.conditional_actions if ca.action == "small")
+        # immediate 42 + discount 0.9 * child value 10 = 51.0
+        assert small.expected_value_if_taken == pytest.approx(51.0)
+
+
 class TestAverseRiskAdjustmentBlowUp:
     """DIAGNOSIS + guard for a SEPARATE, UNFIXED risk-adjustment bug.
 
