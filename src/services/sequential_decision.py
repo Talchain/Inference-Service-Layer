@@ -400,14 +400,14 @@ class SequentialDecisionEngine:
                         expected_value += prob * edge_value(edge)
                         total_prob += prob
 
-                    # F4d (A3, 2026-07-22): reject an ALL-ZERO-MASS chance node —
-                    # every branch probability is 0, so it is not a valid
-                    # distribution and its expected value is undefined. The prior
-                    # code skipped normalisation when total_prob == 0 and valued
-                    # the node at 0, silently collapsing the root to a wrong value
-                    # at HTTP 200. Fail loud -> 422 (route D-12). Omitted
-                    # probabilities default to an equal split (mass == 1), so that
-                    # path is unaffected.
+                    # F4d (A3, 2026-07-22): reject a chance node whose total
+                    # probability mass is effectively zero (<= _PROB_SUM_TOLERANCE)
+                    # — it is not a valid distribution and its expected value is
+                    # undefined. The prior code skipped normalisation when
+                    # total_prob == 0 and valued the node at 0, silently collapsing
+                    # the root to a wrong value at HTTP 200. Fail loud -> 422 (route
+                    # D-12). Omitted probabilities default to an equal split
+                    # (mass == 1), so that path is unaffected.
                     #
                     # A non-zero but non-unit sum is renormalised below (unchanged):
                     # this is a deliberate, load-bearing behaviour — the internal
@@ -419,10 +419,10 @@ class SequentialDecisionEngine:
                     # perturbation (currently a no-op under renormalisation).
                     if total_prob <= _PROB_SUM_TOLERANCE:
                         raise ValueError(
-                            f"Chance node '{node_id}' has zero total probability "
-                            f"mass across its {len(outgoing)} outgoing branches "
-                            f"(every branch probability is 0): it is not a valid "
-                            f"distribution and its expected value is undefined. "
+                            f"Chance node '{node_id}' has effectively zero total "
+                            f"probability mass ({total_prob:g} <= {_PROB_SUM_TOLERANCE:g}) "
+                            f"across its {len(outgoing)} outgoing branches: it is not "
+                            f"a valid distribution and its expected value is undefined. "
                             f"Provide branch probabilities that sum to 1 (or omit "
                             f"them for an equal split)."
                         )
