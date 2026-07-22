@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
+from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
 from src.constants import RESPONSE_SCHEMA_VERSION_V2
 
 
@@ -639,6 +640,25 @@ class ConfidenceProvenance(BaseModel):
     )
 
     model_config = {"extra": "ignore"}
+
+    @classmethod
+    def bootstrap(cls, method_version: str) -> "ConfidenceProvenance":
+        """Marker for the bootstrap-CV-blend confidence method.
+
+        `calibrated` is hardcoded False here — the SINGLE place it is set: the
+        mapping is PROVISIONAL (Neil gate 1) and stays uncalibrated until a
+        validated calibration exists.
+        """
+        return cls(method_version=method_version, calibrated=False)
+
+    @classmethod
+    def graph_structural(cls) -> "ConfidenceProvenance":
+        """Marker for the graph-structural FALLBACK confidence method (F-2) — a
+        DIFFERENT method that stamps its OWN version (GRAPH_STRUCTURAL_METHOD_VERSION),
+        never the bootstrap blend's, so the wire never names a method that did not
+        produce the number.
+        """
+        return cls.bootstrap(GRAPH_STRUCTURAL_METHOD_VERSION)
 
 
 class FactorSensitivityV2(BaseModel):

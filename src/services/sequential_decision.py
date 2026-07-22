@@ -275,8 +275,14 @@ class SequentialDecisionEngine:
                 payoff = node.get("payoff", 0) or 0
                 node_values[node_id] = self._risk_adjust_value(payoff, 0, risk_tolerance)
 
-        # Sort stages so the driver visits nodes end-to-beginning (ordering is no
-        # longer required for correctness; kept for stable, low-surprise iteration).
+        # Sort stages so the driver visits nodes leaf-first (highest stage_index
+        # first). This ordering is NOT merely cosmetic and must NOT be dropped as
+        # "no longer required for correctness": seeding later-stage node_values
+        # before earlier stages ALSO bounds resolve()'s recursion depth in staged
+        # graphs — each resolve() call then finds most of its children already
+        # valued instead of recursing the whole chain. Correctness survives without
+        # the sort (resolve() values any child on demand), but bounded recursion
+        # depth does not. Kept for both bounded depth and stable, low-surprise order.
         sorted_stages = sorted(stages, key=lambda s: s.stage_index, reverse=True)
 
         # Valuation is dependency-ordered, NOT stage-ordered: a node is valued by
@@ -289,6 +295,15 @@ class SequentialDecisionEngine:
         # the root value. A child that genuinely cannot be resolved (dangling edge
         # or cycle) now FAILS LOUD instead of being fabricated as 0.
         resolving: Set[str] = set()
+
+        def edge_value(edge: Dict[str, Any]) -> float:
+            """Immediate payoff plus the discounted continuation value of the
+            edge's child. Shared by the decision (max) and chance (expectation)
+            branches so the `immediate + discount_factor * resolve(child)` formula
+            lives in exactly one place. Closes over resolve(), defined below."""
+            immediate = edge.get("immediate_payoff", 0) or 0
+            total: float = immediate + discount_factor * resolve(edge["to"])
+            return total
 
         def resolve(node_id: str) -> float:
             if node_id in node_values:
@@ -320,15 +335,10 @@ class SequentialDecisionEngine:
                     best_action: str = ""
 
                     for edge in outgoing:
-                        child_id = edge["to"]
-                        immediate = edge.get("immediate_payoff", 0) or 0
-                        continuation = resolve(child_id)
-
-                        total = immediate + discount_factor * continuation
-
+                        total = edge_value(edge)
                         if total > best_value:
                             best_value = total
-                            best_action = str(edge.get("action", child_id))
+                            best_action = str(edge.get("action", edge["to"]))
 
                     node_values[node_id] = best_value
                     optimal_actions[node_id] = best_action
@@ -340,12 +350,8 @@ class SequentialDecisionEngine:
                     total_prob: float = 0.0
 
                     for edge in outgoing:
-                        child_id = edge["to"]
                         prob = edge.get("probability", 1.0 / len(outgoing))
-                        immediate = edge.get("immediate_payoff", 0) or 0
-                        continuation = resolve(child_id)
-
-                        expected_value += prob * (immediate + discount_factor * continuation)
+                        expected_value += prob * edge_value(edge)
                         total_prob += prob
 
                     # Normalize if probabilities don't sum to 1
@@ -370,14 +376,21 @@ class SequentialDecisionEngine:
             finally:
                 resolving.discard(node_id)
 
+        # Bucket every node by its stage_index in a SINGLE pass, so the driver loop
+        # does one dict lookup per stage instead of re-scanning all stage_assignments
+        # for every stage. Coverage is identical: only nodes whose stage_index
+        # appears in `stages` are driven (buckets for other stage indices are never
+        # looked up), and intra-stage order matches stage_assignments iteration
+        # order exactly.
+        nodes_by_stage: Dict[int, List[str]] = {}
+        for node_id, s in stage_assignments.items():
+            nodes_by_stage.setdefault(s, []).append(node_id)
+
         # Drive valuation over the same node set the previous stage sweep covered:
         # every node assigned to a stage that appears in `stages`. resolve() values
         # any reachable child on demand, so intra-stage ordering no longer matters.
         for stage in sorted_stages:
-            stage_nodes = [
-                node_id for node_id, s in stage_assignments.items() if s == stage.stage_index
-            ]
-            for node_id in stage_nodes:
+            for node_id in nodes_by_stage.get(stage.stage_index, []):
                 resolve(node_id)
 
         return node_values, optimal_actions
