@@ -393,3 +393,111 @@ class TestCounterfactualMissingDistributionParameter:
         assert body["source"] == "isl"
         assert "X" in body["message"]
         assert "max" in body["message"]
+
+
+class TestCounterfactualNonFiniteOutcome:
+    """Shape 3: a structural model that computes a non-finite outcome (NaN/+/-inf)
+    on the sampled inputs -> 422, not a serialization 500.
+
+    log() of a non-positive number, division by zero, or overflow in a structural
+    equation yields NaN/inf values. The engine returns them successfully; the
+    non-finite point estimate / interval then serialize-fails in Starlette's
+    JSONResponse (allow_nan=False) -> an unhandled 500 at RESPONSE RENDERING,
+    OUTSIDE the route's try (adversarial finding 2; via the local error fixture the
+    same defect surfaces as a raised `ValueError: Out of range float values are not
+    JSON compliant`). The guard rejects (does NOT clamp — a finite substitute would
+    be a fabricated value) with a clean 422 BEFORE the response is built. The
+    positive controls prove the guard does not false-positive on legitimate finite
+    outcomes, including a legitimately-zero and a large-but-finite value.
+    """
+
+    @pytest.mark.asyncio
+    async def test_log_of_negative_nan_returns_422_envelope(self, counterfactual_error_client):
+        """RED at HEAD: Y=log(X), do(X=-5) -> all-NaN outcome -> 500 at serialization
+        (non-finite point_estimate; JSONResponse allow_nan=False). -> 422 after.
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "log(X)"},
+                "distributions": {},
+            },
+            "intervention": {"X": -5},
+            "outcome": "Y",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert body["code"] == "ISL_VALIDATION_ERROR"
+        assert "non-finite" in body["message"].lower()
+        assert "Y" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_division_by_zero_inf_returns_422_envelope(self, counterfactual_error_client):
+        """RED at HEAD: Y=1/X, do(X=0) -> +inf outcome -> 500 at serialization.
+        -> 422 after. A distinct non-finite class (inf, not NaN).
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "1 / X"},
+                "distributions": {},
+            },
+            "intervention": {"X": 0},
+            "outcome": "Y",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "non-finite" in body["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_legitimate_zero_outcome_still_200(self, counterfactual_error_client):
+        """Positive control: Y=X-5, do(X=5) -> outcome exactly 0.0 (finite). MUST
+        still 200 — proves the non-finite guard does not reject a legitimately-zero
+        outcome.
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "X - 5"},
+                "distributions": {},
+            },
+            "intervention": {"X": 5},
+            "outcome": "Y",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["prediction"]["point_estimate"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_large_but_finite_outcome_still_200(self, counterfactual_error_client):
+        """Positive control: Y=X*1e9, do(X=1e9) -> 1e18 (large but finite). MUST
+        still 200 — proves the guard keys on finiteness, not magnitude.
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "X * 1000000000"},
+                "distributions": {},
+            },
+            "intervention": {"X": 1000000000},
+            "outcome": "Y",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert response.json()["prediction"]["point_estimate"] == 1e18

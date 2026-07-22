@@ -104,6 +104,12 @@ class CounterfactualEngine:
             # Run Monte Carlo simulation
             samples = self._run_monte_carlo(request, rng)
 
+            # Input hardening (A3, 2026-07-22): fail loud on a non-finite outcome
+            # BEFORE building the response, so a mathematically-invalid model maps to
+            # a clean 422 (via the route's D-12(cf)) instead of a 500 raised at
+            # JSON serialization (Starlette's allow_nan=False), OUTSIDE the route try.
+            self._require_finite_outcome(request.outcome, samples[request.outcome])
+
             # Compute prediction results
             prediction = self._compute_prediction(samples, request.outcome)
 
@@ -172,6 +178,31 @@ class CounterfactualEngine:
                 f"so the model can never compute a value for it. Add an equation "
                 f"for '{request.outcome}', or supply it as a distribution, "
                 f"intervention, or context value."
+            )
+
+    def _require_finite_outcome(self, outcome_var: str, outcome_samples: np.ndarray) -> None:
+        """Fail loud (input hardening) when the structural model computes a
+        non-finite outcome (NaN or +/-inf) on the sampled inputs.
+
+        A `log()` of a non-positive number, a division by zero, or an overflow in a
+        structural equation yields NaN/inf sample values. A non-finite point
+        estimate / interval then serialize-fails in Starlette's JSONResponse
+        (`allow_nan=False`) -> an unhandled 500 at RESPONSE RENDERING, OUTSIDE the
+        route's try. It is a client-input defect (a mathematically invalid model on
+        the intervened/context inputs), not an internal failure: raise ValueError ->
+        route D-12(cf) -> 422.
+
+        We REJECT rather than clamp: any finite substitute for an undefined
+        computation would be a fabricated value (the absent-as-0 fabrication class).
+        Fail loud is the doctrine. A legitimately-zero or large-but-finite outcome
+        is finite and passes untouched (see the positive-control tests). Single
+        source of the message.
+        """
+        if not np.all(np.isfinite(np.asarray(outcome_samples, dtype=float))):
+            raise ValueError(
+                f"The structural model produced a non-finite value for outcome "
+                f"'{outcome_var}' (check for log of a non-positive number, division "
+                f"by zero, or overflow in the equations)."
             )
 
     def _topological_sort_equations(self, equations: Dict[str, str]) -> List[Tuple[str, str]]:
