@@ -497,6 +497,30 @@ class SequentialDecisionEngine:
 
         return float(variance)
 
+    @staticmethod
+    def _require_valued_decision_node(node_id: str, node_values: Dict[str, float]) -> None:
+        """Fail loud (F-2 / F-1a) when a decision node listed in a stage's
+        decision_nodes was never valued by backward induction.
+
+        `decision_nodes` is an independent list the request model never
+        cross-validates against `stage_assignments`; a node listed here but not
+        driven (missing from stage_assignments under an analysed stage, and
+        unreachable from any staged node) is a client-input STAGING defect, not an
+        internal failure. Raising ValueError maps it to 422 via D-12 with an
+        actionable message, instead of a mislabeled KeyError-500 (F-2) or a
+        fabricated absent-as-0 StageOption (F-1a). Single source of the message so
+        both call sites stay in lockstep.
+        """
+        if node_id not in node_values:
+            raise ValueError(
+                f"Sequential staging defect: decision node '{node_id}' is listed in "
+                f"a stage's decision_nodes but backward induction never valued it — "
+                f"its stage_assignments entry is missing (or maps to a stage not "
+                f"among the analysed `stages`), and it is unreachable from any staged "
+                f"node. Assign '{node_id}' to an analysed stage so its subtree can be "
+                f"valued."
+            )
+
     def _build_policy(
         self,
         graph_data: Dict[str, Any],
@@ -527,24 +551,9 @@ class SequentialDecisionEngine:
                 if node["type"] != "decision":
                     continue
 
-                # F-2: `decision_nodes` is an independent list that the request
-                # model never cross-validates against `stage_assignments`. A
-                # decision node listed here but absent from the driven staging (not
-                # in stage_assignments under an analysed stage, and unreachable from
-                # any staged node) is never valued by backward induction -> its
-                # children are absent from node_values. That is a client-input
-                # STAGING defect, not an internal failure: fail loud with an
-                # actionable message so the router maps it to 422 (D-12), rather
-                # than letting the child index below raise a mislabeled KeyError-500.
-                if node_id not in node_values:
-                    raise ValueError(
-                        f"Sequential staging defect: decision node '{node_id}' is "
-                        f"listed in a stage's decision_nodes but backward induction "
-                        f"never valued it — its stage_assignments entry is missing "
-                        f"(or maps to a stage not among the analysed `stages`), and "
-                        f"it is unreachable from any staged node. Assign '{node_id}' "
-                        f"to an analysed stage so its subtree can be valued."
-                    )
+                # F-2: fail loud on a mis-staged decision node before the child
+                # index below can raise a mislabeled KeyError-500 (-> 422 via D-12).
+                self._require_valued_decision_node(node_id, node_values)
 
                 # Get optimal action
                 default_action = optimal_actions.get(node_id, "none")
@@ -633,24 +642,44 @@ class SequentialDecisionEngine:
             return f"If {action or 'alternative'}"
 
     def _get_root_value(self, graph_data: Dict[str, Any], node_values: Dict[str, float]) -> float:
-        """Get value at root node (earliest stage decision)."""
+        """Get value at the root node (the stage-0 decision, else any stage-0 node).
+
+        F-1b: absent != zero. The prior `.get(node_id, 0)` / `max(...)` / `return 0`
+        fallbacks fabricated expected_total_value 0.0 whenever there was no root to
+        read — no node assigned to stage 0, or a stage-0 root that backward
+        induction never valued (stage 0 omitted from the analysed `stages`). Both
+        are client-input STAGING defects; fail loud (-> 422 via D-12) instead. A
+        root LEGITIMATELY worth 0.0 is present in node_values and is returned
+        normally below — only a genuinely-absent root raises.
+        """
         stage_assignments = graph_data["stage_assignments"]
         nodes = graph_data["nodes"]
 
-        # Find decision node at stage 0
+        # Prefer the stage-0 decision node (the true root); else any stage-0 node.
+        root_id: Optional[str] = None
         for node_id, stage in stage_assignments.items():
             if stage == 0 and nodes[node_id]["type"] == "decision":
-                return node_values.get(node_id, 0)
+                root_id = node_id
+                break
+        if root_id is None:
+            for node_id, stage in stage_assignments.items():
+                if stage == 0:
+                    root_id = node_id
+                    break
 
-        # Fallback to any stage 0 node
-        for node_id, stage in stage_assignments.items():
-            if stage == 0:
-                return node_values.get(node_id, 0)
-
-        # Last resort
-        if node_values:
-            return max(node_values.values())
-        return 0
+        if root_id is None:
+            raise ValueError(
+                "Sequential staging defect: no node is assigned to stage 0, so the "
+                "decision problem has no root stage and expected_total_value is "
+                "undefined. Assign the initial decision to stage_index 0."
+            )
+        if root_id not in node_values:
+            raise ValueError(
+                f"Sequential staging defect: the stage-0 root node '{root_id}' was "
+                f"not valued by backward induction (stage 0 is not among the analysed "
+                f"`stages`, or the node is unreachable). Ensure stage 0 is analysed."
+            )
+        return node_values[root_id]
 
     def _generate_stage_analyses(
         self,
@@ -676,6 +705,12 @@ class SequentialDecisionEngine:
                 if node["type"] != "decision":
                     continue
 
+                # F-1a: _build_policy `break`s after the FIRST decision node per
+                # stage, so a second mis-staged decision node in decision_nodes
+                # reaches only here. Fail loud on it too (same guard, -> 422) rather
+                # than fabricating a StageOption from an unvalued continuation.
+                self._require_valued_decision_node(node_id, node_values)
+
                 # Analyze each available action
                 outgoing = edges.get(node_id, [])
 
@@ -684,7 +719,11 @@ class SequentialDecisionEngine:
                     child_id = edge["to"]
                     immediate = edge.get("immediate_payoff", 0) or 0
 
-                    continuation = node_values.get(child_id, 0)
+                    # Direct-index, NOT node_values.get(child_id, 0): past the guard
+                    # above this decision node is valued, so every child is present
+                    # (resolve() values them all). A missing child is a breach -->
+                    # fail loud, never fabricate continuation 0 (absent != zero).
+                    continuation = node_values[child_id]
                     total = immediate + discount_factor * continuation
 
                     options.append(

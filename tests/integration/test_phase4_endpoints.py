@@ -861,3 +861,88 @@ class TestSequentialEngineErrorMapping:
         assert body["reason"] == "validation_failed"
         assert body["source"] == "isl"
         assert "c2" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_second_decision_node_unvalued_returns_422(self, sequential_error_client):
+        """F-1(a): a SECOND mis-staged decision node in decision_nodes (which
+        _build_policy skips via its post-first `break`) reaches _generate_stage_
+        analyses and must fail loud, NOT fabricate a StageOption with continuation 0.
+
+        RED at HEAD: 200 with a fabricated option (continuation_value 0.0) for d2's
+        unvalued chance child. d2 is second in stage 0's decision_nodes and absent
+        from stage_assignments.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                    {"id": "d2", "type": "decision", "label": "D2"},
+                    {"id": "d2child", "type": "chance", "label": "D2 Child"},
+                    {"id": "d2gc", "type": "terminal", "label": "D2 GC", "payoff": 5},
+                ],
+                "edges": [
+                    {"from": "root", "to": "win", "action": "safe"},
+                    {"from": "d2", "to": "d2child", "action": "risky", "immediate_payoff": 7},
+                    {"from": "d2child", "to": "d2gc", "outcome": "x", "probability": 1.0},
+                ],
+                # d2 and d2child absent from stage_assignments
+                "stage_assignments": {"root": 0, "win": 1, "d2gc": 2},
+            },
+            "stages": [
+                # d2 is the SECOND decision node -> _build_policy breaks before it
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root", "d2"]},
+                {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "d2" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_no_stage_zero_returns_422(self, sequential_error_client):
+        """F-1(b): `_get_root_value` must fail loud when there is no valued root,
+        NOT fabricate expected_total_value 0.0.
+
+        RED at HEAD: `stages` omits stage_index 0, so the stage-0 root is never
+        driven/valued; _get_root_value's `.get(root, 0)` fabricated 0.0 -> 200.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "mid", "type": "chance", "label": "Mid"},
+                    {"id": "a", "type": "terminal", "label": "A", "payoff": 100},
+                    {"id": "b", "type": "terminal", "label": "B", "payoff": 0},
+                ],
+                "edges": [
+                    {"from": "root", "to": "mid", "action": "go"},
+                    {"from": "mid", "to": "a", "outcome": "x", "probability": 0.5},
+                    {"from": "mid", "to": "b", "outcome": "y", "probability": 0.5},
+                ],
+                "stage_assignments": {"root": 0, "mid": 1, "a": 2, "b": 2},
+            },
+            "stages": [
+                # stage_index 0 deliberately OMITTED -> root never driven/valued
+                {
+                    "stage_index": 1, "stage_label": "Mid",
+                    "decision_nodes": [], "resolution_nodes": ["mid"],
+                },
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "root" in body["message"]
