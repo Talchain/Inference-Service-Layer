@@ -82,6 +82,11 @@ class CounterfactualEngine:
         Returns:
             CounterfactualResponse: Prediction results with uncertainty
         """
+        # Input hardening (A3, 2026-07-22): fail loud on an unresolvable outcome
+        # BEFORE any sampling, so a client-input defect maps to a clean 422 (via the
+        # route's D-12(cf) except-ValueError) instead of a mislabeled KeyError-500.
+        self._require_resolvable_outcome(request)
+
         # Create per-request RNG for thread-safe determinism
         rng = make_deterministic(request.model_dump())
 
@@ -98,6 +103,12 @@ class CounterfactualEngine:
         try:
             # Run Monte Carlo simulation
             samples = self._run_monte_carlo(request, rng)
+
+            # Input hardening (A3, 2026-07-22): fail loud on a non-finite outcome
+            # BEFORE building the response, so a mathematically-invalid model maps to
+            # a clean 422 (via the route's D-12(cf)) instead of a 500 raised at
+            # JSON serialization (Starlette's allow_nan=False), OUTSIDE the route try.
+            self._require_finite_outcome(request.outcome, samples[request.outcome])
 
             # Compute prediction results
             prediction = self._compute_prediction(samples, request.outcome)
@@ -137,6 +148,62 @@ class CounterfactualEngine:
         except Exception as e:
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
+
+    def _require_resolvable_outcome(self, request: CounterfactualRequest) -> None:
+        """Fail loud (input hardening) when `outcome` names a variable the model
+        can never produce a value for.
+
+        `_run_fixed_monte_carlo` populates the `samples` dict from exactly four
+        sources: the exogenous distributions, the intervention, the context, and
+        the structural equations. An `outcome` absent from all four is never
+        sampled, so `_run_adaptive_monte_carlo`'s `batch_samples[request.outcome]`
+        (and, later, `_compute_prediction`'s `samples[outcome_var]`) raises
+        KeyError -> a mislabeled 500. That is a client-input defect (a typo'd or
+        dangling outcome name from the upstream graph-builder), not an internal
+        failure: raise ValueError so the route's D-12(cf) handler maps it to a clean
+        422 naming the unresolved variable. Mirrors phase4's
+        `_require_valued_decision_node`. Single source of the message.
+        """
+        resolvable = (
+            set(request.model.distributions)
+            | set(request.intervention)
+            | set(request.context or {})
+            | set(request.model.equations)
+        )
+        if request.outcome not in resolvable:
+            raise ValueError(
+                f"Outcome variable '{request.outcome}' is not defined by the "
+                f"structural model: it has no structural equation and is not an "
+                f"exogenous distribution, an intervention, or a context variable, "
+                f"so the model can never compute a value for it. Add an equation "
+                f"for '{request.outcome}', or supply it as a distribution, "
+                f"intervention, or context value."
+            )
+
+    def _require_finite_outcome(self, outcome_var: str, outcome_samples: np.ndarray) -> None:
+        """Fail loud (input hardening) when the structural model computes a
+        non-finite outcome (NaN or +/-inf) on the sampled inputs.
+
+        A `log()` of a non-positive number, a division by zero, or an overflow in a
+        structural equation yields NaN/inf sample values. A non-finite point
+        estimate / interval then serialize-fails in Starlette's JSONResponse
+        (`allow_nan=False`) -> an unhandled 500 at RESPONSE RENDERING, OUTSIDE the
+        route's try. It is a client-input defect (a mathematically invalid model on
+        the intervened/context inputs), not an internal failure: raise ValueError ->
+        route D-12(cf) -> 422.
+
+        We REJECT rather than clamp: any finite substitute for an undefined
+        computation would be a fabricated value (the absent-as-0 fabrication class).
+        Fail loud is the doctrine. A legitimately-zero or large-but-finite outcome
+        is finite and passes untouched (see the positive-control tests). Single
+        source of the message.
+        """
+        if not np.all(np.isfinite(np.asarray(outcome_samples, dtype=float))):
+            raise ValueError(
+                f"The structural model produced a non-finite value for outcome "
+                f"'{outcome_var}' (check for log of a non-positive number, division "
+                f"by zero, or overflow in the equations)."
+            )
 
     def _topological_sort_equations(self, equations: Dict[str, str]) -> List[Tuple[str, str]]:
         """
@@ -299,9 +366,27 @@ class CounterfactualEngine:
 
         # Sample exogenous variables from their distributions
         for var_name, dist in request.model.distributions.items():
-            samples[var_name] = self._sample_distribution(
-                dist.type.value, dist.parameters, num_samples, rng
-            )
+            try:
+                samples[var_name] = self._sample_distribution(
+                    dist.type.value, dist.parameters, num_samples, rng
+                )
+            except KeyError as e:
+                # Input hardening (A3, 2026-07-22): `_sample_distribution`
+                # dereferences ONLY the client-supplied distribution parameters
+                # (`params[...]`); the RNG `*_array` helpers it calls take positional
+                # floats and access no dict (src/utils/rng.py). A KeyError here is
+                # therefore UNAMBIGUOUSLY a missing required parameter for this
+                # exogenous variable's distribution — a client-input defect, not an
+                # internal bug — so re-raise it as ValueError (route D-12(cf) -> 422)
+                # naming the variable and the exact missing parameter DERIVED from the
+                # KeyError (not a hand-maintained required-params mirror). Scoped to
+                # this single call so a genuine internal KeyError elsewhere still
+                # surfaces as a 500.
+                missing = e.args[0] if e.args else str(e)
+                raise ValueError(
+                    f"Exogenous distribution for variable '{var_name}' (type "
+                    f"'{dist.type.value}') is missing required parameter '{missing}'."
+                ) from e
 
         # Apply intervention (set intervened variables to fixed values)
         for var_name, value in request.intervention.items():
