@@ -15,7 +15,7 @@ Response versioning:
 import logging
 import math
 import uuid
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, NamedTuple, Optional, Union
 
 import numpy as np
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -51,6 +51,7 @@ from src.models.response_v2 import (
 from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
 from src.models.robustness import RobustnessRequest, RobustnessResponse
 from src.models.robustness_v2 import (
+    FactorSensitivityResult,
     RobustnessRequestV2,
     RobustnessResponseV2,
     detect_schema_version,
@@ -67,7 +68,6 @@ from src.services.robustness_analyzer_v2 import (
     get_max_cost_units,
 )
 from src.config.stability_thresholds import (
-    GRAPH_STRUCTURAL_METHOD_VERSION,
     compute_factor_confidence,
     compute_graph_structural_confidence,
     get_confidence_method_version,
@@ -98,6 +98,61 @@ logger = logging.getLogger(__name__)
 # is REPLACED: it omitted the option multiplier, used the wrong x-edges shape,
 # and priced none of the optional phases. See the cost-model block in
 # robustness_analyzer_v2.py for the formula and calibration provenance.
+
+
+class _FactorConfidence(NamedTuple):
+    """A factor's confidence figure resolved together with its source label and the
+    S2 honest-disclosure marker. `provenance` is never None — see
+    _resolve_factor_confidence for why the marker is unconditional."""
+
+    value: float
+    source: str
+    provenance: ConfidenceProvenance
+
+
+def _resolve_factor_confidence(
+    fs: FactorSensitivityResult, bootstrap_method_version: str
+) -> _FactorConfidence:
+    """Resolve a factor's confidence together with its source and the S2 marker.
+
+    Prefer the bootstrap-CV-blend confidence; fall back to graph-structural when
+    bootstrap metrics are unavailable.
+
+    S2 — honest disclosure marker: the marker rides EXACTLY alongside the
+    confidence figure. On the wire (FactorSensitivityV2, exclude_none=True) it is
+    present EXACTLY when `confidence` is present and OMITTED (never a JSON null)
+    when confidence is absent; the F-3 model_validator on FactorSensitivityV2
+    enforces that iff-invariant and stays as the fail-loud backstop. Both branches
+    here ALWAYS produce a float (compute_graph_structural_confidence never returns
+    None), so the marker is constructed UNCONDITIONALLY. The mapping is PROVISIONAL
+    (Neil gate 1), so `calibrated` is always False until a validated calibration
+    exists and `method_version` is bumped on any mapping change (guarded by
+    tests/unit/test_confidence_provenance.py).
+    """
+    bootstrap_confidence = compute_factor_confidence(
+        fs.attribution_stability,
+        fs.elasticity,
+        fs.elasticity_std,
+    )
+    if bootstrap_confidence is not None:
+        return _FactorConfidence(
+            bootstrap_confidence,
+            "bootstrap_sampling",
+            ConfidenceProvenance.bootstrap(bootstrap_method_version),
+        )
+
+    # Defensive fallback: in normal flow, bootstrap always runs when factor
+    # sensitivity exists, so this branch is unreachable. Kept as a safety net for
+    # future code paths that may bypass bootstrap.
+    #
+    # F-2: the fallback is a DIFFERENT method — stamp its own version, never the
+    # bootstrap blend's, so the wire never names a method that did not produce the
+    # number.
+    return _FactorConfidence(
+        compute_graph_structural_confidence(fs.influence_score),
+        "graph_structural",
+        ConfidenceProvenance.graph_structural(),
+    )
 
 
 def _admission_suggestion(request: RobustnessRequestV2, cost: WeightedCost) -> str:
@@ -1036,42 +1091,12 @@ async def _analyze_robustness_v2_enhanced(
 
             factor_sensitivity = []
             for fs in v1_response.factor_sensitivity:
-                # Confidence: prefer bootstrap-derived, fall back to graph-structural
-                bootstrap_confidence = compute_factor_confidence(
-                    fs.attribution_stability,
-                    fs.elasticity,
-                    fs.elasticity_std,
-                )
-                if bootstrap_confidence is not None:
-                    confidence_val = bootstrap_confidence
-                    confidence_src = "bootstrap_sampling"
-                    confidence_method_version = bootstrap_method_version
-                else:
-                    # Defensive fallback: in normal flow, bootstrap always runs
-                    # when factor sensitivity exists, so this branch is unreachable.
-                    # Kept as a safety net for future code paths that may bypass bootstrap.
-                    confidence_val = compute_graph_structural_confidence(fs.influence_score)
-                    confidence_src = "graph_structural"
-                    # F-2: the fallback is a DIFFERENT method — stamp its own version,
-                    # never the bootstrap blend's, so the wire never names a method
-                    # that did not produce the number.
-                    confidence_method_version = GRAPH_STRUCTURAL_METHOD_VERSION
-
-                # S2: honest disclosure marker for the confidence figure.
-                # Populated EXACTLY when confidence is populated; left None (=>
-                # ABSENT under exclude_none on the wire, never a JSON null) when
-                # confidence is absent. The mapping is provisional (Neil gate 1),
-                # so calibrated is always False until a validated calibration
-                # exists, and method_version is bumped on any mapping change
-                # (guarded by tests/unit/test_confidence_provenance.py).
-                confidence_provenance = (
-                    ConfidenceProvenance(
-                        method_version=confidence_method_version,
-                        calibrated=False,
-                    )
-                    if confidence_val is not None
-                    else None
-                )
+                # Confidence figure + source + S2 disclosure marker, resolved
+                # together (bootstrap-derived, else graph-structural fallback). The
+                # marker is always populated here — both branches yield a float —
+                # and the F-3 model_validator on FactorSensitivityV2 remains the
+                # fail-loud backstop for the confidence<->marker iff-invariant.
+                confidence = _resolve_factor_confidence(fs, bootstrap_method_version)
 
                 # Track S: echo where the factor's value came from. Pure passthrough
                 # of request-supplied provenance; ISL does not consume it in inference.
@@ -1101,9 +1126,9 @@ async def _analyze_robustness_v2_enhanced(
                         elasticity=fs.elasticity,  # Preserve raw elasticity
                         elasticity_display=fs.elasticity_display,  # Clamped for UI
                         direction="positive" if fs.elasticity > 0 else "negative",
-                        confidence=confidence_val,
-                        confidence_source=confidence_src,
-                        confidence_provenance=confidence_provenance,
+                        confidence=confidence.value,
+                        confidence_source=confidence.source,
+                        confidence_provenance=confidence.provenance,
                         importance_rank=fs.importance_rank,
                         observed_value=fs.observed_value,
                         interpretation=fs.interpretation,

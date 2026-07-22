@@ -14,58 +14,11 @@ All assertions go through the real endpoint so they cover model + serialisation
 (by_alias=True, exclude_none=True) end to end.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-
-from src.api.main import app
-
 ENDPOINT = "/api/v1/robustness/analyze/v2"
 V2_HEADERS = {"X-ISL-Response-Version": "2"}
 
-
-@pytest.fixture
-def client():
-    """FastAPI test client."""
-    return TestClient(app)
-
-
-def _build_request(marketing_observed_state=None, include_marketing_uncertainty=True):
-    """Build a 2-factor request where 'marketing' is the uncertain factor.
-
-    'price' is the decision variable (intervened on by both options); 'marketing'
-    is a free uncertain factor that drives factor_sensitivity. Pass
-    ``marketing_observed_state`` to control provenance metadata, or None to omit
-    observed_state entirely (the "value defaulted to 0.0" case).
-    """
-    marketing_node = {"id": "marketing", "kind": "factor", "label": "Marketing"}
-    if marketing_observed_state is not None:
-        marketing_node["observed_state"] = marketing_observed_state
-
-    request = {
-        "graph": {
-            "nodes": [
-                {"id": "price", "kind": "factor", "label": "Price"},
-                marketing_node,
-                {"id": "revenue", "kind": "goal", "label": "Revenue"},
-            ],
-            "edges": [
-                {"from": "price", "to": "revenue", "strength": {"mean": 0.6, "std": 0.15}},
-                {"from": "marketing", "to": "revenue", "strength": {"mean": 0.5, "std": 0.15}},
-            ],
-        },
-        "options": [
-            {"id": "opt1", "label": "Raise price", "interventions": {"price": 120}},
-            {"id": "opt2", "label": "Lower price", "interventions": {"price": 80}},
-        ],
-        "goal_node_id": "revenue",
-        "seed": 42,
-        "n_samples": 200,
-    }
-    if include_marketing_uncertainty:
-        request["parameter_uncertainties"] = [
-            {"node_id": "marketing", "distribution": "normal", "std": 5.0}
-        ]
-    return request
+# The v2_client fixture and the two_factor_request builder are shared via
+# tests/integration/conftest.py (see test_confidence_provenance.py, same suite).
 
 
 def _marketing_factor(client, request):
@@ -84,39 +37,39 @@ def _marketing_factor(client, request):
 class TestProvenanceEcho:
     """Brief B — value-origin passthrough onto FactorSensitivityV2."""
 
-    def test_value_source_echoed(self, client):
+    def test_value_source_echoed(self, v2_client, two_factor_request):
         """1. observed_state.source is echoed to value_source."""
         marketing = _marketing_factor(
-            client, _build_request({"value": 50.0, "source": "user_input"})
+            v2_client, two_factor_request({"value": 50.0, "source": "user_input"})
         )
         assert marketing["value_source"] == "user_input"
 
-    def test_extraction_type_echoed(self, client):
+    def test_extraction_type_echoed(self, v2_client, two_factor_request):
         """2. observed_state.extractionType is echoed to value_extraction_type."""
         marketing = _marketing_factor(
-            client,
-            _build_request(
+            v2_client,
+            two_factor_request(
                 {"value": 50.0, "source": "brief_extraction", "extractionType": "inferred"}
             ),
         )
         assert marketing["value_extraction_type"] == "inferred"
 
-    def test_defaulted_value_flagged_true(self, client):
+    def test_defaulted_value_flagged_true(self, v2_client, two_factor_request):
         """3. Factor with uncertainty but no observed value → value_defaulted: true."""
-        marketing = _marketing_factor(client, _build_request(marketing_observed_state=None))
+        marketing = _marketing_factor(v2_client, two_factor_request(marketing_observed_state=None))
         assert marketing["value_defaulted"] is True
 
-    def test_provided_value_not_flagged_defaulted(self, client):
+    def test_provided_value_not_flagged_defaulted(self, v2_client, two_factor_request):
         """4. Explicitly-provided value → value_defaulted absent (not defaulted)."""
         marketing = _marketing_factor(
-            client, _build_request({"value": 50.0, "source": "user_input"})
+            v2_client, two_factor_request({"value": 50.0, "source": "user_input"})
         )
         assert "value_defaulted" not in marketing
 
-    def test_no_provenance_metadata_fields_absent(self, client):
+    def test_no_provenance_metadata_fields_absent(self, v2_client, two_factor_request):
         """5. Factor with a value but no source/extractionType → echo fields absent,
         not null-injected, and the response is still valid."""
-        marketing = _marketing_factor(client, _build_request({"value": 50.0}))
+        marketing = _marketing_factor(v2_client, two_factor_request({"value": 50.0}))
         assert "value_source" not in marketing
         assert "value_extraction_type" not in marketing
         # Value WAS provided, so it is not flagged as defaulted either.
@@ -126,24 +79,24 @@ class TestProvenanceEcho:
         assert "direction" in marketing
         assert "sensitivity_score" in marketing
 
-    def test_provenance_deterministic(self, client):
+    def test_provenance_deterministic(self, v2_client, two_factor_request):
         """6. Same input + seed → identical provenance fields across calls."""
-        request = _build_request(
+        request = two_factor_request(
             {"value": 50.0, "source": "user_input", "extractionType": "explicit"}
         )
-        first = _marketing_factor(client, request)
-        second = _marketing_factor(client, request)
+        first = _marketing_factor(v2_client, request)
+        second = _marketing_factor(v2_client, request)
         for key in ("value_source", "value_extraction_type", "value_defaulted"):
             assert first.get(key) == second.get(key)
         assert first["value_source"] == "user_input"
         assert first["value_extraction_type"] == "explicit"
 
-    def test_present_fields_not_null_injected(self, client):
+    def test_present_fields_not_null_injected(self, v2_client, two_factor_request):
         """7. exclude_none contract: supplied provenance is present and non-null;
         the unsupplied value_defaulted is omitted rather than serialised as null."""
         marketing = _marketing_factor(
-            client,
-            _build_request({"value": 50.0, "source": "computed", "extractionType": "explicit"}),
+            v2_client,
+            two_factor_request({"value": 50.0, "source": "computed", "extractionType": "explicit"}),
         )
         assert marketing["value_source"] == "computed"
         assert marketing["value_extraction_type"] == "explicit"

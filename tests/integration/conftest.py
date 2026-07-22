@@ -13,6 +13,10 @@ from typing import Dict, List, Any
 from datetime import datetime
 import json
 
+from fastapi.testclient import TestClient
+
+from src.api.main import app
+
 
 # ==================== STANDARD TEST MODELS ====================
 
@@ -249,3 +253,64 @@ def make_request_id():
         return f"{prefix}_{counter}_{datetime.utcnow().timestamp()}"
 
     return _make_id
+
+
+# ==================== S2 ROBUSTNESS-V2 ENDPOINT FIXTURES ====================
+# Shared by the two S2 factor-sensitivity suites — test_confidence_provenance.py
+# (disclosure marker) and test_provenance_echo.py (value-origin echo) — which both
+# drive /api/v1/robustness/analyze/v2 with the same 2-factor graph where
+# 'marketing' is the uncertain factor that drives factor_sensitivity. Named
+# distinctly (v2_client, not `client`) so they do NOT override the async httpx
+# `client` fixture in tests/conftest.py that the other integration suites use.
+
+
+@pytest.fixture
+def v2_client():
+    """Sync FastAPI TestClient for the robustness v2 endpoint (S2 suites)."""
+    return TestClient(app)
+
+
+@pytest.fixture
+def two_factor_request():
+    """Return a builder for the shared 2-factor robustness request.
+
+    'price' is the decision variable (intervened on by both options); 'marketing'
+    is a free uncertain factor that drives factor_sensitivity. Pass
+    ``marketing_observed_state`` to control provenance metadata, or None to omit
+    observed_state entirely (the "value defaulted to 0.0" case). Set
+    ``include_marketing_uncertainty=False`` to drop the marketing PU. With the
+    defaults it reproduces the disclosure-marker suite's request exactly.
+    """
+
+    def _build(marketing_observed_state=None, include_marketing_uncertainty=True):
+        marketing_node = {"id": "marketing", "kind": "factor", "label": "Marketing"}
+        if marketing_observed_state is not None:
+            marketing_node["observed_state"] = marketing_observed_state
+
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "price", "kind": "factor", "label": "Price"},
+                    marketing_node,
+                    {"id": "revenue", "kind": "goal", "label": "Revenue"},
+                ],
+                "edges": [
+                    {"from": "price", "to": "revenue", "strength": {"mean": 0.6, "std": 0.15}},
+                    {"from": "marketing", "to": "revenue", "strength": {"mean": 0.5, "std": 0.15}},
+                ],
+            },
+            "options": [
+                {"id": "opt1", "label": "Raise price", "interventions": {"price": 120}},
+                {"id": "opt2", "label": "Lower price", "interventions": {"price": 80}},
+            ],
+            "goal_node_id": "revenue",
+            "seed": 42,
+            "n_samples": 200,
+        }
+        if include_marketing_uncertainty:
+            request["parameter_uncertainties"] = [
+                {"node_id": "marketing", "distribution": "normal", "std": 5.0}
+            ]
+        return request
+
+    return _build

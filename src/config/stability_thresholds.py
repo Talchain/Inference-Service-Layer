@@ -41,6 +41,22 @@ class StabilityThresholds:
     provisional: bool
     version: str
 
+    @property
+    def is_overridden(self) -> bool:
+        """True when either CV boundary differs from its literal default — a
+        STABILITY_CV_* env override moved it, yielding a NON-standard confidence
+        method (F-1).
+
+        This is a VALUE comparison, NOT env presence: setting an override to
+        exactly the default boundary is not a recalibration, so it reads False.
+        Deliberately distinct from load_stability_thresholds()'s presence-based
+        `overrides_active` warning, which fires whenever the env var is SET at all.
+        """
+        return (
+            self.high_moderate_boundary != DEFAULT_CV_HIGH_MODERATE_BOUNDARY
+            or self.moderate_low_boundary != DEFAULT_CV_MODERATE_LOW_BOUNDARY
+        )
+
 
 def _read_env_float(name: str, default: float) -> float:
     """Read a float from an environment variable, returning default if absent or invalid."""
@@ -167,11 +183,7 @@ def get_confidence_method_version() -> str:
     ``DEFAULT_CV_HIGH_MODERATE_BOUNDARY`` / ``DEFAULT_CV_MODERATE_LOW_BOUNDARY``.
     """
     thresholds = load_stability_thresholds()
-    overridden = (
-        thresholds.high_moderate_boundary != DEFAULT_CV_HIGH_MODERATE_BOUNDARY
-        or thresholds.moderate_low_boundary != DEFAULT_CV_MODERATE_LOW_BOUNDARY
-    )
-    if overridden:
+    if thresholds.is_overridden:
         return CONFIDENCE_METHOD_VERSION + "+env-override"
     return CONFIDENCE_METHOD_VERSION
 

@@ -22,9 +22,6 @@ Two concerns:
    self-heal.
 """
 
-import hashlib
-import json
-
 import pytest
 
 from src.config.stability_thresholds import (
@@ -42,6 +39,7 @@ from src.config.stability_thresholds import (
     get_confidence_method_version,
 )
 from src.models.response_v2 import ConfidenceProvenance, FactorSensitivityV2
+from src.utils.canonical_hash import canonical_json_hash
 
 # ---------------------------------------------------------------------------
 # 1. ABSENT-NOT-NULL serialisation contract
@@ -137,37 +135,36 @@ PINNED_GRAPH_STRUCTURAL_METHOD_VERSION = "graph-structural-v1"
 
 def _current_constants_fingerprint() -> str:
     """sha256 over a canonical repr of the mapping constants (computed LIVE from
-    source — the pin is a hardcoded literal, so this never self-heals)."""
-    canonical = json.dumps(
+    source — the pin is a hardcoded literal, so this never self-heals).
+
+    Uses the repo canonical_json_hash (sort_keys=True, compact separators, sha256
+    over the UTF-8 bytes) — the same canonicalisation the wire fingerprint uses.
+    sort_keys sorts nested keys too, so STABILITY_CONFIDENCE_MAP needs no manual
+    pre-sort."""
+    return canonical_json_hash(
         {
-            "STABILITY_CONFIDENCE_MAP": {
-                k: STABILITY_CONFIDENCE_MAP[k] for k in sorted(STABILITY_CONFIDENCE_MAP)
-            },
+            "STABILITY_CONFIDENCE_MAP": STABILITY_CONFIDENCE_MAP,
             "STABILITY_CONFIDENCE_DEFAULT": STABILITY_CONFIDENCE_DEFAULT,
             "CONFIDENCE_CATEGORY_WEIGHT": CONFIDENCE_CATEGORY_WEIGHT,
             "CONFIDENCE_CV_WEIGHT": CONFIDENCE_CV_WEIGHT,
             "CONFIDENCE_CV_ELASTICITY_FLOOR": CONFIDENCE_CV_ELASTICITY_FLOOR,
             "DEFAULT_CV_HIGH_MODERATE_BOUNDARY": DEFAULT_CV_HIGH_MODERATE_BOUNDARY,
             "DEFAULT_CV_MODERATE_LOW_BOUNDARY": DEFAULT_CV_MODERATE_LOW_BOUNDARY,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+        }
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _current_graph_structural_fingerprint() -> str:
     """sha256 over the graph-structural fallback constants (F-2). Pinned to
-    GRAPH_STRUCTURAL_METHOD_VERSION; computed LIVE, pin is a literal (no self-heal)."""
-    canonical = json.dumps(
+    GRAPH_STRUCTURAL_METHOD_VERSION; computed LIVE, pin is a literal (no self-heal).
+
+    Same repo canonical_json_hash canonicalisation as the constants fingerprint."""
+    return canonical_json_hash(
         {
             "GRAPH_STRUCTURAL_CONFIDENCE_FLOOR": GRAPH_STRUCTURAL_CONFIDENCE_FLOOR,
             "GRAPH_STRUCTURAL_CONFIDENCE_SCALE": GRAPH_STRUCTURAL_CONFIDENCE_SCALE,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+        }
     )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class TestConfidenceMethodVersionGuard:
