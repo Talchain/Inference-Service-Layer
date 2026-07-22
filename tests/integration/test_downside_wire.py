@@ -141,30 +141,83 @@ class TestDownsideOnWire:
         for opt in body["options"]:
             assert opt["downside"]["expected_regret"] >= 0.0
 
-    def test_expected_regret_consistent_with_win_probability(self, client):
-        """expected_regret and win_probability derive from the SAME pre-noise
-        CRN population (F1 fix), so the option that wins the most samples
-        (highest win_probability) also carries the lowest expected_regret --
-        one consistent answer to "which option is best?".
+    def test_expected_regret_argmin_is_max_mean_utility(self):
+        """The HONEST identity `argmin(expected_regret) == argmax(mean utility)`.
 
-        Pre-fix this FAILED on this exact fixture: win_probability is built from
-        the PRE-noise winners and ranks 'low' highest (0.5025 > 0.4975), while
-        expected_regret was computed from the POST-noise samples and ranked
-        'high' lowest (0.1075 < 0.1115). The same response answered the same
-        question two ways from two populations (CODE-REVIEW-ISL F1 aggravator).
-        RED before the fix (low != high), GREEN after (low == low).
+        F9 (A3, 2026-07-22): this REPLACES the false invariant
+        argmin(regret)==argmax(win_probability). That equality is NOT a theorem
+        (see the divergence test below). What IS a theorem — directly from the
+        metric's own definition `regret_o = mean_i(best_i − o_i)` — is that when
+        every draw is finite, `regret_o = E[best] − mean_o` with E[best] a single
+        constant shared by all options; therefore the option with the LOWEST
+        expected regret is exactly the one with the HIGHEST mean utility.
 
-        NB: this REPLACES the old ``winner_has_lowest_regret_when_all_finite``
-        check, which compared argmin(regret) to argmax(WIRE mean). The wire mean
-        is POST-noise while the corrected regret is PRE-noise, so near-equivalent
-        means that noise reorders would make that comparison mis-fire. The honest
-        same-population winner is win_probability (also pre-noise), used here.
+        Verified on the production metric (`expected_regret_per_option`, the exact
+        code that produces the wire `downside.expected_regret`) over CRN-aligned
+        PRE-noise per-option sample populations — the same population semantics as
+        the fixture — not from the disagreeing scalar summaries.
         """
-        body = post_v2(client, base_request())
-        opts = body["options"]
-        best_by_winprob = max(opts, key=lambda o: o["win_probability"])["id"]
-        least_regret = min(opts, key=lambda o: o["downside"]["expected_regret"])["id"]
-        assert best_by_winprob == least_regret, (best_by_winprob, least_regret)
+        import numpy as np
+
+        from src.utils.downside import expected_regret_per_option
+
+        rng = np.random.default_rng(42)
+        n = 4000
+        # Three CRN-aligned options (same n draws) with clearly separated means.
+        base = rng.normal(0.0, 1.0, n)  # shared latent draw (CRN)
+        samples = {
+            "a": (base + rng.normal(0.0, 0.3, n) + 2.0).tolist(),  # highest mean
+            "b": (base + rng.normal(0.0, 0.3, n) + 0.5).tolist(),
+            "c": (base + rng.normal(0.0, 0.3, n) - 1.0).tolist(),  # lowest mean
+        }
+        regrets = expected_regret_per_option(samples)
+        means = {k: float(np.mean(v)) for k, v in samples.items()}
+
+        least_regret = min(regrets, key=lambda k: regrets[k])
+        highest_mean = max(means, key=lambda k: means[k])
+        assert least_regret == highest_mean == "a", (regrets, means)
+
+    def test_regret_and_win_probability_may_legitimately_diverge(self):
+        """Codex's counterexample: argmin(regret) and argmax(win_probability) can
+        pick DIFFERENT options — proving the old equality invariant was never a
+        theorem, and guarding against ever re-imposing it on the engine.
+
+        Option A pays 100 on 49% of the CRN draws and 0 otherwise; option B pays 1
+        on every draw. Then B wins the MOST samples (51% > 49%) so
+        argmax(win_probability) = B, while A carries the LOWEST expected regret
+        (E[regret_A]=0.51 vs E[regret_B]=48.51) so argmin(regret) = A. The two
+        honest metrics answer "which is best?" differently, and both are correct
+        for their own question.
+
+        RED-first framing: on THIS data the old assertion
+        `argmax(win_prob) == argmin(regret)` is `B == A` -> FALSE. If anyone ever
+        made the engine force regret to track win_probability (re-imposing the
+        false equality), the two would agree here and this divergence assertion
+        would go RED.
+        """
+        import numpy as np
+
+        from src.utils.downside import expected_regret_per_option
+
+        n = 100
+        a = [100.0] * 49 + [0.0] * 51  # 49% pay 100, else 0
+        b = [1.0] * n  # always pays 1
+        samples = {"A": a, "B": b}
+
+        # win_probability: per-sample argmax winner (production semantics; no ties
+        # here since A in {100, 0} and B == 1 are never equal).
+        mat = np.vstack([np.asarray(a), np.asarray(b)])  # rows: A, B
+        winners = mat.argmax(axis=0)  # 0 -> A wins, 1 -> B wins
+        win_prob = {"A": float(np.mean(winners == 0)), "B": float(np.mean(winners == 1))}
+        regrets = expected_regret_per_option(samples)
+
+        best_by_winprob = max(win_prob, key=lambda k: win_prob[k])
+        least_regret = min(regrets, key=lambda k: regrets[k])
+
+        assert best_by_winprob == "B", win_prob
+        assert least_regret == "A", regrets
+        # The metrics DIVERGE — the old invariant would fail here.
+        assert best_by_winprob != least_regret, (best_by_winprob, least_regret)
 
     def test_expected_regret_is_pre_noise_crn_value(self, client):
         """expected_regret is the PRE-noise CRN-joint regret, NOT the post-noise

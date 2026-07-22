@@ -250,12 +250,18 @@ class DownsideV2(BaseModel):
         description="Expected shortfall: the MEAN of the worst 10% (lowest) "
         "outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) "
         "default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of "
-        "the worst decile cannot exceed the decile boundary).",
+        "the worst decile cannot exceed the decile boundary). "
+        "POPULATION: computed from the POST-``_apply_auto_scaled_noise`` outcome "
+        "samples — the SAME (noised) population as outcome.p10/p50/p90/mean and "
+        "p05, and DIFFERENT from expected_regret (which is pre-noise).",
     )
     p05: float = Field(
         ...,
         description="5th-percentile outcome — extends the p10/p50/p90 family "
-        "downward, computed with the SAME percentile convention as p10.",
+        "downward, computed with the SAME percentile convention as p10. "
+        "POPULATION: the POST-``_apply_auto_scaled_noise`` (noised) samples, like "
+        "outcome.p10/p50/p90/mean and cvar_10 — and DIFFERENT from "
+        "expected_regret (pre-noise).",
     )
     expected_regret: float = Field(
         ...,
@@ -263,10 +269,12 @@ class DownsideV2(BaseModel):
         description="Joint expected regret: mean over MC samples of "
         "(best-option outcome - this option's outcome) at the SAME underlying "
         "draw (Common Random Numbers). >= 0 by construction; ~0 for the option "
-        "that wins each sample. Computed from the PRE-noise CRN-aligned "
-        "population (the same samples as win_probability), NOT the "
-        "auto-scaled-noise outcome samples used by cvar_10/p05 — independent "
-        "per-option noise would break the CRN alignment this metric requires.",
+        "that wins each sample. POPULATION: the PRE-noise CRN-aligned samples "
+        "(the same population as win_probability), NOT the "
+        "post-auto-scaled-noise outcome samples used by cvar_10/p05 — independent "
+        "per-option noise would break the CRN alignment this metric requires. "
+        "(So within one downside{} object the two metric families ride DIFFERENT "
+        "populations: expected_regret is pre-noise; cvar_10/p05 are post-noise.)",
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
