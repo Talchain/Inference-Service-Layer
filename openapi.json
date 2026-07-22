@@ -1243,6 +1243,34 @@
         "title": "DistributionType",
         "type": "string"
       },
+      "DownsideV2": {
+        "description": "Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome\nsamples the v2 engine already draws \u2014 no new sampling, no change to any\nexisting emitted value.\n\nRides as a sibling to ``outcome`` and is present EXACTLY when the option's\nsamples are available at the emission locus (``outcome.percentiles_source ==\n'samples'``); otherwise omitted (absent, never a JSON null). All values are\nin the SAME units as ``outcome.mean`` / ``outcome.p10`` (no normalisation).",
+        "properties": {
+          "cvar_10": {
+            "description": "Expected shortfall: the MEAN of the worst 10% (lowest) outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of the worst decile cannot exceed the decile boundary).",
+            "title": "Cvar 10",
+            "type": "number"
+          },
+          "expected_regret": {
+            "description": "Joint expected regret: mean over MC samples of (best-option outcome - this option's outcome) at the SAME underlying draw (Common Random Numbers). >= 0 by construction; ~0 for the option that wins each sample. Meaningful only because the v2 engine draws joint per-option samples.",
+            "minimum": 0.0,
+            "title": "Expected Regret",
+            "type": "number"
+          },
+          "p05": {
+            "description": "5th-percentile outcome \u2014 extends the p10/p50/p90 family downward, computed with the SAME percentile convention as p10.",
+            "title": "P05",
+            "type": "number"
+          }
+        },
+        "required": [
+          "cvar_10",
+          "p05",
+          "expected_regret"
+        ],
+        "title": "DownsideV2",
+        "type": "object"
+      },
       "EdgeEValueV2": {
         "description": "E-value analogue for an edge: how wrong must the strength be to flip the recommendation?\n\nAnalogous to VanderWeele's E-value in observational epidemiology: larger values\nindicate the assumption is robust (needs a larger violation to overturn the finding).",
         "properties": {
@@ -3691,6 +3719,17 @@
               }
             ],
             "description": "Multi-constraint analysis results. Only present when goal_constraints is provided in request."
+          },
+          "downside": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DownsideV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Downside / tail-risk view {cvar_10, p05, expected_regret}. Present exactly when the option's MC samples are available (outcome.percentiles_source == 'samples'); omitted (not null) otherwise."
           },
           "id": {
             "description": "Option identifier",
