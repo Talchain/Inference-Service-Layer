@@ -90,7 +90,6 @@ def sequential_analysis_request():
         ],
         "discount_factor": 0.95,
         "risk_tolerance": "neutral",
-        "monte_carlo_samples": 100
     }
 
 
@@ -271,7 +270,8 @@ class TestSequentialAnalysisEndpoint:
         policy = data["optimal_policy"]
         assert "stages" in policy
         assert "expected_total_value" in policy
-        assert "value_distribution" in policy
+        # A3 F4b: the fabricated `value_distribution` (std = 0.2*|root|) is omitted.
+        assert "value_distribution" not in policy
 
         # Value-correct (hand-derived, neutral, d=0.95):
         #   V(market)  = 0.6*0.95*100000 + 0.4*0.95*(-20000) = 57000 - 7600 = 49400
