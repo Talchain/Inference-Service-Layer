@@ -406,6 +406,54 @@ class TestSequentialAnalysisEndpoint:
         invest_option = collision.json()["stage_analyses"][0]["options_at_stage"][0]
         assert invest_option["continuation_value"] == pytest.approx(54625.0)
 
+    @pytest.mark.asyncio
+    async def test_sequential_omitted_probability_equal_split(self, client):
+        """F-3: chance edges with OMITTED probability default to an equal split.
+
+        The probability field's Pydantic default is None; omitting it must mean
+        'unspecified' -> equal split across the node's outgoing edges, NOT a
+        TypeError-500. RED at HEAD: `edge.get('probability', 1/len)` returns the
+        present-but-None value -> None*float -> 500.
+
+        Hand-derivation (d=1.0, neutral, coin has 2 outgoing edges -> 0.5 each):
+          V(coin)  = 0.5*100 + 0.5*0 = 50
+          V(decide)= max(play=0 + 1.0*50, skip=0) = 50
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "decide", "type": "decision", "label": "Decide"},
+                    {"id": "coin", "type": "chance", "label": "Coin"},
+                    {"id": "heads", "type": "terminal", "label": "Heads", "payoff": 100},
+                    {"id": "tails", "type": "terminal", "label": "Tails", "payoff": 0},
+                    {"id": "skip", "type": "terminal", "label": "Skip", "payoff": 0},
+                ],
+                "edges": [
+                    {"from": "decide", "to": "coin", "action": "play"},
+                    {"from": "decide", "to": "skip", "action": "skip"},
+                    # probability OMITTED on both -> equal split expected
+                    {"from": "coin", "to": "heads", "outcome": "h"},
+                    {"from": "coin", "to": "tails", "outcome": "t"},
+                ],
+                "stage_assignments": {
+                    "decide": 0, "coin": 1, "heads": 2, "tails": 2, "skip": 1,
+                },
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Decide", "decision_nodes": ["decide"]},
+                {
+                    "stage_index": 1, "stage_label": "Coin",
+                    "decision_nodes": [], "resolution_nodes": ["coin"],
+                },
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+            "risk_tolerance": "neutral",
+        }
+        response = await client.post("/api/v1/analysis/sequential", json=request)
+        assert response.status_code == 200
+        assert response.json()["optimal_policy"]["expected_total_value"] == pytest.approx(50.0)
+
 
 class TestPolicyTreeEndpoint:
     """Tests for POST /api/v1/analysis/policy-tree"""

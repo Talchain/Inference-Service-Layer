@@ -51,6 +51,22 @@ def _discounted_edge_value(immediate: float, discount_factor: float, child_value
     return immediate + discount_factor * child_value
 
 
+def _edge_probability(edge: Dict[str, Any], num_siblings: int) -> float:
+    """Transition probability for a chance edge, defaulting an UNSPECIFIED
+    probability to an equal split across the node's outgoing edges.
+
+    The request model's `probability` field is Optional with default None, and
+    `_build_graph_data` always writes the key -- so `edge.get("probability",
+    1/len)` returned None (key present, F-3), and `None * value` raised TypeError
+    while the equal-split fallback was dead code. Treat None as 'unspecified' here,
+    at every probability read, so omitting a probability means an equal split.
+    """
+    prob = edge.get("probability")
+    if prob is None:
+        return 1.0 / num_siblings
+    return float(prob)
+
+
 # Risk-aversion coefficient for the mean-standard-deviation adjustment applied to a
 # chance node's value under risk_tolerance="averse": value = mean - k * sqrt(variance).
 # DOCTRINE-PENDING(Neil): ruling D-13 fixes only the UNITS here — variance (currency^2)
@@ -375,7 +391,7 @@ class SequentialDecisionEngine:
                     total_prob: float = 0.0
 
                     for edge in outgoing:
-                        prob = edge.get("probability", 1.0 / len(outgoing))
+                        prob = _edge_probability(edge, len(outgoing))
                         expected_value += prob * edge_value(edge)
                         total_prob += prob
 
@@ -447,7 +463,7 @@ class SequentialDecisionEngine:
 
         for edge in outgoing_edges:
             child_id = edge["to"]
-            prob = edge.get("probability", 1.0 / len(outgoing_edges))
+            prob = _edge_probability(edge, len(outgoing_edges))
             immediate = edge.get("immediate_payoff", 0) or 0
 
             if child_id not in node_values:
