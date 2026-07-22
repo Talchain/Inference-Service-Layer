@@ -19,6 +19,15 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+# Literal defaults of the STANDARD attribution_stability CV boundaries. The
+# STABILITY_CV_* env overrides (below) move these — a testing/recalibration lever
+# that feeds a DIFFERENT `attribution_stability` and hence a DIFFERENT emitted
+# `confidence`. They are part of the confidence method: they join the fingerprint
+# guard and drive the `+env-override` disclosure suffix (see F-1).
+DEFAULT_CV_HIGH_MODERATE_BOUNDARY = 0.1
+DEFAULT_CV_MODERATE_LOW_BOUNDARY = 0.3
+
+
 @dataclass(frozen=True)
 class StabilityThresholds:
     """CV-based thresholds for attribution_stability classification.
@@ -53,8 +62,8 @@ def load_stability_thresholds() -> StabilityThresholds:
 
     Logs a warning when any override is active.
     """
-    high_mod = _read_env_float("STABILITY_CV_HIGH_MODERATE", 0.1)
-    mod_low = _read_env_float("STABILITY_CV_MODERATE_LOW", 0.3)
+    high_mod = _read_env_float("STABILITY_CV_HIGH_MODERATE", DEFAULT_CV_HIGH_MODERATE_BOUNDARY)
+    mod_low = _read_env_float("STABILITY_CV_MODERATE_LOW", DEFAULT_CV_MODERATE_LOW_BOUNDARY)
 
     overrides_active = (
         os.environ.get("STABILITY_CV_HIGH_MODERATE") is not None
@@ -142,6 +151,31 @@ STABILITY_CONFIDENCE_DEFAULT = 0.5  # When attribution_stability is unrecognised
 # calibration exists.
 CONFIDENCE_METHOD_VERSION = "stability-cv-blend-v1"
 
+
+def get_confidence_method_version() -> str:
+    """method_version for the bootstrap-CV-blend confidence, disclosing env recalibration (F-1).
+
+    The ``STABILITY_CV_*`` env overrides move the CV boundaries that decide
+    ``attribution_stability`` — the INPUT to the confidence mapping — so an active
+    override yields a DIFFERENT emitted ``confidence`` computed with a NON-standard
+    boundary, while ``CONFIDENCE_METHOD_VERSION`` alone would stay put. When either
+    live boundary differs from its literal default, the wire discloses that the
+    standard method was NOT used by appending ``+env-override``.
+
+    Single derivation (no hand-maintained mirror): the live thresholds are read via
+    ``load_stability_thresholds()`` and compared against the default literals
+    ``DEFAULT_CV_HIGH_MODERATE_BOUNDARY`` / ``DEFAULT_CV_MODERATE_LOW_BOUNDARY``.
+    """
+    thresholds = load_stability_thresholds()
+    overridden = (
+        thresholds.high_moderate_boundary != DEFAULT_CV_HIGH_MODERATE_BOUNDARY
+        or thresholds.moderate_low_boundary != DEFAULT_CV_MODERATE_LOW_BOUNDARY
+    )
+    if overridden:
+        return CONFIDENCE_METHOD_VERSION + "+env-override"
+    return CONFIDENCE_METHOD_VERSION
+
+
 # Blend weights: category signal vs CV signal
 CONFIDENCE_CATEGORY_WEIGHT = 0.7
 CONFIDENCE_CV_WEIGHT = 0.3
@@ -219,6 +253,16 @@ def compute_factor_confidence(
 # Graph-structural confidence parameters (fallback when bootstrap unavailable)
 GRAPH_STRUCTURAL_CONFIDENCE_SCALE = 0.5
 GRAPH_STRUCTURAL_CONFIDENCE_FLOOR = 0.25
+
+# Version tag for the graph-structural FALLBACK confidence method (F-2). This is a
+# DIFFERENT method from the bootstrap-CV blend — confidence = FLOOR + SCALE * influence
+# (compute_graph_structural_confidence) — so it MUST NOT stamp the bootstrap
+# method_version. The branch is unreachable on today's live path (bootstrap always
+# runs whenever factors are emitted) but is kept for future code paths; stamping it
+# honestly now means the wrong version can never go live silently. Its two constants
+# (GRAPH_STRUCTURAL_CONFIDENCE_FLOOR / GRAPH_STRUCTURAL_CONFIDENCE_SCALE) have their
+# OWN fingerprint entry in tests/unit/test_confidence_provenance.py.
+GRAPH_STRUCTURAL_METHOD_VERSION = "graph-structural-v1"
 
 
 def compute_graph_structural_confidence(

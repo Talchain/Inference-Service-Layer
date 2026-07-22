@@ -9,7 +9,7 @@ from src.config.stability_thresholds import (
     compute_factor_confidence,
     compute_graph_structural_confidence,
 )
-from src.models.response_v2 import EdgeEValueV2, FactorSensitivityV2
+from src.models.response_v2 import ConfidenceProvenance, EdgeEValueV2, FactorSensitivityV2
 from src.models.robustness_v2 import (
     EdgeV2,
     GoalConstraint,
@@ -171,6 +171,11 @@ class TestFactorSensitivityConfidence:
             direction="positive",
             confidence=0.7,
             confidence_source="bootstrap_sampling",
+            # S2 iff-invariant (F-3): the disclosure marker must ride alongside a
+            # populated confidence figure.
+            confidence_provenance=ConfidenceProvenance(
+                method_version="stability-cv-blend-v1", calibrated=False
+            ),
         )
         assert fs.confidence_source == "bootstrap_sampling"
 
@@ -777,6 +782,11 @@ class TestResponseShapeIntegration:
             direction="positive",
             confidence=0.7,
             confidence_source="bootstrap_sampling",
+            # S2 iff-invariant (F-3): the disclosure marker must ride alongside a
+            # populated confidence figure.
+            confidence_provenance=ConfidenceProvenance(
+                method_version="stability-cv-blend-v1", calibrated=False
+            ),
         )
         d = fs.model_dump(exclude_none=True)
         assert "confidence_source" in d

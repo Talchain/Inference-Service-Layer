@@ -118,3 +118,32 @@ class TestConfidenceProvenanceEmission:
         fm = next(fs for fs in first if fs["node_id"] == "marketing")
         sm = next(fs for fs in second if fs["node_id"] == "marketing")
         assert fm.get("confidence_provenance") == sm.get("confidence_provenance")
+
+
+class TestGraphStructuralFallbackVersion:
+    """F-2 — the graph_structural fallback stamps its OWN method_version, never the
+    bootstrap blend's. The branch is endpoint-unreachable today (bootstrap always
+    runs when factors are emitted), so we drive it DIRECTLY: monkeypatching the
+    bootstrap confidence to return None forces the emission down the fallback path,
+    which is reachable at this level."""
+
+    GRAPH_STRUCTURAL_METHOD_VERSION = "graph-structural-v1"
+
+    def test_fallback_stamps_graph_structural_version(self, client, monkeypatch):
+        import src.api.robustness as rob
+
+        # Force the fallback: bootstrap-derived confidence returns None, so the
+        # emission takes the graph_structural branch for every factor.
+        monkeypatch.setattr(rob, "compute_factor_confidence", lambda *a, **k: None)
+
+        factors = _factors(client)
+        marketing = next((fs for fs in factors if fs["node_id"] == "marketing"), None)
+        assert marketing is not None, f"no 'marketing' factor in {factors}"
+        # Precondition: we really are on the fallback path.
+        assert marketing.get("confidence_source") == "graph_structural"
+        # The marker must name the FALLBACK method, not the bootstrap blend.
+        prov = marketing.get("confidence_provenance")
+        assert prov is not None, "fallback confidence must still carry a marker"
+        assert prov["method_version"] == self.GRAPH_STRUCTURAL_METHOD_VERSION
+        assert prov["method_version"] != EXPECTED_METHOD_VERSION
+        assert prov["calibrated"] is False

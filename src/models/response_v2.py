@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from src.constants import RESPONSE_SCHEMA_VERSION_V2
 
@@ -741,6 +741,31 @@ class FactorSensitivityV2(BaseModel):
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _confidence_provenance_iff_confidence(self) -> "FactorSensitivityV2":
+        """F-3: enforce the S2 iff-invariant at the MODEL level, both directions.
+
+        `confidence_provenance` (the disclosure marker) must be present EXACTLY when
+        `confidence` is present. Without this, a mutation that ALWAYS emits the
+        marker (even when confidence is None) — or never emits it — passes the suite
+        silently (trap-#13: an absence assertion with no discriminating enforcement).
+        Enforcing the iff here makes marker-without-confidence AND
+        confidence-without-marker fail loud at construction.
+        """
+        confidence_present = self.confidence is not None
+        provenance_present = self.confidence_provenance is not None
+        if confidence_present != provenance_present:
+            raise ValueError(
+                "S2 iff-invariant violated: confidence_provenance must be present "
+                "EXACTLY when confidence is present "
+                f"(confidence={'set' if confidence_present else 'None'}, "
+                f"confidence_provenance="
+                f"{'set' if provenance_present else 'None'}). The disclosure marker "
+                "rides exactly alongside the confidence figure — never without it, "
+                "and never absent when confidence is emitted."
+            )
+        return self
 
 
 # =============================================================================
