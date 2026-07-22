@@ -254,3 +254,77 @@ class TestCounterfactualEngineErrorMapping:
         assert body["reason"] == "validation_failed"
         assert body["source"] == "isl"
         assert "equation" in body["message"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Input hardening (A3, 2026-07-22): three client-reachable input-defect classes
+# that fail-closed as 500 on the LIVE mount are hardened to a clean 422 through
+# the same D-12(cf) `except ValueError -> 422` locus. All three are fail-closed
+# today (no wrong value) but the endpoint is live and a consumer will wire in;
+# this is the counterfactual analogue of the phase4 sequential F-2/F-3 pre-mount
+# hardening. Documented in a3-flip/ADVERSARIAL.md findings 1 (KeyError classes)
+# and 2 (non-finite outcomes). Reuses the counterfactual_error_client fixture
+# (route + production handlers) so the mapping is exercised at the router level.
+
+
+class TestCounterfactualUndefinedOutcome:
+    """Shape 1: `outcome` names a variable the model can never value -> 422, not 500.
+
+    The MC sampler populates `samples` from exactly four sources (exogenous
+    distributions, intervention, context, structural equations). An outcome absent
+    from all four is never sampled, so `samples[outcome]` (and, earlier,
+    `_run_adaptive_monte_carlo`'s `batch_samples[request.outcome]`) raises KeyError
+    -> a mislabeled 500. It is a client-input defect (a typo'd / dangling outcome
+    name from the upstream graph-builder), so it must be a clean 422 naming the
+    unresolved variable.
+    """
+
+    @pytest.mark.asyncio
+    async def test_undefined_outcome_returns_422_envelope(self, counterfactual_error_client):
+        """RED at HEAD: outcome 'Ghost' absent from eq/dist/intervention/context -> 500
+        (KeyError 'Ghost' @ counterfactual_engine.py:252). -> 422 after the guard.
+        """
+        request = {
+            "model": {
+                "variables": ["X", "Y"],
+                "equations": {"Y": "10 + 2 * X"},
+                "distributions": {},
+            },
+            "intervention": {"X": 5},
+            "outcome": "Ghost",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert body["code"] == "ISL_VALIDATION_ERROR"
+        # message names the unresolved outcome variable
+        assert "Ghost" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_outcome_resolvable_via_distribution_only_still_200(
+        self, counterfactual_error_client
+    ):
+        """Positive control: an outcome that is a pure exogenous distribution
+        variable (no structural equation) is legitimately resolvable and MUST still
+        200 — proving the guard's resolvable set includes distributions, not only
+        equations (i.e. it does not over-reject).
+        """
+        request = {
+            "model": {
+                "variables": ["X"],
+                "equations": {},
+                "distributions": {"X": {"type": "normal", "parameters": {"mean": 10, "std": 1}}},
+            },
+            "intervention": {},
+            "outcome": "X",
+        }
+        response = await counterfactual_error_client.post(
+            "/api/v1/causal/counterfactual", json=request
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert "point_estimate" in body["prediction"]

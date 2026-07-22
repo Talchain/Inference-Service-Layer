@@ -82,6 +82,11 @@ class CounterfactualEngine:
         Returns:
             CounterfactualResponse: Prediction results with uncertainty
         """
+        # Input hardening (A3, 2026-07-22): fail loud on an unresolvable outcome
+        # BEFORE any sampling, so a client-input defect maps to a clean 422 (via the
+        # route's D-12(cf) except-ValueError) instead of a mislabeled KeyError-500.
+        self._require_resolvable_outcome(request)
+
         # Create per-request RNG for thread-safe determinism
         rng = make_deterministic(request.model_dump())
 
@@ -137,6 +142,37 @@ class CounterfactualEngine:
         except Exception as e:
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
+
+    def _require_resolvable_outcome(self, request: CounterfactualRequest) -> None:
+        """Fail loud (input hardening) when `outcome` names a variable the model
+        can never produce a value for.
+
+        `_run_fixed_monte_carlo` populates the `samples` dict from exactly four
+        sources: the exogenous distributions, the intervention, the context, and
+        the structural equations. An `outcome` absent from all four is never
+        sampled, so `_run_adaptive_monte_carlo`'s `batch_samples[request.outcome]`
+        (and, later, `_compute_prediction`'s `samples[outcome_var]`) raises
+        KeyError -> a mislabeled 500. That is a client-input defect (a typo'd or
+        dangling outcome name from the upstream graph-builder), not an internal
+        failure: raise ValueError so the route's D-12(cf) handler maps it to a clean
+        422 naming the unresolved variable. Mirrors phase4's
+        `_require_valued_decision_node`. Single source of the message.
+        """
+        resolvable = (
+            set(request.model.distributions)
+            | set(request.intervention)
+            | set(request.context or {})
+            | set(request.model.equations)
+        )
+        if request.outcome not in resolvable:
+            raise ValueError(
+                f"Outcome variable '{request.outcome}' is not defined by the "
+                f"structural model: it has no structural equation and is not an "
+                f"exogenous distribution, an intervention, or a context variable, "
+                f"so the model can never compute a value for it. Add an equation "
+                f"for '{request.outcome}', or supply it as a distribution, "
+                f"intervention, or context value."
+            )
 
     def _topological_sort_equations(self, equations: Dict[str, str]) -> List[Tuple[str, str]]:
         """
