@@ -226,8 +226,18 @@ class OutcomeDistributionV2(BaseModel):
 
 class DownsideV2(BaseModel):
     """Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome
-    samples the v2 engine already draws — no new sampling, no change to any
-    existing emitted value.
+    samples the v2 engine already draws — no new sampling.
+
+    Two metric families with DIFFERENT (deliberate) sample populations:
+
+    * ``cvar_10`` / ``p05`` — MARGINAL tail metrics of this option's own outcome
+      samples, taken from the SAME post-``_apply_auto_scaled_noise`` population as
+      ``outcome.p10/p50/p90/mean`` (consistent, conservative/noised distribution).
+    * ``expected_regret`` — a JOINT (cross-option) metric, computed from the
+      PRE-noise Common-Random-Numbers population — the same samples that produce
+      ``win_probability``. Auto-scaled noise draws INDEPENDENT per-option noise,
+      which breaks the CRN alignment this metric relies on, so it is NOT taken
+      from the noised samples (CODE-REVIEW-ISL F1).
 
     Rides as a sibling to ``outcome`` and is present EXACTLY when the option's
     samples are available at the emission locus (``outcome.percentiles_source ==
@@ -253,8 +263,10 @@ class DownsideV2(BaseModel):
         description="Joint expected regret: mean over MC samples of "
         "(best-option outcome - this option's outcome) at the SAME underlying "
         "draw (Common Random Numbers). >= 0 by construction; ~0 for the option "
-        "that wins each sample. Meaningful only because the v2 engine draws "
-        "joint per-option samples.",
+        "that wins each sample. Computed from the PRE-noise CRN-aligned "
+        "population (the same samples as win_probability), NOT the "
+        "auto-scaled-noise outcome samples used by cvar_10/p05 — independent "
+        "per-option noise would break the CRN alignment this metric requires.",
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.

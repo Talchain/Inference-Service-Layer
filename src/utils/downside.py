@@ -80,6 +80,12 @@ def expected_regret_per_option(
 
     All arrays must be the same length (the engine draws ``n_samples`` for every
     option). Returns ``{}`` for empty input.
+
+    CALLER CONTRACT: pass the PRE-``_apply_auto_scaled_noise`` outcomes — the
+    genuinely CRN-aligned population (the same one that produces
+    ``win_probability``). The auto-scaled-noise step adds INDEPENDENT per-option
+    noise, so its samples are NOT CRN-aligned at a given index; feeding them here
+    inflates regret by a max-over-independent-noise premium (CODE-REVIEW-ISL F1).
     """
     if not option_samples:
         return {}

@@ -923,6 +923,17 @@ class OptionResult(BaseModel):
         description="Multi-constraint analysis results. Only present when goal_constraints is provided.",
     )
 
+    # B2 CRN-fix (CODE-REVIEW-ISL F1): the JOINT expected_regret, computed in the
+    # analyzer from the PRE-noise CRN-aligned outcomes -- the SAME population that
+    # produced win_probability (winner_per_sample). It MUST NOT be reconstructed
+    # from outcome_distribution.samples, which are POST-`_apply_auto_scaled_noise`
+    # (independent per-option noise that breaks CRN alignment and inflates regret).
+    # Private (mirrors _pre_clamp_mean above): an internal thread to the V2
+    # emission layer only -- never on any wire nor in openapi. Set in
+    # _compute_option_results; read in api/robustness.py. None when regret was not
+    # computed (e.g. no samples), in which case the V2 layer omits `downside`.
+    _expected_regret: Optional[float] = PrivateAttr(default=None)
+
     model_config = {
         "json_schema_extra": {
             "example": {
