@@ -573,72 +573,31 @@ class PredictionResults(BaseModel):
     )
 
 
-class UncertaintySource(BaseModel):
-    """Source of uncertainty in the analysis."""
-
-    factor: str = Field(..., description="Name of uncertainty factor")
-    impact: float = Field(..., description="Contribution to variance")
-    confidence: ConfidenceLevel = Field(..., description="Confidence in this estimate")
-    explanation: str = Field(..., description="Plain English explanation")
-    basis: str = Field(..., description="Evidence source for this factor")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "factor": "Brand perception lag",
-                "impact": 3000,
-                "confidence": "medium",
-                "explanation": "Brand changes take 2-4 weeks to affect revenue",
-                "basis": "Historical data from 3 previous price changes",
-            }
-        }
-    }
-
-
 class UncertaintyBreakdown(BaseModel):
-    """Breakdown of uncertainty sources."""
+    """Overall uncertainty of the counterfactual outcome.
+
+    A3 (2026-07-22): the per-factor `sources` list is OMITTED — it reported each
+    exogenous input's OWN variance as its "impact" on the outcome, a
+    leverage-blind fabrication whose ranking inverted the true sensitivity. Only
+    the honest overall level (from the OUTCOME distribution) is emitted.
+    """
 
     overall: UncertaintyLevel = Field(..., description="Overall uncertainty level")
-    sources: List[UncertaintySource] = Field(..., description="Individual uncertainty sources")
-
-
-class CriticalAssumption(BaseModel):
-    """A critical assumption affecting robustness."""
-
-    assumption: str = Field(..., description="The assumption being tested")
-    impact: float = Field(..., description="How much result changes if assumption is wrong")
-    confidence: ConfidenceLevel = Field(..., description="Confidence in this assumption")
-    recommendation: str = Field(..., description="Recommended action")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "assumption": "Customer price sensitivity remains constant",
-                "impact": 15000,
-                "confidence": "medium",
-                "recommendation": "Consider A/B testing before full rollout",
-            }
-        }
-    }
-
-
-class RobustnessAnalysis(BaseModel):
-    """Robustness analysis results."""
-
-    score: RobustnessLevel = Field(..., description="Overall robustness score")
-    critical_assumptions: List[CriticalAssumption] = Field(
-        ...,
-        description="Critical assumptions",
-    )
 
 
 class CounterfactualResponse(BaseModel):
-    """Response model for counterfactual analysis endpoint."""
+    """Response model for counterfactual analysis endpoint.
+
+    A3 (2026-07-22): the `robustness` block is OMITTED — its "critical
+    assumptions" reported a flat abs(baseline*0.15) "perturbation" and a score
+    that was a constant function of the baseline sign; it neither parsed nor
+    perturbed the structural equations, so it implemented none of its label. A
+    real assumption-sensitivity analysis is a modeling roadmap item.
+    """
 
     scenario: ScenarioDescription = Field(..., description="Scenario description")
     prediction: PredictionResults = Field(..., description="Prediction results")
     uncertainty: UncertaintyBreakdown = Field(..., description="Uncertainty breakdown")
-    robustness: RobustnessAnalysis = Field(..., description="Robustness analysis")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
 
     # Metadata for determinism and reproducibility
@@ -661,26 +620,6 @@ class CounterfactualResponse(BaseModel):
                 },
                 "uncertainty": {
                     "overall": "medium",
-                    "sources": [
-                        {
-                            "factor": "Brand perception lag",
-                            "impact": 3000,
-                            "confidence": "medium",
-                            "explanation": "Brand changes take time",
-                            "basis": "Historical data",
-                        }
-                    ],
-                },
-                "robustness": {
-                    "score": "moderate",
-                    "critical_assumptions": [
-                        {
-                            "assumption": "Price sensitivity constant",
-                            "impact": 15000,
-                            "confidence": "medium",
-                            "recommendation": "A/B test before rollout",
-                        }
-                    ],
                 },
                 "explanation": {
                     "summary": "Revenue likely increases by £45k-£55k",
@@ -1117,7 +1056,10 @@ class ScenarioResult(BaseModel):
     label: Optional[str] = Field(default=None, description="Human-readable label")
     prediction: PredictionResults = Field(..., description="Prediction results")
     uncertainty: UncertaintyBreakdown = Field(..., description="Uncertainty breakdown")
-    robustness: RobustnessAnalysis = Field(..., description="Robustness analysis")
+    # A3 (2026-07-22): the per-scenario `robustness` block is OMITTED — it was the
+    # same fabricated CounterfactualEngine robustness (constant score + flat
+    # perturbation) this remediation removed from the single /counterfactual
+    # response.
 
     model_config = {
         "json_schema_extra": {
@@ -1136,11 +1078,6 @@ class ScenarioResult(BaseModel):
                 },
                 "uncertainty": {
                     "overall": "medium",
-                    "sources": [],
-                },
-                "robustness": {
-                    "score": "robust",
-                    "critical_assumptions": [],
                 },
             }
         }
@@ -1197,10 +1134,15 @@ class InteractionAnalysis(BaseModel):
 
 
 class ScenarioComparison(BaseModel):
-    """Comparison of multiple scenarios."""
+    """Comparison of multiple scenarios.
+
+    A3 (2026-07-22): `most_robust` is OMITTED — it ranked scenarios by the
+    fabricated counterfactual robustness score (a constant), so the "most robust"
+    verdict was meaningless. Outcome-based ranking (best_outcome / ranking /
+    marginal_gains) is retained.
+    """
 
     best_outcome: str = Field(..., description="Scenario ID with best outcome")
-    most_robust: str = Field(..., description="Scenario ID with highest robustness")
     marginal_gains: Dict[str, float] = Field(
         ...,
         description="Marginal uplift of each scenario vs baseline",
@@ -1211,7 +1153,6 @@ class ScenarioComparison(BaseModel):
         "json_schema_extra": {
             "example": {
                 "best_outcome": "combined",
-                "most_robust": "baseline",
                 "marginal_gains": {
                     "increase": 5000,
                     "combined": 12000,
@@ -1276,12 +1217,11 @@ class BatchCounterfactualResponse(BaseModel):
                 },
                 "comparison": {
                     "best_outcome": "increase",
-                    "most_robust": "baseline",
                     "marginal_gains": {"increase": 5000},
                     "ranking": ["increase", "baseline"],
                 },
                 "explanation": {
-                    "summary": "Price increase yields £5k marginal gain with moderate robustness",
+                    "summary": "Price increase yields £5k marginal gain",
                     "reasoning": "10% price increase produces consistent revenue uplift across scenarios",
                     "technical_basis": "Batch counterfactual analysis with interaction detection",
                     "assumptions": ["Structural equations correct", "No external shocks"],

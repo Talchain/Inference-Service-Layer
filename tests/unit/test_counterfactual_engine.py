@@ -48,7 +48,9 @@ class TestCounterfactualEngineBasic:
         assert abs(response.prediction.confidence_interval.lower - 30.0) < 0.1
         assert abs(response.prediction.confidence_interval.upper - 30.0) < 0.1
         assert response.uncertainty is not None
-        assert response.robustness is not None
+        assert response.uncertainty.overall in ["low", "medium", "high"]
+        # A3: the fabricated `robustness` block is omitted from the response.
+        assert not hasattr(response, "robustness")
 
     def test_multivariate_model(self):
         """Test multivariate model: Y = a + b*X + c*Z."""
@@ -399,8 +401,11 @@ class TestPredictionComputation:
 class TestUncertaintyAnalysis:
     """Test uncertainty breakdown analysis."""
 
-    def test_analyze_uncertainty_single_source(self):
-        """Test uncertainty analysis with single exogenous variable."""
+    def test_analyze_uncertainty_overall_only(self):
+        """A3: `_analyze_uncertainty` returns only the honest overall level.
+
+        The per-factor `sources` breakdown is OMITTED (it labeled each input's own
+        variance as its outcome "impact", a leverage-blind fabrication)."""
         engine = CounterfactualEngine()
         rng = SeededRNG(42)
 
@@ -428,8 +433,8 @@ class TestUncertaintyAnalysis:
         uncertainty = engine._analyze_uncertainty(request, samples)
 
         assert uncertainty.overall in ["low", "medium", "high"]
-        assert len(uncertainty.sources) >= 1
-        assert uncertainty.sources[0].factor is not None
+        # The fabricated `sources` field no longer exists on the model.
+        assert not hasattr(uncertainty, "sources")
 
     def test_uncertainty_level_classification(self):
         """Test classification of uncertainty levels."""
@@ -460,108 +465,55 @@ class TestUncertaintyAnalysis:
         # Low coefficient of variation should give LOW uncertainty
         assert uncertainty.overall == "low"
 
-
-class TestRobustnessAnalysis:
-    """Test robustness analysis."""
-
-    def test_analyze_robustness(self):
-        """Test robustness analysis generates critical assumptions."""
+    def test_undefined_cv_zero_mean_spread_is_not_low(self):
+        """F3b: a zero-mean outcome WITH non-zero spread has an UNDEFINED
+        coefficient of variation and must NOT be reported as LOW uncertainty
+        (the old code substituted cv=0 -> LOW, claiming confidence it lacked).
+        Fail safe to HIGH. Exercised directly because a zero mean with spread is
+        not reachable through random MC sampling (verdict F3b nuance)."""
         engine = CounterfactualEngine()
-
         model = StructuralModel(
-            variables=["X", "Y"],
-            equations={"Y": "2 * X + 5"},
+            variables=["Y"],
+            equations={},
             distributions={
-                "X": Distribution(
-                    type=DistributionType.NORMAL,
-                    parameters={"mean": 10.0, "std": 1.0}
+                "Y": Distribution(
+                    type=DistributionType.NORMAL, parameters={"mean": 0.0, "std": 1.0}
                 )
-            }
+            },
         )
-
         request = CounterfactualRequest(
-            model=model,
-            intervention={"X": 10.0},
-            outcome="Y",
-            context={}
+            model=model, intervention={}, outcome="Y", context={}
         )
+        # mean exactly 0, std > 0 -> CV undefined
+        samples = {"Y": np.array([-2.0, -1.0, 1.0, 2.0])}
+        assert engine._analyze_uncertainty(request, samples).overall == "high"
 
-        baseline_result = 25.0  # 2*10 + 5
-        robustness = engine._analyze_robustness(request, baseline_result)
-
-        assert robustness.score in ["robust", "moderate", "fragile"]
-        assert len(robustness.critical_assumptions) > 0
-        assert robustness.critical_assumptions[0].assumption is not None
-        assert robustness.critical_assumptions[0].impact >= 0
-
-
-class TestDistributionConfidence:
-    """Test distribution confidence assessment."""
-
-    def test_high_confidence_low_cv(self):
-        """Test high confidence for low coefficient of variation."""
+    def test_degenerate_zero_outcome_is_low(self):
+        """F3b control: a genuinely degenerate outcome (mean 0, std 0 — e.g. a
+        fully-intervened deterministic model) IS zero-uncertainty -> LOW. Proves
+        the mean-0 guard does not over-reject a legitimate zero."""
         engine = CounterfactualEngine()
-
-        # CV = 1/100 = 0.01 < 0.1 → HIGH
-        params = {"mean": 100.0, "std": 1.0}
-        confidence = engine._assess_distribution_confidence(params)
-
-        assert confidence == "high"
-
-    def test_medium_confidence_moderate_cv(self):
-        """Test medium confidence for moderate CV."""
-        engine = CounterfactualEngine()
-
-        # CV = 20/100 = 0.2 (between 0.1 and 0.3) → MEDIUM
-        params = {"mean": 100.0, "std": 20.0}
-        confidence = engine._assess_distribution_confidence(params)
-
-        assert confidence == "medium"
-
-    def test_low_confidence_high_cv(self):
-        """Test low confidence for high CV."""
-        engine = CounterfactualEngine()
-
-        # CV = 50/100 = 0.5 > 0.3 → LOW
-        params = {"mean": 100.0, "std": 50.0}
-        confidence = engine._assess_distribution_confidence(params)
-
-        assert confidence == "low"
-
-    def test_default_confidence_non_normal(self):
-        """Test default confidence for non-normal distributions."""
-        engine = CounterfactualEngine()
-
-        # Uniform distribution parameters
-        params = {"min": 0.0, "max": 10.0}
-        confidence = engine._assess_distribution_confidence(params)
-
-        assert confidence == "medium"
+        model = StructuralModel(
+            variables=["Y"],
+            equations={},
+            distributions={
+                "Y": Distribution(
+                    type=DistributionType.NORMAL, parameters={"mean": 0.0, "std": 1.0}
+                )
+            },
+        )
+        request = CounterfactualRequest(
+            model=model, intervention={}, outcome="Y", context={}
+        )
+        samples = {"Y": np.zeros(4)}
+        assert engine._analyze_uncertainty(request, samples).overall == "low"
 
 
-class TestFactorNameFormatting:
-    """Test factor name formatting."""
-
-    def test_format_snake_case(self):
-        """Test formatting snake_case variable names."""
-        engine = CounterfactualEngine()
-
-        result = engine._format_factor_name("market_demand")
-        assert result == "Market Demand"
-
-    def test_format_camel_case(self):
-        """Test formatting camelCase variable names."""
-        engine = CounterfactualEngine()
-
-        result = engine._format_factor_name("marketDemand")
-        assert result == "Market Demand"
-
-    def test_format_simple_name(self):
-        """Test formatting simple variable names."""
-        engine = CounterfactualEngine()
-
-        result = engine._format_factor_name("price")
-        assert result == "Price"
+# A3 (2026-07-22): TestRobustnessAnalysis, TestDistributionConfidence and
+# TestFactorNameFormatting removed. They exercised `_analyze_robustness`,
+# `_assess_distribution_confidence` and `_format_factor_name` — all deleted with
+# the fabricated robustness/uncertainty-sources block (F3a/F3c). The honest
+# outputs (point estimate, CI, overall uncertainty) are covered above.
 
 
 class TestErrorHandling:

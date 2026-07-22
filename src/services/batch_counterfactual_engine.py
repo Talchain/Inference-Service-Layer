@@ -19,7 +19,7 @@ from src.models.responses import (
     ScenarioComparison,
     ScenarioResult,
 )
-from src.models.shared import ExplanationMetadata, RobustnessLevel, StructuralModel
+from src.models.shared import ExplanationMetadata, StructuralModel
 from src.services.counterfactual_engine import CounterfactualEngine
 from src.services.explanation_generator import ExplanationGenerator
 from src.utils.determinism import canonical_hash, make_deterministic
@@ -122,7 +122,6 @@ class BatchCounterfactualEngine:
                     "request_id": request_id,
                     "num_scenarios": len(results),
                     "best_outcome": comparison.best_outcome,
-                    "most_robust": comparison.most_robust,
                 },
             )
 
@@ -169,14 +168,14 @@ class BatchCounterfactualEngine:
         # Use existing counterfactual engine
         cf_result = self.cf_engine.analyze(cf_request)
 
-        # Convert to scenario result
+        # Convert to scenario result (A3: `robustness` omitted — the
+        # CounterfactualEngine no longer produces the fabricated robustness block)
         return ScenarioResult(
             scenario_id=scenario.id,
             intervention=scenario.intervention,
             label=scenario.label,
             prediction=cf_result.prediction,
             uncertainty=cf_result.uncertainty,
-            robustness=cf_result.robustness,
         )
 
     def _detect_interactions(
@@ -414,15 +413,9 @@ class BatchCounterfactualEngine:
         # Find best outcome
         best_outcome = max(results, key=lambda r: r.prediction.point_estimate)
 
-        # Find most robust
-        # Map robustness level to score
-        robustness_scores = {
-            RobustnessLevel.ROBUST: 3,
-            RobustnessLevel.MODERATE: 2,
-            RobustnessLevel.FRAGILE: 1,
-        }
-
-        most_robust = max(results, key=lambda r: robustness_scores.get(r.robustness.score, 0))
+        # A3 (2026-07-22): `most_robust` is OMITTED — it ranked scenarios by the
+        # fabricated counterfactual robustness score (a constant), so the verdict
+        # carried no information. Outcome-based ranking is retained.
 
         # Compute marginal gains (assume first scenario is baseline)
         baseline_outcome = results[0].prediction.point_estimate
@@ -437,7 +430,6 @@ class BatchCounterfactualEngine:
 
         return ScenarioComparison(
             best_outcome=best_outcome.scenario_id,
-            most_robust=most_robust.scenario_id,
             marginal_gains=marginal_gains,
             ranking=ranking,
         )
@@ -463,10 +455,7 @@ class BatchCounterfactualEngine:
 
         gain = best.prediction.point_estimate - baseline.prediction.point_estimate
 
-        summary = (
-            f"Best scenario '{best.scenario_id}' yields {gain:+.0f} gain vs baseline "
-            f"with {best.robustness.score.value} robustness"
-        )
+        summary = f"Best scenario '{best.scenario_id}' yields {gain:+.0f} gain vs baseline"
 
         # Reasoning
         reasoning_parts = [

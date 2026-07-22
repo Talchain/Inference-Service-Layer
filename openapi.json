@@ -370,16 +370,6 @@
         "title": "ConfidenceInterval",
         "type": "object"
       },
-      "ConfidenceLevel": {
-        "description": "Confidence level for analysis results.",
-        "enum": [
-          "high",
-          "medium",
-          "low"
-        ],
-        "title": "ConfidenceLevel",
-        "type": "string"
-      },
       "ConfidenceProvenance": {
         "description": "Honest disclosure marker for a factor's `confidence` figure (S2).\n\nThe per-factor `confidence` is built from a PROVISIONAL stability->confidence\nmapping (STABILITY_CONFIDENCE_MAP and its blend weights) that is explicitly\nNOT research-validated \u2014 it is a Neil-gate-1 operational default pending\nscientific calibration. This marker rides alongside `confidence` so a\nconsumer can tell a provisional heuristic from a calibrated probability, and\nso any recalibration is a DISCLOSED, versioned change rather than a silent\nreweighting.\n\nContract:\n- `method_version` identifies the confidence method. Any change to the\n  mapping constants MUST bump it (enforced by the fingerprint guard in\n  tests/unit/test_confidence_provenance.py) \u2014 no silent reweighting.\n- `calibrated` stays False until a validated calibration exists; while it is\n  False, `confidence` must be read as a provisional stability heuristic, not\n  a calibrated probability.",
         "properties": {
@@ -771,7 +761,7 @@
         "type": "object"
       },
       "CounterfactualResponse": {
-        "description": "Response model for counterfactual analysis endpoint.",
+        "description": "Response model for counterfactual analysis endpoint.\n\nA3 (2026-07-22): the `robustness` block is OMITTED \u2014 its \"critical\nassumptions\" reported a flat abs(baseline*0.15) \"perturbation\" and a score\nthat was a constant function of the baseline sign; it neither parsed nor\nperturbed the structural equations, so it implemented none of its label. A\nreal assumption-sensitivity analysis is a modeling roadmap item.",
         "example": {
           "explanation": {
             "assumptions": [
@@ -793,17 +783,6 @@
               "pessimistic": 38000
             }
           },
-          "robustness": {
-            "critical_assumptions": [
-              {
-                "assumption": "Price sensitivity constant",
-                "confidence": "medium",
-                "impact": 15000,
-                "recommendation": "A/B test before rollout"
-              }
-            ],
-            "score": "moderate"
-          },
           "scenario": {
             "intervention": {
               "Price": 15
@@ -811,16 +790,7 @@
             "outcome": "Revenue"
           },
           "uncertainty": {
-            "overall": "medium",
-            "sources": [
-              {
-                "basis": "Historical data",
-                "confidence": "medium",
-                "explanation": "Brand changes take time",
-                "factor": "Brand perception lag",
-                "impact": 3000
-              }
-            ]
+            "overall": "medium"
           }
         },
         "properties": {
@@ -851,14 +821,6 @@
             ],
             "description": "Prediction results"
           },
-          "robustness": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RobustnessAnalysis"
-              }
-            ],
-            "description": "Robustness analysis"
-          },
           "scenario": {
             "allOf": [
               {
@@ -880,52 +842,9 @@
           "scenario",
           "prediction",
           "uncertainty",
-          "robustness",
           "explanation"
         ],
         "title": "CounterfactualResponse",
-        "type": "object"
-      },
-      "CriticalAssumption": {
-        "description": "A critical assumption affecting robustness.",
-        "example": {
-          "assumption": "Customer price sensitivity remains constant",
-          "confidence": "medium",
-          "impact": 15000,
-          "recommendation": "Consider A/B testing before full rollout"
-        },
-        "properties": {
-          "assumption": {
-            "description": "The assumption being tested",
-            "title": "Assumption",
-            "type": "string"
-          },
-          "confidence": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ConfidenceLevel"
-              }
-            ],
-            "description": "Confidence in this assumption"
-          },
-          "impact": {
-            "description": "How much result changes if assumption is wrong",
-            "title": "Impact",
-            "type": "number"
-          },
-          "recommendation": {
-            "description": "Recommended action",
-            "title": "Recommendation",
-            "type": "string"
-          }
-        },
-        "required": [
-          "assumption",
-          "impact",
-          "confidence",
-          "recommendation"
-        ],
-        "title": "CriticalAssumption",
         "type": "object"
       },
       "CritiqueV2": {
@@ -4642,43 +4561,6 @@
         "title": "ResponseMetadataV2",
         "type": "object"
       },
-      "RobustnessAnalysis": {
-        "description": "Robustness analysis results.",
-        "properties": {
-          "critical_assumptions": {
-            "description": "Critical assumptions",
-            "items": {
-              "$ref": "#/components/schemas/CriticalAssumption"
-            },
-            "title": "Critical Assumptions",
-            "type": "array"
-          },
-          "score": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RobustnessLevel"
-              }
-            ],
-            "description": "Overall robustness score"
-          }
-        },
-        "required": [
-          "score",
-          "critical_assumptions"
-        ],
-        "title": "RobustnessAnalysis",
-        "type": "object"
-      },
-      "RobustnessLevel": {
-        "description": "Robustness level for analysis results.",
-        "enum": [
-          "robust",
-          "moderate",
-          "fragile"
-        ],
-        "title": "RobustnessLevel",
-        "type": "string"
-      },
       "RobustnessRequest": {
         "description": "Request for FACET robustness analysis.",
         "example": {
@@ -6506,7 +6388,7 @@
         "type": "object"
       },
       "UncertaintyBreakdown": {
-        "description": "Breakdown of uncertainty sources.",
+        "description": "Overall uncertainty of the counterfactual outcome.\n\nA3 (2026-07-22): the per-factor `sources` list is OMITTED \u2014 it reported each\nexogenous input's OWN variance as its \"impact\" on the outcome, a\nleverage-blind fabrication whose ranking inverted the true sensitivity. Only\nthe honest overall level (from the OUTCOME distribution) is emitted.",
         "properties": {
           "overall": {
             "allOf": [
@@ -6515,19 +6397,10 @@
               }
             ],
             "description": "Overall uncertainty level"
-          },
-          "sources": {
-            "description": "Individual uncertainty sources",
-            "items": {
-              "$ref": "#/components/schemas/UncertaintySource"
-            },
-            "title": "Sources",
-            "type": "array"
           }
         },
         "required": [
-          "overall",
-          "sources"
+          "overall"
         ],
         "title": "UncertaintyBreakdown",
         "type": "object"
@@ -6541,55 +6414,6 @@
         ],
         "title": "UncertaintyLevel",
         "type": "string"
-      },
-      "UncertaintySource": {
-        "description": "Source of uncertainty in the analysis.",
-        "example": {
-          "basis": "Historical data from 3 previous price changes",
-          "confidence": "medium",
-          "explanation": "Brand changes take 2-4 weeks to affect revenue",
-          "factor": "Brand perception lag",
-          "impact": 3000
-        },
-        "properties": {
-          "basis": {
-            "description": "Evidence source for this factor",
-            "title": "Basis",
-            "type": "string"
-          },
-          "confidence": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ConfidenceLevel"
-              }
-            ],
-            "description": "Confidence in this estimate"
-          },
-          "explanation": {
-            "description": "Plain English explanation",
-            "title": "Explanation",
-            "type": "string"
-          },
-          "factor": {
-            "description": "Name of uncertainty factor",
-            "title": "Factor",
-            "type": "string"
-          },
-          "impact": {
-            "description": "Contribution to variance",
-            "title": "Impact",
-            "type": "number"
-          }
-        },
-        "required": [
-          "factor",
-          "impact",
-          "confidence",
-          "explanation",
-          "basis"
-        ],
-        "title": "UncertaintySource",
-        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -6714,7 +6538,7 @@
     },
     "/api/v1/causal/counterfactual": {
       "post": {
-        "description": "Analyzes what would happen under a counterfactual intervention.\n\n    Provides:\n    - Point estimates and confidence intervals\n    - Uncertainty breakdown by source\n    - Robustness analysis\n    - Critical assumptions\n\n    **Use when:** Evaluating \"what if\" scenarios for decision making.",
+        "description": "Analyzes what would happen under a counterfactual intervention.\n\n    Provides:\n    - Point estimate (median of the Monte Carlo outcome samples)\n    - Percentile-based prediction interval (named `confidence_interval`)\n    - Overall outcome uncertainty level\n\n    **Use when:** Evaluating \"what if\" scenarios for decision making.",
         "operationId": "analyze_counterfactual_api_v1_causal_counterfactual_post",
         "parameters": [
           {

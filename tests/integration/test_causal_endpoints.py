@@ -96,7 +96,10 @@ async def test_counterfactual_basic(client, sample_structural_model):
     assert "point_estimate" in data["prediction"]
     assert "confidence_interval" in data["prediction"]
     assert "uncertainty" in data
-    assert "robustness" in data
+    # A3: the fabricated `robustness` block and the per-factor uncertainty
+    # `sources` list are OMITTED — assert they are gone, not present.
+    assert "robustness" not in data
+    assert "sources" not in data["uncertainty"]
     assert "explanation" in data
 
 
@@ -216,7 +219,9 @@ class TestCounterfactualEngineErrorMapping:
                 "equations": {"A": "B + 1", "B": "A + 1"},
                 "distributions": {},
             },
-            "intervention": {},
+            # Non-empty intervention (F3d rejects an empty one before the engine);
+            # the cycle is detected during topological sort regardless of it.
+            "intervention": {"A": 1.0},
             "outcome": "A",
         }
         response = await counterfactual_error_client.post(
@@ -319,7 +324,9 @@ class TestCounterfactualUndefinedOutcome:
                 "equations": {},
                 "distributions": {"X": {"type": "normal", "parameters": {"mean": 10, "std": 1}}},
             },
-            "intervention": {},
+            # Non-empty intervention on a control variable (F3d rejects an empty
+            # one); the outcome X remains resolvable via its distribution alone.
+            "intervention": {"Ctrl": 0.0},
             "outcome": "X",
         }
         response = await counterfactual_error_client.post(
@@ -354,7 +361,10 @@ class TestCounterfactualMissingDistributionParameter:
                 "equations": {"Y": "10 + 2 * X"},
                 "distributions": {"X": {"type": "normal", "parameters": {"mean": 5}}},
             },
-            "intervention": {},
+            # Non-empty intervention on a control var (F3d rejects an empty one);
+            # the missing-std distribution error fires in the exogenous-sampling
+            # loop regardless, before the intervention is applied.
+            "intervention": {"Ctrl": 1.0},
             "outcome": "Y",
         }
         response = await counterfactual_error_client.post(
@@ -381,7 +391,10 @@ class TestCounterfactualMissingDistributionParameter:
                 "equations": {"Y": "10 + 2 * X"},
                 "distributions": {"X": {"type": "uniform", "parameters": {"min": 0}}},
             },
-            "intervention": {},
+            # Non-empty intervention on a control var (F3d rejects an empty one);
+            # the missing-max distribution error fires in the exogenous-sampling
+            # loop regardless.
+            "intervention": {"Ctrl": 1.0},
             "outcome": "Y",
         }
         response = await counterfactual_error_client.post(

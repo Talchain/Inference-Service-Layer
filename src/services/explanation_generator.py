@@ -433,10 +433,14 @@ class ExplanationGenerator:
         ci_lower: float,
         ci_upper: float,
         uncertainty_level: str,
-        robustness_level: str,
     ) -> "ExplanationMetadata":
         """
         Generate explanation for counterfactual analysis.
+
+        A3 (2026-07-22): the `robustness_level` argument is REMOVED — the
+        counterfactual robustness block it described was omitted as a fabrication
+        (a constant score + flat perturbation that implemented none of its
+        label), so the explanation no longer makes robustness claims.
 
         Args:
             outcome: The outcome variable name
@@ -445,7 +449,6 @@ class ExplanationGenerator:
             ci_lower: Lower bound of confidence interval
             ci_upper: Upper bound of confidence interval
             uncertainty_level: Level of uncertainty (e.g., "low", "medium", "high")
-            robustness_level: Robustness score level (e.g., "high", "medium", "low")
 
         Returns:
             ExplanationMetadata object with structured explanation
@@ -473,18 +476,13 @@ class ExplanationGenerator:
                 "Note: This prediction has high uncertainty; interpret with caution."
             )
 
-        if robustness_level == "high":
-            reasoning_parts.append("The result is robust to assumption violations.")
-        elif robustness_level == "low":
-            reasoning_parts.append("Warning: The result is sensitive to assumptions.")
-
         reasoning = " ".join(reasoning_parts)
 
         # Build technical basis
         technical_basis = (
             f"Monte Carlo simulation with intervention do({intervention_str}). "
             f"Point estimate: {point_estimate:.4f}, CI: [{ci_lower:.4f}, {ci_upper:.4f}]. "
-            f"Uncertainty level: {uncertainty_level}, Robustness: {robustness_level}."
+            f"Uncertainty level: {uncertainty_level}."
         )
 
         # Key assumptions
