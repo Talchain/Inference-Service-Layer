@@ -31,6 +31,7 @@ from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
     BucketResultV2,
     ConditionalWinnerV2,
+    ConfidenceProvenance,
     ConstraintAnalysisV2,
     ConstraintResultV2,
     DiagnosticsV2,
@@ -66,6 +67,7 @@ from src.services.robustness_analyzer_v2 import (
     get_max_cost_units,
 )
 from src.config.stability_thresholds import (
+    CONFIDENCE_METHOD_VERSION,
     compute_factor_confidence,
     compute_graph_structural_confidence,
 )
@@ -1043,6 +1045,22 @@ async def _analyze_robustness_v2_enhanced(
                     confidence_val = compute_graph_structural_confidence(fs.influence_score)
                     confidence_src = "graph_structural"
 
+                # S2: honest disclosure marker for the confidence figure.
+                # Populated EXACTLY when confidence is populated; left None (=>
+                # ABSENT under exclude_none on the wire, never a JSON null) when
+                # confidence is absent. The mapping is provisional (Neil gate 1),
+                # so calibrated is always False until a validated calibration
+                # exists, and method_version is bumped on any mapping change
+                # (guarded by tests/unit/test_confidence_provenance.py).
+                confidence_provenance = (
+                    ConfidenceProvenance(
+                        method_version=CONFIDENCE_METHOD_VERSION,
+                        calibrated=False,
+                    )
+                    if confidence_val is not None
+                    else None
+                )
+
                 # Track S: echo where the factor's value came from. Pure passthrough
                 # of request-supplied provenance; ISL does not consume it in inference.
                 node = nodes_by_id.get(fs.node_id)
@@ -1073,6 +1091,7 @@ async def _analyze_robustness_v2_enhanced(
                         direction="positive" if fs.elasticity > 0 else "negative",
                         confidence=confidence_val,
                         confidence_source=confidence_src,
+                        confidence_provenance=confidence_provenance,
                         importance_rank=fs.importance_rank,
                         observed_value=fs.observed_value,
                         interpretation=fs.interpretation,

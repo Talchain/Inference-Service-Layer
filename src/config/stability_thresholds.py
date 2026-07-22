@@ -129,6 +129,19 @@ STABILITY_CONFIDENCE_MAP = {
 }
 STABILITY_CONFIDENCE_DEFAULT = 0.5  # When attribution_stability is unrecognised
 
+# Version tag for the factor-confidence method (S2 disclosure marker).
+# Emitted on the wire as FactorSensitivityV2.confidence_provenance.method_version.
+# CONTRACT (Neil gate 1, no silent reweighting): the confidence mapping is
+# PROVISIONAL and NOT research-validated. ANY change to the constants that
+# define the mapping — STABILITY_CONFIDENCE_MAP, STABILITY_CONFIDENCE_DEFAULT,
+# CONFIDENCE_CATEGORY_WEIGHT, CONFIDENCE_CV_WEIGHT, CONFIDENCE_CV_ELASTICITY_FLOOR
+# — MUST bump this version so downstream can detect the recalibration. The
+# fingerprint guard in tests/unit/test_confidence_provenance.py pins the pair
+# (constants fingerprint <-> this version) and fails loud if the constants move
+# while the version stays put. `calibrated` stays False until a validated
+# calibration exists.
+CONFIDENCE_METHOD_VERSION = "stability-cv-blend-v1"
+
 # Blend weights: category signal vs CV signal
 CONFIDENCE_CATEGORY_WEIGHT = 0.7
 CONFIDENCE_CV_WEIGHT = 0.3

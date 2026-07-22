@@ -306,6 +306,27 @@
         "title": "ConditionalWinnerV2",
         "type": "object"
       },
+      "ConfidenceProvenance": {
+        "description": "Honest disclosure marker for a factor's `confidence` figure (S2).\n\nThe per-factor `confidence` is built from a PROVISIONAL stability->confidence\nmapping (STABILITY_CONFIDENCE_MAP and its blend weights) that is explicitly\nNOT research-validated \u2014 it is a Neil-gate-1 operational default pending\nscientific calibration. This marker rides alongside `confidence` so a\nconsumer can tell a provisional heuristic from a calibrated probability, and\nso any recalibration is a DISCLOSED, versioned change rather than a silent\nreweighting.\n\nContract:\n- `method_version` identifies the confidence method. Any change to the\n  mapping constants MUST bump it (enforced by the fingerprint guard in\n  tests/unit/test_confidence_provenance.py) \u2014 no silent reweighting.\n- `calibrated` stays False until a validated calibration exists; while it is\n  False, `confidence` must be read as a provisional stability heuristic, not\n  a calibrated probability.",
+        "properties": {
+          "calibrated": {
+            "description": "False until a validated calibration exists. While False, the confidence figure is a provisional stability heuristic, not a calibrated probability.",
+            "title": "Calibrated",
+            "type": "boolean"
+          },
+          "method_version": {
+            "description": "Identifier of the confidence method. PROVISIONAL mapping (Neil gate 1) \u2014 any change to the mapping constants MUST bump this version (no silent reweighting).",
+            "title": "Method Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method_version",
+          "calibrated"
+        ],
+        "title": "ConfidenceProvenance",
+        "type": "object"
+      },
       "ConstraintAnalysis": {
         "description": "Internal multi-constraint analysis results for an option.",
         "properties": {
@@ -1551,6 +1572,17 @@
             ],
             "description": "Confidence level (omitted when not computed)",
             "title": "Confidence"
+          },
+          "confidence_provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceProvenance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Disclosure marker for the `confidence` figure: {method_version, calibrated}. Present exactly when `confidence` is present; omitted (not null) otherwise. calibrated is False until a validated calibration exists."
           },
           "confidence_source": {
             "anyOf": [

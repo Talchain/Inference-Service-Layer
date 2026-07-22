@@ -605,6 +605,42 @@ class RobustnessResultV2(BaseModel):
 # =============================================================================
 
 
+class ConfidenceProvenance(BaseModel):
+    """Honest disclosure marker for a factor's `confidence` figure (S2).
+
+    The per-factor `confidence` is built from a PROVISIONAL stability->confidence
+    mapping (STABILITY_CONFIDENCE_MAP and its blend weights) that is explicitly
+    NOT research-validated — it is a Neil-gate-1 operational default pending
+    scientific calibration. This marker rides alongside `confidence` so a
+    consumer can tell a provisional heuristic from a calibrated probability, and
+    so any recalibration is a DISCLOSED, versioned change rather than a silent
+    reweighting.
+
+    Contract:
+    - `method_version` identifies the confidence method. Any change to the
+      mapping constants MUST bump it (enforced by the fingerprint guard in
+      tests/unit/test_confidence_provenance.py) — no silent reweighting.
+    - `calibrated` stays False until a validated calibration exists; while it is
+      False, `confidence` must be read as a provisional stability heuristic, not
+      a calibrated probability.
+    """
+
+    method_version: str = Field(
+        ...,
+        description="Identifier of the confidence method. PROVISIONAL mapping "
+        "(Neil gate 1) — any change to the mapping constants MUST bump this "
+        "version (no silent reweighting).",
+    )
+    calibrated: bool = Field(
+        ...,
+        description="False until a validated calibration exists. While False, "
+        "the confidence figure is a provisional stability heuristic, not a "
+        "calibrated probability.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
 class FactorSensitivityV2(BaseModel):
     """Factor sensitivity for drivers analysis."""
 
@@ -630,6 +666,17 @@ class FactorSensitivityV2(BaseModel):
         None,
         description="Source of confidence value: 'bootstrap_sampling' (from MC resampling) "
         "or 'graph_structural' (fallback from graph path analysis when bootstrap unavailable)",
+    )
+    # S2 disclosure marker — additive, optional. Populated EXACTLY when
+    # `confidence` is populated; left None (=> ABSENT under exclude_none=True on
+    # the wire, never a JSON null) when `confidence` is absent. Signals that the
+    # confidence figure comes from a PROVISIONAL, uncalibrated mapping so any
+    # recalibration is a disclosed, versioned change (Neil gate 1).
+    confidence_provenance: Optional[ConfidenceProvenance] = Field(
+        None,
+        description="Disclosure marker for the `confidence` figure: {method_version, "
+        "calibrated}. Present exactly when `confidence` is present; omitted (not null) "
+        "otherwise. calibrated is False until a validated calibration exists.",
     )
     importance_rank: Optional[int] = Field(
         None, ge=1, description="Rank by importance (1 = most important)"
