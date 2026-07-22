@@ -51,6 +51,16 @@ def _discounted_edge_value(immediate: float, discount_factor: float, child_value
     return immediate + discount_factor * child_value
 
 
+# Risk-aversion coefficient for the mean-standard-deviation adjustment applied to a
+# chance node's value under risk_tolerance="averse": value = mean - k * sqrt(variance).
+# DOCTRINE-PENDING(Neil): ruling D-13 fixes only the UNITS here — variance (currency^2)
+# -> sqrt(variance) (sigma / currency units), symmetric with the 'seeking' branch and
+# _calculate_information_value, both of which already use sqrt(variance). That is a
+# consistency restoration, not a modeling change. The coefficient VALUE (k=0.5) is a
+# risk-modeling decision reserved for Neil; do NOT read 0.5 as ratified.
+RISK_AVERSION_COEFFICIENT = 0.5
+
+
 class SequentialDecisionEngine:
     """
     Engine for solving sequential decision problems via backward induction.
@@ -415,8 +425,11 @@ class SequentialDecisionEngine:
         if risk_tolerance == "neutral" or variance == 0:
             return mean
         elif risk_tolerance == "averse":
-            # Mean-variance with risk aversion coefficient
-            return mean - 0.5 * variance
+            # Mean-standard-deviation penalty (sigma units), symmetric with the
+            # 'seeking' branch and _calculate_information_value which already use
+            # sqrt(variance). D-13 units fix; coefficient is DOCTRINE-PENDING(Neil).
+            # (variance == 0 is handled by the first branch, so sqrt is safe here.)
+            return float(mean - RISK_AVERSION_COEFFICIENT * np.sqrt(variance))
         elif risk_tolerance == "seeking":
             # Risk-seeking: slight bonus for variance
             return mean + 0.1 * np.sqrt(variance) if variance > 0 else mean

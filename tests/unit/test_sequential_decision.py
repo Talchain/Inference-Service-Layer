@@ -1073,27 +1073,31 @@ class TestVarianceHelperFailsLoudOnUnvaluedChild:
             )
 
 
-class TestAverseRiskAdjustmentBlowUp:
-    """DIAGNOSIS + guard for a SEPARATE, UNFIXED risk-adjustment bug.
+class TestAverseRiskAdjustmentUnits:
+    """D-13: `_risk_adjust_value` averse branch uses standard-deviation units.
 
-    `_risk_adjust_value` averse branch computes ``mean - 0.5 * variance`` with
-    variance in currency^2 units, so a +/-100k problem is inflated to ~1e8. This
-    is a distinct defect from the same-stage drop and is intentionally NOT fixed
-    here: the correct risk model (variance vs std; the aversion coefficient) is a
-    modeling-doctrine decision, not a mechanical fix. See NOTES.md sec 4.
+    The averse branch previously computed ``mean - 0.5 * variance`` with variance in
+    currency^2 units, inflating a +/-100k problem by ~4 orders of magnitude
+    (-813,082,400 on the control layout below). The 'seeking' branch and
+    `_calculate_information_value` already use sqrt(variance); D-13 makes averse
+    consistent -- ``mean - RISK_AVERSION_COEFFICIENT * sqrt(variance)`` (sigma units).
+    D-13 fixes only the UNITS; the coefficient value stays DOCTRINE-PENDING(Neil).
     """
 
-    def test_averse_blowup_is_independent_of_same_stage_fix(self, engine):
-        """Prove the averse blow-up is independent of the same-stage drop (verdict (b)).
+    def test_averse_uses_std_not_variance_units(self, engine):
+        """RED at HEAD: the averse continuation blows up to -813,082,400.
 
-        Uses the CONTROL layout (pricing at its own stage 2 -> NO collision), where
-        pricing is correctly valued at 80000, yet market still blows up. Because the
-        same-stage fix is a no-op on this layout, this value is IDENTICAL before and
-        after that fix, which is exactly what makes it an independence proof.
-
-        The asserted numbers are KNOWN-WRONG (dimensional blow-up). They are pinned
-        so that ANY future change to the risk model FAILS THIS TEST and forces a
-        conscious record update. Do NOT read them as correct.
+        Control layout (pricing at its own stage 2 -> no same-stage collision),
+        discount 0.8. Hand-derivation:
+          V(pricing) = max(0.8*100000, 0.8*20000) = 80000
+          EV(market) = 0.7*(0 + 0.8*80000) + 0.3*(0 + 0.8*(-30000))
+                     = 0.7*64000 + 0.3*(-24000) = 44800 - 7200 = 37600
+          variance   = 0.7*(64000-37600)^2 + 0.3*(-24000-37600)^2
+                     = 0.7*696,960,000 + 0.3*3,794,560,000 = 1,626,240,000
+          sqrt(variance) = 40326.66611561139
+          V(market) averse = 37600 - 0.5*sqrt(variance)
+                           = 37600 - 20163.333057... = 17436.666942194304
+        (The prior KNOWN-WRONG pin was -813,082,400 == 37600 - 0.5*1,626,240,000.)
         """
         graph, stages = _canonical_decision_graph(pricing_stage=2)  # control: no collision
         result = engine.analyze(
@@ -1102,8 +1106,9 @@ class TestAverseRiskAdjustmentBlowUp:
             )
         )
         invest_option = result.stage_analyses[0].options_at_stage[0]
-        # positive control: the blow-up IS present (orders of magnitude off scale)
-        max_abs_payoff = 100000
-        assert abs(invest_option.continuation_value) > 100 * max_abs_payoff
-        # characterization of the exact CURRENT (wrong) value, hand-derived in NOTES sec 4
-        assert invest_option.continuation_value == pytest.approx(-813082400.0)
+        # Dimensionally sane: on the scale of the problem's payoffs (< max |payoff|),
+        # NOT ~1e8. (This is the positive control the old blow-up pin asserted in
+        # reverse: it required |value| > 100 * max_payoff.)
+        assert abs(invest_option.continuation_value) < 100000
+        # Exact corrected value (hand-derived above; numpy and math.sqrt agree, no RNG).
+        assert invest_option.continuation_value == pytest.approx(17436.666942194304)
