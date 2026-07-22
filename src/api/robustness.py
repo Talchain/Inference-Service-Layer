@@ -80,7 +80,7 @@ from src.utils.response_builder import (
     determine_option_status,
     hash_node_id,
 )
-from src.utils.downside import cvar_from_samples, expected_regret_per_option
+from src.utils.downside import cvar_from_samples
 from src.utils.numerical_stability import validate_mc_samples
 from src.utils.tracing import sanitize_request_id
 from src.validation.degenerate_detector import detect_degenerate_outcomes
@@ -837,20 +837,15 @@ async def _analyze_robustness_v2_enhanced(
         # Task 3: Build option label lookup for propagation to V2 response
         option_label_map = {opt.id: opt.label for opt in request.options}
 
-        # B2 downside — JOINT expected regret. The v2 engine draws per-option
-        # outcome samples against SHARED (Common Random Numbers) draws, so
-        # option_outcomes[o][i] are index-aligned across options. Pre-collect the
-        # raw sample arrays for every option that has them and compute the joint
-        # regret once (best-per-sample minus each option, per-index finite mask).
-        # cvar_10 / p05 are marginal and computed per option inside the loop.
-        # Absent → {} when no option has samples; keyed by option_id otherwise.
-        downside_raw_samples = {
-            r.option_id: r.outcome_distribution.samples
-            for r in v1_response.results
-            if r.outcome_distribution.samples is not None
-            and len(r.outcome_distribution.samples) > 0
-        }
-        expected_regret_map = expected_regret_per_option(downside_raw_samples)
+        # B2 downside — JOINT expected regret is computed in the ANALYZER from the
+        # PRE-noise CRN-aligned outcomes (the same population as win_probability)
+        # and threaded here via OptionResult.pre_noise_expected_regret (a regular
+        # serialized field, so it survives the offload worker->endpoint boundary).
+        # It is deliberately NOT recomputed from outcome_distribution.samples,
+        # which are POST `_apply_auto_scaled_noise` (independent per-option noise
+        # that breaks CRN alignment and inflates regret ~80x for near-equivalent
+        # options — see CODE-REVIEW-ISL F1). cvar_10 / p05 ARE marginal and stay on
+        # the noised per-option samples, computed inside the loop below.
 
         # Convert V1 response to V2 option results
         option_results = []
@@ -910,8 +905,10 @@ async def _analyze_robustness_v2_enhanced(
             #
             # CIL 0.2: return null when true percentiles unavailable, not
             #          mislabelled CI bounds. See code review C3.
-            # B2 downside — computed from the SAME finite_cleaned population as
-            # the percentiles; present exactly when percentiles_source=="samples".
+            # B2 downside — cvar_10/p05 from the SAME finite_cleaned (post-noise)
+            # population as the percentiles; expected_regret is the PRE-noise
+            # joint value threaded from the analyzer. Present exactly when
+            # percentiles_source=="samples" AND the pre-noise regret is available.
             downside: Optional[DownsideV2] = None
             if dist.samples is not None and len(dist.samples) > 0:
                 # Use cleaned_samples (from validate_mc_samples above) filtered
@@ -925,13 +922,18 @@ async def _analyze_robustness_v2_enhanced(
                         float(v) for v in np.percentile(finite_cleaned, [5, 10, 50, 90])
                     )
                     percentiles_source = "samples"
-                    # cvar_10 (mean of the worst decile) from the same finite
-                    # population; expected_regret from the pre-computed joint map.
-                    downside = DownsideV2(
-                        cvar_10=cvar_from_samples(finite_cleaned),
-                        p05=p05_val,
-                        expected_regret=expected_regret_map[result.option_id],
-                    )
+                    # PRE-noise CRN-aligned joint regret (B2 CRN-fix F1), threaded
+                    # from the analyzer. Present for every option with samples; if
+                    # unexpectedly absent, omit downside rather than fabricate —
+                    # absent != wrong (trap #13). cvar_10 (mean of the worst
+                    # decile) and p05 stay on the finite (post-noise) population.
+                    pre_noise_regret = result.pre_noise_expected_regret
+                    if pre_noise_regret is not None:
+                        downside = DownsideV2(
+                            cvar_10=cvar_from_samples(finite_cleaned),
+                            p05=p05_val,
+                            expected_regret=pre_noise_regret,
+                        )
                 else:
                     # All samples non-finite — cannot compute true percentiles
                     p10_val = None

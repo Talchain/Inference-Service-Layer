@@ -72,6 +72,7 @@ from src.models.critique import (
 )
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
+from src.utils.downside import expected_regret_per_option
 from src.validation.request_validator import detect_graph_cycle
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
@@ -1355,6 +1356,20 @@ class RobustnessAnalyzerV2:
             request, sampler, factor_sampler, evaluator, constraint_target_nodes
         )
 
+        # B2 CRN-fix (CODE-REVIEW-ISL F1): expected_regret is a JOINT Common-
+        # Random-Numbers metric and MUST be computed from the PRE-noise outcomes
+        # -- the exact CRN-aligned population that produced winner_per_sample /
+        # win_probability just above. `_apply_auto_scaled_noise` below draws
+        # INDEPENDENT per-option noise (one rng.normal(0, outcome_std_o) per
+        # option), which breaks CRN alignment; computing regret from the noised
+        # samples inflates it by a pure max-over-independent-noise premium (~80x
+        # for near-equivalent options) and makes it disagree with win_probability.
+        # We compute it here, before the noise, and thread it to the V2 emission
+        # via OptionResult.pre_noise_expected_regret. cvar_10/p05 intentionally stay on the
+        # NOISED samples downstream (marginal tail metrics, consistent with the
+        # noised p10/p50/p90/mean).
+        pre_noise_expected_regret = expected_regret_per_option(option_outcomes)
+
         # Disable epsilon noise for post-MC structural analyses
         # (sensitivity, counterfactual, robustness) — these compare structural
         # differences and should not include stochastic per-sample noise.
@@ -1404,9 +1419,16 @@ class RobustnessAnalyzerV2:
                     )
                 )
 
-        # Compute results (including constraint analysis if goal_constraints provided)
+        # Compute results (including constraint analysis if goal_constraints provided).
+        # `option_outcomes` is now POST-noise; win_probability uses the pre-noise
+        # `option_wins`, and the pre-noise joint regret is passed in explicitly so
+        # both joint metrics ride the SAME pre-noise population (B2 CRN-fix F1).
         results = self._compute_option_results(
-            option_outcomes, option_wins, request, constraint_node_values
+            option_outcomes,
+            option_wins,
+            request,
+            constraint_node_values,
+            pre_noise_expected_regret,
         )
 
         # Build critiques for analysis warnings
@@ -2233,6 +2255,7 @@ class RobustnessAnalyzerV2:
         wins: Dict[str, float],
         request: RobustnessRequestV2,
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None,
+        expected_regret: Optional[Dict[str, float]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -2242,7 +2265,13 @@ class RobustnessAnalyzerV2:
             request: The analysis request
             constraint_node_values: Optional dict of constraint node sample values
                 for multi-constraint analysis
+            expected_regret: Optional dict[option_id, pre-noise JOINT expected
+                regret]. Computed by the caller from the PRE-noise CRN-aligned
+                outcomes (B2 CRN-fix F1) so it rides the same population as
+                win_probability. Stored on OptionResult.pre_noise_expected_regret (serialized;
+                survives offload) for the V2 emission layer. None -> not threaded.
         """
+        expected_regret = expected_regret or {}
         results = []
 
         for option in request.options:
@@ -2290,24 +2319,28 @@ class RobustnessAnalyzerV2:
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
 
-            results.append(
-                OptionResult(
-                    option_id=option.id,
-                    outcome_distribution=OutcomeDistribution(
-                        mean=float(np.mean(samples_array)),
-                        std=float(np.std(samples_array)),
-                        median=float(np.median(samples_array)),
-                        ci_lower=ci_lower,
-                        ci_upper=ci_upper,
-                        # Task 2: Store raw samples so the V2 API layer can compute
-                        # actual p10/p50/p90 percentiles instead of aliasing CI bounds.
-                        samples=samples,
-                    ),
-                    win_probability=wins[option.id] / request.n_samples,
-                    probability_of_goal=probability_of_goal,
-                    constraint_analysis=constraint_analysis_result,
-                )
+            option_result = OptionResult(
+                option_id=option.id,
+                outcome_distribution=OutcomeDistribution(
+                    mean=float(np.mean(samples_array)),
+                    std=float(np.std(samples_array)),
+                    median=float(np.median(samples_array)),
+                    ci_lower=ci_lower,
+                    ci_upper=ci_upper,
+                    # Task 2: Store raw samples so the V2 API layer can compute
+                    # actual p10/p50/p90 percentiles instead of aliasing CI bounds.
+                    samples=samples,
+                ),
+                win_probability=wins[option.id] / request.n_samples,
+                probability_of_goal=probability_of_goal,
+                constraint_analysis=constraint_analysis_result,
             )
+            # B2 CRN-fix (F1): attach the PRE-noise joint regret so the V2
+            # emission layer emits the CRN-aligned value instead of recomputing it
+            # from the POST-noise samples above. A regular (serialized) field so it
+            # survives the offload worker->endpoint dump/validate boundary.
+            option_result.pre_noise_expected_regret = expected_regret.get(option.id)
+            results.append(option_result)
 
         return results
 

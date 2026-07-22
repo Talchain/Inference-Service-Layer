@@ -56,6 +56,20 @@ def base_request(**overrides):
     return request
 
 
+def near_equivalent_request(**overrides):
+    """base_request's graph with two NEAR-EQUIVALENT options (price 0.50 vs
+    0.51). Their true outcomes are almost identical, so the CRN decision regret
+    is tiny -- which is what makes the post-noise inflation glaring (~80x): the
+    max-over-independently-noised premium swamps the real regret."""
+    request = base_request()
+    request["options"] = [
+        {"id": "low", "label": "Price 0.50", "interventions": {"price": 0.50}},
+        {"id": "high", "label": "Price 0.51", "interventions": {"price": 0.51}},
+    ]
+    request.update(overrides)
+    return request
+
+
 def post_v2(client, request):
     resp = client.post(f"{V2_URL}?response_version=2", json=request)
     assert resp.status_code == 200, resp.text
@@ -127,30 +141,88 @@ class TestDownsideOnWire:
         for opt in body["options"]:
             assert opt["downside"]["expected_regret"] >= 0.0
 
-    def test_winner_has_lowest_regret_when_all_finite(self, client):
-        """Highest-mean option has the lowest expected_regret.
+    def test_expected_regret_consistent_with_win_probability(self, client):
+        """expected_regret and win_probability derive from the SAME pre-noise
+        CRN population (F1 fix), so the option that wins the most samples
+        (highest win_probability) also carries the lowest expected_regret --
+        one consistent answer to "which option is best?".
 
-        regret_o = E[best] - mean_o (exact when all draws finite), so argmin
-        regret == argmax mean. Gated on validity_ratio == 1.0 per option.
+        Pre-fix this FAILED on this exact fixture: win_probability is built from
+        the PRE-noise winners and ranks 'low' highest (0.5025 > 0.4975), while
+        expected_regret was computed from the POST-noise samples and ranked
+        'high' lowest (0.1075 < 0.1115). The same response answered the same
+        question two ways from two populations (CODE-REVIEW-ISL F1 aggravator).
+        RED before the fix (low != high), GREEN after (low == low).
+
+        NB: this REPLACES the old ``winner_has_lowest_regret_when_all_finite``
+        check, which compared argmin(regret) to argmax(WIRE mean). The wire mean
+        is POST-noise while the corrected regret is PRE-noise, so near-equivalent
+        means that noise reorders would make that comparison mis-fire. The honest
+        same-population winner is win_probability (also pre-noise), used here.
         """
         body = post_v2(client, base_request())
         opts = body["options"]
-        if not all(o["outcome"].get("validity_ratio") == 1.0 for o in opts):
-            pytest.skip("non-finite draws present; identity not exact")
-        best_by_mean = max(opts, key=lambda o: o["outcome"]["mean"])["id"]
-        best_by_regret = min(opts, key=lambda o: o["downside"]["expected_regret"])["id"]
-        assert best_by_mean == best_by_regret
+        best_by_winprob = max(opts, key=lambda o: o["win_probability"])["id"]
+        least_regret = min(opts, key=lambda o: o["downside"]["expected_regret"])["id"]
+        assert best_by_winprob == least_regret, (best_by_winprob, least_regret)
 
-    def test_regret_plus_mean_is_constant_across_options(self, client):
-        """expected_regret_o + mean_o = E[best] (same for every option) when all
-        draws are finite. A strong, raw-sample-free cross-check that regret is
-        wired to the JOINT best-per-sample, not to some per-option quantity."""
+    def test_expected_regret_is_pre_noise_crn_value(self, client):
+        """expected_regret is the PRE-noise CRN-joint regret, NOT the post-noise
+        inflated value (F1 fix / CODE-REVIEW-ISL P1).
+
+        The goal node 'revenue' is kind='outcome', so ``_apply_auto_scaled_noise``
+        fires and adds INDEPENDENT per-option noise to the outcome samples,
+        breaking the CRN alignment the metric's own docstring relies on. The
+        JOINT expected_regret must be computed from the PRE-noise (CRN-aligned)
+        population -- the same samples that produced win_probability.
+
+        Seed-42/n=400 wire-exact pins (deterministic; captured from an
+        independent pre-noise analyzer run, module __file__ pinned to this tree).
+        BEFORE the fix the wire emitted the POST-noise values
+        (low=0.11147263695963129, high=0.10749866011865553) -- ~2.5x these -- so
+        this test is RED on the pre-fix code and GREEN after. cvar_10/p05 stay on
+        the noised samples and are UNCHANGED by this fix (test_p05_wire_value_pin).
+        """
+        expected_regret = {
+            "low": 0.04396019818411503,
+            "high": 0.05405519879844565,
+        }
+        pre_fix_noised_bug = {  # what the pre-fix (post-noise) code emitted
+            "low": 0.11147263695963129,
+            "high": 0.10749866011865553,
+        }
         body = post_v2(client, base_request())
-        opts = body["options"]
-        if not all(o["outcome"].get("validity_ratio") == 1.0 for o in opts):
-            pytest.skip("non-finite draws present; identity not exact")
-        totals = [o["downside"]["expected_regret"] + o["outcome"]["mean"] for o in opts]
-        assert max(totals) - min(totals) == pytest.approx(0.0, abs=1e-9)
+        for opt in body["options"]:
+            oid = opt["id"]
+            r = opt["downside"]["expected_regret"]
+            # Positive control (trap #13): the emitted value is materially
+            # different from the pre-fix noised value -> the assertion can SEE
+            # the correction, it is not vacuously green.
+            assert abs(r - pre_fix_noised_bug[oid]) > 1e-2, (oid, r)
+            assert r == pytest.approx(expected_regret[oid], rel=1e-12), (oid, r)
+
+    def test_expected_regret_not_noise_inflated_wide_margin(self, client):
+        """Wide-margin discriminator: two NEAR-EQUIVALENT options on a noised
+        (outcome) goal. The true CRN decision regret is ~0.001; the pre-fix
+        post-noise code inflated it ~80x to ~0.09 -- a pure max-over-independent-
+        noise artifact for options that are causally near-identical. Pins the
+        PRE-noise values and asserts the emitted regret is NOT in the noised
+        band. RED on the pre-fix code (emits ~0.09), GREEN after.
+        """
+        expected_regret = {
+            "low": 0.0010990049546028757,
+            "high": 0.0013513799699611433,
+        }
+        pre_fix_noised_bug = {"low": 0.0965537399, "high": 0.0899453578}
+        body = post_v2(client, near_equivalent_request())
+        for opt in body["options"]:
+            oid = opt["id"]
+            r = opt["downside"]["expected_regret"]
+            # Positive control: pre-fix emitted the ~80x-inflated value.
+            assert abs(r - pre_fix_noised_bug[oid]) > 5e-2, (oid, r)
+            # The honest regret is < 0.01; anything in the noised band (~0.09) fails.
+            assert r < 0.01, (oid, r, "looks noise-inflated")
+            assert r == pytest.approx(expected_regret[oid], rel=1e-12), (oid, r)
 
     def test_downside_seed_deterministic(self, client):
         """Same request + seed → identical downside values."""
@@ -168,3 +240,50 @@ class TestDownsideOnWire:
             o = opt["outcome"]
             for k in ("mean", "std", "p10", "p50", "p90"):
                 assert isinstance(o[k], (int, float))
+
+
+class TestDownsideOffloadSurvival:
+    """Regret must survive the ProcessPoolExecutor OFFLOAD boundary (CODE-REVIEW
+    F1 fix-of-fix). The analyzer runs inside the worker; run_offloaded returns the
+    response as model_dump_json() and the endpoint reconstructs it with
+    model_validate_json(). The pre-noise regret carrier MUST be a serialized field
+    — a PrivateAttr is dropped across that boundary, so downside would be silently
+    omitted on offloaded requests while present in in-process tests (test/prod
+    divergence). These tests fail if the carrier ever reverts to a PrivateAttr.
+    """
+
+    def test_pre_noise_regret_survives_model_dump_validate_roundtrip(self):
+        """The exact dump/validate boundary run_offloaded uses. A PrivateAttr
+        carrier would come back None here (RED); a serialized field survives."""
+        from src.models.robustness_v2 import OptionResult, OutcomeDistribution
+
+        od = OutcomeDistribution(
+            mean=1.0, std=0.5, median=1.0, ci_lower=0.2, ci_upper=1.8,
+            samples=[0.1, 0.2, 0.3],
+        )
+        r = OptionResult(option_id="low", outcome_distribution=od, win_probability=0.5)
+        r.pre_noise_expected_regret = 0.0439601982
+        r2 = OptionResult.model_validate_json(r.model_dump_json())
+        assert r2.pre_noise_expected_regret == pytest.approx(0.0439601982, rel=1e-12), (
+            "pre_noise_expected_regret did not survive the offload dump/validate "
+            "boundary — it must be a serialized field, not a PrivateAttr"
+        )
+
+    def test_worker_entry_emits_pre_noise_regret_across_boundary(self):
+        """End-to-end via the EXACT ProcessPoolExecutor entry (run_robustness_v2:
+        JSON in → JSON out). After reconstruction the results carry the correct
+        PRE-noise regret (not the ~2.5x noised value), so an offloaded request
+        builds downside identically to an in-process one."""
+        import json as _json
+
+        import src.services.robustness_worker as worker
+        from src.models.robustness_v2 import RobustnessResponseV2
+
+        out_json = worker.run_robustness_v2(_json.dumps(base_request()))
+        resp = RobustnessResponseV2.model_validate_json(out_json)
+        by_id = {r.option_id: r.pre_noise_expected_regret for r in resp.results}
+        # PRE-noise targets (seed 42); the noised/pre-fix values were ~0.111/0.107.
+        assert by_id["low"] == pytest.approx(0.0439601982, rel=1e-9), by_id
+        assert by_id["high"] == pytest.approx(0.0540551988, rel=1e-9), by_id
+        for v in by_id.values():
+            assert v is not None
