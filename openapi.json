@@ -338,6 +338,48 @@
         "title": "ConditionalWinnerV2",
         "type": "object"
       },
+      "ConfidenceInterval": {
+        "description": "Prediction interval for numerical estimates.\n\nNote on terminology: While named \"confidence interval\" for API consistency,\nthese bounds are computed as percentiles from Monte Carlo simulation samples.\nSpecifically, for a 95% interval:\n- lower = 2.5th percentile of simulated outcomes\n- upper = 97.5th percentile of simulated outcomes\n\nThis represents the range containing 95% of predicted outcomes given\nuncertainty in model parameters and inputs. Statistically, this is closer\nto a Bayesian credible interval or prediction interval than a frequentist\nconfidence interval.\n\nInterpretation: \"Given our model and uncertainty estimates, 95% of\nsimulated outcomes fall within this range.\"",
+        "example": {
+          "confidence_level": 0.95,
+          "lower": 45000,
+          "upper": 55000
+        },
+        "properties": {
+          "confidence_level": {
+            "default": 0.95,
+            "description": "Coverage level (proportion of distribution captured)",
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "lower": {
+            "description": "Lower bound (e.g., 2.5th percentile for 95% level)",
+            "title": "Lower",
+            "type": "number"
+          },
+          "upper": {
+            "description": "Upper bound (e.g., 97.5th percentile for 95% level)",
+            "title": "Upper",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lower",
+          "upper"
+        ],
+        "title": "ConfidenceInterval",
+        "type": "object"
+      },
+      "ConfidenceLevel": {
+        "description": "Confidence level for analysis results.",
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "title": "ConfidenceLevel",
+        "type": "string"
+      },
       "ConfidenceProvenance": {
         "description": "Honest disclosure marker for a factor's `confidence` figure (S2).\n\nThe per-factor `confidence` is built from a PROVISIONAL stability->confidence\nmapping (STABILITY_CONFIDENCE_MAP and its blend weights) that is explicitly\nNOT research-validated \u2014 it is a Neil-gate-1 operational default pending\nscientific calibration. This marker rides alongside `confidence` so a\nconsumer can tell a provisional heuristic from a calibrated probability, and\nso any recalibration is a DISCLOSED, versioned change rather than a silent\nreweighting.\n\nContract:\n- `method_version` identifies the confidence method. Any change to the\n  mapping constants MUST bump it (enforced by the fingerprint guard in\n  tests/unit/test_confidence_provenance.py) \u2014 no silent reweighting.\n- `calibrated` stays False until a validated calibration exists; while it is\n  False, `confidence` must be read as a provisional stability heuristic, not\n  a calibrated probability.",
         "properties": {
@@ -625,6 +667,267 @@
         "title": "ConstraintResultV2",
         "type": "object"
       },
+      "CounterfactualRequest": {
+        "description": "Request model for counterfactual analysis endpoint.",
+        "example": {
+          "context": {
+            "baseline_brand": 52
+          },
+          "intervention": {
+            "Price": 15
+          },
+          "model": {
+            "distributions": {
+              "baseline_brand": {
+                "parameters": {
+                  "mean": 50,
+                  "std": 5
+                },
+                "type": "normal"
+              }
+            },
+            "equations": {
+              "Brand": "baseline_brand + 0.3 * Price",
+              "Revenue": "10000 + 500 * Price - 200 * Brand"
+            },
+            "variables": [
+              "Price",
+              "Brand",
+              "Revenue"
+            ]
+          },
+          "outcome": "Revenue"
+        },
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional observed context values",
+            "title": "Context"
+          },
+          "intervention": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Intervention values mapping variable names to values",
+            "title": "Intervention",
+            "type": "object"
+          },
+          "model": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StructuralModel"
+              }
+            ],
+            "description": "Structural causal model"
+          },
+          "outcome": {
+            "description": "Outcome variable to predict",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Outcome",
+            "type": "string"
+          },
+          "preferences": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reserved for ActiVA preferences (Phase 1)",
+            "title": "Preferences"
+          },
+          "user_context": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reserved for Bayesian Teaching context (Phase 1)",
+            "title": "User Context"
+          }
+        },
+        "required": [
+          "model",
+          "intervention",
+          "outcome"
+        ],
+        "title": "CounterfactualRequest",
+        "type": "object"
+      },
+      "CounterfactualResponse": {
+        "description": "Response model for counterfactual analysis endpoint.",
+        "example": {
+          "explanation": {
+            "assumptions": [
+              "Structural equations correct"
+            ],
+            "reasoning": "Price increase drives growth...",
+            "summary": "Revenue likely increases by \u00a345k-\u00a355k",
+            "technical_basis": "FACET region-based analysis"
+          },
+          "prediction": {
+            "confidence_interval": {
+              "lower": 45000,
+              "upper": 55000
+            },
+            "point_estimate": 51000,
+            "sensitivity_range": {
+              "explanation": "Range accounts for competitive effects",
+              "optimistic": 62000,
+              "pessimistic": 38000
+            }
+          },
+          "robustness": {
+            "critical_assumptions": [
+              {
+                "assumption": "Price sensitivity constant",
+                "confidence": "medium",
+                "impact": 15000,
+                "recommendation": "A/B test before rollout"
+              }
+            ],
+            "score": "moderate"
+          },
+          "scenario": {
+            "intervention": {
+              "Price": 15
+            },
+            "outcome": "Revenue"
+          },
+          "uncertainty": {
+            "overall": "medium",
+            "sources": [
+              {
+                "basis": "Historical data",
+                "confidence": "medium",
+                "explanation": "Brand changes take time",
+                "factor": "Brand perception lag",
+                "impact": 3000
+              }
+            ]
+          }
+        },
+        "properties": {
+          "_metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResponseMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata for determinism verification"
+          },
+          "explanation": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExplanationMetadata"
+              }
+            ],
+            "description": "Explanation metadata"
+          },
+          "prediction": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PredictionResults"
+              }
+            ],
+            "description": "Prediction results"
+          },
+          "robustness": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RobustnessAnalysis"
+              }
+            ],
+            "description": "Robustness analysis"
+          },
+          "scenario": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ScenarioDescription"
+              }
+            ],
+            "description": "Scenario description"
+          },
+          "uncertainty": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UncertaintyBreakdown"
+              }
+            ],
+            "description": "Uncertainty breakdown"
+          }
+        },
+        "required": [
+          "scenario",
+          "prediction",
+          "uncertainty",
+          "robustness",
+          "explanation"
+        ],
+        "title": "CounterfactualResponse",
+        "type": "object"
+      },
+      "CriticalAssumption": {
+        "description": "A critical assumption affecting robustness.",
+        "example": {
+          "assumption": "Customer price sensitivity remains constant",
+          "confidence": "medium",
+          "impact": 15000,
+          "recommendation": "Consider A/B testing before full rollout"
+        },
+        "properties": {
+          "assumption": {
+            "description": "The assumption being tested",
+            "title": "Assumption",
+            "type": "string"
+          },
+          "confidence": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceLevel"
+              }
+            ],
+            "description": "Confidence in this assumption"
+          },
+          "impact": {
+            "description": "How much result changes if assumption is wrong",
+            "title": "Impact",
+            "type": "number"
+          },
+          "recommendation": {
+            "description": "Recommended action",
+            "title": "Recommendation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assumption",
+          "impact",
+          "confidence",
+          "recommendation"
+        ],
+        "title": "CriticalAssumption",
+        "type": "object"
+      },
       "CritiqueV2": {
         "description": "Structured critique for UI display.",
         "properties": {
@@ -894,6 +1197,51 @@
         ],
         "title": "DiagnosticsV2",
         "type": "object"
+      },
+      "Distribution": {
+        "description": "Probability distribution specification.",
+        "example": {
+          "parameters": {
+            "mean": 0,
+            "std": 1
+          },
+          "type": "normal"
+        },
+        "properties": {
+          "parameters": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Distribution parameters",
+            "title": "Parameters",
+            "type": "object"
+          },
+          "type": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DistributionType"
+              }
+            ],
+            "description": "Type of distribution"
+          }
+        },
+        "required": [
+          "type",
+          "parameters"
+        ],
+        "title": "Distribution",
+        "type": "object"
+      },
+      "DistributionType": {
+        "description": "Types of probability distributions.",
+        "enum": [
+          "normal",
+          "uniform",
+          "beta",
+          "exponential"
+        ],
+        "title": "DistributionType",
+        "type": "string"
       },
       "EdgeEValueV2": {
         "description": "E-value analogue for an edge: how wrong must the strength be to flip the recommendation?\n\nAnalogous to VanderWeele's E-value in observational epidemiology: larger values\nindicate the assumption is robust (needs a larger violation to overturn the finding).",
@@ -1334,6 +1682,91 @@
           "retryable"
         ],
         "title": "ErrorResponse",
+        "type": "object"
+      },
+      "ExplanationMetadata": {
+        "description": "Explanation metadata included in all responses.",
+        "example": {
+          "assumptions": [
+            "No unmeasured confounding",
+            "Correct causal structure specified"
+          ],
+          "learn_more_url": "https://docs.inference-service-layer.com/docs/methods/backdoor-adjustment",
+          "reasoning": "Brand influences both Price and Revenue, creating confounding. Controlling for Brand blocks the backdoor path.",
+          "simple_explanation": "We can estimate this effect by controlling for Brand.",
+          "summary": "Effect is identifiable by controlling for Brand",
+          "technical_basis": "Backdoor criterion satisfied with adjustment set {Brand}",
+          "visual_type": "dag_with_adjustment"
+        },
+        "properties": {
+          "assumptions": {
+            "description": "Key assumptions made in analysis",
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "learn_more_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Link to documentation for this concept",
+            "title": "Learn More Url"
+          },
+          "reasoning": {
+            "description": "Plain English explanation of why",
+            "title": "Reasoning",
+            "type": "string"
+          },
+          "simple_explanation": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Non-technical explanation for general audience",
+            "title": "Simple Explanation"
+          },
+          "summary": {
+            "description": "One-line summary of the result",
+            "title": "Summary",
+            "type": "string"
+          },
+          "technical_basis": {
+            "description": "Mathematical/technical justification",
+            "title": "Technical Basis",
+            "type": "string"
+          },
+          "visual_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Suggested visualization type (e.g., 'path_diagram', 'interval_plot')",
+            "title": "Visual Type"
+          }
+        },
+        "required": [
+          "summary",
+          "reasoning",
+          "technical_basis",
+          "assumptions"
+        ],
+        "title": "ExplanationMetadata",
         "type": "object"
       },
       "FACETRobustnessAnalysis": {
@@ -3883,6 +4316,39 @@
         "title": "PolicyDistribution",
         "type": "object"
       },
+      "PredictionResults": {
+        "description": "Prediction results for counterfactual analysis.",
+        "properties": {
+          "confidence_interval": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceInterval"
+              }
+            ],
+            "description": "Confidence interval for prediction"
+          },
+          "point_estimate": {
+            "description": "Most likely outcome value",
+            "title": "Point Estimate",
+            "type": "number"
+          },
+          "sensitivity_range": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SensitivityRange"
+              }
+            ],
+            "description": "Range of plausible outcomes"
+          }
+        },
+        "required": [
+          "point_estimate",
+          "confidence_interval",
+          "sensitivity_range"
+        ],
+        "title": "PredictionResults",
+        "type": "object"
+      },
       "RecoveryHints": {
         "description": "Recovery hints for error resolution.",
         "properties": {
@@ -4124,6 +4590,43 @@
         ],
         "title": "ResponseMetadataV2",
         "type": "object"
+      },
+      "RobustnessAnalysis": {
+        "description": "Robustness analysis results.",
+        "properties": {
+          "critical_assumptions": {
+            "description": "Critical assumptions",
+            "items": {
+              "$ref": "#/components/schemas/CriticalAssumption"
+            },
+            "title": "Critical Assumptions",
+            "type": "array"
+          },
+          "score": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RobustnessLevel"
+              }
+            ],
+            "description": "Overall robustness score"
+          }
+        },
+        "required": [
+          "score",
+          "critical_assumptions"
+        ],
+        "title": "RobustnessAnalysis",
+        "type": "object"
+      },
+      "RobustnessLevel": {
+        "description": "Robustness level for analysis results.",
+        "enum": [
+          "robust",
+          "moderate",
+          "fragile"
+        ],
+        "title": "RobustnessLevel",
+        "type": "string"
       },
       "RobustnessRequest": {
         "description": "Request for FACET robustness analysis.",
@@ -4972,6 +5475,45 @@
         "title": "RobustnessResultV2",
         "type": "object"
       },
+      "ScenarioDescription": {
+        "description": "Description of the counterfactual scenario.",
+        "properties": {
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed context",
+            "title": "Context"
+          },
+          "intervention": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "Intervention values",
+            "title": "Intervention",
+            "type": "object"
+          },
+          "outcome": {
+            "description": "Outcome variable",
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "intervention",
+          "outcome"
+        ],
+        "title": "ScenarioDescription",
+        "type": "object"
+      },
       "SensitiveFactorV2": {
         "description": "Factor sensitivity information.",
         "properties": {
@@ -5003,6 +5545,38 @@
           "effect_on_ranking"
         ],
         "title": "SensitiveFactorV2",
+        "type": "object"
+      },
+      "SensitivityRange": {
+        "description": "Sensitivity range showing best/worst plausible cases.",
+        "example": {
+          "explanation": "Range accounts for uncertainty in competitive response",
+          "optimistic": 62000,
+          "pessimistic": 38000
+        },
+        "properties": {
+          "explanation": {
+            "description": "What creates this range",
+            "title": "Explanation",
+            "type": "string"
+          },
+          "optimistic": {
+            "description": "Optimistic scenario value",
+            "title": "Optimistic",
+            "type": "number"
+          },
+          "pessimistic": {
+            "description": "Pessimistic scenario value",
+            "title": "Pessimistic",
+            "type": "number"
+          }
+        },
+        "required": [
+          "optimistic",
+          "pessimistic",
+          "explanation"
+        ],
+        "title": "SensitivityRange",
         "type": "object"
       },
       "SensitivityResult": {
@@ -5823,6 +6397,149 @@
         "title": "StrengthDistribution",
         "type": "object"
       },
+      "StructuralModel": {
+        "description": "Structural causal model specification.",
+        "example": {
+          "distributions": {
+            "X": {
+              "parameters": {
+                "mean": 0,
+                "std": 1
+              },
+              "type": "normal"
+            }
+          },
+          "equations": {
+            "Y": "10 + 2*X + 3*Z",
+            "Z": "5 + 0.5*X"
+          },
+          "variables": [
+            "X",
+            "Y",
+            "Z"
+          ]
+        },
+        "properties": {
+          "distributions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/Distribution"
+            },
+            "description": "Prior distributions for exogenous variables",
+            "title": "Distributions",
+            "type": "object"
+          },
+          "equations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Structural equations mapping variable to expression",
+            "title": "Equations",
+            "type": "object"
+          },
+          "variables": {
+            "description": "List of variable names",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Variables",
+            "type": "array"
+          }
+        },
+        "required": [
+          "variables",
+          "equations",
+          "distributions"
+        ],
+        "title": "StructuralModel",
+        "type": "object"
+      },
+      "UncertaintyBreakdown": {
+        "description": "Breakdown of uncertainty sources.",
+        "properties": {
+          "overall": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UncertaintyLevel"
+              }
+            ],
+            "description": "Overall uncertainty level"
+          },
+          "sources": {
+            "description": "Individual uncertainty sources",
+            "items": {
+              "$ref": "#/components/schemas/UncertaintySource"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "overall",
+          "sources"
+        ],
+        "title": "UncertaintyBreakdown",
+        "type": "object"
+      },
+      "UncertaintyLevel": {
+        "description": "Overall uncertainty level.",
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "title": "UncertaintyLevel",
+        "type": "string"
+      },
+      "UncertaintySource": {
+        "description": "Source of uncertainty in the analysis.",
+        "example": {
+          "basis": "Historical data from 3 previous price changes",
+          "confidence": "medium",
+          "explanation": "Brand changes take 2-4 weeks to affect revenue",
+          "factor": "Brand perception lag",
+          "impact": 3000
+        },
+        "properties": {
+          "basis": {
+            "description": "Evidence source for this factor",
+            "title": "Basis",
+            "type": "string"
+          },
+          "confidence": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConfidenceLevel"
+              }
+            ],
+            "description": "Confidence in this estimate"
+          },
+          "explanation": {
+            "description": "Plain English explanation",
+            "title": "Explanation",
+            "type": "string"
+          },
+          "factor": {
+            "description": "Name of uncertainty factor",
+            "title": "Factor",
+            "type": "string"
+          },
+          "impact": {
+            "description": "Contribution to variance",
+            "title": "Impact",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor",
+          "impact",
+          "confidence",
+          "explanation",
+          "basis"
+        ],
+        "title": "UncertaintySource",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -5941,6 +6658,72 @@
         "summary": "Analyze sequential decision problem",
         "tags": [
           "Phase 4: Sequential Decisions"
+        ]
+      }
+    },
+    "/api/v1/causal/counterfactual": {
+      "post": {
+        "description": "Analyzes what would happen under a counterfactual intervention.\n\n    Provides:\n    - Point estimates and confidence intervals\n    - Uncertainty breakdown by source\n    - Robustness analysis\n    - Critical assumptions\n\n    **Use when:** Evaluating \"what if\" scenarios for decision making.",
+        "operationId": "analyze_counterfactual_api_v1_causal_counterfactual_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Request-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CounterfactualRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CounterfactualResponse"
+                }
+              }
+            },
+            "description": "Counterfactual analysis completed successfully"
+          },
+          "400": {
+            "description": "Invalid input (e.g., malformed structural model)"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "description": "Internal computation error"
+          }
+        },
+        "summary": "Perform counterfactual analysis",
+        "tags": [
+          "Causal Inference"
         ]
       }
     },

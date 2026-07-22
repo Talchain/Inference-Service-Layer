@@ -143,8 +143,8 @@ async def test_counterfactual_deterministic(client, sample_structural_model):
 # matching the sequential (phase4) D-12 mapping and the robustness v2 handler
 # (`except ValueError: HTTPException(422, str(e))`).
 #
-# This fixture mounts the causal router with the PRODUCTION exception handlers on
-# a local app so the ValueError->422 mapping is exercised at the router level
+# This fixture mounts the counterfactual router with the PRODUCTION exception handlers
+# on a local app so the ValueError->422 mapping is exercised at the router level
 # regardless of whether the global app has mounted the route yet (C1 precedes the
 # C3 selective mount). It asserts the real Olumi ErrorResponse envelope.
 
@@ -155,10 +155,10 @@ async def counterfactual_error_client():
     from fastapi import FastAPI, HTTPException
 
     from src.api import main as isl_main
-    from src.api.causal import router as causal_router
+    from src.api.causal import counterfactual_router
 
     test_app = FastAPI()
-    test_app.include_router(causal_router, prefix="/api/v1/causal")
+    test_app.include_router(counterfactual_router, prefix="/api/v1/causal")
     test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
     test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
 

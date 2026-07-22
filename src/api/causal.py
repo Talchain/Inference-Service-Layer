@@ -54,6 +54,17 @@ from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
 
 router = APIRouter()
+
+# Selective mount (R-12, 2026-07-22): ONLY POST /counterfactual is runtime-verified
+# (A3 flip: engine math verified sound 22 Jul + D-12(cf) 422 mapping + C2 cache-leak
+# removal) and goes live. It lives on its OWN router so main.py can mount exactly
+# POST /api/v1/causal/counterfactual while the rest of `router` (validate,
+# counterfactual/batch, counterfactual/conformal, transport, validate/strategies,
+# discover/*, experiment/recommend, parameter-recommendations, sensitivity/detailed,
+# extract-factors) stays dark pending its own runtime verification. Do NOT move other
+# routes onto counterfactual_router.
+counterfactual_router = APIRouter()
+
 logger = logging.getLogger(__name__)
 
 # Initialize services
@@ -207,7 +218,7 @@ async def validate_causal_model(
         )
 
 
-@router.post(
+@counterfactual_router.post(
     "/counterfactual",
     response_model=CounterfactualResponse,
     summary="Perform counterfactual analysis",
