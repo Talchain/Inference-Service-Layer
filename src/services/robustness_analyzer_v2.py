@@ -1365,7 +1365,7 @@ class RobustnessAnalyzerV2:
         # samples inflates it by a pure max-over-independent-noise premium (~80x
         # for near-equivalent options) and makes it disagree with win_probability.
         # We compute it here, before the noise, and thread it to the V2 emission
-        # via OptionResult._expected_regret. cvar_10/p05 intentionally stay on the
+        # via OptionResult.pre_noise_expected_regret. cvar_10/p05 intentionally stay on the
         # NOISED samples downstream (marginal tail metrics, consistent with the
         # noised p10/p50/p90/mean).
         pre_noise_expected_regret = expected_regret_per_option(option_outcomes)
@@ -2268,8 +2268,8 @@ class RobustnessAnalyzerV2:
             expected_regret: Optional dict[option_id, pre-noise JOINT expected
                 regret]. Computed by the caller from the PRE-noise CRN-aligned
                 outcomes (B2 CRN-fix F1) so it rides the same population as
-                win_probability. Stored on OptionResult._expected_regret (private;
-                off-wire) for the V2 emission layer. None -> not threaded.
+                win_probability. Stored on OptionResult.pre_noise_expected_regret (serialized;
+                survives offload) for the V2 emission layer. None -> not threaded.
         """
         expected_regret = expected_regret or {}
         results = []
@@ -2335,10 +2335,11 @@ class RobustnessAnalyzerV2:
                 probability_of_goal=probability_of_goal,
                 constraint_analysis=constraint_analysis_result,
             )
-            # B2 CRN-fix (F1): attach the PRE-noise joint regret (private,
-            # off-wire) so the V2 emission layer emits the CRN-aligned value
-            # instead of recomputing it from the POST-noise samples above.
-            object.__setattr__(option_result, "_expected_regret", expected_regret.get(option.id))
+            # B2 CRN-fix (F1): attach the PRE-noise joint regret so the V2
+            # emission layer emits the CRN-aligned value instead of recomputing it
+            # from the POST-noise samples above. A regular (serialized) field so it
+            # survives the offload worker->endpoint dump/validate boundary.
+            option_result.pre_noise_expected_regret = expected_regret.get(option.id)
             results.append(option_result)
 
         return results

@@ -240,3 +240,50 @@ class TestDownsideOnWire:
             o = opt["outcome"]
             for k in ("mean", "std", "p10", "p50", "p90"):
                 assert isinstance(o[k], (int, float))
+
+
+class TestDownsideOffloadSurvival:
+    """Regret must survive the ProcessPoolExecutor OFFLOAD boundary (CODE-REVIEW
+    F1 fix-of-fix). The analyzer runs inside the worker; run_offloaded returns the
+    response as model_dump_json() and the endpoint reconstructs it with
+    model_validate_json(). The pre-noise regret carrier MUST be a serialized field
+    — a PrivateAttr is dropped across that boundary, so downside would be silently
+    omitted on offloaded requests while present in in-process tests (test/prod
+    divergence). These tests fail if the carrier ever reverts to a PrivateAttr.
+    """
+
+    def test_pre_noise_regret_survives_model_dump_validate_roundtrip(self):
+        """The exact dump/validate boundary run_offloaded uses. A PrivateAttr
+        carrier would come back None here (RED); a serialized field survives."""
+        from src.models.robustness_v2 import OptionResult, OutcomeDistribution
+
+        od = OutcomeDistribution(
+            mean=1.0, std=0.5, median=1.0, ci_lower=0.2, ci_upper=1.8,
+            samples=[0.1, 0.2, 0.3],
+        )
+        r = OptionResult(option_id="low", outcome_distribution=od, win_probability=0.5)
+        r.pre_noise_expected_regret = 0.0439601982
+        r2 = OptionResult.model_validate_json(r.model_dump_json())
+        assert r2.pre_noise_expected_regret == pytest.approx(0.0439601982, rel=1e-12), (
+            "pre_noise_expected_regret did not survive the offload dump/validate "
+            "boundary — it must be a serialized field, not a PrivateAttr"
+        )
+
+    def test_worker_entry_emits_pre_noise_regret_across_boundary(self):
+        """End-to-end via the EXACT ProcessPoolExecutor entry (run_robustness_v2:
+        JSON in → JSON out). After reconstruction the results carry the correct
+        PRE-noise regret (not the ~2.5x noised value), so an offloaded request
+        builds downside identically to an in-process one."""
+        import json as _json
+
+        import src.services.robustness_worker as worker
+        from src.models.robustness_v2 import RobustnessResponseV2
+
+        out_json = worker.run_robustness_v2(_json.dumps(base_request()))
+        resp = RobustnessResponseV2.model_validate_json(out_json)
+        by_id = {r.option_id: r.pre_noise_expected_regret for r in resp.results}
+        # PRE-noise targets (seed 42); the noised/pre-fix values were ~0.111/0.107.
+        assert by_id["low"] == pytest.approx(0.0439601982, rel=1e-9), by_id
+        assert by_id["high"] == pytest.approx(0.0540551988, rel=1e-9), by_id
+        for v in by_id.values():
+            assert v is not None

@@ -839,12 +839,13 @@ async def _analyze_robustness_v2_enhanced(
 
         # B2 downside — JOINT expected regret is computed in the ANALYZER from the
         # PRE-noise CRN-aligned outcomes (the same population as win_probability)
-        # and threaded here via OptionResult._expected_regret. It is deliberately
-        # NOT recomputed from outcome_distribution.samples, which are POST
-        # `_apply_auto_scaled_noise` (independent per-option noise that breaks CRN
-        # alignment and inflates regret ~80x for near-equivalent options — see
-        # CODE-REVIEW-ISL F1). cvar_10 / p05 ARE marginal and stay on the noised
-        # per-option samples, computed inside the loop below.
+        # and threaded here via OptionResult.pre_noise_expected_regret (a regular
+        # serialized field, so it survives the offload worker->endpoint boundary).
+        # It is deliberately NOT recomputed from outcome_distribution.samples,
+        # which are POST `_apply_auto_scaled_noise` (independent per-option noise
+        # that breaks CRN alignment and inflates regret ~80x for near-equivalent
+        # options — see CODE-REVIEW-ISL F1). cvar_10 / p05 ARE marginal and stay on
+        # the noised per-option samples, computed inside the loop below.
 
         # Convert V1 response to V2 option results
         option_results = []
@@ -926,7 +927,7 @@ async def _analyze_robustness_v2_enhanced(
                     # unexpectedly absent, omit downside rather than fabricate —
                     # absent != wrong (trap #13). cvar_10 (mean of the worst
                     # decile) and p05 stay on the finite (post-noise) population.
-                    pre_noise_regret = result._expected_regret
+                    pre_noise_regret = result.pre_noise_expected_regret
                     if pre_noise_regret is not None:
                         downside = DownsideV2(
                             cvar_10=cvar_from_samples(finite_cleaned),

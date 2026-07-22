@@ -3676,6 +3676,18 @@
             ],
             "description": "Distribution of outcomes"
           },
+          "pre_noise_expected_regret": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Internal (V1, not client-facing): PRE-noise CRN-aligned joint expected regret, threaded analyzer -> V2 emission so the wire value matches win_probability's population. Survives the offload serialization boundary (a PrivateAttr would not).",
+            "title": "Pre Noise Expected Regret"
+          },
           "probability_of_goal": {
             "anyOf": [
               {

@@ -928,11 +928,28 @@ class OptionResult(BaseModel):
     # produced win_probability (winner_per_sample). It MUST NOT be reconstructed
     # from outcome_distribution.samples, which are POST-`_apply_auto_scaled_noise`
     # (independent per-option noise that breaks CRN alignment and inflates regret).
-    # Private (mirrors _pre_clamp_mean above): an internal thread to the V2
-    # emission layer only -- never on any wire nor in openapi. Set in
-    # _compute_option_results; read in api/robustness.py. None when regret was not
-    # computed (e.g. no samples), in which case the V2 layer omits `downside`.
-    _expected_regret: Optional[float] = PrivateAttr(default=None)
+    #
+    # A REGULAR (serialized) field, NOT a PrivateAttr: the analyzer runs inside the
+    # ProcessPoolExecutor worker (analysis_pool.run_offloaded), which returns the
+    # response as `model_dump_json()` and the endpoint reconstructs it with
+    # `model_validate_json()`. Pydantic DROPS private attrs across that
+    # dump/validate boundary, so a PrivateAttr would silently become None on every
+    # OFFLOADED request -> `downside` omitted in prod while present in in-process
+    # tests (a test/prod divergence). A regular field survives serialization.
+    # OptionResult (V1) is INTERNAL -- the client receives a separately-built
+    # OptionResultV2, so this field never reaches the client wire (it appears only
+    # in the internal OptionResult schema). Set in _compute_option_results; read in
+    # api/robustness.py to build DownsideV2. None when regret was not computed
+    # (e.g. no samples), in which case the V2 layer omits `downside`.
+    pre_noise_expected_regret: Optional[float] = Field(
+        default=None,
+        description=(
+            "Internal (V1, not client-facing): PRE-noise CRN-aligned joint "
+            "expected regret, threaded analyzer -> V2 emission so the wire value "
+            "matches win_probability's population. Survives the offload "
+            "serialization boundary (a PrivateAttr would not)."
+        ),
+    )
 
     model_config = {
         "json_schema_extra": {
