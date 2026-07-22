@@ -673,10 +673,10 @@ async def sequential_error_client():
     from fastapi import FastAPI, HTTPException
 
     from src.api import main as isl_main
-    from src.api.phase4 import router as phase4_router
+    from src.api.phase4 import sequential_router as phase4_sequential_router
 
     test_app = FastAPI()
-    test_app.include_router(phase4_router, prefix="/api/v1/analysis")
+    test_app.include_router(phase4_sequential_router, prefix="/api/v1/analysis")
     test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
     test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
 

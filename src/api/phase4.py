@@ -30,6 +30,15 @@ from src.services.conditional_recommender import ConditionalRecommendationEngine
 from src.services.sequential_decision import SequentialDecisionEngine
 
 router = APIRouter()
+
+# Selective mount (R-12): ONLY the sequential-analysis route is runtime-verified
+# (A2 flip: honest engine + served-path value pins + D-12 422 mapping) and goes
+# live. It lives on its OWN router so main.py can mount exactly
+# POST /api/v1/analysis/sequential while the rest of `router`
+# (conditional-recommend, policy-tree, stage-sensitivity) stays dark pending its
+# own runtime verification. Do NOT move other routes onto sequential_router.
+sequential_router = APIRouter()
+
 logger = logging.getLogger(__name__)
 
 # Initialize services
@@ -127,7 +136,7 @@ async def generate_conditional_recommendations(
         )
 
 
-@router.post(
+@sequential_router.post(
     "/sequential",
     response_model=SequentialAnalysisResponse,
     summary="Analyze sequential decision problem",
