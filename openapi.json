@@ -1166,18 +1166,18 @@
         "description": "Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome\nsamples the v2 engine already draws \u2014 no new sampling.\n\nTwo metric families with DIFFERENT (deliberate) sample populations:\n\n* ``cvar_10`` / ``p05`` \u2014 MARGINAL tail metrics of this option's own outcome\n  samples, taken from the SAME post-``_apply_auto_scaled_noise`` population as\n  ``outcome.p10/p50/p90/mean`` (consistent, conservative/noised distribution).\n* ``expected_regret`` \u2014 a JOINT (cross-option) metric, computed from the\n  PRE-noise Common-Random-Numbers population \u2014 the same samples that produce\n  ``win_probability``. Auto-scaled noise draws INDEPENDENT per-option noise,\n  which breaks the CRN alignment this metric relies on, so it is NOT taken\n  from the noised samples (CODE-REVIEW-ISL F1).\n\nRides as a sibling to ``outcome`` and is present EXACTLY when the option's\nsamples are available at the emission locus (``outcome.percentiles_source ==\n'samples'``); otherwise omitted (absent, never a JSON null). All values are\nin the SAME units as ``outcome.mean`` / ``outcome.p10`` (no normalisation).",
         "properties": {
           "cvar_10": {
-            "description": "Expected shortfall: the MEAN of the worst 10% (lowest) outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of the worst decile cannot exceed the decile boundary).",
+            "description": "Expected shortfall: the MEAN of the worst 10% (lowest) outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of the worst decile cannot exceed the decile boundary). POPULATION: computed from the POST-``_apply_auto_scaled_noise`` outcome samples \u2014 the SAME (noised) population as outcome.p10/p50/p90/mean and p05, and DIFFERENT from expected_regret (which is pre-noise).",
             "title": "Cvar 10",
             "type": "number"
           },
           "expected_regret": {
-            "description": "Joint expected regret: mean over MC samples of (best-option outcome - this option's outcome) at the SAME underlying draw (Common Random Numbers). >= 0 by construction; ~0 for the option that wins each sample. Computed from the PRE-noise CRN-aligned population (the same samples as win_probability), NOT the auto-scaled-noise outcome samples used by cvar_10/p05 \u2014 independent per-option noise would break the CRN alignment this metric requires.",
+            "description": "Joint expected regret: mean over MC samples of (best-option outcome - this option's outcome) at the SAME underlying draw (Common Random Numbers). >= 0 by construction; ~0 for the option that wins each sample. POPULATION: the PRE-noise CRN-aligned samples (the same population as win_probability), NOT the post-auto-scaled-noise outcome samples used by cvar_10/p05 \u2014 independent per-option noise would break the CRN alignment this metric requires. (So within one downside{} object the two metric families ride DIFFERENT populations: expected_regret is pre-noise; cvar_10/p05 are post-noise.)",
             "minimum": 0.0,
             "title": "Expected Regret",
             "type": "number"
           },
           "p05": {
-            "description": "5th-percentile outcome \u2014 extends the p10/p50/p90 family downward, computed with the SAME percentile convention as p10.",
+            "description": "5th-percentile outcome \u2014 extends the p10/p50/p90 family downward, computed with the SAME percentile convention as p10. POPULATION: the POST-``_apply_auto_scaled_noise`` (noised) samples, like outcome.p10/p50/p90/mean and cvar_10 \u2014 and DIFFERENT from expected_regret (pre-noise).",
             "title": "P05",
             "type": "number"
           }
