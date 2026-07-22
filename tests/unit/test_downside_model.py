@@ -11,17 +11,18 @@ OptionResultV2 with percentiles_source defaulting to 'samples' and no enrichment
 """
 
 import pytest
+
 from pydantic import ValidationError
 
 from src.models.response_v2 import DownsideV2, OptionResultV2, OutcomeDistributionV2
 
 
 def _outcome(source="samples", **kw):
-    base = dict(
-        mean=100.0, std=10.0, p10=85.0, p50=100.0, p90=115.0,
-        n_samples=1000, n_valid_samples=1000, validity_ratio=1.0,
-        percentiles_source=source,
-    )
+    base = {
+        "mean": 100.0, "std": 10.0, "p10": 85.0, "p50": 100.0, "p90": 115.0,
+        "n_samples": 1000, "n_valid_samples": 1000, "validity_ratio": 1.0,
+        "percentiles_source": source,
+    }
     base.update(kw)
     return OutcomeDistributionV2(**base)
 

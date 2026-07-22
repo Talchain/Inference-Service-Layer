@@ -20,6 +20,7 @@ Two families:
 from __future__ import annotations
 
 import math
+
 from typing import Dict, Mapping, Sequence
 
 import numpy as np
