@@ -650,3 +650,121 @@ class TestPhase4ResponseTimes:
         assert response.status_code == 200
         # Should be under 2s for 3-stage problem
         assert elapsed < 5.0  # Allow 5s for CI environments
+
+
+# ---------------------------------------------------------------------------
+# D-12: engine input-rejection ValueErrors must surface as 422, never 500.
+# ---------------------------------------------------------------------------
+#
+# The sequential engine fails loud (ValueError) on dangling edges and cycles
+# (A2 fix). The router previously mapped any Exception -> 500; D-12 maps these
+# client-input rejections to the repo's 422 validation-error envelope, matching
+# the robustness v2 handler (`except ValueError: HTTPException(422, str(e))`).
+#
+# This fixture mounts the phase4 router with the PRODUCTION exception handlers on
+# a local app so the ValueError->422 mapping is exercised at the router level
+# regardless of whether the global app has mounted the route yet (C4 precedes the
+# C5 selective mount). It asserts the real Olumi ErrorResponse envelope.
+
+
+@pytest_asyncio.fixture
+async def sequential_error_client():
+    """Local app: phase4 sequential route + production HTTPException/Exception handlers."""
+    from fastapi import FastAPI, HTTPException
+
+    from src.api import main as isl_main
+    from src.api.phase4 import router as phase4_router
+
+    test_app = FastAPI()
+    test_app.include_router(phase4_router, prefix="/api/v1/analysis")
+    test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
+    test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
+
+    async with AsyncClient(
+        transport=ASGITransport(app=test_app), base_url="http://test"
+    ) as ac:
+        yield ac
+
+
+class TestSequentialEngineErrorMapping:
+    """D-12: engine ValueError (dangling edge / cycle) -> 422, not 500."""
+
+    @pytest.mark.asyncio
+    async def test_dangling_edge_returns_422_envelope(self, sequential_error_client):
+        """RED at HEAD: dangling edge -> ValueError -> generic 500.
+
+        `root -> ghost` where `ghost` is never defined as a node. Pydantic does not
+        validate edge endpoints against `nodes`, so the request reaches the engine,
+        which fails loud. That is a client-input rejection -> 422 (Olumi envelope),
+        never a 500.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                ],
+                "edges": [
+                    {"from": "root", "to": "ghost", "action": "risky"},
+                    {"from": "root", "to": "win", "action": "safe"},
+                ],
+                "stage_assignments": {"root": 0, "win": 1},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root"]},
+                {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 0.95,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert body["code"] == "ISL_VALIDATION_ERROR"
+        # message carries the engine's diagnostic naming the dangling node
+        assert "ghost" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_cycle_returns_422_envelope(self, sequential_error_client):
+        """RED at HEAD: a cycle -> ValueError -> generic 500.
+
+        a -> b -> a is a directed cycle; backward induction requires a DAG and
+        fails loud. -> 422, not 500.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "a", "type": "decision", "label": "A"},
+                    {"id": "b", "type": "chance", "label": "B"},
+                    {"id": "end", "type": "terminal", "label": "End", "payoff": 10},
+                ],
+                "edges": [
+                    {"from": "a", "to": "b", "action": "go"},
+                    {"from": "b", "to": "a", "outcome": "loop", "probability": 0.5},
+                    {"from": "b", "to": "end", "outcome": "done", "probability": 0.5},
+                ],
+                "stage_assignments": {"a": 0, "b": 1, "end": 2},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "A", "decision_nodes": ["a"]},
+                {
+                    "stage_index": 1,
+                    "stage_label": "B",
+                    "decision_nodes": [],
+                    "resolution_nodes": ["b"],
+                },
+                {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 0.95,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        assert "cycle" in body["message"].lower()

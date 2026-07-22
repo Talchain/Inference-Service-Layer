@@ -210,6 +210,19 @@ async def analyze_sequential_decision(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        # D-12: the engine fails loud (ValueError) on client-input defects the
+        # request model cannot catch — dangling edges (to_node not validated
+        # against nodes), cycles (backward induction requires a DAG), or an
+        # unsupported node type. These are client errors, not internal failures.
+        # Fail closed with 422 (matching the robustness v2 handler) so a
+        # dangling-edge-behind-p=0 graph surfaces as a clean validation error,
+        # never a 500 or a plausible-looking 200.
+        logger.warning(
+            "sequential_analysis_invalid_input",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error(
             "sequential_analysis_error",
