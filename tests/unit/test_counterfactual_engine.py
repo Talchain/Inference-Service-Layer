@@ -686,3 +686,61 @@ class TestMonteCarloIntegration:
         assert np.all(samples["Y"] == 10.0)
         # Z should be 15 (5 + 10)
         assert np.all(samples["Z"] == 15.0)
+
+
+class TestBoundedTopoSortCache:
+    """C2(cf): the topological-sort cache must be BOUNDED, not grow unbounded."""
+
+    def test_distinct_models_do_not_grow_the_cache_unbounded(self):
+        """RED at HEAD: the per-request topological-sort cache leaks unbounded.
+
+        ``self._topo_sort_cache`` (keyed by ``json.dumps(equations, sort_keys=True)``)
+        grew one entry per distinct structural model, was never evicted, and lived for
+        the process lifetime on the live request path (the module-level
+        ``counterfactual_engine`` singleton in ``causal.py``). With the C3 mount that is
+        a monotonic memory leak keyed by client-controllable equation content — the same
+        class phase4 F-4 addressed. The cache is a real read-through optimisation
+        (tests/performance/test_optimization_gains.py exercises it), so it is BOUNDED
+        rather than removed: at capacity the oldest entry is evicted.
+
+        Analysing MAX + 32 DISTINCT-equation models grew the cache to MAX + 32 at HEAD
+        (unbounded); with the bound it never exceeds ``_TOPO_SORT_CACHE_MAX``.
+        """
+        from src.services.counterfactual_engine import _TOPO_SORT_CACHE_MAX
+
+        engine = CounterfactualEngine()
+
+        n = _TOPO_SORT_CACHE_MAX + 32
+        for i in range(n):
+            model = StructuralModel(
+                variables=["X", "Y"],
+                equations={"Y": f"{i} + 2*X"},  # distinct equation set per i
+                distributions={
+                    "X": Distribution(
+                        type=DistributionType.NORMAL,
+                        parameters={"mean": 5.0, "std": 1.0},
+                    )
+                },
+            )
+            request = CounterfactualRequest(
+                model=model,
+                intervention={"X": 1.0},
+                outcome="Y",
+                context={},
+            )
+            engine.analyze(request)
+
+        # Bounded: cache size is capped regardless of how many distinct models arrive.
+        assert len(engine._topo_sort_cache) <= _TOPO_SORT_CACHE_MAX
+        # Sanity: it is actually saturated to the cap (proves the eviction path ran and
+        # the bound is what holds size down, not that fewer than n models were seen).
+        assert len(engine._topo_sort_cache) == _TOPO_SORT_CACHE_MAX
+
+    def test_cache_hit_returns_same_result(self):
+        """A repeated identical model reuses the cached sort (read-through preserved)."""
+        engine = CounterfactualEngine()
+        equations = {"B": "2 * A", "C": "B + 3", "D": "C * 1.5"}
+        first = engine._topological_sort_equations(equations)
+        second = engine._topological_sort_equations(dict(equations))
+        assert first == second
+        assert len(engine._topo_sort_cache) == 1
