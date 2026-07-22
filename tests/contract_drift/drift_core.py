@@ -69,6 +69,7 @@ from src.models.response_v2 import (
     ConstraintAnalysisV2,
     ConstraintResultV2,
     CritiqueV2,
+    DownsideV2,
     EdgeEValueV2,
     EdgeSensitivityV2,
     FactorSensitivityV2,
@@ -116,6 +117,7 @@ PAIRINGS: Dict[Type[BaseModel], Optional[Tuple[str, str]]] = {
     ConstraintResultV2: ("boundary", "EnrichmentConstraintResultSchema"),
     # No contract counterpart today:
     ConstraintAnalysisV2: None,
+    DownsideV2: None,  # B2 downside/tail-risk — ISL emits ahead of contract adoption
     EdgeSensitivityV2: None,
     SensitiveFactorV2: None,
 }

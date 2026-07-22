@@ -220,6 +220,49 @@ class OutcomeDistributionV2(BaseModel):
 
 
 # =============================================================================
+# Downside / Tail-risk (B2)
+# =============================================================================
+
+
+class DownsideV2(BaseModel):
+    """Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome
+    samples the v2 engine already draws — no new sampling, no change to any
+    existing emitted value.
+
+    Rides as a sibling to ``outcome`` and is present EXACTLY when the option's
+    samples are available at the emission locus (``outcome.percentiles_source ==
+    'samples'``); otherwise omitted (absent, never a JSON null). All values are
+    in the SAME units as ``outcome.mean`` / ``outcome.p10`` (no normalisation).
+    """
+
+    cvar_10: float = Field(
+        ...,
+        description="Expected shortfall: the MEAN of the worst 10% (lowest) "
+        "outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) "
+        "default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of "
+        "the worst decile cannot exceed the decile boundary).",
+    )
+    p05: float = Field(
+        ...,
+        description="5th-percentile outcome — extends the p10/p50/p90 family "
+        "downward, computed with the SAME percentile convention as p10.",
+    )
+    expected_regret: float = Field(
+        ...,
+        ge=0,
+        description="Joint expected regret: mean over MC samples of "
+        "(best-option outcome - this option's outcome) at the SAME underlying "
+        "draw (Common Random Numbers). >= 0 by construction; ~0 for the option "
+        "that wins each sample. Meaningful only because the v2 engine draws "
+        "joint per-option samples.",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {"extra": "ignore"}
+
+
+# =============================================================================
 # Option Result
 # =============================================================================
 
@@ -230,6 +273,16 @@ class OptionResultV2(BaseModel):
     id: str = Field(..., description="Option identifier")
     label: Optional[str] = Field(None, description="Human-readable label")
     outcome: OutcomeDistributionV2 = Field(..., description="Outcome distribution")
+    # B2 downside — additive, optional, sibling to `outcome`. Populated EXACTLY
+    # when the option's MC samples are available (outcome.percentiles_source ==
+    # 'samples'); left None (=> ABSENT under exclude_none=True on the wire, never
+    # a JSON null) otherwise. Enforced one-directionally below.
+    downside: Optional[DownsideV2] = Field(
+        None,
+        description="Downside / tail-risk view {cvar_10, p05, expected_regret}. "
+        "Present exactly when the option's MC samples are available "
+        "(outcome.percentiles_source == 'samples'); omitted (not null) otherwise.",
+    )
     win_probability: Optional[float] = Field(
         None,
         ge=0,
@@ -254,6 +307,32 @@ class OptionResultV2(BaseModel):
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _downside_requires_samples(self) -> "OptionResultV2":
+        """B2: guard the FABRICATION direction — a downside (tail-risk) object may
+        ride only alongside real MC samples.
+
+        ``downside`` present ⟹ ``outcome.percentiles_source == 'samples'``.
+        Emitting cvar_10 / p05 / expected_regret when the option has no valid
+        samples would invent a distribution from nothing; this fails loud at
+        construction so a mutation that always emits the object cannot pass
+        silently (trap-#13).
+
+        The REVERSE (samples ⟹ downside) is deliberately NOT enforced here: it is
+        a completeness property of the emission locus (src/api/robustness.py),
+        asserted end-to-end in the API tests. Many legitimate constructors build
+        OptionResultV2 with percentiles_source defaulting to 'samples' and no
+        enrichment, and forcing the biconditional would break every one of them.
+        """
+        if self.downside is not None and self.outcome.percentiles_source != "samples":
+            raise ValueError(
+                "B2 invariant: downside is present but outcome.percentiles_source="
+                f"{self.outcome.percentiles_source!r} — tail-risk metrics require "
+                "valid MC samples (percentiles_source == 'samples'). The downside "
+                "object must never ride without the samples it summarises."
+            )
+        return self
 
 
 # =============================================================================

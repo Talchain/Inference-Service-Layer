@@ -173,12 +173,24 @@ def normalize_v2_payload(payload: dict) -> dict:
     return data
 
 
-def _strip_stability(payload):
-    """Recursively remove every 'stability' key (the additive surface)."""
+# Additive-only wire surfaces layered on top of the pre-bands base wire. The
+# base golden (golden_base_v2.json) predates ALL of them, so each must be
+# stripped before the modulo comparison. 'stability' = flip-stability bands;
+# 'downside' = B2 tail-risk view (cvar_10/p05/expected_regret).
+_ADDITIVE_WIRE_SURFACES = frozenset({"stability", "downside"})
+
+
+def _strip_additive_surfaces(payload):
+    """Recursively remove every additive-only surface key so what remains is the
+    pre-feature base wire (compared byte-for-byte against the frozen golden)."""
     if isinstance(payload, dict):
-        return {k: _strip_stability(v) for k, v in payload.items() if k != "stability"}
+        return {
+            k: _strip_additive_surfaces(v)
+            for k, v in payload.items()
+            if k not in _ADDITIVE_WIRE_SURFACES
+        }
     if isinstance(payload, list):
-        return [_strip_stability(item) for item in payload]
+        return [_strip_additive_surfaces(item) for item in payload]
     return payload
 
 
@@ -260,12 +272,12 @@ class TestDefaultOn:
 
 class TestAdditiveVsBase:
     def test_v2_wire_modulo_stability_matches_base_golden(self, no_env, client):
-        """Pin: the ONLY wire delta vs origin/staging base is the additive
-        ``stability`` key.
+        """Pin: the ONLY wire deltas vs origin/staging base are the additive
+        surfaces ``stability`` (flip bands) and ``downside`` (B2 tail-risk).
 
         The golden was captured from UNMODIFIED pre-bands base code
         (e029cae2d); this test failing after a src change means the base wire
-        drifted (not just the additive band surface).
+        drifted (beyond the known additive surfaces).
         """
         assert GOLDEN_PATH.exists(), (
             f"golden fixture missing at {GOLDEN_PATH} — regenerate via "
@@ -274,15 +286,15 @@ class TestAdditiveVsBase:
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
         golden = json.loads(GOLDEN_PATH.read_text())
-        assert _strip_stability(normalize_v2_payload(resp.json())) == golden
+        assert _strip_additive_surfaces(normalize_v2_payload(resp.json())) == golden
 
     def test_stability_present_before_stripping(self, no_env, client):
         """Positive control for the golden pin: the strip in the test above
-        must actually be removing something, or the modulo-stability
-        comparison silently degenerates into 'wire unchanged'."""
+        must actually be removing something, or the modulo comparison silently
+        degenerates into 'wire unchanged'."""
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
-        assert _strip_stability(resp.json()) != resp.json()
+        assert _strip_additive_surfaces(resp.json()) != resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +414,7 @@ class TestBudgetDegradation:
         control = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         monkeypatch.setattr(RobustnessAnalyzerV2, "FLIP_STABILITY_BUDGET_MS", -1)
         degraded = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
-        assert _strip_stability(control.edge_e_values) == degraded.edge_e_values
+        assert _strip_additive_surfaces(control.edge_e_values) == degraded.edge_e_values
 
 
 # ---------------------------------------------------------------------------
@@ -514,7 +526,7 @@ def _capture_golden() -> None:  # pragma: no cover
         raise SystemExit(f"capture failed: {resp.status_code} {resp.text}")
     GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     GOLDEN_PATH.write_text(
-        json.dumps(_strip_stability(normalize_v2_payload(resp.json())), indent=2, sort_keys=True)
+        json.dumps(_strip_additive_surfaces(normalize_v2_payload(resp.json())), indent=2, sort_keys=True)
         + "\n"
     )
     print(f"golden written: {GOLDEN_PATH}")
