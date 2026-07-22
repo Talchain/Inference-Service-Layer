@@ -31,6 +31,7 @@ from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
     BucketResultV2,
     ConditionalWinnerV2,
+    ConfidenceProvenance,
     ConstraintAnalysisV2,
     ConstraintResultV2,
     DiagnosticsV2,
@@ -66,8 +67,10 @@ from src.services.robustness_analyzer_v2 import (
     get_max_cost_units,
 )
 from src.config.stability_thresholds import (
+    GRAPH_STRUCTURAL_METHOD_VERSION,
     compute_factor_confidence,
     compute_graph_structural_confidence,
+    get_confidence_method_version,
 )
 from src.utils.business_metrics import track_robustness_analysis
 from src.utils.response_builder import (
@@ -1025,6 +1028,12 @@ async def _analyze_robustness_v2_enhanced(
             # in inference.
             nodes_by_id = {n.id: n for n in request.graph.nodes}
 
+            # S2/F-1: bootstrap-blend method_version resolved ONCE per request. It
+            # gains a "+env-override" suffix when the STABILITY_CV_* env levers have
+            # moved the CV boundaries away from their defaults (a non-standard
+            # method); env cannot change mid-request, so one resolution is exact.
+            bootstrap_method_version = get_confidence_method_version()
+
             factor_sensitivity = []
             for fs in v1_response.factor_sensitivity:
                 # Confidence: prefer bootstrap-derived, fall back to graph-structural
@@ -1036,12 +1045,33 @@ async def _analyze_robustness_v2_enhanced(
                 if bootstrap_confidence is not None:
                     confidence_val = bootstrap_confidence
                     confidence_src = "bootstrap_sampling"
+                    confidence_method_version = bootstrap_method_version
                 else:
                     # Defensive fallback: in normal flow, bootstrap always runs
                     # when factor sensitivity exists, so this branch is unreachable.
                     # Kept as a safety net for future code paths that may bypass bootstrap.
                     confidence_val = compute_graph_structural_confidence(fs.influence_score)
                     confidence_src = "graph_structural"
+                    # F-2: the fallback is a DIFFERENT method — stamp its own version,
+                    # never the bootstrap blend's, so the wire never names a method
+                    # that did not produce the number.
+                    confidence_method_version = GRAPH_STRUCTURAL_METHOD_VERSION
+
+                # S2: honest disclosure marker for the confidence figure.
+                # Populated EXACTLY when confidence is populated; left None (=>
+                # ABSENT under exclude_none on the wire, never a JSON null) when
+                # confidence is absent. The mapping is provisional (Neil gate 1),
+                # so calibrated is always False until a validated calibration
+                # exists, and method_version is bumped on any mapping change
+                # (guarded by tests/unit/test_confidence_provenance.py).
+                confidence_provenance = (
+                    ConfidenceProvenance(
+                        method_version=confidence_method_version,
+                        calibrated=False,
+                    )
+                    if confidence_val is not None
+                    else None
+                )
 
                 # Track S: echo where the factor's value came from. Pure passthrough
                 # of request-supplied provenance; ISL does not consume it in inference.
@@ -1073,6 +1103,7 @@ async def _analyze_robustness_v2_enhanced(
                         direction="positive" if fs.elasticity > 0 else "negative",
                         confidence=confidence_val,
                         confidence_source=confidence_src,
+                        confidence_provenance=confidence_provenance,
                         importance_rank=fs.importance_rank,
                         observed_value=fs.observed_value,
                         interpretation=fs.interpretation,
