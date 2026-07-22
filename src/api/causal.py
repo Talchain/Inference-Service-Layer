@@ -275,6 +275,22 @@ async def analyze_counterfactual(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        # D-12(cf): the counterfactual engine fails loud (ValueError) on client-input
+        # defects the request model cannot catch — a structural equation referencing
+        # an undefined variable, a malformed/unparseable equation, or circular
+        # equation dependencies. These are client errors, not internal failures. Fail
+        # closed with 422 (matching the phase4 sequential D-12 mapping and the
+        # robustness v2 handler) so a malformed structural model surfaces as a clean
+        # validation error, never a 500. All client-reachable engine ValueErrors are
+        # input defects; the one internal-only ValueError source (unknown distribution
+        # type) is unreachable — DistributionType is a Pydantic-validated enum, so an
+        # unknown type is rejected with 422 before the engine runs.
+        logger.warning(
+            "counterfactual_invalid_input",
+            extra={"request_id": request_id, "error": str(e)},
+        )
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except Exception as e:
         logger.error("counterfactual_error", exc_info=True)
         raise HTTPException(
