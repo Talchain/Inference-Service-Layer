@@ -9,6 +9,8 @@ the degenerate-chance collapse to 0, None for a decision-less stage, an independ
 E[max]−max E cross-check, the risk-adjustment posture, and the removal of the old key.
 """
 
+import time
+
 import pytest
 
 from src.models.requests import (
@@ -156,12 +158,89 @@ def test_stage_evpi_zero_when_decision_faces_no_chance(engine):
 
 
 def test_stage_evpi_none_for_stage_without_decision_node(engine):
-    """A stage with no decision node has no decision to inform -> stage_evpi absent
-    (None, omitted on the wire), NOT a fabricated 0."""
+    """A stage with no decision node has no decision to inform -> stage_evpi None,
+    NOT a fabricated 0, with status 'no_decision_node' disclosing the cause (F-3)."""
     resp = engine.analyze(two_stage())
     sm = _stage_map(resp)
-    assert sm[1].stage_evpi is None
-    assert sm[2].stage_evpi is None
+    assert sm[1].stage_evpi is None and sm[1].stage_evpi_status == "no_decision_node"
+    assert sm[2].stage_evpi is None and sm[2].stage_evpi_status == "no_decision_node"
+
+
+def test_stage_evpi_status_none_when_computed(engine):
+    """A computed stage_evpi (incl. a real 0.0) carries status None — the status is
+    ONLY for null causes, never overwriting a genuine value."""
+    computed = _stage_map(engine.analyze(two_stage()))[0]        # 11220.0
+    assert computed.stage_evpi == pytest.approx(11220.0) and computed.stage_evpi_status is None
+    zero = _stage_map(engine.analyze(two_stage(failure=50000)))[0]  # real EVPI 0.0
+    assert zero.stage_evpi == 0.0 and zero.stage_evpi_status is None
+
+
+# ---------------------------------------------------------------------------
+# F-3 — joint-enumeration safety cap (honest skip, not a DoS, not a 422)
+# ---------------------------------------------------------------------------
+
+
+def _fanout(K, B=2, df=1.0):
+    """A decision D with K actions, each -> its OWN B-branch chance node (shared
+    terminals). The decide-after leg would enumerate B^K joint cells. Nodes = 1 + K
+    + B; edges = K + B·K. resolution_nodes kept empty (its own <=20 cap is unrelated
+    to the DoS, which rides the decision's action edges)."""
+    nodes = [SequentialGraphNode(id="D", type="decision", label="D")]
+    edges = []
+    for j in range(B):
+        nodes.append(SequentialGraphNode(id=f"t{j}", type="terminal", label=f"t{j}", payoff=100 * (j + 1)))
+    sa = {"D": 0}
+    for i in range(K):
+        cid = f"c{i}"
+        nodes.append(SequentialGraphNode(id=cid, type="chance", label=cid))
+        sa[cid] = 1
+        edges.append(SequentialGraphEdge(from_node="D", to_node=cid, action=f"a{i}"))
+        for j in range(B):
+            edges.append(SequentialGraphEdge(from_node=cid, to_node=f"t{j}", outcome=f"o{j}", probability=1.0 / B))
+    for j in range(B):
+        sa[f"t{j}"] = 2
+    g = SequentialGraph(nodes=nodes, edges=edges, stage_assignments=sa)
+    stages = [
+        DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+        DecisionStage(stage_index=1, stage_label="s1", decision_nodes=[]),
+        DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[]),
+    ]
+    return SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=df, risk_tolerance="neutral")
+
+
+def test_stage_evpi_computes_at_cap_boundary(engine):
+    """K=12 => 2^12 = 4096 = the cap => COMPUTED (status None). This is the boundary:
+    <= cap computes."""
+    sm = _stage_map(engine.analyze(_fanout(12)))
+    assert sm[0].stage_evpi is not None
+    assert sm[0].stage_evpi_status is None
+
+
+def test_stage_evpi_skips_just_over_cap(engine):
+    """K=13 => 2^13 = 8192 > 4096 => honest SKIP: stage_evpi null + status. The
+    exact analysis still succeeds (optimal_policy / value_of_flexibility present)."""
+    resp = engine.analyze(_fanout(13))
+    sm = {s.stage_index: s for s in resp.stage_analyses}
+    assert sm[0].stage_evpi is None
+    assert sm[0].stage_evpi_status == "skipped_joint_space_too_large"
+    assert resp.optimal_policy is not None
+    assert resp.value_of_flexibility is not None  # exact analysis untouched
+
+
+def test_stage_evpi_legal_max_fanout_returns_fast_not_hang(engine):
+    """F-3 core: a LEGAL request (100 nodes / 291 edges, K=97 => 2^97 joint cells)
+    must return quickly with an honest skip — WITHOUT the guard this never
+    terminates and freezes the event loop. Time-bound as a safety net; the
+    load-bearing assertion is the status (a mechanism pin, no wall-clock race)."""
+    req = _fanout(97)
+    assert len(req.graph.nodes) == 100 and len(req.graph.edges) == 291  # legal
+    t0 = time.monotonic()
+    resp = engine.analyze(req)
+    elapsed = time.monotonic() - t0
+    sm = {s.stage_index: s for s in resp.stage_analyses}
+    assert sm[0].stage_evpi is None
+    assert sm[0].stage_evpi_status == "skipped_joint_space_too_large"
+    assert elapsed < 2.0, f"stage_evpi guard did not bound the enumeration: {elapsed:.2f}s"
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +270,8 @@ def test_stage_evpi_matches_independent_e_max_minus_max_e(engine):
     decide_now = nv["invest"]
     expected = max(0.0, e_after - decide_now)
 
-    got = engine._compute_stage_evpi("invest", graph_data, node_values, df)
+    got, status = engine._compute_stage_evpi("invest", graph_data, node_values, df)
+    assert status is None  # computed, under the joint-cell cap
     assert got == pytest.approx(expected, rel=1e-12)
     assert got >= 0.0
 

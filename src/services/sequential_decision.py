@@ -96,6 +96,18 @@ RISK_AVERSION_COEFFICIENT = 0.5
 # tight enough to reject a genuinely malformed distribution.
 _PROB_SUM_TOLERANCE = 1e-6
 
+# F-3 (A3 VOI adversarial): safety cap on the number of joint cells the per-stage
+# stage_evpi decide-after leg enumerates (∏ branch-counts over the decision's chance
+# children = B^K for K chance-child actions with B branches each). A legal request
+# (SequentialGraph caps: ≤100 nodes / ≤300 edges) can build a decision with ~97
+# chance-child actions ⇒ 2^97 cells, an un-preemptable CPU DoS on the async route.
+# 4096 = 2^12 caps the enumeration at trivial cost (each cell is O(K); 4096 cells is
+# well under a millisecond) while never rejecting a legitimate decision — real
+# decisions face a handful of independent chance nodes (6 binary = 64 cells, even
+# 12 binary = 4096); the DoS shapes need K ≥ 13. Over the cap, stage_evpi honestly
+# SKIPS (null + status) rather than 422-ing the whole (valid, O(nodes)) analysis.
+_STAGE_EVPI_JOINT_CELL_CAP = 4096
+
 
 class SequentialDecisionEngine:
     """
@@ -792,8 +804,12 @@ class SequentialDecisionEngine:
             # replacing the deleted `optimal_waiting_value` (discount × sqrt(Σvar)
             # heuristic). Computed for this stage's decision node (the first valid
             # one, matching _build_policy) as E_C[max_a Q] − max_a E_C[Q] on the
-            # exact backward-induction tree. None when the stage has no decision
-            # node (no decision => information has nothing to inform).
+            # exact backward-induction tree. `stage_evpi_status` (F-3) discloses WHY
+            # a null value is null: absent when computed (incl. a real EVPI of 0);
+            # 'no_decision_node' when the stage has no decision to inform;
+            # 'skipped_joint_space_too_large' when the decide-after joint enumeration
+            # would exceed the safety cap (an honest skip of an auxiliary metric —
+            # the exact analysis itself is unaffected).
             primary_decision = next(
                 (
                     nid
@@ -802,13 +818,12 @@ class SequentialDecisionEngine:
                 ),
                 None,
             )
-            stage_evpi = (
-                self._compute_stage_evpi(
+            if primary_decision is not None:
+                stage_evpi, stage_evpi_status = self._compute_stage_evpi(
                     primary_decision, graph_data, node_values, discount_factor
                 )
-                if primary_decision is not None
-                else None
-            )
+            else:
+                stage_evpi, stage_evpi_status = None, "no_decision_node"
 
             analyses.append(
                 StageAnalysis(
@@ -817,6 +832,7 @@ class SequentialDecisionEngine:
                     options_at_stage=options,
                     resolved_uncertainty=resolved_uncertainty,
                     stage_evpi=stage_evpi,
+                    stage_evpi_status=stage_evpi_status,
                 )
             )
 
@@ -865,12 +881,20 @@ class SequentialDecisionEngine:
         graph_data: Dict[str, Any],
         node_values: Dict[str, float],
         discount_factor: float,
-    ) -> float:
+    ) -> Tuple[Optional[float], Optional[str]]:
         """Honest per-stage EVPI (S3 — A3 VOI, D-23.8): the expected value of
         perfectly resolving the chance node(s) this decision faces BEFORE choosing,
         minus deciding without that information.
 
             stage_evpi = E_C[max_a Q(a | C)] − max_a E_C[Q(a)]   (>= 0, outcome units)
+
+        Returns ``(stage_evpi, status)``:
+        * ``(value, None)`` — computed (value may be a real 0.0);
+        * ``(None, "skipped_joint_space_too_large")`` — the decide-after joint
+          enumeration ∏(branch counts) exceeds ``_STAGE_EVPI_JOINT_CELL_CAP``, an
+          F-3 honest skip of this auxiliary metric (the exact O(nodes) analysis is
+          untouched). The join size is measured multiplicatively with an
+          overflow-safe early exit — the ∏ is NEVER materialised.
 
         This REPLACES the deleted ``optimal_waiting_value`` (a discount × sqrt(Σvar)
         dispersion heuristic dressed as an option value) with a real value of
@@ -905,7 +929,7 @@ class SequentialDecisionEngine:
 
         action_edges = edges.get(decision_node_id, [])
         if not action_edges:
-            return 0.0
+            return 0.0, None
 
         # The immediate chance node(s) directly under the decision's actions = the
         # uncertainty this decision faces. If none, perfect information is worth 0.
@@ -913,7 +937,7 @@ class SequentialDecisionEngine:
             nodes.get(e["to"], {}).get("type") == "chance" for e in action_edges
         )
         if not has_chance:
-            return 0.0
+            return 0.0, None
 
         # decide-now leg is exactly what backward induction stored for the decision.
         decide_now = node_values[decision_node_id]
@@ -968,6 +992,19 @@ class SequentialDecisionEngine:
                 branches.append((p / total_p, branch_value))
             resolved.append((cid, branches))
 
+        # F-3 SAFETY GUARD: the decide-after leg enumerates ∏(branch counts) joint
+        # cells = B^K for K chance-child actions. A legal request can drive K ~97
+        # (2^97 cells) — an un-preemptable CPU freeze of the async event loop.
+        # Measure the joint size MULTIPLICATIVELY with an overflow-safe early exit
+        # (never materialise the ∏, so K=97 costs ~13 multiplications then bails). If
+        # it exceeds the cap, honestly SKIP this auxiliary metric (null + status)
+        # rather than 422-ing the valid, O(nodes) analysis (over-rejection).
+        joint_cells = 1
+        for _, branches in resolved:
+            joint_cells *= len(branches)
+            if joint_cells > _STAGE_EVPI_JOINT_CELL_CAP:
+                return None, "skipped_joint_space_too_large"
+
         # Enumerate the JOINT outcome space of the resolved (independent) chance
         # nodes. Under each joint outcome an action keeps its unconditional Q unless
         # its child IS one of the resolved chance nodes, in which case it takes that
@@ -992,7 +1029,7 @@ class SequentialDecisionEngine:
                     best = q
             e_after += joint_p * best
 
-        return max(0.0, e_after - decide_now)
+        return max(0.0, e_after - decide_now), None
 
     def _compute_value_of_flexibility(
         self,

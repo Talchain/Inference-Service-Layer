@@ -3,7 +3,7 @@ Response Pydantic models for API endpoints.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -3104,6 +3104,22 @@ class StageAnalysis(BaseModel):
         "(perfect information removes it); deeper continuations keep their risk "
         "adjustment.",
     )
+    stage_evpi_status: Optional[
+        Literal["no_decision_node", "skipped_joint_space_too_large"]
+    ] = Field(
+        default=None,
+        description="Disclosure for WHY stage_evpi is null (F-3). null/absent when "
+        "stage_evpi is COMPUTED — including a genuine EVPI of 0.0 (which is a real "
+        "value, not a skip). 'no_decision_node': the stage has no decision node, so "
+        "there is no choice for information to inform. "
+        "'skipped_joint_space_too_large': the decide-after leg's joint enumeration "
+        "(∏ of the decision's chance-child branch counts) exceeds the safety cap "
+        "(4096 cells), so this AUXILIARY metric is honestly skipped rather than "
+        "pinning the event loop — the exact analysis (optimal_policy, "
+        "value_of_flexibility, resolved_uncertainty, options) is unaffected. "
+        "Distinguishes the two null causes so a consumer never reads a skip as a "
+        "real 0.",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -3128,6 +3144,7 @@ class StageAnalysis(BaseModel):
                 ],
                 "resolved_uncertainty": 15000.0,
                 "stage_evpi": 11220.0,
+                "stage_evpi_status": None,
             }
         }
     }
@@ -3200,6 +3217,7 @@ class SequentialAnalysisResponse(BaseModel):
                         ],
                         "resolved_uncertainty": 15000.0,
                         "stage_evpi": 11220.0,
+                        "stage_evpi_status": None,
                     }
                 ],
                 "value_of_flexibility": 25000.0,

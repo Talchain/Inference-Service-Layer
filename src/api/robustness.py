@@ -992,12 +992,27 @@ async def _analyze_robustness_v2_enhanced(
         # JOINT pre-noise CRN population (exact identity: min of E[max]−E[o] over o
         # is achieved at argmax_o E[o]). This is a one-line READ of the regret
         # already emitted per option in downside.expected_regret — zero new
-        # sampling, no recompute. Every regret-bearing option has finite samples and
-        # therefore a downside block (auto-noise preserves finiteness), including the
-        # argmax-mean == argmin-regret option, so the minimum over the wire downside
-        # regrets equals the true EVPI and can never overstate. Present exactly when
-        # the regret population is present (>=1 downside); the ISLResponseV2 validator
-        # enforces this emission-iff and the value both ways.
+        # sampling, no recompute. We take the min over the options that carry a
+        # downside block (percentiles_source == 'samples').
+        #
+        # EXACTNESS / no-overstate — what ACTUALLY protects it (adversarial F-1):
+        # min over the DOWNSIDE-bearing subset equals the true min_o regret only if
+        # the argmax-mean (== argmin-regret) option is in that subset. It is NOT true
+        # that "auto-noise preserves finiteness": _apply_auto_scaled_noise computes
+        # outcome_std over an option's pre-noise samples, and a single non-finite
+        # sample makes std nan/inf, so rng.normal(0, nan/inf) then DESTROYS a
+        # partially-finite option's finiteness → downside omitted → excluded here →
+        # the remaining min could OVERSTATE. The reason that overstatement never
+        # reaches a 200 response is INCIDENTAL, not this code's invariant: any
+        # non-finite sample also poisons outcome.mean (np.mean over the same array),
+        # and the JSONResponse render rejects non-finite floats (allow_nan=False) →
+        # the whole response 500s before the number ships. So on every 200 the
+        # population is all-finite and this min is the exact EVPI. That serializer
+        # guard is pre-existing and accidental; hardening _apply_auto_scaled_noise to
+        # skip/ignore non-finite-std options is a separate, tracked row — NOT this
+        # slice's regression. Present exactly when the regret population is present
+        # (>=1 downside); the ISLResponseV2 validator enforces the emission-iff and
+        # the value both ways.
         decision_evpi_regrets = [
             o.downside.expected_regret
             for o in option_results
