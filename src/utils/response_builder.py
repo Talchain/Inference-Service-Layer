@@ -22,6 +22,7 @@ from src.constants import MIN_VALID_RATIO
 from src.models.critique import INTERNAL_ERROR
 from src.models.response_v2 import (
     ConditionalWinnerV2,
+    CorrelationModelV2,
     CritiqueV2,
     DiagnosticsV2,
     FactorSensitivityV2,
@@ -113,6 +114,8 @@ class ResponseBuilder:
         self.path_decomposition: Optional[PathDecompositionV2] = None
         # T1-5: reference-option disclosure for sensitivity analyses (additive)
         self.sensitivity_reference_option_id: Optional[str] = None
+        # B3-S1: correlated-factors disclosure (present iff correlation active)
+        self.correlation_model: Optional[CorrelationModelV2] = None
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -162,6 +165,10 @@ class ResponseBuilder:
     def set_sensitivity_reference_option_id(self, option_id: Optional[str]) -> None:
         """Set the reference-option disclosure for sensitivity analyses (T1-5)."""
         self.sensitivity_reference_option_id = option_id
+
+    def set_correlation_model(self, correlation_model: Optional[CorrelationModelV2]) -> None:
+        """Set the correlated-factors disclosure block (B3-S1)."""
+        self.correlation_model = correlation_model
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -252,6 +259,7 @@ class ResponseBuilder:
             factor_evpi=self.factor_evpi,
             path_decomposition=self.path_decomposition,  # T1-6
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
+            correlation_model=self.correlation_model,  # B3-S1
             auto_noise_applied=self.auto_noise_applied,
             request_id=self.request_id,
             processing_time_ms=processing_time,

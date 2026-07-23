@@ -51,7 +51,11 @@ from src.models.robustness_v2 import (
     SensitivityResult,
     StabilityThresholdsResponse,
 )
-from src.models.response_v2 import ZeroSensitivityReason
+from src.models.response_v2 import (
+    CorrelationModelV2,
+    CorrelationProjectionV2,
+    ZeroSensitivityReason,
+)
 from src.constants import (
     ELASTICITY_CLAMP_MAX,
     FACTOR_SENSITIVITY_BASELINE_EPSILON,
@@ -73,6 +77,7 @@ from src.models.critique import (
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import expected_regret_per_option
+from src.utils.correlation import CORRELATION_METHOD, CorrelationPlan, build_correlation_plan
 from src.validation.request_validator import detect_graph_cycle
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
@@ -96,6 +101,22 @@ MAX_DECOMPOSITION_PATHS = 20000
 # Edge strength bounds from schema v2.6
 EDGE_STRENGTH_MIN = -1.0
 EDGE_STRENGTH_MAX = 1.0
+
+# B3-S1: sqrt(2) for the Gaussian-copula uniform coupling Phi(y) = 0.5*erfc(-y/√2).
+_SQRT2 = math.sqrt(2.0)
+
+# B3-S1 MANDATORY tail-independence disclosure (D-23.4, research-sharpened). The
+# Gaussian copula has zero tail dependence; co-shipping it with the downside/CVaR
+# block makes this caveat load-bearing (the known 2008 failure mode: joint
+# extremes are systematically understated under a Gaussian dependence model).
+_CORRELATION_TAIL_NOTE = (
+    "The Gaussian copula has zero tail dependence: it does not model factors "
+    "moving to their extremes together, so joint tail (worst-case) co-movements "
+    "may be understated. Downside metrics (CVaR, p05, expected_regret) can be "
+    "optimistic when correlated factors are strongly dependent."
+)
+# Reason stamped on every suppressed independence-assuming per-factor attribution.
+_CORRELATION_SUPPRESSION_REASON = "not_separable_under_correlation"
 
 # Default samples for marginal switch probability calculation
 MARGINAL_K_SAMPLES = 100
@@ -554,6 +575,7 @@ class FactorSampler:
         nodes: List[NodeV2],
         uncertainties: Optional[List[ParameterUncertainty]],
         rng: SeededRNG,
+        correlation_plan: Optional[CorrelationPlan] = None,
     ):
         """
         Initialize factor sampler.
@@ -562,6 +584,11 @@ class FactorSampler:
             nodes: List of graph nodes (may include observed_state)
             uncertainties: List of factor uncertainty specifications
             rng: Seeded random number generator
+            correlation_plan: Optional Gaussian-copula plan (B3-S1). When None,
+                every factor is drawn independently from its own marginal — the
+                exact pre-B3 path, byte-identical in RNG consumption. When
+                supplied, the factors in ``correlation_plan.factor_order`` are
+                drawn JOINTLY via the copula and the rest stay independent.
         """
         self.rng = rng
         self._node_map: Dict[str, NodeV2] = {n.id: n for n in nodes}
@@ -570,6 +597,12 @@ class FactorSampler:
         }
         self._sample_count = 0
         self._value_sums: Dict[str, float] = defaultdict(float)
+        # B3-S1 copula plan. `_correlated_ids` is the membership set used to route
+        # factors to the joint vs independent path; empty when inert.
+        self._correlation_plan = correlation_plan
+        self._correlated_ids: set = (
+            set(correlation_plan.factor_order) if correlation_plan else set()
+        )
 
     def sample_factor_values(self) -> Dict[str, float]:
         """
@@ -582,7 +615,20 @@ class FactorSampler:
         self._sample_count += 1
         factor_values: Dict[str, float] = {}
 
+        # B3-S1: when a correlation plan is present, draw its factor set JOINTLY
+        # via the Gaussian copula FIRST, then fall through to the independent loop
+        # for every remaining factor. When no plan is present, `_correlated_ids`
+        # is empty and this whole block is skipped, so the loop below consumes the
+        # RNG stream exactly as the pre-B3 path did (byte-identical when absent).
+        if self._correlation_plan is not None:
+            self._draw_correlated(factor_values)
+
         for node_id, uncertainty in self._uncertainty_map.items():
+            if node_id in self._correlated_ids:
+                # Already drawn jointly above — never re-draw (would double-consume
+                # the RNG stream and overwrite the joint value).
+                continue
+
             node = self._node_map.get(node_id)
             if not node:
                 # Node doesn't exist - skip (should have been caught by validation)
@@ -599,6 +645,69 @@ class FactorSampler:
             self._value_sums[node_id] += sampled_value
 
         return factor_values
+
+    def _draw_correlated(self, factor_values: Dict[str, float]) -> None:
+        """Draw the correlated factor set jointly via the Gaussian copula (B3-S1).
+
+        Draws N iid standard normals — one scalar ``rng.normal(0, 1)`` per
+        correlated factor, in the plan's canonical order (the same order and draw
+        mechanism the independent path uses for a normal factor, which is what
+        makes an identity/rho=0 matrix reproduce the independent normal draws
+        bit-for-bit). Correlates them with the Cholesky factor (``y = L @ z``),
+        then maps each correlated standard-normal through that factor's marginal.
+
+        CRN is preserved: this fills ONE ``factor_values`` dict per MC iteration,
+        shared across every option by the caller — so all options see the same
+        joint draw. Only the factor stream (seed+1) is consumed; the auto-noise
+        stream (seed+2) is untouched.
+        """
+        plan = self._correlation_plan
+        assert plan is not None
+        order = plan.factor_order
+        z = np.array([self.rng.normal(0.0, 1.0) for _ in order], dtype=float)
+        y = plan.cholesky @ z  # correlated standard normals
+        for i, node_id in enumerate(order):
+            uncertainty = self._uncertainty_map.get(node_id)
+            node = self._node_map.get(node_id)
+            if uncertainty is None or node is None:
+                # Guarded upstream by validation; skip defensively.
+                continue
+            mean = 0.0
+            if node.observed_state and node.observed_state.value is not None:
+                mean = node.observed_state.value
+            value = self._copula_transform(uncertainty, mean, float(y[i]))
+            factor_values[node_id] = value
+            self._value_sums[node_id] += value
+
+    def _copula_transform(self, uncertainty: ParameterUncertainty, mean: float, y: float) -> float:
+        """Map a correlated standard-normal draw ``y`` onto a factor's marginal.
+
+        - normal:  x = mean + std * y  (exact — no CDF round-trip, so an identity
+          correlation reproduces the independent normal draw bit-for-bit).
+        - uniform: x = range_min + (range_max - range_min) * Phi(y), where Phi is
+          the standard-normal CDF — the Gaussian-copula uniform coupling.
+
+        point_mass factors are rejected at request validation (zero variance), so
+        they never reach here; an unexpected distribution fails closed.
+        """
+        dist = uncertainty.distribution
+        if dist == "normal":
+            std = uncertainty.std or 0.0
+            return mean + std * y
+        if dist == "uniform":
+            range_min = uncertainty.range_min
+            range_max = uncertainty.range_max
+            if range_min is None or range_max is None:
+                raise ValueError(
+                    f"Uniform distribution for correlated factor "
+                    f"'{uncertainty.node_id}' requires range_min and range_max"
+                )
+            u = 0.5 * math.erfc(-y / _SQRT2)  # Phi(y): standard-normal CDF
+            return range_min + (range_max - range_min) * u
+        raise ValueError(
+            f"Correlation not supported for distribution type '{dist}' "
+            f"(factor '{uncertainty.node_id}')"
+        )
 
     def _sample_from_distribution(
         self, uncertainty: ParameterUncertainty, mean: float, node_id: str
@@ -1145,8 +1254,17 @@ class RobustnessAnalyzerV2:
         rng_edge = SeededRNG(seed)
         rng_factor = SeededRNG(seed + 1)
         sampler = DualUncertaintySampler(request.graph.edges, rng_edge)
+        # B3-S1: build the Gaussian-copula plan when correlations are supplied.
+        # Returns None (inert) otherwise — the sampler then draws every factor
+        # independently, byte-identically to the pre-B3 path. `correlation_active`
+        # gates both the disclosure block and the attribution suppression below.
+        correlation_plan = self._build_correlation_plan(request)
+        correlation_active = correlation_plan is not None
         factor_sampler = FactorSampler(
-            request.graph.nodes, request.parameter_uncertainties, rng_factor
+            request.graph.nodes,
+            request.parameter_uncertainties,
+            rng_factor,
+            correlation_plan=correlation_plan,
         )
         # Dedicated RNG stream (seed+3) for per-node epsilon noise.
         # Only instantiated when at least one node has epsilon_std > 0,
@@ -1470,16 +1588,34 @@ class RobustnessAnalyzerV2:
                 request, option_outcomes, sampler, rng_edge, evaluator
             )
 
-        # Compute factor sensitivity if factor uncertainties are specified
-        factor_sensitivity = []
-        if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
+        # Compute factor sensitivity if factor uncertainties are specified.
+        # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor OAT
+        # elasticity perturbs one factor holding the others at their mean, an
+        # off-manifold move that double-counts shared variance and mis-ranks
+        # correlated factors. Omitted (absent, not fabricated) with the
+        # correlation_model disclosure marker naming the reason.
+        factor_sensitivity: List[FactorSensitivityResult] = []
+        if (
+            factor_sampler.has_uncertainties()
+            and "sensitivity" in request.analysis_types
+            and not correlation_active
+        ):
             factor_sensitivity = self._compute_factor_sensitivity(
                 request, option_outcomes, rng_factor, evaluator
             )
 
-        # Compute conditional winners (factor-partitioned win probabilities)
+        # Compute conditional winners (factor-partitioned win probabilities).
+        # B3-S1 (D-23.4): SUPPRESSED under active correlation — a single-factor
+        # median split attributes a winner flip to one factor, but under
+        # correlation that factor's low/high bucket also drags its correlated
+        # partners, so the per-factor attribution is confounded. Omitted with the
+        # disclosure marker (joint win_probability itself stays valid).
         conditional_winners = None
-        if factor_sampler.has_uncertainties() and len(request.options) > 1:
+        if (
+            factor_sampler.has_uncertainties()
+            and len(request.options) > 1
+            and not correlation_active
+        ):
             conditional_winners = self._compute_conditional_winners(
                 factor_values_per_sample,
                 winner_per_sample,
@@ -1623,8 +1759,14 @@ class RobustnessAnalyzerV2:
         # Compute EVPI per factor if requested. OPTIONAL phase — gated at entry AND
         # (Codex F7) governed by an internal wall-clock deadline once started, so it
         # degrades-with-disclosure instead of running unbounded past the budget.
+        # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor EVPI
+        # removes one factor's uncertainty while its correlated partners stay
+        # uncertain, but learning that factor also resolves the correlated ones,
+        # so the individual EVPIs are neither additive nor separable. Omitted with
+        # the correlation_model disclosure marker (group-level VOI is a later
+        # slice, per D-23.4).
         factor_evpi = None
-        if request.include_voi and factor_sampler.has_uncertainties():
+        if request.include_voi and factor_sampler.has_uncertainties() and not correlation_active:
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.EVPI_MIN_BUDGET_MS:
                 elapsed_ms = _elapsed_ms()
@@ -1726,6 +1868,13 @@ class RobustnessAnalyzerV2:
 
         execution_time = int((time.time() - start_time) * 1000)
 
+        # B3-S1: correlation disclosure block (present iff correlation active).
+        # Carries the tail-independence caveat, any Higham PSD projection, and the
+        # manifest of suppressed independence-assuming per-factor attributions.
+        correlation_model = self._build_correlation_disclosure(
+            request, correlation_plan, factor_sampler.has_uncertainties()
+        )
+
         # Include stability thresholds when bootstrap stability was computed
         has_bootstrap = any(fs.attribution_stability is not None for fs in factor_sensitivity)
         stability_thresholds = (
@@ -1769,6 +1918,7 @@ class RobustnessAnalyzerV2:
             edge_e_values=edge_e_values,
             factor_evpi=factor_evpi,
             path_decomposition=path_decomposition,
+            correlation_model=correlation_model,
         )
 
         self.logger.info(
@@ -1784,6 +1934,85 @@ class RobustnessAnalyzerV2:
         )
 
         return response
+
+    @staticmethod
+    def _build_correlation_plan(
+        request: RobustnessRequestV2,
+    ) -> Optional[CorrelationPlan]:
+        """Build the Gaussian-copula plan from request.factor_correlations (B3-S1).
+
+        Returns None when no correlations are supplied — inert-when-absent. The
+        canonical factor order is first-appearance in ``parameter_uncertainties``,
+        the same order ``FactorSampler``'s independent loop draws in, so an
+        all-normal request whose correlated set spans the full uncertainty list
+        with rho=0 reproduces the independent draws bit-for-bit. Request
+        validation has already rejected every hard-invalid input, so the assembled
+        matrix is well-posed (PSD-checked + Higham-projected inside
+        ``build_correlation_plan``).
+        """
+        correlations = request.factor_correlations
+        if not correlations:
+            return None
+        correlated_ids: set = set()
+        for corr in correlations:
+            correlated_ids.add(corr.factor_a)
+            correlated_ids.add(corr.factor_b)
+        uncertainties = request.parameter_uncertainties or []
+        factor_order = [u.node_id for u in uncertainties if u.node_id in correlated_ids]
+        pairs = [(c.factor_a, c.factor_b, c.rho) for c in correlations]
+        return build_correlation_plan(factor_order, pairs)
+
+    @staticmethod
+    def _build_correlation_disclosure(
+        request: RobustnessRequestV2,
+        correlation_plan: Optional[CorrelationPlan],
+        has_uncertainties: bool,
+    ) -> Optional[CorrelationModelV2]:
+        """Assemble the ``correlation_model`` disclosure block (B3-S1, D-23.4).
+
+        Returns None when correlation is inactive. When active it carries the
+        method tag, the MANDATORY tail-independence caveat, any Higham PSD
+        projection, and the manifest of suppressed independence-assuming per-
+        factor attributions. Only attributions that WOULD have been computed
+        (their enabling preconditions hold) are listed as suppressed — a field
+        that was never going to be emitted is absent for a different reason and is
+        not claimed as correlation-suppressed.
+        """
+        if correlation_plan is None:
+            return None
+
+        projection = correlation_plan.projection
+        psd_projection = (
+            CorrelationProjectionV2(
+                applied=projection.applied,
+                method=projection.method,
+                frobenius_distance=projection.frobenius_distance,
+                max_abs_off_diagonal_adjustment=projection.max_abs_off_diagonal_adjustment,
+                iterations=projection.iterations,
+            )
+            if projection is not None
+            else None
+        )
+
+        suppressed: List[str] = []
+        if has_uncertainties and "sensitivity" in request.analysis_types:
+            suppressed.append("factor_sensitivity")
+        if has_uncertainties and len(request.options) > 1:
+            suppressed.append("conditional_winners")
+        if has_uncertainties and request.include_voi:
+            suppressed.append("factor_evpi")
+
+        return CorrelationModelV2(
+            method=CORRELATION_METHOD,
+            active=True,
+            correlated_factors=list(correlation_plan.factor_order),
+            n_pairs=len(request.factor_correlations or []),
+            tail_dependence="none",
+            tail_dependence_note=_CORRELATION_TAIL_NOTE,
+            psd_projection=psd_projection,
+            suppressed_attributions=suppressed,
+            suppression_reason=_CORRELATION_SUPPRESSION_REASON,
+        )
 
     def _run_monte_carlo(
         self,
