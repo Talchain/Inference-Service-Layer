@@ -755,7 +755,7 @@ class SequentialDecisionEngine:
                     # (resolve() values them all). A missing child is a breach -->
                     # fail loud, never fabricate continuation 0 (absent != zero).
                     continuation = node_values[child_id]
-                    total = immediate + discount_factor * continuation
+                    total = _discounted_edge_value(immediate, discount_factor, continuation)
 
                     options.append(
                         StageOption(
@@ -913,7 +913,7 @@ class SequentialDecisionEngine:
                 edge["to"], graph_data, discount_factor, visited=set()
             )
 
-            total = immediate + discount_factor * continuation
+            total = _discounted_edge_value(immediate, discount_factor, continuation)
 
             if total > best_committed_value:
                 best_committed_value = total
@@ -950,9 +950,9 @@ class SequentialDecisionEngine:
             continuation = self._calculate_average_continuation(
                 edge["to"], graph_data, discount_factor, visited.copy()
             )
-            values.append(immediate + discount_factor * continuation)
+            values.append(_discounted_edge_value(immediate, discount_factor, continuation))
 
-        return np.mean(values) if values else 0
+        return float(np.mean(values)) if values else 0
 
     def _assess_timing_sensitivity(
         self, stage_analyses: List[StageAnalysis], value_of_flexibility: float
