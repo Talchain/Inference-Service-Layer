@@ -4539,8 +4539,9 @@
             "description": "Key configuration values",
             "example": {
               "confidence_level": 0.95,
-              "learning_rate": 0.1,
-              "monte_carlo_samples": 10000
+              "deterministic_mode": true,
+              "redis_enabled": true,
+              "response_timeout": 30
             },
             "title": "Config Details",
             "type": "object"

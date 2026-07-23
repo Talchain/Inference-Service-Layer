@@ -35,10 +35,15 @@ class ResponseMetadata(BaseModel):
     config_details: Dict[str, Any] = Field(
         description="Key configuration values",
         json_schema_extra={
+            # Mirrors the real generate_config_details() shape. The former example
+            # advertised monte_carlo_samples/learning_rate — keys no live code path
+            # emits (monte_carlo_samples was removed in #98 as a fabricated
+            # disclosure; learning_rate was never in config_details).
             "example": {
-                "monte_carlo_samples": 10000,
                 "confidence_level": 0.95,
-                "learning_rate": 0.1,
+                "response_timeout": 30,
+                "redis_enabled": True,
+                "deterministic_mode": True,
             }
         },
     )
