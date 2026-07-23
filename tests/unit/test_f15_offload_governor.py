@@ -400,7 +400,7 @@ class TestPCERoundTrip:
         resp = RobustnessResponseV2.model_validate_json(run_robustness_v2(req.model_dump_json()))
         assert resp.results, "base MC results present"
         assert resp.edge_e_values, "e-values present (include_e_values)"
-        assert resp.factor_evpi, "EVPI present (include_voi + parameter_uncertainties)"
+        assert resp.p_win_sensitivity, "EVPI present (include_voi + parameter_uncertainties)"
         assert resp.path_decomposition is not None, "path decomposition present"
 
 

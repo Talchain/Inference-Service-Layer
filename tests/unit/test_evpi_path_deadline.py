@@ -14,7 +14,7 @@ disclose EVPI_UNAVAILABLE / PATH_DECOMPOSITION_UNAVAILABLE with elapsed_ms.
 F4 (producer half): InferenceWarning now carries a typed `severity` (default
 'warning') so PLoT/UI no longer default a MISSING severity to 'info' and hide the
 disclosure; and the EVPI/path disclosures name the TOP-LEVEL envelope fields
-`factor_evpi` / `path_decomposition` (were `robustness.factor_evpi` /
+`factor_evpi` / `path_decomposition` (were `robustness.p_win_sensitivity` /
 `robustness.path_decomposition`).
 
 RED-first at base 933c3404: EVPI_BUDGET_MS / PATH_DECOMPOSITION_BUDGET_MS are
@@ -90,7 +90,7 @@ def _warn(resp, code):
 class TestEvpiPathPositiveControl:
     def test_ample_budget_phases_present_no_unavailability(self):
         resp = RobustnessAnalyzerV2().analyze(_request())
-        assert resp.factor_evpi, "EVPI rows present under the full budget"
+        assert resp.p_win_sensitivity, "EVPI rows present under the full budget"
         assert resp.path_decomposition is not None, "path decomposition present under full budget"
         assert not (
             _codes(resp) & {EVPI_UNAVAILABLE, PATH_DECOMPOSITION_UNAVAILABLE}
@@ -102,8 +102,8 @@ class TestEvpiPathPositiveControl:
         perturb output."""
         a = RobustnessAnalyzerV2().analyze(_request())
         b = RobustnessAnalyzerV2().analyze(_request())
-        assert json.dumps(a.factor_evpi, sort_keys=True) == json.dumps(
-            b.factor_evpi, sort_keys=True
+        assert json.dumps(a.p_win_sensitivity, sort_keys=True) == json.dumps(
+            b.p_win_sensitivity, sort_keys=True
         )
 
 
@@ -121,7 +121,7 @@ class TestEvpiInternalDeadlineTrip:
 
         assert resp.results, "core MC results survive an EVPI-only internal trip"
         assert resp.robustness is not None, "core robustness survives"
-        assert resp.factor_evpi is None, "all-or-nothing: NO partial EVPI rows on internal trip"
+        assert resp.p_win_sensitivity is None, "all-or-nothing: NO partial EVPI rows on internal trip"
 
         w = _warn(resp, EVPI_UNAVAILABLE)
         assert w is not None, "EVPI_UNAVAILABLE must ride inference_warnings"
@@ -130,13 +130,13 @@ class TestEvpiInternalDeadlineTrip:
 
     def test_evpi_disclosure_severity_and_top_level_field(self, monkeypatch):
         """F4: severity='warning' (was absent) + TOP-LEVEL field `factor_evpi`
-        (was `robustness.factor_evpi`)."""
+        (was `robustness.p_win_sensitivity`)."""
         monkeypatch.setattr(RobustnessAnalyzerV2, "EVPI_BUDGET_MS", -1)
         resp = RobustnessAnalyzerV2().analyze(_request())
         w = _warn(resp, EVPI_UNAVAILABLE)
         assert w is not None
         assert w.severity == "warning"
-        assert w.field == "factor_evpi"
+        assert w.field == "p_win_sensitivity"
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ class TestEntrySkipDisclosuresCorrected:
         we = _warn(resp, EVPI_UNAVAILABLE)
         wp = _warn(resp, PATH_DECOMPOSITION_UNAVAILABLE)
         assert we is not None and wp is not None
-        assert we.field == "factor_evpi", "F4: top-level, not robustness.factor_evpi"
+        assert we.field == "p_win_sensitivity", "F4: top-level, not robustness.p_win_sensitivity"
         assert wp.field == "path_decomposition", "F4: top-level, not robustness.path_decomposition"
         assert we.severity == "warning"
         assert wp.severity == "warning"
@@ -208,7 +208,7 @@ class TestSeverityIsAdditiveOnWire:
 
         # An explicit 'warning' (the degradation-code path) also serialises.
         w_warn = InferenceWarning(
-            code="EVPI_UNAVAILABLE", field="factor_evpi", detail={}, severity="warning"
+            code="EVPI_UNAVAILABLE", field="p_win_sensitivity", detail={}, severity="warning"
         )
         dumped_warn = w_warn.model_dump(by_alias=True, exclude_none=True)
         assert dumped_warn.get("severity") == "warning"

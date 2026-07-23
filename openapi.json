@@ -695,7 +695,7 @@
             "description": "Present only when the supplied matrix was not PSD and was projected to the nearest correlation matrix (Higham 2002). Null/absent when the input was already valid."
           },
           "suppressed_attributions": {
-            "description": "Independence-assuming per-factor attributions omitted under active correlation (e.g. factor_sensitivity, factor_evpi, conditional_winners). Absent from the response, not null \u2014 this list names what was withheld.",
+            "description": "Independence-assuming per-factor attributions omitted under active correlation (e.g. factor_sensitivity, p_win_sensitivity, conditional_winners). factor_evppi is NOT listed \u2014 it is a conditional-expectation quantity on the joint copula samples and remains emitted. Absent from the response, not null \u2014 this list names what was withheld.",
             "items": {
               "type": "string"
             },
@@ -3033,7 +3033,7 @@
                 "type": "null"
               }
             ],
-            "description": "Expected value of perfect information for the WHOLE decision, in the same OUTCOME UNITS as outcome.mean (not win-probability points). EXACT FORM: decision_evpi = E[max_o U] \u2212 max_o E[U], computed on the JOINT pre-noise Common-Random-Numbers sample population (the same population as win_probability and downside.expected_regret) as the MINIMUM per-option expected regret: min_o expected_regret[o]. The identity E[max]\u2212max_o E[o] = min_o (E[max]\u2212E[o]) is exact, so this is the value of resolving ALL uncertainty before choosing \u2014 it captures option-switching, unlike the per-factor win-probability sensitivity in factor_evpi. Zero new sampling: a read of the regret already emitted per option. >= 0 by construction (min of non-negative regrets). Present EXACTLY when the downside/regret population is present (>=1 option carries downside.expected_regret); omitted (never a JSON null) otherwise.",
+            "description": "Expected value of perfect information for the WHOLE decision, in the same OUTCOME UNITS as outcome.mean (not win-probability points). EXACT FORM: decision_evpi = E[max_o U] \u2212 max_o E[U], computed on the JOINT pre-noise Common-Random-Numbers sample population (the same population as win_probability and downside.expected_regret) as the MINIMUM per-option expected regret: min_o expected_regret[o]. The identity E[max]\u2212max_o E[o] = min_o (E[max]\u2212E[o]) is exact, so this is the value of resolving ALL uncertainty before choosing \u2014 it captures option-switching, unlike the per-factor win-probability sensitivity in p_win_sensitivity. Zero new sampling: a read of the regret already emitted per option. >= 0 by construction (min of non-negative regrets). Present EXACTLY when the downside/regret population is present (>=1 option carries downside.expected_regret); omitted (never a JSON null) otherwise.",
             "title": "Decision Evpi"
           },
           "diagnostics": {
@@ -3057,7 +3057,7 @@
             "title": "Engine Version",
             "type": "string"
           },
-          "factor_evpi": {
+          "factor_evppi": {
             "anyOf": [
               {
                 "items": {
@@ -3069,8 +3069,8 @@
                 "type": "null"
               }
             ],
-            "description": "Expected Value of Perfect Information per factor: how much does removing this factor's uncertainty improve the decision metric?",
-            "title": "Factor Evpi"
+            "description": "Per-factor Expected Value of Partial Perfect Information (EVPPI) in the SAME OUTCOME UNITS as outcome.mean and decision_evpi: for each uncertain factor, how much better the decision could be if that factor's true value were learned before choosing. Computed by a single-loop Strong-Oakley regression EVPPI = E[max_o E[U_o|theta_i]] \u2212 max_o E[U_o] on the retained joint pre-noise CRN samples (NO nested Monte Carlo, NO new sampling); the inner conditional expectation is a polynomial regression of each option's outcome on the factor's sampled values. Fields: factor_id, evppi (clamped to [0, decision_evpi]), evppi_raw (pre-clamp audit), baseline_max_expected_utility, conditional_max_expected_utility, units ('outcome'), method ('regression_evppi_v1'), regression_degree, n_samples, clamped_low (Howard non-negativity DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by construction for this estimator \u2014 least-squares mean-preservation + Jensen \u2014 so clamped_low is always false; a true value would mean the estimator itself changed, not that a real negative occurred), clamped_high (per-factor EVPPI <= whole-decision EVPI theorem \u2014 capped at decision_evpi), noise_floor (permutation-null overfit floor: the MAX of K theta-shuffled null EVPPIs, i.e. a permutation test at level ~1/(K+1) so a pure-noise factor is labelled below_resolution ~1-1/(K+1) of the time), status (below_resolution when evppi <= noise_floor), correlation_active. Unlike p_win_sensitivity, this captures option-switching and is honest under correlation (the samples are joint draws, so the regression conditions on the joint). Option-controlled levers (any option intervenes on the factor \u2014 union across options) are OMITTED (absent, not zero: their uncertainty is a choice, not information to buy).",
+            "title": "Factor Evppi"
           },
           "factor_sensitivity": {
             "anyOf": [
@@ -3121,6 +3121,21 @@
             ],
             "description": "Option results",
             "title": "Options"
+          },
+          "p_win_sensitivity": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-factor win-probability sensitivity: for each uncertain factor, how much the recommended option's win probability (or P(joint_goal) when goal_constraints are set) moves when that factor is FIXED at its mean, with the decision held fixed at the recommended option. Fields: p_win_delta (probability units), p_win_delta_percentage_points, current_metric, perfect_metric, metric_type (p_win_recommended|p_joint_goal), method ('p_win_delta_at_mean_v1'), n_samples, status, clamped, noise_floor. This is NOT value-of-information: holding the decision fixed, it structurally cannot capture option-switching, and it is in probability (not outcome) units, with its OWN Monte Carlo redraw (not the CRN joint population). For decision value use decision_evpi (whole decision) and factor_evppi (per-factor), both in outcome units. Non-negative (negative estimates clamped to 0, clamped=true).",
+            "title": "P Win Sensitivity"
           },
           "path_decomposition": {
             "anyOf": [
@@ -4906,7 +4921,7 @@
                 "type": "null"
               }
             ],
-            "description": "Pairwise correlations between factor uncertainties. Independence is the default; supplying any pair activates a Gaussian copula over the named factors' marginals. Each referenced factor must have a parameter_uncertainty with a supported distribution (normal or uniform; point_mass factors have zero variance and cannot be correlated). Under active correlation, independence-assuming per-factor attributions (factor_sensitivity, factor_evpi, conditional_winners) are omitted with a disclosure marker; joint quantities (win_probability, downside, percentiles) remain valid.",
+            "description": "Pairwise correlations between factor uncertainties. Independence is the default; supplying any pair activates a Gaussian copula over the named factors' marginals. Each referenced factor must have a parameter_uncertainty with a supported distribution (normal or uniform; point_mass factors have zero variance and cannot be correlated). Under active correlation, independence-assuming per-factor attributions (factor_sensitivity, p_win_sensitivity, conditional_winners) are omitted with a disclosure marker; joint quantities (win_probability, downside, percentiles, factor_evppi) remain valid.",
             "title": "Factor Correlations"
           },
           "goal_constraints": {
@@ -5177,7 +5192,7 @@
             "description": "E-value analogue per edge: minimum strength perturbation to flip recommendation. Only included when computed within time budget.",
             "title": "Edge E Values"
           },
-          "factor_evpi": {
+          "factor_evppi": {
             "anyOf": [
               {
                 "items": {
@@ -5189,8 +5204,8 @@
                 "type": "null"
               }
             ],
-            "description": "Expected Value of Perfect Information per factor: how much does removing this factor's uncertainty improve P(joint_goal)?",
-            "title": "Factor Evpi"
+            "description": "Per-factor Expected Value of Partial Perfect Information (EVPPI) in OUTCOME units, via single-loop Strong-Oakley regression on the retained joint CRN samples. Method 'regression_evppi_v1'. Option-controlled levers are OMITTED (absent, not zero). Emitted under active correlation. See ISLResponseV2.factor_evppi.",
+            "title": "Factor Evppi"
           },
           "factor_sensitivity": {
             "description": "Sensitivity results per factor node value",
@@ -5207,6 +5222,21 @@
             },
             "title": "Inference Warnings",
             "type": "array"
+          },
+          "p_win_sensitivity": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-factor win-probability sensitivity: how much the recommended option's win probability (or P(joint_goal)) moves when this factor is fixed at its mean, with the decision held FIXED. A win-probability delta in PROBABILITY units \u2014 NOT value-of-information (it cannot capture option-switching). Method-tagged 'p_win_delta_at_mean_v1'. For decision value use decision_evpi (whole-decision EVPI) and factor_evppi (per-factor EVPPI), both in outcome units.",
+            "title": "P Win Sensitivity"
           },
           "path_decomposition": {
             "anyOf": [

@@ -1,0 +1,245 @@
+"""S2 (D-23.8) analyzer-level tests for factor_evppi emission.
+
+Covers the end-to-end path through RobustnessAnalyzerV2.analyze():
+* a constructed mediator graph with an analytically-known positive EVPPI,
+* the per-factor <= whole-decision EVPI bound,
+* D-U lever omission (option-controlled factors are ABSENT, not zero),
+* Howard non-negativity + per-factor<=total clamps with disclosure (monkeypatched
+  so the clamp mechanism is tested deterministically),
+* emission under active correlation (with p_win_sensitivity suppressed),
+* method/units tags, gating, and determinism.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pytest
+
+import src.services.robustness_analyzer_v2 as analyzer_mod
+
+from src.models.robustness_v2 import (
+    EdgeV2,
+    FactorCorrelation,
+    GraphV2,
+    InterventionOption,
+    NodeV2,
+    ObservedState,
+    ParameterUncertainty,
+    RobustnessRequestV2,
+    StrengthDistribution,
+)
+from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.utils.evppi import FactorEvppiEstimate
+
+SQRT_2_OVER_PI = math.sqrt(2.0 / math.pi)
+
+
+def _mediator_request(n_samples=6000, sigma=2.0, seed=777):
+    """theta -> m (+1); m -> outcome (+1); theta -> outcome (-0.5 direct).
+
+    opt_pin intervenes m=0  => outcome = -0.5*theta
+    opt_free leaves m free  => outcome = +1*theta - 0.5*theta = +0.5*theta
+    The winner flips at theta=0, so with perfect info you pick 0.5*|theta|:
+        EVPPI_theta = 0.5 * E|theta| = 0.5 * sigma * sqrt(2/pi).
+    theta is a NON-lever factor (options intervene on m, never on theta); m is the
+    lever. sigma large so theta swings sign.
+    """
+    nodes = [
+        NodeV2(id="theta", kind="factor", label="Theta", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="m", kind="factor", label="M", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="outcome", kind="outcome", label="Out", observed_state=ObservedState(value=0.0)),
+    ]
+    edges = [
+        EdgeV2(**{"from": "theta"}, to="m", strength=StrengthDistribution(mean=1.0, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "m"}, to="outcome", strength=StrengthDistribution(mean=1.0, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "theta"}, to="outcome", strength=StrengthDistribution(mean=-0.5, std=0.002), exists_probability=1.0),
+    ]
+    return RobustnessRequestV2(
+        graph=GraphV2(nodes=nodes, edges=edges),
+        options=[
+            InterventionOption(id="opt_pin", label="Pin m", interventions={"m": 0.0}),
+            InterventionOption(id="opt_free", label="Free", interventions={}),
+        ],
+        goal_node_id="outcome",
+        seed=seed,
+        n_samples=n_samples,
+        parameter_uncertainties=[ParameterUncertainty(node_id="theta", distribution="normal", std=sigma)],
+        include_voi=True,
+    )
+
+
+def _lever_request(n_samples=2000, correlated=False):
+    """factor_a is intervened by BOTH options -> a D-U lever (must be OMITTED from
+    factor_evppi). factor_b is a free uncertain factor (gets an entry)."""
+    nodes = [
+        NodeV2(id="factor_a", kind="factor", label="A", observed_state=ObservedState(value=0.5)),
+        NodeV2(id="factor_b", kind="factor", label="B", observed_state=ObservedState(value=0.3)),
+        NodeV2(id="outcome", kind="outcome", label="Rev", observed_state=ObservedState(value=0.0)),
+    ]
+    edges = [
+        EdgeV2(**{"from": "factor_a"}, to="outcome", strength=StrengthDistribution(mean=0.8, std=0.1), exists_probability=0.95),
+        EdgeV2(**{"from": "factor_b"}, to="outcome", strength=StrengthDistribution(mean=0.3, std=0.2), exists_probability=0.9),
+    ]
+    kw = {}
+    if correlated:
+        kw["factor_correlations"] = [FactorCorrelation(factor_a="factor_a", factor_b="factor_b", rho=0.5)]
+    return RobustnessRequestV2(
+        graph=GraphV2(nodes=nodes, edges=edges),
+        options=[
+            InterventionOption(id="opt_high", label="High", interventions={"factor_a": 0.9}),
+            InterventionOption(id="opt_low", label="Low", interventions={"factor_a": 0.1}),
+        ],
+        goal_node_id="outcome",
+        seed=12345,
+        n_samples=n_samples,
+        parameter_uncertainties=[
+            ParameterUncertainty(node_id="factor_a", distribution="normal", std=0.1),
+            ParameterUncertainty(node_id="factor_b", distribution="normal", std=0.15),
+        ],
+        include_voi=True,
+        **kw,
+    )
+
+
+def _decision_evpi_bound(response):
+    regrets = [
+        o.pre_noise_expected_regret
+        for o in response.results
+        if o.pre_noise_expected_regret is not None and math.isfinite(o.pre_noise_expected_regret)
+    ]
+    return min(regrets) if regrets else None
+
+
+class TestPositiveEvppiAnalytic:
+    def test_mediator_evppi_matches_half_sigma_sqrt_2_over_pi(self):
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(sigma=2.0))
+        entries = {e["factor_id"]: e for e in (r.factor_evppi or [])}
+        assert "theta" in entries
+        theta = entries["theta"]
+        analytic = 0.5 * 2.0 * SQRT_2_OVER_PI  # ~0.7979
+        assert theta["evppi"] == pytest.approx(analytic, abs=0.04)
+        assert theta["units"] == "outcome"
+        assert theta["method"] == "regression_evppi_v1"
+        assert theta["status"] == "resolved"
+        assert theta["clamped_low"] is False
+
+    def test_evppi_raw_respects_decision_evpi_bound(self):
+        """The RAW estimate (pre-clamp) already respects EVPPI_i <= decision_evpi
+        on this shape — proving the estimator, not just the clamp."""
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(sigma=2.0))
+        bound = _decision_evpi_bound(r)
+        assert bound is not None
+        for e in r.factor_evppi:
+            assert e["evppi_raw"] <= bound + 1e-3
+            assert e["evppi"] <= bound + 1e-9  # emitted value is clamped to the bound
+
+
+class TestLeverOmission:
+    def test_lever_factor_absent_free_factor_present(self):
+        r = RobustnessAnalyzerV2().analyze(_lever_request())
+        fids = [e["factor_id"] for e in (r.factor_evppi or [])]
+        assert "factor_a" not in fids, "D-U lever leaked into factor_evppi"
+        assert "factor_b" in fids
+        # The relabelled p_win_sensitivity keeps BOTH factors (byte-identical
+        # legacy behaviour); only the new EVPPI applies lever suppression.
+        assert {e["factor_id"] for e in r.p_win_sensitivity} == {"factor_a", "factor_b"}
+
+    def test_all_factors_lever_yields_no_block(self):
+        """If every uncertain factor is a lever, factor_evppi is None (not [])."""
+        nodes = [
+            NodeV2(id="a", kind="factor", label="A", observed_state=ObservedState(value=0.5)),
+            NodeV2(id="outcome", kind="outcome", label="O", observed_state=ObservedState(value=0.0)),
+        ]
+        edges = [EdgeV2(**{"from": "a"}, to="outcome", strength=StrengthDistribution(mean=0.8, std=0.1), exists_probability=0.95)]
+        req = RobustnessRequestV2(
+            graph=GraphV2(nodes=nodes, edges=edges),
+            options=[
+                InterventionOption(id="hi", label="hi", interventions={"a": 0.9}),
+                InterventionOption(id="lo", label="lo", interventions={"a": 0.1}),
+            ],
+            goal_node_id="outcome",
+            seed=1,
+            n_samples=500,
+            parameter_uncertainties=[ParameterUncertainty(node_id="a", distribution="normal", std=0.1)],
+            include_voi=True,
+        )
+        r = RobustnessAnalyzerV2().analyze(req)
+        assert r.factor_evppi is None
+
+
+class TestClampDisclosure:
+    """The Howard (>=0) and per-factor<=total clamps are tested deterministically
+    by monkeypatching the estimator to return out-of-range raw values."""
+
+    def _patched(self, monkeypatch, raw):
+        def fake(theta, option_outcomes, *, seed, **kw):
+            return FactorEvppiEstimate(
+                evppi_raw=raw,
+                conditional_max_expected_utility=0.0,
+                baseline_max_expected_utility=0.0,
+                noise_floor=0.0,
+                degree_used=4,
+                n_samples=len(list(theta)),
+                degenerate=False,
+            )
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", fake)
+
+    def test_negative_raw_clamped_to_zero_and_disclosed(self, monkeypatch):
+        self._patched(monkeypatch, raw=-0.5)
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=800))
+        theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+        assert theta["evppi"] == 0.0
+        assert theta["clamped_low"] is True
+        assert theta["clamped_high"] is False
+
+    def test_raw_above_total_evpi_capped_and_disclosed(self, monkeypatch):
+        self._patched(monkeypatch, raw=1e6)  # absurdly large -> must cap at bound
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=800))
+        bound = _decision_evpi_bound(r)
+        theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+        assert theta["clamped_high"] is True
+        # Emitted value is the bound rounded to 6 dp.
+        assert theta["evppi"] == round(bound, 6)
+        assert theta["evppi"] <= bound + 1e-6
+
+
+class TestCorrelationEmission:
+    def test_factor_evppi_emitted_under_correlation(self):
+        r = RobustnessAnalyzerV2().analyze(_lever_request(correlated=True))
+        assert r.factor_evppi is not None
+        for e in r.factor_evppi:
+            assert e["correlation_active"] is True
+        # p_win_sensitivity IS suppressed under correlation; factor_evppi is NOT.
+        assert r.p_win_sensitivity is None
+        assert "p_win_sensitivity" in r.correlation_model.suppressed_attributions
+        assert "factor_evppi" not in r.correlation_model.suppressed_attributions
+
+
+class TestGatingAndDeterminism:
+    def test_no_block_without_include_voi(self):
+        req = _mediator_request(n_samples=500)
+        req.include_voi = False
+        assert RobustnessAnalyzerV2().analyze(req).factor_evppi is None
+
+    def test_no_block_without_uncertainties(self):
+        nodes = [
+            NodeV2(id="a", kind="factor", label="A", observed_state=ObservedState(value=0.5)),
+            NodeV2(id="outcome", kind="outcome", label="O", observed_state=ObservedState(value=0.0)),
+        ]
+        edges = [EdgeV2(**{"from": "a"}, to="outcome", strength=StrengthDistribution(mean=0.8, std=0.1), exists_probability=0.95)]
+        req = RobustnessRequestV2(
+            graph=GraphV2(nodes=nodes, edges=edges),
+            options=[InterventionOption(id="x", label="x", interventions={})],
+            goal_node_id="outcome",
+            seed=1,
+            n_samples=500,
+            include_voi=True,
+        )
+        assert RobustnessAnalyzerV2().analyze(req).factor_evppi is None
+
+    def test_deterministic_same_seed(self):
+        r1 = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=3000))
+        r2 = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=3000))
+        assert r1.factor_evppi == r2.factor_evppi

@@ -755,9 +755,9 @@ class RobustnessRequestV2(BaseModel):
         "factors' marginals. Each referenced factor must have a parameter_uncertainty "
         "with a supported distribution (normal or uniform; point_mass factors have zero "
         "variance and cannot be correlated). Under active correlation, independence-"
-        "assuming per-factor attributions (factor_sensitivity, factor_evpi, "
+        "assuming per-factor attributions (factor_sensitivity, p_win_sensitivity, "
         "conditional_winners) are omitted with a disclosure marker; joint quantities "
-        "(win_probability, downside, percentiles) remain valid.",
+        "(win_probability, downside, percentiles, factor_evppi) remain valid.",
     )
 
     # Goal threshold configuration (single constraint, legacy)
@@ -843,9 +843,10 @@ class RobustnessRequestV2(BaseModel):
         """Validate parameter_uncertainties: node existence AND uniqueness (F8).
 
         Uniqueness is enforced here (fail-closed at parse time → typed 422 before
-        any compute) because a repeated node_id is definitionally redundant: EVPI
-        seeds each per-factor pass on ``f"{seed}:evpi:{node_id}"``, so duplicate
-        node_ids produce byte-identical factor_evpi rows while still costing a full
+        any compute) because a repeated node_id is definitionally redundant: the
+        win-probability sensitivity sweep seeds each per-factor pass on
+        ``f"{seed}:evpi:{node_id}"``, so duplicate node_ids produce byte-identical
+        p_win_sensitivity rows while still costing a full
         Monte Carlo pass each. Rejecting duplicates removes the free-ride and lets
         the admission gate price only the deduplicated factor count.
         """
@@ -1540,11 +1541,29 @@ class RobustnessResponseV2(BaseModel):
         "recommendation. Only included when computed within time budget.",
     )
 
-    # EVPI results (enhancement — optional, gated by include_voi flag)
-    factor_evpi: Optional[List[Dict[str, Any]]] = Field(
+    # Per-factor win-probability sensitivity (enhancement — optional, gated by
+    # include_voi). S2 (D-23.8) HONEST RELABEL: this was ``factor_evpi``, but it is
+    # NOT value-of-information — see the wire description on ISLResponseV2.
+    p_win_sensitivity: Optional[List[Dict[str, Any]]] = Field(
         None,
-        description="Expected Value of Perfect Information per factor: how much does "
-        "removing this factor's uncertainty improve P(joint_goal)?",
+        description="Per-factor win-probability sensitivity: how much the recommended "
+        "option's win probability (or P(joint_goal)) moves when this factor is fixed "
+        "at its mean, with the decision held FIXED. A win-probability delta in "
+        "PROBABILITY units — NOT value-of-information (it cannot capture option-"
+        "switching). Method-tagged 'p_win_delta_at_mean_v1'. For decision value use "
+        "decision_evpi (whole-decision EVPI) and factor_evppi (per-factor EVPPI), "
+        "both in outcome units.",
+    )
+
+    # Per-factor EVPPI (S2 — A3 VOI, D-23.8). Regression EVPPI on the retained
+    # joint CRN samples (no new sampling); see ISLResponseV2.factor_evppi.
+    factor_evppi: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-factor Expected Value of Partial Perfect Information "
+        "(EVPPI) in OUTCOME units, via single-loop Strong-Oakley regression on the "
+        "retained joint CRN samples. Method 'regression_evppi_v1'. Option-controlled "
+        "levers are OMITTED (absent, not zero). Emitted under active correlation. "
+        "See ISLResponseV2.factor_evppi.",
     )
 
     # Path decomposition (enhancement — optional, gated by include_path_decomposition flag)

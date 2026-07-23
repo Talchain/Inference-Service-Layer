@@ -1108,8 +1108,10 @@ class CorrelationModelV2(BaseModel):
     suppressed_attributions: List[str] = Field(
         default_factory=list,
         description="Independence-assuming per-factor attributions omitted under active "
-        "correlation (e.g. factor_sensitivity, factor_evpi, conditional_winners). Absent "
-        "from the response, not null — this list names what was withheld.",
+        "correlation (e.g. factor_sensitivity, p_win_sensitivity, conditional_winners). "
+        "factor_evppi is NOT listed — it is a conditional-expectation quantity on the "
+        "joint copula samples and remains emitted. Absent from the response, not null — "
+        "this list names what was withheld.",
     )
     suppression_reason: str = Field(
         default="not_separable_under_correlation",
@@ -1206,11 +1208,26 @@ class ISLResponseV2(BaseModel):
         "Provisional — pending scientific review. NOT included in response_hash.",
     )
 
-    # EVPI results (enhancement — gated by include_voi flag)
-    factor_evpi: Optional[List[Dict[str, Any]]] = Field(
+    # Per-factor win-probability sensitivity (enhancement — gated by include_voi).
+    # S2 (D-23.8) HONEST RELABEL: this wire block was ``factor_evpi`` with an
+    # ``evpi`` field, but it is NOT value-of-information (it holds the decision fixed
+    # and reports a win-probability delta), so it was mislabelled. Renamed to
+    # ``p_win_sensitivity`` with de-EVPI'd field names + a ``method`` tag; the
+    # numbers are byte-identical to the pre-S2 ``factor_evpi`` values.
+    p_win_sensitivity: Optional[List[Dict[str, Any]]] = Field(
         None,
-        description="Expected Value of Perfect Information per factor: how much does "
-        "removing this factor's uncertainty improve the decision metric?",
+        description="Per-factor win-probability sensitivity: for each uncertain "
+        "factor, how much the recommended option's win probability (or P(joint_goal) "
+        "when goal_constraints are set) moves when that factor is FIXED at its mean, "
+        "with the decision held fixed at the recommended option. Fields: p_win_delta "
+        "(probability units), p_win_delta_percentage_points, current_metric, "
+        "perfect_metric, metric_type (p_win_recommended|p_joint_goal), method "
+        "('p_win_delta_at_mean_v1'), n_samples, status, clamped, noise_floor. This is "
+        "NOT value-of-information: holding the decision fixed, it structurally cannot "
+        "capture option-switching, and it is in probability (not outcome) units, with "
+        "its OWN Monte Carlo redraw (not the CRN joint population). For decision value "
+        "use decision_evpi (whole decision) and factor_evppi (per-factor), both in "
+        "outcome units. Non-negative (negative estimates clamped to 0, clamped=true).",
     )
 
     # Decision-level EVPI (S1 — A3 VOI honesty, D-23.8). Additive-optional; a READ
@@ -1226,11 +1243,42 @@ class ISLResponseV2(BaseModel):
         "expected regret: min_o expected_regret[o]. The identity "
         "E[max]−max_o E[o] = min_o (E[max]−E[o]) is exact, so this is the value of "
         "resolving ALL uncertainty before choosing — it captures option-switching, "
-        "unlike the per-factor win-probability sensitivity in factor_evpi. Zero new "
+        "unlike the per-factor win-probability sensitivity in p_win_sensitivity. Zero new "
         "sampling: a read of the regret already emitted per option. >= 0 by "
         "construction (min of non-negative regrets). Present EXACTLY when the "
         "downside/regret population is present (>=1 option carries "
         "downside.expected_regret); omitted (never a JSON null) otherwise.",
+    )
+
+    # Per-factor EVPPI (S2 — A3 VOI honesty, D-23.8). Additive-optional; regression
+    # EVPPI on the retained joint CRN samples (no new sampling).
+    factor_evppi: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-factor Expected Value of Partial Perfect Information (EVPPI) "
+        "in the SAME OUTCOME UNITS as outcome.mean and decision_evpi: for each "
+        "uncertain factor, how much better the decision could be if that factor's "
+        "true value were learned before choosing. Computed by a single-loop "
+        "Strong-Oakley regression EVPPI = E[max_o E[U_o|theta_i]] − max_o E[U_o] on "
+        "the retained joint pre-noise CRN samples (NO nested Monte Carlo, NO new "
+        "sampling); the inner conditional expectation is a polynomial regression of "
+        "each option's outcome on the factor's sampled values. Fields: factor_id, "
+        "evppi (clamped to [0, decision_evpi]), evppi_raw (pre-clamp audit), "
+        "baseline_max_expected_utility, conditional_max_expected_utility, units "
+        "('outcome'), method ('regression_evppi_v1'), regression_degree, n_samples, "
+        "clamped_low (Howard non-negativity DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by "
+        "construction for this estimator — least-squares mean-preservation + Jensen — "
+        "so clamped_low is always false; a true value would mean the estimator itself "
+        "changed, not that a real negative occurred), clamped_high (per-factor EVPPI "
+        "<= whole-decision EVPI theorem — capped at decision_evpi), noise_floor "
+        "(permutation-null overfit floor: the MAX of K theta-shuffled null EVPPIs, i.e. "
+        "a permutation test at level ~1/(K+1) so a pure-noise factor is labelled "
+        "below_resolution ~1-1/(K+1) of the time), status (below_resolution when evppi "
+        "<= noise_floor), correlation_active. Unlike p_win_sensitivity, this captures "
+        "option-switching "
+        "and is honest under correlation (the samples are joint draws, so the "
+        "regression conditions on the joint). Option-controlled levers (any option "
+        "intervenes on the factor — union across options) are OMITTED (absent, not "
+        "zero: their uncertainty is a choice, not information to buy).",
     )
 
     # Path decomposition (T1-6 wire completeness — additive optional, request-gated
