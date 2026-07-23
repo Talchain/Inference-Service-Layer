@@ -151,6 +151,17 @@ class CounterfactualEngine:
                 explanation=explanation,
             )
 
+        except ValueError as e:
+            # Client-input defects — an undefined/dangling outcome, a malformed or
+            # circular structural equation, a non-finite outcome, or a numpy
+            # scale<0 — fail loud as ValueError, and the route's D-12(cf) handler
+            # maps them to a clean 422 (the only internal ValueError source,
+            # unknown distribution type, is unreachable behind the Pydantic enum).
+            # These are client errors, not server incidents: log at WARNING without
+            # a server-path traceback (the route also logs counterfactual_invalid_input
+            # at WARNING). Reserve ERROR + traceback for genuinely unexpected faults.
+            logger.warning("counterfactual_analysis_failed", extra={"error": str(e)})
+            raise
         except Exception as e:
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
