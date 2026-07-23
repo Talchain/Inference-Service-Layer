@@ -12,8 +12,11 @@ import math
 import numpy as np
 import pytest
 
+from src.utils.canonical_hash import canonical_json_hash
 from src.utils.evppi import (
     REGRESSION_EVPPI_METHOD,
+    REGRESSION_EVPPI_NULL_PERMUTATIONS,
+    REGRESSION_EVPPI_POLY_DEGREE,
     factor_evppi_estimate,
 )
 
@@ -186,3 +189,58 @@ class TestBelowResolutionFloorCalibration:
         assert est.evppi_raw > est.noise_floor  # resolved
         assert est.evppi_raw > 0.5
         assert est.noise_floor < 0.05  # floor stays tiny relative to the signal
+
+
+# ---------------------------------------------------------------------------
+# Q6 (altitude): fail-loud fingerprint guard for the method-defining EVPPI
+# constants, mirroring the STABILITY_CONFIDENCE_MAP pattern in
+# tests/unit/test_confidence_provenance.py. The new estimator adopted the wire
+# version TAG ("regression_evppi_v1") but NOT the fail-loud guard, so silently
+# retuning degree=4 or K=16 would shift the below_resolution level (and the
+# emitted evppi) under a stable method tag with no test failing. Bind the two
+# METHOD-DEFINING constants to the version. The operational _STAGE_EVPI_JOINT_CELL_CAP
+# (4096) is EXCLUDED — it governs WHEN a metric is skipped, not the VALUE of a
+# computed one, and already has literal boundary tests.
+#
+# If either constant changes, this fails loud with the fresh fingerprint to paste
+# and instructions: bump REGRESSION_EVPPI_METHOD and re-pin here. Do NOT regenerate
+# the pin blindly to make the test pass — that defeats the disclosure contract.
+PINNED_EVPPI_METHOD = "regression_evppi_v1"
+PINNED_EVPPI_CONSTANTS_FINGERPRINT = (
+    "934d8504deda533e7f3f9d61f2c5a3cd1f781fe4145743a69fce8ad625989a61"
+)
+
+
+def _current_evppi_constants_fingerprint() -> str:
+    """sha256 over a canonical repr of the method-defining EVPPI constants,
+    computed LIVE from source (the pin is a hardcoded literal, so this never
+    self-heals). Same repo canonical_json_hash canonicalisation (sort_keys) the
+    confidence fingerprint uses."""
+    return canonical_json_hash(
+        {
+            "REGRESSION_EVPPI_POLY_DEGREE": REGRESSION_EVPPI_POLY_DEGREE,
+            "REGRESSION_EVPPI_NULL_PERMUTATIONS": REGRESSION_EVPPI_NULL_PERMUTATIONS,
+        }
+    )
+
+
+class TestEvppiMethodFingerprintGuard:
+    def test_method_version_matches_pin(self):
+        """The served method tag must equal the pinned version (they move together)."""
+        assert REGRESSION_EVPPI_METHOD == PINNED_EVPPI_METHOD
+
+    def test_constants_fingerprint_pinned_to_version(self):
+        """If degree or K changed while REGRESSION_EVPPI_METHOD stayed put, fail
+        loud and tell the editor exactly what to do."""
+        current = _current_evppi_constants_fingerprint()
+        assert current == PINNED_EVPPI_CONSTANTS_FINGERPRINT, (
+            "The method-defining EVPPI constants (REGRESSION_EVPPI_POLY_DEGREE / "
+            "REGRESSION_EVPPI_NULL_PERMUTATIONS) changed but REGRESSION_EVPPI_METHOD "
+            f"is still '{REGRESSION_EVPPI_METHOD}'. Retuning degree or K changes the "
+            "below_resolution level and the emitted evppi, and MUST be disclosed via a "
+            "new method version:\n"
+            "  1. bump REGRESSION_EVPPI_METHOD in src/utils/evppi.py, and\n"
+            "  2. update PINNED_EVPPI_CONSTANTS_FINGERPRINT + PINNED_EVPPI_METHOD here.\n"
+            f"Current fingerprint to pin: {current}\n"
+            f"Old pinned fingerprint:     {PINNED_EVPPI_CONSTANTS_FINGERPRINT}"
+        )
