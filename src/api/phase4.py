@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
+from src.api.error_helpers import raise_invalid_input
 from src.models.metadata import create_response_metadata
 from src.models.requests import (
     ConditionalRecommendRequest,
@@ -230,11 +231,7 @@ async def analyze_sequential_decision(
         # Fail closed with 422 (matching the robustness v2 handler) so a
         # dangling-edge-behind-p=0 graph surfaces as a clean validation error,
         # never a 500 or a plausible-looking 200.
-        logger.warning(
-            "sequential_analysis_invalid_input",
-            extra={"request_id": request_id, "error": str(e)},
-        )
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise_invalid_input(logger, "sequential_analysis_invalid_input", request_id, e)
     except Exception as e:
         logger.error(
             "sequential_analysis_error",
