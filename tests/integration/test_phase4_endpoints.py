@@ -57,40 +57,9 @@ def conditional_recommend_request():
     }
 
 
-@pytest.fixture
-def sequential_analysis_request():
-    """Sample sequential analysis request."""
-    return {
-        "graph": {
-            "nodes": [
-                {"id": "invest", "type": "decision", "label": "Investment Decision"},
-                {"id": "market", "type": "chance", "label": "Market Outcome"},
-                {"id": "success", "type": "terminal", "label": "Success", "payoff": 100000},
-                {"id": "failure", "type": "terminal", "label": "Failure", "payoff": -20000},
-                {"id": "no_invest", "type": "terminal", "label": "No Investment", "payoff": 0}
-            ],
-            "edges": [
-                {"from": "invest", "to": "market", "action": "invest", "immediate_payoff": -10000},
-                {"from": "invest", "to": "no_invest", "action": "wait"},
-                {"from": "market", "to": "success", "outcome": "favorable", "probability": 0.6},
-                {"from": "market", "to": "failure", "outcome": "unfavorable", "probability": 0.4}
-            ],
-            "stage_assignments": {
-                "invest": 0,
-                "market": 1,
-                "success": 2,
-                "failure": 2,
-                "no_invest": 1
-            }
-        },
-        "stages": [
-            {"stage_index": 0, "stage_label": "Investment", "decision_nodes": ["invest"]},
-            {"stage_index": 1, "stage_label": "Market", "decision_nodes": [], "resolution_nodes": ["market"]},
-            {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []}
-        ],
-        "discount_factor": 0.95,
-        "risk_tolerance": "neutral",
-    }
+# `sequential_analysis_request` is the shared fixture in
+# tests/integration/conftest.py (C4 dedup; also consumed by the config_details
+# honesty suite).
 
 
 @pytest.fixture

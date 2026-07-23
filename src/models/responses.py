@@ -476,6 +476,7 @@ class CausalValidationResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "examples": [
                 {
@@ -606,6 +607,7 @@ class CounterfactualResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "scenario": {"intervention": {"Price": 15}, "outcome": "Revenue"},
@@ -690,6 +692,7 @@ class TeamAlignmentResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "common_ground": {
@@ -778,6 +781,7 @@ class SensitivityAnalysisResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "conclusion": {
@@ -1005,6 +1009,7 @@ class ContrastiveExplanationResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "minimal_interventions": [
@@ -1189,6 +1194,7 @@ class BatchCounterfactualResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "scenarios": [
@@ -1295,6 +1301,7 @@ class TransportabilityResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "examples": [
                 {
@@ -1545,6 +1552,7 @@ class ConformalCounterfactualResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "prediction_interval": {
@@ -1682,6 +1690,7 @@ class ValidationStrategyResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "strategies": [
@@ -1760,6 +1769,7 @@ class DiscoveryResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "discovered_dags": [
@@ -1842,6 +1852,7 @@ class ExperimentRecommendationResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "recommendation": {
@@ -2865,6 +2876,7 @@ class ConditionalRecommendResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "schema_version": "conditional_recommend.v1",
@@ -3123,6 +3135,7 @@ class SequentialAnalysisResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "schema_version": "sequential.v1",
@@ -3223,6 +3236,7 @@ class PolicyTreeResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "schema_version": "policy_tree.v1",
@@ -3289,6 +3303,7 @@ class StageSensitivityResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "schema_version": "stage_sensitivity.v1",

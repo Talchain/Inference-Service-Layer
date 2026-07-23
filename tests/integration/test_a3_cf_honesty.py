@@ -19,34 +19,13 @@ asserts the production log does NOT carry it.
 import logging
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 
 from src.models.requests import ConformalCounterfactualRequest
 
-
-# ---------------------------------------------------------------------------
-# Local app: the LIVE counterfactual route + the conformal route, both with the
-# production exception handlers, so the ValueError->422 mapping (D-12(cf)) and
-# the conformal 400 envelope are exercised at the router level.
-# ---------------------------------------------------------------------------
-@pytest_asyncio.fixture
-async def cf_client():
-    from fastapi import FastAPI, HTTPException
-
-    from src.api import main as isl_main
-    from src.api.causal import counterfactual_router, router as causal_full_router
-
-    test_app = FastAPI()
-    test_app.include_router(counterfactual_router, prefix="/api/v1/causal")
-    # conformal lives on the full causal router (dark in prod); mount it here so
-    # the F11 site-3 redaction is exercised through the real handler.
-    test_app.include_router(causal_full_router, prefix="/api/v1/causal")
-    test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
-    test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
-
-    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as ac:
-        yield ac
+# `cf_client` (LIVE counterfactual + conformal routes with the production
+# exception handlers), the F11 `redaction_sentinel`, and the
+# `assert_harness_can_see_value` positive-control helper are shared fixtures in
+# tests/integration/conftest.py (C4 dedup).
 
 
 # ===========================================================================
@@ -125,27 +104,19 @@ class TestF3dEmptyIntervention:
 # ===========================================================================
 # F11 — redact raw intervention VALUES from the structured logs (3 sites)
 # ===========================================================================
-_SENTINEL = 987654.321  # a value that cannot arise from a hash/seed/percentile
-
-
-def _assert_harness_can_see_value(caplog_records_before, logger_name):
-    """Trap #13 positive control: prove the capture harness is NOT blind to the
-    sentinel by emitting it through the same logger and confirming it is seen."""
-    log = logging.getLogger(logger_name)
-    log.info("a3_f11_probe_control", extra={"intervention": {"Probe": _SENTINEL}})
-    seen = [r for r in caplog_records_before if getattr(r, "msg", None) == "a3_f11_probe_control"]
-    assert seen, "positive control failed: caplog did not capture the probe log at all"
-    assert any(str(_SENTINEL) in repr(r.__dict__) for r in seen), (
-        "positive control failed: the harness cannot SEE the raw value even when "
-        "it is deliberately logged — an absence assertion here would be vacuous"
-    )
+# The `redaction_sentinel` value and the `assert_harness_can_see_value` positive
+# control live in tests/integration/conftest.py (shared with the intervention-key
+# validation suite). Each F11 test is a trap-#13 positive control: it first proves
+# the capture harness CAN SEE the sentinel, then asserts the production log omits it.
 
 
 class TestF11EngineLogRedaction:
     """Engine site (counterfactual_engine.py :98, `counterfactual_analysis_started`)."""
 
     @pytest.mark.asyncio
-    async def test_engine_start_log_redacts_intervention_values(self, cf_client, caplog):
+    async def test_engine_start_log_redacts_intervention_values(
+        self, cf_client, caplog, redaction_sentinel, assert_harness_can_see_value
+    ):
         from src.models.requests import CounterfactualRequest, StructuralModel
         from src.services.counterfactual_engine import CounterfactualEngine
 
@@ -156,14 +127,14 @@ class TestF11EngineLogRedaction:
                 equations={"Y": "2 * SecretPrice"},
                 distributions={},
             ),
-            intervention={"SecretPrice": _SENTINEL},
+            intervention={"SecretPrice": redaction_sentinel},
             outcome="Y",
             context=None,
         )
         with caplog.at_level(logging.INFO, logger="src.services.counterfactual_engine"):
             engine.analyze(request)
             # positive control FIRST — the harness must be able to see the value
-            _assert_harness_can_see_value(caplog.records, "src.services.counterfactual_engine")
+            assert_harness_can_see_value(caplog.records, "src.services.counterfactual_engine")
 
         recs = [r for r in caplog.records if r.msg == "counterfactual_analysis_started"]
         assert recs, "expected the counterfactual_analysis_started log"
@@ -173,28 +144,30 @@ class TestF11EngineLogRedaction:
         assert getattr(rec, "intervention_count", None) == 1
         # RED at HEAD: the raw dict field is gone and the value appears nowhere
         assert not hasattr(rec, "intervention"), "raw intervention dict still logged"
-        assert str(_SENTINEL) not in repr(rec.__dict__)
-        assert "987654" not in repr(rec.__dict__)
+        assert str(redaction_sentinel) not in repr(rec.__dict__)
+        assert str(int(redaction_sentinel)) not in repr(rec.__dict__)
 
 
 class TestF11RouteLogRedaction:
     """Route site (causal.py :265, `counterfactual_request`)."""
 
     @pytest.mark.asyncio
-    async def test_counterfactual_request_log_redacts_intervention_values(self, cf_client, caplog):
+    async def test_counterfactual_request_log_redacts_intervention_values(
+        self, cf_client, caplog, redaction_sentinel, assert_harness_can_see_value
+    ):
         request = {
             "model": {
                 "variables": ["SecretPrice", "Y"],
                 "equations": {"Y": "2 * SecretPrice"},
                 "distributions": {},
             },
-            "intervention": {"SecretPrice": _SENTINEL},
+            "intervention": {"SecretPrice": redaction_sentinel},
             "outcome": "Y",
         }
         with caplog.at_level(logging.INFO, logger="src.api.causal"):
             resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
             assert resp.status_code == 200, resp.text
-            _assert_harness_can_see_value(caplog.records, "src.api.causal")
+            assert_harness_can_see_value(caplog.records, "src.api.causal")
 
         recs = [r for r in caplog.records if r.msg == "counterfactual_request"]
         assert recs, "expected the counterfactual_request log"
@@ -202,8 +175,8 @@ class TestF11RouteLogRedaction:
         assert getattr(rec, "intervention_keys", None) == ["SecretPrice"]
         assert getattr(rec, "intervention_count", None) == 1
         assert not hasattr(rec, "intervention"), "raw intervention dict still logged"
-        assert str(_SENTINEL) not in repr(rec.__dict__)
-        assert "987654" not in repr(rec.__dict__)
+        assert str(redaction_sentinel) not in repr(rec.__dict__)
+        assert str(int(redaction_sentinel)) not in repr(rec.__dict__)
 
 
 class TestF11ConformalLogRedaction:
@@ -236,3 +209,74 @@ class TestF11ConformalLogRedaction:
         assert getattr(rec, "intervention_keys", None) == []
         assert getattr(rec, "intervention_count", None) == 0
         assert not hasattr(rec, "intervention"), "raw intervention dict still logged"
+
+
+# ===========================================================================
+# F5 — an invalid client equation is a client error, not a server incident
+# ===========================================================================
+class TestF5EquationErrorSeverity:
+    """C6 (F-5, 2026-07-23): `_evaluate_equation` logged client equation
+    syntax/eval errors at ERROR, so every invalid-equation 422 paged as a server
+    incident. Demote to WARNING (the #95 convention). The genuine internal-fault
+    ERROR + traceback path (analyze()'s except Exception) stays intact."""
+
+    def test_invalid_client_equation_logs_warning_not_error(self, caplog):
+        """RED at HEAD: `_evaluate_equation`'s syntax-error log is ERROR-level.
+        `2 */ X` passes the equation charset but fails ast.parse -> ValueError ->
+        422; its engine log must be WARNING, not ERROR."""
+        from src.models.requests import CounterfactualRequest, StructuralModel
+        from src.services.counterfactual_engine import CounterfactualEngine
+
+        engine = CounterfactualEngine()
+        request = CounterfactualRequest(
+            model=StructuralModel(
+                variables=["X", "Y"], equations={"Y": "2 */ X"}, distributions={}
+            ),
+            intervention={"X": 5.0},
+            outcome="Y",
+            context=None,
+        )
+        with caplog.at_level(logging.DEBUG, logger="src.services.counterfactual_engine"):
+            with pytest.raises(ValueError):
+                engine.analyze(request)
+
+        eqn_recs = [r for r in caplog.records if "equation" in str(r.msg).lower()]
+        assert eqn_recs, "expected an equation-error log from _evaluate_equation"
+        assert all(r.levelname != "ERROR" for r in eqn_recs), (
+            "invalid client equation still logged at ERROR (should be WARNING)"
+        )
+        assert any(r.levelname == "WARNING" for r in eqn_recs)
+
+    def test_genuine_internal_fault_still_logs_error_with_traceback(self, caplog):
+        """Positive control: the ERROR + traceback path for a REAL server fault
+        (analyze()'s except Exception) is intact — not collateral of the demotion."""
+        from src.models.requests import CounterfactualRequest, StructuralModel
+        from src.services.counterfactual_engine import CounterfactualEngine
+
+        engine = CounterfactualEngine()
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic internal fault")
+
+        engine._compute_prediction = _boom  # a genuine (non-ValueError) server fault
+        request = CounterfactualRequest(
+            model=StructuralModel(
+                variables=["X", "Y"],
+                equations={"Y": "2 * X"},
+                distributions={"X": {"type": "normal", "parameters": {"mean": 5, "std": 1}}},
+            ),
+            intervention={"X": 5.0},
+            outcome="Y",
+            context=None,
+        )
+        with caplog.at_level(logging.DEBUG, logger="src.services.counterfactual_engine"):
+            with pytest.raises(RuntimeError):
+                engine.analyze(request)
+
+        errs = [
+            r
+            for r in caplog.records
+            if r.msg == "counterfactual_analysis_failed" and r.levelname == "ERROR"
+        ]
+        assert errs, "genuine internal fault must still log ERROR"
+        assert any(r.exc_info is not None for r in errs), "ERROR must carry a traceback (exc_info)"

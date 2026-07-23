@@ -7,6 +7,7 @@ with Monte Carlo simulation for uncertainty quantification.
 
 import ast
 import logging
+import math
 import operator
 import re
 import threading
@@ -69,11 +70,15 @@ class CounterfactualEngine:
         # _TOPO_SORT_CACHE_MAX): capped so it cannot grow unbounded on the live
         # request path.
         self._topo_sort_cache: Dict[str, List[Tuple[str, str]]] = {}
-        # Guards every read/insert/evict of the cache above. This engine is a
-        # module-level singleton (`counterfactual_engine` in causal.py) served on a
-        # concurrent request path, so the unlocked dict's evict step —
-        # `pop(next(iter(...)))` racing a concurrent `[key] = result` — can raise
-        # "dictionary changed size during iteration" or corrupt the FIFO ordering.
+        # Guards every read/insert/evict of the cache above. On the LIVE path this
+        # lock is inert-but-correct: the async `/counterfactual` route calls this
+        # sync engine DIRECTLY (no thread offload), so every live execution
+        # serializes on the event-loop thread and the cache is never touched
+        # concurrently. It becomes load-bearing under the DARK batch path (batch.py's
+        # own engine instance driven via `asyncio.to_thread`) or any future executor
+        # offload, where the unlocked dict's evict step — `pop(next(iter(...)))`
+        # racing a concurrent `[key] = result` — can raise "dictionary changed size
+        # during iteration" or corrupt the FIFO ordering.
         # A plain Lock preserves the EXACT FIFO-128 / no-TTL semantics from PR #89
         # and keeps `_topo_sort_cache` a real dict (test_optimization_gains reads
         # `len(engine._topo_sort_cache)`). The repo's thread-safe cache utilities —
@@ -228,6 +233,13 @@ class CounterfactualEngine:
         # the single validation home that already carries the do/observe collision
         # guard above, so there is ONE place a key is checked against the model.
         #
+        # WHY the engine, not a Pydantic field validator on the request model: a
+        # validator failure surfaces as FastAPI's RequestValidationError -> the
+        # `invalid_schema` reason code, whereas this engine-raised ValueError maps
+        # (route D-12(cf)) to a 422 with the `validation_failed` reason. Both are
+        # malformed-model client errors; keeping the check here keeps them under ONE
+        # reason code instead of splitting semantically-identical errors across two.
+        #
         # Redaction (F11 discipline): the message names the unknown KEYS and the
         # known-variable-set SIZE only — never the request VALUES (a client's
         # private scenario inputs). This message is surfaced verbatim to the client
@@ -254,6 +266,40 @@ class CounterfactualEngine:
                 f"the observational baseline for a question that was never "
                 f"evaluated. Provide each key from the model's known variables, or "
                 f"add the variable to the model."
+            )
+
+        # C1 residual (F-1, A3 2026-07-23): reject a NON-FINITE intervention/context
+        # VALUE (NaN or +/-inf) BEFORE sampling. The unknown-key guard above admits
+        # any key in the model's known set, and `_require_finite_outcome` checks only
+        # the OUTCOME samples — so a non-finite value on a declared-but-DISCONNECTED
+        # variable (one no equation reads) passes both guards, leaves the outcome
+        # finite, and is echoed back into `scenario.intervention`/`scenario.context`.
+        # Starlette's JSONResponse renders with `allow_nan=False` and raises OUTSIDE
+        # the route try -> an unhandled 500 (ISL_COMPUTATION_ERROR, retryable:true —
+        # which is false: it fails deterministically forever). That is a client-input
+        # defect, not a server incident: raise ValueError -> route D-12(cf) -> a clean
+        # 422. Validated HERE, the single validation home, alongside the do/observe
+        # and unknown-key guards.
+        #
+        # Redaction (F11 discipline): the message names the offending KEY(s) and the
+        # category word "non-finite" only — never the request VALUE (a client's
+        # private scenario input; this message is surfaced to the client AND written
+        # to the route's `counterfactual_invalid_input` warning log). Values are
+        # `Dict[str, float]` per CounterfactualRequest, so `math.isfinite` applies.
+        nonfinite_keys = sorted(
+            {
+                key
+                for source in (request.intervention, request.context or {})
+                for key, value in source.items()
+                if not math.isfinite(value)
+            }
+        )
+        if nonfinite_keys:
+            raise ValueError(
+                f"Intervention/context key(s) {nonfinite_keys} have a non-finite "
+                f"value (NaN or +/-infinity). A non-finite input cannot be used in a "
+                f"structural computation and would fail response serialization. "
+                f"Provide a finite numeric value for each key."
             )
 
         resolvable = (
@@ -574,10 +620,19 @@ class CounterfactualEngine:
 
             return np.array(result)
         except SyntaxError as e:
-            logger.error(f"Syntax error in equation '{equation}': {e}")
+            # C6 (F-5, A3 2026-07-23): a malformed client equation is a client-input
+            # defect (this re-raises as ValueError -> route D-12(cf) -> 422), not a
+            # server incident — log at WARNING to match the #95 convention, so an
+            # invalid-equation 422 no longer pages as an ERROR. The genuine
+            # internal-fault ERROR + traceback path (analyze()'s except Exception)
+            # is unchanged. (The raw-equation-text in the message is unchanged; its
+            # privacy is a standing doctrine row, out of scope here.)
+            logger.warning(f"Syntax error in equation '{equation}': {e}")
             raise ValueError(f"Invalid equation syntax: {equation}")
         except Exception as e:
-            logger.error(f"Failed to evaluate equation '{equation}': {e}")
+            # Same class: an equation that parses but cannot evaluate (client input)
+            # -> ValueError -> 422. WARNING, not ERROR (see the SyntaxError branch).
+            logger.warning(f"Failed to evaluate equation '{equation}': {e}")
             raise ValueError(f"Invalid equation: {equation}")
 
     def _eval_ast_node(self, node: ast.AST, samples: Dict[str, np.ndarray], depth: int = 0) -> Any:

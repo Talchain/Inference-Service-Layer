@@ -318,6 +318,7 @@ class RobustnessResponse(BaseModel):
     )
 
     model_config = {
+        "populate_by_name": True,
         "json_schema_extra": {
             "example": {
                 "analysis": {
