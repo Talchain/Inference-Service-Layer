@@ -24,7 +24,6 @@ from src.models.responses import (
     DecisionRule,
     ExplanationMetadata,
     Policy,
-    PolicyDistribution,
     PolicyTreeNode,
     PolicyTreeResponse,
     SequentialAnalysisResponse,
@@ -71,10 +70,16 @@ def _edge_probability(edge: Dict[str, Any], num_siblings: int) -> float:
 # chance node's value under risk_tolerance="averse": value = mean - k * sqrt(variance).
 # DOCTRINE-PENDING(Neil): ruling D-13 fixes only the UNITS here — variance (currency^2)
 # -> sqrt(variance) (sigma / currency units), symmetric with the 'seeking' branch and
-# _calculate_information_value, both of which already use sqrt(variance). That is a
+# _calculate_resolved_uncertainty, both of which already use sqrt(variance). That is a
 # consistency restoration, not a modeling change. The coefficient VALUE (k=0.5) is a
 # risk-modeling decision reserved for Neil; do NOT read 0.5 as ratified.
 RISK_AVERSION_COEFFICIENT = 0.5
+
+# F4d (A3, 2026-07-22): tolerance for validating that a chance node's branch
+# probabilities form a proper distribution (sum to 1). Loose enough to absorb
+# float error in the equal-split default (e.g. 3 * (1/3) = 0.999999999999…) yet
+# tight enough to reject a genuinely malformed distribution.
+_PROB_SUM_TOLERANCE = 1e-6
 
 
 class SequentialDecisionEngine:
@@ -395,8 +400,35 @@ class SequentialDecisionEngine:
                         expected_value += prob * edge_value(edge)
                         total_prob += prob
 
+                    # F4d (A3, 2026-07-22): reject a chance node whose total
+                    # probability mass is effectively zero (<= _PROB_SUM_TOLERANCE)
+                    # — it is not a valid distribution and its expected value is
+                    # undefined. The prior code skipped normalisation when
+                    # total_prob == 0 and valued the node at 0, silently collapsing
+                    # the root to a wrong value at HTTP 200. Fail loud -> 422 (route
+                    # D-12). Omitted probabilities default to an equal split
+                    # (mass == 1), so that path is unaffected.
+                    #
+                    # A non-zero but non-unit sum is renormalised below (unchanged):
+                    # this is a deliberate, load-bearing behaviour — the internal
+                    # stage-sensitivity perturbation (_perturb_parameter) scales a
+                    # node's probabilities and re-runs induction, relying on this
+                    # renormalisation to keep the distribution proper. Rejecting a
+                    # non-unit sum here would break that (dark) path; tightening it
+                    # to a strict sum-to-1 check belongs with a rework of that
+                    # perturbation (currently a no-op under renormalisation).
+                    if total_prob <= _PROB_SUM_TOLERANCE:
+                        raise ValueError(
+                            f"Chance node '{node_id}' has effectively zero total "
+                            f"probability mass ({total_prob:g} <= {_PROB_SUM_TOLERANCE:g}) "
+                            f"across its {len(outgoing)} outgoing branches: it is not "
+                            f"a valid distribution and its expected value is undefined. "
+                            f"Provide branch probabilities that sum to 1 (or omit "
+                            f"them for an equal split)."
+                        )
+
                     # Normalize if probabilities don't sum to 1
-                    if total_prob > 0 and abs(total_prob - 1.0) > 0.01:
+                    if abs(total_prob - 1.0) > 0.01:
                         expected_value /= total_prob
 
                     # Apply risk adjustment
@@ -442,7 +474,7 @@ class SequentialDecisionEngine:
             return mean
         elif risk_tolerance == "averse":
             # Mean-standard-deviation penalty (sigma units), symmetric with the
-            # 'seeking' branch and _calculate_information_value which already use
+            # 'seeking' branch and _calculate_resolved_uncertainty which already use
             # sqrt(variance). D-13 units fix; coefficient is DOCTRINE-PENDING(Neil).
             # (variance == 0 is handled by the first branch, so sqrt is safe here.)
             return float(mean - RISK_AVERSION_COEFFICIENT * np.sqrt(variance))
@@ -470,10 +502,10 @@ class SequentialDecisionEngine:
                 # RW-6a: absent != zero. A child missing from node_values has an
                 # UNKNOWN continuation, not a zero one. The backward-induction
                 # caller resolves every child before computing variance, so this
-                # only fires from _calculate_information_value when a resolution
+                # only fires from _calculate_resolved_uncertainty when a resolution
                 # chance node feeds a non-terminal that induction never valued.
                 # Fabricating `value = immediate` (treating the unknown
-                # continuation as 0) silently corrupts information_value. Fail
+                # continuation as 0) silently corrupts resolved_uncertainty. Fail
                 # loud, matching the engine's absent-as-0 doctrine (see resolve()).
                 raise ValueError(
                     f"Sequential variance estimate references unvalued node "
@@ -616,15 +648,14 @@ class SequentialDecisionEngine:
         # Calculate expected total value
         root_value = self._get_root_value(graph_data, node_values)
 
-        # Estimate value distribution
-        value_std = abs(root_value) * 0.2  # Simplified estimate
-
+        # F4b (A3, 2026-07-22): the fabricated `value_distribution` is OMITTED. It
+        # reported normal params with std = 0.2 * |root_value| — a made-up spread
+        # presented as if measured, while backward induction is deterministic (it
+        # draws no noise). A genuine policy-value distribution is a modeling
+        # roadmap item.
         return Policy(
             stages=stage_policies,
             expected_total_value=root_value,
-            value_distribution=PolicyDistribution(
-                type="normal", parameters={"mean": root_value, "std": value_std}
-            ),
         )
 
     def _generate_condition_string(self, edge: Dict, graph_data: Dict) -> str:
@@ -736,8 +767,9 @@ class SequentialDecisionEngine:
                         )
                     )
 
-            # Calculate information value
-            info_value = self._calculate_information_value(
+            # F4c: magnitude of outcome dispersion resolved at this stage (sqrt of
+            # summed chance-node variance) — NOT a value of information.
+            resolved_uncertainty = self._calculate_resolved_uncertainty(
                 stage, graph_data, node_values, discount_factor
             )
 
@@ -753,31 +785,36 @@ class SequentialDecisionEngine:
                     stage_index=stage.stage_index,
                     stage_label=stage.stage_label,
                     options_at_stage=options,
-                    information_value=info_value,
+                    resolved_uncertainty=resolved_uncertainty,
                     optimal_waiting_value=waiting_value,
                 )
             )
 
         return analyses
 
-    def _calculate_information_value(
+    def _calculate_resolved_uncertainty(
         self,
         stage: DecisionStage,
         graph_data: Dict[str, Any],
         node_values: Dict[str, float],
         discount_factor: float,
     ) -> float:
-        """
-        Calculate value of information revealed at this stage.
+        """Magnitude of outcome dispersion resolved at this stage.
 
-        This is the difference between value with and without information.
+        F4c (A3, 2026-07-22): this was named `_calculate_information_value` and its
+        result was emitted as `information_value` with the claim that it is "the
+        difference between value with and without information." It is NOT: it
+        computes sqrt(Σ variance) over the chance nodes resolving at this stage —
+        a payoff-unit magnitude of how dispersed the outcomes are, with no
+        with-information vs without-information comparison anywhere. A true value
+        of information (E[value|info] − E[value]) is a modeling roadmap item; the
+        honest quantity is relabeled accordingly.
         """
         # Get chance nodes that resolve at this stage
         resolution_nodes = stage.resolution_nodes
         if not resolution_nodes:
             return 0
 
-        # Simplified: estimate as variance reduction
         total_variance: float = 0.0
         for node_id in resolution_nodes:
             if node_id in graph_data["nodes"]:
@@ -789,7 +826,7 @@ class SequentialDecisionEngine:
                     )
                     total_variance += variance
 
-        # Value of information is roughly sqrt of variance reduction
+        # sqrt of total variance = standard-deviation-scale dispersion magnitude
         return np.sqrt(total_variance) if total_variance > 0 else 0
 
     def _calculate_waiting_value(
@@ -809,14 +846,15 @@ class SequentialDecisionEngine:
         # Get value at stage 0 without waiting
         root_value = self._get_root_value(graph_data, node_values)
 
-        # Estimate value with perfect information (upper bound)
-        # This would require resolving all uncertainty first
-        info_value_stage1 = self._calculate_information_value(
+        # F4c: proxy = discount_factor × the next stage's resolved-uncertainty
+        # magnitude. This is a discounted outcome-dispersion magnitude, NOT a true
+        # option value (the wait-and-decide vs commit-now difference); the field
+        # description discloses that.
+        next_stage_uncertainty = self._calculate_resolved_uncertainty(
             stages[1] if len(stages) > 1 else stages[0], graph_data, node_values, discount_factor
         )
 
-        # Waiting value is discounted information value
-        waiting_value = discount_factor * info_value_stage1
+        waiting_value = discount_factor * next_stage_uncertainty
 
         return waiting_value
 
@@ -987,6 +1025,17 @@ class SequentialDecisionEngine:
         node_type = node["type"]
         label = node.get("label", node_id)
         optimal_action = optimal_actions.get(node_id)
+        # TODO(A3 F4:990, pre-mount hardening): this is the absent-as-0 fabrication
+        # class — a node not valued by backward induction is reported with
+        # expected_value 0 rather than failing loud. The live paths (_build_policy
+        # :575-585, _generate_stage_analyses) direct-index node_values[...] and let
+        # a missing value raise. This method feeds ONLY the policy-tree route,
+        # which is DARK (not mounted; see main.py selective-mount note), so the
+        # blast radius is 0 today. Left as .get(...,0) deliberately: the route's
+        # fallback root (:164-166) can select an unvalued node, so a naive
+        # direct-index would raise on a legitimate-but-unmounted request; a proper
+        # fix (guarantee the chosen root is valued, then direct-index + fail-loud)
+        # is deferred to when policy-tree is runtime-verified and mounted.
         expected_value = node_values.get(node_id, 0)
 
         # Build children

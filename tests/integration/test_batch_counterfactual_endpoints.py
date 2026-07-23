@@ -46,7 +46,8 @@ async def test_batch_counterfactual_basic(client):
         assert "intervention" in scenario
         assert "prediction" in scenario
         assert "uncertainty" in scenario
-        assert "robustness" in scenario
+        # A3: the fabricated per-scenario `robustness` block is omitted.
+        assert "robustness" not in scenario
 
     # Check predictions are ordered
     baseline_rev = data["scenarios"][0]["prediction"]["point_estimate"]
@@ -170,7 +171,8 @@ async def test_batch_counterfactual_comparison(client):
     # Check comparison
     comparison = data["comparison"]
     assert "best_outcome" in comparison
-    assert "most_robust" in comparison
+    # A3: `most_robust` is omitted (it ranked by the fabricated constant score).
+    assert "most_robust" not in comparison
     assert "marginal_gains" in comparison
     assert "ranking" in comparison
 

@@ -573,72 +573,31 @@ class PredictionResults(BaseModel):
     )
 
 
-class UncertaintySource(BaseModel):
-    """Source of uncertainty in the analysis."""
-
-    factor: str = Field(..., description="Name of uncertainty factor")
-    impact: float = Field(..., description="Contribution to variance")
-    confidence: ConfidenceLevel = Field(..., description="Confidence in this estimate")
-    explanation: str = Field(..., description="Plain English explanation")
-    basis: str = Field(..., description="Evidence source for this factor")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "factor": "Brand perception lag",
-                "impact": 3000,
-                "confidence": "medium",
-                "explanation": "Brand changes take 2-4 weeks to affect revenue",
-                "basis": "Historical data from 3 previous price changes",
-            }
-        }
-    }
-
-
 class UncertaintyBreakdown(BaseModel):
-    """Breakdown of uncertainty sources."""
+    """Overall uncertainty of the counterfactual outcome.
+
+    A3 (2026-07-22): the per-factor `sources` list is OMITTED — it reported each
+    exogenous input's OWN variance as its "impact" on the outcome, a
+    leverage-blind fabrication whose ranking inverted the true sensitivity. Only
+    the honest overall level (from the OUTCOME distribution) is emitted.
+    """
 
     overall: UncertaintyLevel = Field(..., description="Overall uncertainty level")
-    sources: List[UncertaintySource] = Field(..., description="Individual uncertainty sources")
-
-
-class CriticalAssumption(BaseModel):
-    """A critical assumption affecting robustness."""
-
-    assumption: str = Field(..., description="The assumption being tested")
-    impact: float = Field(..., description="How much result changes if assumption is wrong")
-    confidence: ConfidenceLevel = Field(..., description="Confidence in this assumption")
-    recommendation: str = Field(..., description="Recommended action")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "assumption": "Customer price sensitivity remains constant",
-                "impact": 15000,
-                "confidence": "medium",
-                "recommendation": "Consider A/B testing before full rollout",
-            }
-        }
-    }
-
-
-class RobustnessAnalysis(BaseModel):
-    """Robustness analysis results."""
-
-    score: RobustnessLevel = Field(..., description="Overall robustness score")
-    critical_assumptions: List[CriticalAssumption] = Field(
-        ...,
-        description="Critical assumptions",
-    )
 
 
 class CounterfactualResponse(BaseModel):
-    """Response model for counterfactual analysis endpoint."""
+    """Response model for counterfactual analysis endpoint.
+
+    A3 (2026-07-22): the `robustness` block is OMITTED — its "critical
+    assumptions" reported a flat abs(baseline*0.15) "perturbation" and a score
+    that was a constant function of the baseline sign; it neither parsed nor
+    perturbed the structural equations, so it implemented none of its label. A
+    real assumption-sensitivity analysis is a modeling roadmap item.
+    """
 
     scenario: ScenarioDescription = Field(..., description="Scenario description")
     prediction: PredictionResults = Field(..., description="Prediction results")
     uncertainty: UncertaintyBreakdown = Field(..., description="Uncertainty breakdown")
-    robustness: RobustnessAnalysis = Field(..., description="Robustness analysis")
     explanation: ExplanationMetadata = Field(..., description="Explanation metadata")
 
     # Metadata for determinism and reproducibility
@@ -661,26 +620,6 @@ class CounterfactualResponse(BaseModel):
                 },
                 "uncertainty": {
                     "overall": "medium",
-                    "sources": [
-                        {
-                            "factor": "Brand perception lag",
-                            "impact": 3000,
-                            "confidence": "medium",
-                            "explanation": "Brand changes take time",
-                            "basis": "Historical data",
-                        }
-                    ],
-                },
-                "robustness": {
-                    "score": "moderate",
-                    "critical_assumptions": [
-                        {
-                            "assumption": "Price sensitivity constant",
-                            "impact": 15000,
-                            "confidence": "medium",
-                            "recommendation": "A/B test before rollout",
-                        }
-                    ],
                 },
                 "explanation": {
                     "summary": "Revenue likely increases by £45k-£55k",
@@ -1117,7 +1056,10 @@ class ScenarioResult(BaseModel):
     label: Optional[str] = Field(default=None, description="Human-readable label")
     prediction: PredictionResults = Field(..., description="Prediction results")
     uncertainty: UncertaintyBreakdown = Field(..., description="Uncertainty breakdown")
-    robustness: RobustnessAnalysis = Field(..., description="Robustness analysis")
+    # A3 (2026-07-22): the per-scenario `robustness` block is OMITTED — it was the
+    # same fabricated CounterfactualEngine robustness (constant score + flat
+    # perturbation) this remediation removed from the single /counterfactual
+    # response.
 
     model_config = {
         "json_schema_extra": {
@@ -1136,11 +1078,6 @@ class ScenarioResult(BaseModel):
                 },
                 "uncertainty": {
                     "overall": "medium",
-                    "sources": [],
-                },
-                "robustness": {
-                    "score": "robust",
-                    "critical_assumptions": [],
                 },
             }
         }
@@ -1197,10 +1134,15 @@ class InteractionAnalysis(BaseModel):
 
 
 class ScenarioComparison(BaseModel):
-    """Comparison of multiple scenarios."""
+    """Comparison of multiple scenarios.
+
+    A3 (2026-07-22): `most_robust` is OMITTED — it ranked scenarios by the
+    fabricated counterfactual robustness score (a constant), so the "most robust"
+    verdict was meaningless. Outcome-based ranking (best_outcome / ranking /
+    marginal_gains) is retained.
+    """
 
     best_outcome: str = Field(..., description="Scenario ID with best outcome")
-    most_robust: str = Field(..., description="Scenario ID with highest robustness")
     marginal_gains: Dict[str, float] = Field(
         ...,
         description="Marginal uplift of each scenario vs baseline",
@@ -1211,7 +1153,6 @@ class ScenarioComparison(BaseModel):
         "json_schema_extra": {
             "example": {
                 "best_outcome": "combined",
-                "most_robust": "baseline",
                 "marginal_gains": {
                     "increase": 5000,
                     "combined": 12000,
@@ -1276,12 +1217,11 @@ class BatchCounterfactualResponse(BaseModel):
                 },
                 "comparison": {
                     "best_outcome": "increase",
-                    "most_robust": "baseline",
                     "marginal_gains": {"increase": 5000},
                     "ranking": ["increase", "baseline"],
                 },
                 "explanation": {
-                    "summary": "Price increase yields £5k marginal gain with moderate robustness",
+                    "summary": "Price increase yields £5k marginal gain",
                     "reasoning": "10% price increase produces consistent revenue uplift across scenarios",
                     "technical_basis": "Batch counterfactual analysis with interaction detection",
                     "assumptions": ["Structural equations correct", "No external shocks"],
@@ -3052,27 +2992,19 @@ class StagePolicy(BaseModel):
     }
 
 
-class PolicyDistribution(BaseModel):
-    """Distribution of policy values."""
-
-    type: str = Field(..., description="Distribution type")
-    parameters: Dict[str, float] = Field(..., description="Distribution parameters")
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {"type": "normal", "parameters": {"mean": 45000, "std": 15000}}
-        }
-    }
-
-
 class Policy(BaseModel):
-    """Optimal policy across all stages."""
+    """Optimal policy across all stages.
+
+    A3 (2026-07-22): `value_distribution` is OMITTED — it reported normal params
+    with std = 0.2 * |expected_total_value|, a fabricated spread presented as if
+    measured (backward induction is deterministic). A real policy-value
+    distribution is a modeling roadmap item.
+    """
 
     stages: List[StagePolicy] = Field(..., description="Policy for each stage")
     expected_total_value: float = Field(
         ..., description="Expected total value following this policy"
     )
-    value_distribution: PolicyDistribution = Field(..., description="Distribution of total value")
 
     model_config = {
         "json_schema_extra": {
@@ -3086,10 +3018,6 @@ class Policy(BaseModel):
                     }
                 ],
                 "expected_total_value": 45000.0,
-                "value_distribution": {
-                    "type": "normal",
-                    "parameters": {"mean": 45000, "std": 15000},
-                },
             }
         }
     }
@@ -3118,16 +3046,34 @@ class StageOption(BaseModel):
 
 
 class StageAnalysis(BaseModel):
-    """Analysis for a single stage."""
+    """Analysis for a single stage.
+
+    A3 (2026-07-22): `information_value` was relabeled `resolved_uncertainty`
+    (F4c) — the quantity is sqrt(Σ variance) of the chance nodes resolving at this
+    stage (a payoff-unit magnitude of outcome dispersion), NOT a value of
+    information (E[value|info] − E[value]). The old name and its "difference
+    between value with and without information" claim were unsupported.
+    """
 
     stage_index: int = Field(..., description="Stage index", ge=0)
     stage_label: str = Field(..., description="Human-readable stage label")
     options_at_stage: List[StageOption] = Field(
         ..., description="Options available at this stage with analysis"
     )
-    information_value: float = Field(..., description="Value of information revealed at this stage")
+    resolved_uncertainty: float = Field(
+        ...,
+        description="Magnitude of outcome dispersion resolved at this stage: "
+        "sqrt of the summed variance of the chance nodes that resolve here, in "
+        "payoff units. This is NOT a value of information (E[value|info] − "
+        "E[value]); it does not compare a with-information policy to a "
+        "without-information one.",
+    )
     optimal_waiting_value: Optional[float] = Field(
-        default=None, description="Value of delaying decision (if applicable)"
+        default=None,
+        description="Proxy for the value of delaying the stage-0 decision, "
+        "computed as discount_factor × the next stage's `resolved_uncertainty`. "
+        "It is a discounted outcome-dispersion magnitude, NOT a true option value "
+        "(the difference between the wait-and-decide and commit-now policies).",
     )
 
     model_config = {
@@ -3151,7 +3097,7 @@ class StageAnalysis(BaseModel):
                         "total_value": 20000,
                     },
                 ],
-                "information_value": 15000.0,
+                "resolved_uncertainty": 15000.0,
                 "optimal_waiting_value": 20000.0,
             }
         }
@@ -3208,10 +3154,6 @@ class SequentialAnalysisResponse(BaseModel):
                         },
                     ],
                     "expected_total_value": 45000.0,
-                    "value_distribution": {
-                        "type": "normal",
-                        "parameters": {"mean": 45000, "std": 15000},
-                    },
                 },
                 "stage_analyses": [
                     {
@@ -3226,7 +3168,7 @@ class SequentialAnalysisResponse(BaseModel):
                                 "total_value": 45000,
                             }
                         ],
-                        "information_value": 15000.0,
+                        "resolved_uncertainty": 15000.0,
                         "optimal_waiting_value": 20000.0,
                     }
                 ],

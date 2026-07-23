@@ -67,6 +67,19 @@ counterfactual_router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
+
+def _is_intervention_valid(intervention: dict) -> bool:
+    """A counterfactual intervention must carry at least one non-null do() value.
+
+    Shared by the conformal route and the main /counterfactual route (F3d, A3
+    2026-07-22): a counterfactual with no do() operator is not a counterfactual.
+    Returns False for an empty dict or an all-null dict.
+    """
+    if not intervention:
+        return False
+    return any(v is not None for v in intervention.values())
+
+
 # Initialize services
 causal_validator = CausalValidator()
 counterfactual_engine = CounterfactualEngine()
@@ -226,10 +239,9 @@ async def validate_causal_model(
     Analyzes what would happen under a counterfactual intervention.
 
     Provides:
-    - Point estimates and confidence intervals
-    - Uncertainty breakdown by source
-    - Robustness analysis
-    - Critical assumptions
+    - Point estimate (median of the Monte Carlo outcome samples)
+    - Percentile-based prediction interval (named `confidence_interval`)
+    - Overall outcome uncertainty level
 
     **Use when:** Evaluating "what if" scenarios for decision making.
     """,
@@ -257,12 +269,26 @@ async def analyze_counterfactual(
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
     try:
+        # F3d (A3, 2026-07-22): reject an empty/all-null intervention on the
+        # interventional route — a counterfactual with no do() is not a
+        # counterfactual. Raise ValueError so D-12(cf) maps it to a clean 422
+        # (mirrors the conformal route's semantic-required guard).
+        if not _is_intervention_valid(request.intervention):
+            raise ValueError(
+                "Intervention is required and cannot be empty for counterfactual "
+                "analysis: provide at least one variable/value pair to intervene "
+                'on (do()), e.g. {"Price": 15}.'
+            )
+
+        # F11 (A3, 2026-07-22): log intervention NAMES + count only, never the raw
+        # client-supplied values (their private scenario inputs).
         logger.info(
             "counterfactual_request",
             extra={
                 "request_id": request_id,
                 "outcome": request.outcome,
-                "intervention": request.intervention,
+                "intervention_keys": sorted(request.intervention),
+                "intervention_count": len(request.intervention),
                 "num_variables": len(request.model.variables),
             },
         )
@@ -278,7 +304,6 @@ async def analyze_counterfactual(
                 "request_id": request_id,
                 "point_estimate": result.prediction.point_estimate,
                 "uncertainty": result.uncertainty.overall,
-                "robustness": result.robustness.score,
             },
         )
 
@@ -385,7 +410,6 @@ async def analyze_batch_counterfactual(
                 "request_id": request_id,
                 "num_scenarios": len(result.scenarios),
                 "best_outcome": result.comparison.best_outcome,
-                "most_robust": result.comparison.most_robust,
                 "num_interactions": len(result.interactions.pairwise) if result.interactions else 0,
             },
         )
@@ -455,21 +479,18 @@ async def conformal_counterfactual_prediction(
     # Generate request ID if not provided
     request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
 
-    # Validate intervention is present and non-empty
-    # This is a counterfactual endpoint - intervention is semantically required
-    def _is_intervention_valid(intervention: dict) -> bool:
-        """Check if intervention has at least one non-null value."""
-        if not intervention:
-            return False
-        # Check if all values are None/null
-        return any(v is not None for v in intervention.values())
-
+    # Validate intervention is present and non-empty (module-level
+    # _is_intervention_valid, shared with the main /counterfactual route).
+    # This is a counterfactual endpoint - intervention is semantically required.
     if not _is_intervention_valid(request.intervention):
+        # F11 (A3, 2026-07-22): log intervention NAMES + count only, never the raw
+        # values (consistency with the other two counterfactual log sites).
         logger.warning(
             "conformal_counterfactual_invalid_intervention",
             extra={
                 "request_id": request_id,
-                "intervention": request.intervention,
+                "intervention_keys": sorted(request.intervention),
+                "intervention_count": len(request.intervention),
                 "reason": "empty_or_null_intervention",
             },
         )

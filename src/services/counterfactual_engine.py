@@ -19,15 +19,12 @@ from src.models.requests import CounterfactualRequest
 from src.models.responses import (
     ConfidenceInterval,
     CounterfactualResponse,
-    CriticalAssumption,
     PredictionResults,
-    RobustnessAnalysis,
     ScenarioDescription,
     SensitivityRange,
     UncertaintyBreakdown,
-    UncertaintySource,
 )
-from src.models.shared import ConfidenceLevel, RobustnessLevel, UncertaintyLevel
+from src.models.shared import UncertaintyLevel
 from src.services.explanation_generator import ExplanationGenerator
 from src.utils.determinism import canonical_hash, make_deterministic
 from src.utils.rng import SeededRNG
@@ -90,12 +87,18 @@ class CounterfactualEngine:
         # Create per-request RNG for thread-safe determinism
         rng = make_deterministic(request.model_dump())
 
+        # F11 (A3, 2026-07-22): NEVER log raw intervention values — they are the
+        # client's private scenario inputs. Log only the sorted intervention
+        # variable NAMES + a count; the R-004 correlation key is the
+        # request_hash (canonical_hash) already logged one line above, which is a
+        # digest, not a recoverable value.
         logger.info(
             "counterfactual_analysis_started",
             extra={
                 "request_hash": canonical_hash(request.model_dump()),
                 "outcome": request.outcome,
-                "intervention": request.intervention,
+                "intervention_keys": sorted(request.intervention),
+                "intervention_count": len(request.intervention),
                 "seed": rng.seed,
             },
         )
@@ -113,11 +116,12 @@ class CounterfactualEngine:
             # Compute prediction results
             prediction = self._compute_prediction(samples, request.outcome)
 
-            # Analyze uncertainty sources
+            # Analyze overall outcome uncertainty (F3a/F3c, A3 2026-07-22: the
+            # per-factor `sources` breakdown is OMITTED — it labeled each input's
+            # own variance as its "impact" on the outcome, a leverage-blind
+            # fabrication whose ranking inverts. Only the honest overall level,
+            # derived from the OUTCOME samples' coefficient of variation, remains.)
             uncertainty = self._analyze_uncertainty(request, samples)
-
-            # Perform robustness analysis
-            robustness = self._analyze_robustness(request, prediction.point_estimate)
 
             # Create scenario description
             scenario = ScenarioDescription(
@@ -126,7 +130,11 @@ class CounterfactualEngine:
                 context=request.context,
             )
 
-            # Generate explanation
+            # Generate explanation. Robustness is OMITTED (F3c): the former
+            # "robustness/critical-assumptions" block reported a flat
+            # abs(baseline*0.15) "perturbation" and a score that was a constant
+            # function of the baseline sign — neither parsed or perturbed the
+            # equations, so it implemented none of its label.
             explanation = self.explanation_generator.generate_counterfactual_explanation(
                 outcome=request.outcome,
                 intervention=request.intervention,
@@ -134,14 +142,12 @@ class CounterfactualEngine:
                 ci_lower=prediction.confidence_interval.lower,
                 ci_upper=prediction.confidence_interval.upper,
                 uncertainty_level=uncertainty.overall.value,
-                robustness_level=robustness.score.value,
             )
 
             return CounterfactualResponse(
                 scenario=scenario,
                 prediction=prediction,
                 uncertainty=uncertainty,
-                robustness=robustness,
                 explanation=explanation,
             )
 
@@ -163,7 +169,28 @@ class CounterfactualEngine:
         failure: raise ValueError so the route's D-12(cf) handler maps it to a clean
         422 naming the unresolved variable. Mirrors phase4's
         `_require_valued_decision_node`. Single source of the message.
+
+        Also rejects (F2) a variable set in BOTH `intervention` and `context`:
+        do(X) and observe(X) are contradictory, and the sampler's write order
+        lets context silently overwrite the intervention.
         """
+        # F2 (A3, 2026-07-22): do(X) and observe(X) are contradictory. A variable
+        # in BOTH `intervention` and `context` is a client-input defect — the
+        # sampler applies the intervention and then the context OVER it (write
+        # order), so a declared do(X=10) is silently computed at X=context
+        # (Y=2X with intervention X=10 + context X=3 returns 6, not 20). Reject
+        # BEFORE sampling with a clean 422 (route D-12(cf)) naming the colliding
+        # variable(s), rather than returning a plausible-looking wrong value.
+        collisions = sorted(set(request.intervention) & set(request.context or {}))
+        if collisions:
+            raise ValueError(
+                f"Variable(s) {collisions} appear in BOTH `intervention` and "
+                f"`context`: do({', '.join(collisions)}) and "
+                f"observe({', '.join(collisions)}) are contradictory. An "
+                f"intervention FIXES a variable; a context OBSERVES it. Provide "
+                f"each variable in exactly one of `intervention` or `context`."
+            )
+
         resolvable = (
             set(request.model.distributions)
             | set(request.intervention)
@@ -607,146 +634,45 @@ class CounterfactualEngine:
         self, request: CounterfactualRequest, samples: Dict[str, np.ndarray]
     ) -> UncertaintyBreakdown:
         """
-        Break down sources of uncertainty.
+        Classify the OVERALL uncertainty of the outcome from its Monte Carlo
+        samples' coefficient of variation.
+
+        F3a/F3c (A3, 2026-07-22): the former per-factor `sources` breakdown is
+        OMITTED. It labeled each exogenous input's OWN variance as its "impact"
+        on the outcome — a leverage-blind fabrication (a high-variance input with
+        a near-zero coefficient outranked a low-variance input with a large one),
+        so the ranking it published inverted the true sensitivity. Only the
+        honest overall level (from the OUTCOME distribution) remains. A real
+        variance-decomposition is a modeling roadmap item.
 
         Args:
             request: Counterfactual request
             samples: Monte Carlo samples
 
         Returns:
-            UncertaintyBreakdown with sources
+            UncertaintyBreakdown with the overall level only
         """
-        outcome_var = request.outcome
-        outcome_samples = samples[outcome_var]
-        total_variance = float(np.var(outcome_samples))
+        outcome_samples = samples[request.outcome]
+        mean_out = float(np.mean(outcome_samples))
+        std_out = float(np.std(outcome_samples))
 
-        sources: List[UncertaintySource] = []
-
-        # Analyze contribution from each exogenous variable
-        for var_name, dist in request.model.distributions.items():
-            # Estimate contribution to variance
-            # (simplified - in practice would use variance decomposition)
-            var_samples = samples.get(var_name, np.array([]))
-            if len(var_samples) > 0:
-                contribution = float(np.var(var_samples))
-
-                # Determine confidence based on distribution parameters
-                confidence = self._assess_distribution_confidence(dist.parameters)
-
-                # Create descriptive factor name
-                factor = self._format_factor_name(var_name)
-
-                sources.append(
-                    UncertaintySource(
-                        factor=factor,
-                        impact=contribution,
-                        confidence=confidence,
-                        explanation=f"Uncertainty in {var_name} affects the outcome",
-                        basis=f"Distribution: {dist.type.value} with parameters {dist.parameters}",
-                    )
-                )
-
-        # Sort by impact (descending)
-        sources.sort(key=lambda x: x.impact, reverse=True)
-
-        # Determine overall uncertainty level
-        cv = (
-            np.std(outcome_samples) / abs(np.mean(outcome_samples))
-            if np.mean(outcome_samples) != 0
-            else 0
-        )
-        if cv < 0.1:
-            overall = UncertaintyLevel.LOW
-        elif cv < 0.3:
-            overall = UncertaintyLevel.MEDIUM
-        else:
-            overall = UncertaintyLevel.HIGH
-
-        return UncertaintyBreakdown(overall=overall, sources=sources[:5])  # Top 5 sources
-
-    def _analyze_robustness(
-        self, request: CounterfactualRequest, baseline_result: float
-    ) -> RobustnessAnalysis:
-        """
-        Analyze robustness to assumption changes.
-
-        Args:
-            request: Counterfactual request
-            baseline_result: Baseline prediction
-
-        Returns:
-            RobustnessAnalysis with critical assumptions
-        """
-        critical_assumptions: List[CriticalAssumption] = []
-
-        # Test structural equation assumptions
-        for var_name, equation in request.model.equations.items():
-            # Simple perturbation test - multiply coefficients by 1.3
-            impact = abs(baseline_result * 0.15)  # Simplified estimate
-
-            assumption_text = f"Structural equation for {var_name} is correctly specified"
-
-            critical_assumptions.append(
-                CriticalAssumption(
-                    assumption=assumption_text,
-                    impact=impact,
-                    confidence=ConfidenceLevel.MEDIUM,
-                    recommendation=f"Validate {var_name} equation with additional data if possible",
-                )
-            )
-
-        # Sort by impact
-        critical_assumptions.sort(key=lambda x: x.impact, reverse=True)
-
-        # Determine overall robustness
-        max_impact = max([a.impact for a in critical_assumptions], default=0)
-        if max_impact < abs(baseline_result * 0.1):
-            score = RobustnessLevel.ROBUST
-        elif max_impact < abs(baseline_result * 0.3):
-            score = RobustnessLevel.MODERATE
-        else:
-            score = RobustnessLevel.FRAGILE
-
-        # Return top 3 critical assumptions
-        return RobustnessAnalysis(
-            score=score,
-            critical_assumptions=critical_assumptions[:3],
-        )
-
-    def _assess_distribution_confidence(self, params: Dict[str, float]) -> ConfidenceLevel:
-        """
-        Assess confidence in a distribution based on its parameters.
-
-        Args:
-            params: Distribution parameters
-
-        Returns:
-            Confidence level
-        """
-        # Simple heuristic - if std/mean ratio is low, higher confidence
-        if "std" in params and "mean" in params:
-            cv = params["std"] / abs(params["mean"]) if params["mean"] != 0 else 1
+        # Overall level from the coefficient of variation of the OUTCOME samples.
+        # F3b (A3, 2026-07-22): when the mean is 0 the CV is UNDEFINED. The old
+        # code substituted cv=0 and reported LOW uncertainty — claiming high
+        # confidence for a value it could not actually assess. A genuinely
+        # degenerate outcome (std==0, e.g. a fully-intervened deterministic model)
+        # is legitimately zero-uncertainty (LOW); a non-zero spread around a zero
+        # mean has an undefined CV and must NOT be reported as LOW — fail safe to
+        # HIGH rather than fabricate confidence.
+        if mean_out != 0:
+            cv = std_out / abs(mean_out)
             if cv < 0.1:
-                return ConfidenceLevel.HIGH
+                overall = UncertaintyLevel.LOW
             elif cv < 0.3:
-                return ConfidenceLevel.MEDIUM
+                overall = UncertaintyLevel.MEDIUM
             else:
-                return ConfidenceLevel.LOW
+                overall = UncertaintyLevel.HIGH
+        else:
+            overall = UncertaintyLevel.LOW if std_out == 0 else UncertaintyLevel.HIGH
 
-        # For other distributions, default to medium
-        return ConfidenceLevel.MEDIUM
-
-    def _format_factor_name(self, var_name: str) -> str:
-        """
-        Format variable name into readable factor name.
-
-        Args:
-            var_name: Variable name
-
-        Returns:
-            Formatted factor name
-        """
-        # Convert snake_case or camelCase to Title Case
-        name = re.sub(r"_", " ", var_name)
-        name = re.sub(r"([a-z])([A-Z])", r"\1 \2", name)
-        return name.title()
+        return UncertaintyBreakdown(overall=overall)

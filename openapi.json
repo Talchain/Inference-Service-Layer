@@ -370,16 +370,6 @@
         "title": "ConfidenceInterval",
         "type": "object"
       },
-      "ConfidenceLevel": {
-        "description": "Confidence level for analysis results.",
-        "enum": [
-          "high",
-          "medium",
-          "low"
-        ],
-        "title": "ConfidenceLevel",
-        "type": "string"
-      },
       "ConfidenceProvenance": {
         "description": "Honest disclosure marker for a factor's `confidence` figure (S2).\n\nThe per-factor `confidence` is built from a PROVISIONAL stability->confidence\nmapping (STABILITY_CONFIDENCE_MAP and its blend weights) that is explicitly\nNOT research-validated \u2014 it is a Neil-gate-1 operational default pending\nscientific calibration. This marker rides alongside `confidence` so a\nconsumer can tell a provisional heuristic from a calibrated probability, and\nso any recalibration is a DISCLOSED, versioned change rather than a silent\nreweighting.\n\nContract:\n- `method_version` identifies the confidence method. Any change to the\n  mapping constants MUST bump it (enforced by the fingerprint guard in\n  tests/unit/test_confidence_provenance.py) \u2014 no silent reweighting.\n- `calibrated` stays False until a validated calibration exists; while it is\n  False, `confidence` must be read as a provisional stability heuristic, not\n  a calibrated probability.",
         "properties": {
@@ -771,7 +761,7 @@
         "type": "object"
       },
       "CounterfactualResponse": {
-        "description": "Response model for counterfactual analysis endpoint.",
+        "description": "Response model for counterfactual analysis endpoint.\n\nA3 (2026-07-22): the `robustness` block is OMITTED \u2014 its \"critical\nassumptions\" reported a flat abs(baseline*0.15) \"perturbation\" and a score\nthat was a constant function of the baseline sign; it neither parsed nor\nperturbed the structural equations, so it implemented none of its label. A\nreal assumption-sensitivity analysis is a modeling roadmap item.",
         "example": {
           "explanation": {
             "assumptions": [
@@ -793,17 +783,6 @@
               "pessimistic": 38000
             }
           },
-          "robustness": {
-            "critical_assumptions": [
-              {
-                "assumption": "Price sensitivity constant",
-                "confidence": "medium",
-                "impact": 15000,
-                "recommendation": "A/B test before rollout"
-              }
-            ],
-            "score": "moderate"
-          },
           "scenario": {
             "intervention": {
               "Price": 15
@@ -811,16 +790,7 @@
             "outcome": "Revenue"
           },
           "uncertainty": {
-            "overall": "medium",
-            "sources": [
-              {
-                "basis": "Historical data",
-                "confidence": "medium",
-                "explanation": "Brand changes take time",
-                "factor": "Brand perception lag",
-                "impact": 3000
-              }
-            ]
+            "overall": "medium"
           }
         },
         "properties": {
@@ -851,14 +821,6 @@
             ],
             "description": "Prediction results"
           },
-          "robustness": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RobustnessAnalysis"
-              }
-            ],
-            "description": "Robustness analysis"
-          },
           "scenario": {
             "allOf": [
               {
@@ -880,52 +842,9 @@
           "scenario",
           "prediction",
           "uncertainty",
-          "robustness",
           "explanation"
         ],
         "title": "CounterfactualResponse",
-        "type": "object"
-      },
-      "CriticalAssumption": {
-        "description": "A critical assumption affecting robustness.",
-        "example": {
-          "assumption": "Customer price sensitivity remains constant",
-          "confidence": "medium",
-          "impact": 15000,
-          "recommendation": "Consider A/B testing before full rollout"
-        },
-        "properties": {
-          "assumption": {
-            "description": "The assumption being tested",
-            "title": "Assumption",
-            "type": "string"
-          },
-          "confidence": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ConfidenceLevel"
-              }
-            ],
-            "description": "Confidence in this assumption"
-          },
-          "impact": {
-            "description": "How much result changes if assumption is wrong",
-            "title": "Impact",
-            "type": "number"
-          },
-          "recommendation": {
-            "description": "Recommended action",
-            "title": "Recommendation",
-            "type": "string"
-          }
-        },
-        "required": [
-          "assumption",
-          "impact",
-          "confidence",
-          "recommendation"
-        ],
-        "title": "CriticalAssumption",
         "type": "object"
       },
       "CritiqueV2": {
@@ -1247,18 +1166,18 @@
         "description": "Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome\nsamples the v2 engine already draws \u2014 no new sampling.\n\nTwo metric families with DIFFERENT (deliberate) sample populations:\n\n* ``cvar_10`` / ``p05`` \u2014 MARGINAL tail metrics of this option's own outcome\n  samples, taken from the SAME post-``_apply_auto_scaled_noise`` population as\n  ``outcome.p10/p50/p90/mean`` (consistent, conservative/noised distribution).\n* ``expected_regret`` \u2014 a JOINT (cross-option) metric, computed from the\n  PRE-noise Common-Random-Numbers population \u2014 the same samples that produce\n  ``win_probability``. Auto-scaled noise draws INDEPENDENT per-option noise,\n  which breaks the CRN alignment this metric relies on, so it is NOT taken\n  from the noised samples (CODE-REVIEW-ISL F1).\n\nRides as a sibling to ``outcome`` and is present EXACTLY when the option's\nsamples are available at the emission locus (``outcome.percentiles_source ==\n'samples'``); otherwise omitted (absent, never a JSON null). All values are\nin the SAME units as ``outcome.mean`` / ``outcome.p10`` (no normalisation).",
         "properties": {
           "cvar_10": {
-            "description": "Expected shortfall: the MEAN of the worst 10% (lowest) outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of the worst decile cannot exceed the decile boundary).",
+            "description": "Expected shortfall: the MEAN of the worst 10% (lowest) outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of the worst decile cannot exceed the decile boundary). POPULATION: computed from the POST-``_apply_auto_scaled_noise`` outcome samples \u2014 the SAME (noised) population as outcome.p10/p50/p90/mean and p05, and DIFFERENT from expected_regret (which is pre-noise).",
             "title": "Cvar 10",
             "type": "number"
           },
           "expected_regret": {
-            "description": "Joint expected regret: mean over MC samples of (best-option outcome - this option's outcome) at the SAME underlying draw (Common Random Numbers). >= 0 by construction; ~0 for the option that wins each sample. Computed from the PRE-noise CRN-aligned population (the same samples as win_probability), NOT the auto-scaled-noise outcome samples used by cvar_10/p05 \u2014 independent per-option noise would break the CRN alignment this metric requires.",
+            "description": "Joint expected regret: mean over MC samples of (best-option outcome - this option's outcome) at the SAME underlying draw (Common Random Numbers). >= 0 by construction; ~0 for the option that wins each sample. POPULATION: the PRE-noise CRN-aligned samples (the same population as win_probability), NOT the post-auto-scaled-noise outcome samples used by cvar_10/p05 \u2014 independent per-option noise would break the CRN alignment this metric requires. (So within one downside{} object the two metric families ride DIFFERENT populations: expected_regret is pre-noise; cvar_10/p05 are post-noise.)",
             "minimum": 0.0,
             "title": "Expected Regret",
             "type": "number"
           },
           "p05": {
-            "description": "5th-percentile outcome \u2014 extends the p10/p50/p90 family downward, computed with the SAME percentile convention as p10.",
+            "description": "5th-percentile outcome \u2014 extends the p10/p50/p90 family downward, computed with the SAME percentile convention as p10. POPULATION: the POST-``_apply_auto_scaled_noise`` (noised) samples, like outcome.p10/p50/p90/mean and cvar_10 \u2014 and DIFFERENT from expected_regret (pre-noise).",
             "title": "P05",
             "type": "number"
           }
@@ -4283,7 +4202,7 @@
         "type": "object"
       },
       "Policy": {
-        "description": "Optimal policy across all stages.",
+        "description": "Optimal policy across all stages.\n\nA3 (2026-07-22): `value_distribution` is OMITTED \u2014 it reported normal params\nwith std = 0.2 * |expected_total_value|, a fabricated spread presented as if\nmeasured (backward induction is deterministic). A real policy-value\ndistribution is a modeling roadmap item.",
         "example": {
           "expected_total_value": 45000.0,
           "stages": [
@@ -4296,14 +4215,7 @@
               "stage_index": 0,
               "stage_label": "Investment"
             }
-          ],
-          "value_distribution": {
-            "parameters": {
-              "mean": 45000,
-              "std": 15000
-            },
-            "type": "normal"
-          }
+          ]
         },
         "properties": {
           "expected_total_value": {
@@ -4318,53 +4230,13 @@
             },
             "title": "Stages",
             "type": "array"
-          },
-          "value_distribution": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/PolicyDistribution"
-              }
-            ],
-            "description": "Distribution of total value"
           }
         },
         "required": [
           "stages",
-          "expected_total_value",
-          "value_distribution"
+          "expected_total_value"
         ],
         "title": "Policy",
-        "type": "object"
-      },
-      "PolicyDistribution": {
-        "description": "Distribution of policy values.",
-        "example": {
-          "parameters": {
-            "mean": 45000,
-            "std": 15000
-          },
-          "type": "normal"
-        },
-        "properties": {
-          "parameters": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "description": "Distribution parameters",
-            "title": "Parameters",
-            "type": "object"
-          },
-          "type": {
-            "description": "Distribution type",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "parameters"
-        ],
-        "title": "PolicyDistribution",
         "type": "object"
       },
       "PredictionResults": {
@@ -4641,43 +4513,6 @@
         ],
         "title": "ResponseMetadataV2",
         "type": "object"
-      },
-      "RobustnessAnalysis": {
-        "description": "Robustness analysis results.",
-        "properties": {
-          "critical_assumptions": {
-            "description": "Critical assumptions",
-            "items": {
-              "$ref": "#/components/schemas/CriticalAssumption"
-            },
-            "title": "Critical Assumptions",
-            "type": "array"
-          },
-          "score": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/RobustnessLevel"
-              }
-            ],
-            "description": "Overall robustness score"
-          }
-        },
-        "required": [
-          "score",
-          "critical_assumptions"
-        ],
-        "title": "RobustnessAnalysis",
-        "type": "object"
-      },
-      "RobustnessLevel": {
-        "description": "Robustness level for analysis results.",
-        "enum": [
-          "robust",
-          "moderate",
-          "fragile"
-        ],
-        "title": "RobustnessLevel",
-        "type": "string"
       },
       "RobustnessRequest": {
         "description": "Request for FACET robustness analysis.",
@@ -5763,7 +5598,6 @@
               "pricing": 1
             }
           },
-          "monte_carlo_samples": 1000,
           "risk_tolerance": "neutral",
           "stages": [
             {
@@ -5806,14 +5640,6 @@
               }
             ],
             "description": "Sequential decision graph"
-          },
-          "monte_carlo_samples": {
-            "default": 1000,
-            "description": "Number of Monte Carlo samples for uncertainty",
-            "maximum": 10000.0,
-            "minimum": 100.0,
-            "title": "Monte Carlo Samples",
-            "type": "integer"
           },
           "risk_tolerance": {
             "anyOf": [
@@ -5879,20 +5705,12 @@
                 "stage_index": 1,
                 "stage_label": "Pricing"
               }
-            ],
-            "value_distribution": {
-              "parameters": {
-                "mean": 45000,
-                "std": 15000
-              },
-              "type": "normal"
-            }
+            ]
           },
           "schema_version": "sequential.v1",
           "sensitivity_to_timing": "medium",
           "stage_analyses": [
             {
-              "information_value": 15000.0,
               "optimal_waiting_value": 20000.0,
               "options_at_stage": [
                 {
@@ -5903,6 +5721,7 @@
                   "total_value": 45000
                 }
               ],
+              "resolved_uncertainty": 15000.0,
               "stage_index": 0,
               "stage_label": "Investment Decision"
             }
@@ -6250,9 +6069,8 @@
         "type": "object"
       },
       "StageAnalysis": {
-        "description": "Analysis for a single stage.",
+        "description": "Analysis for a single stage.\n\nA3 (2026-07-22): `information_value` was relabeled `resolved_uncertainty`\n(F4c) \u2014 the quantity is sqrt(\u03a3 variance) of the chance nodes resolving at this\nstage (a payoff-unit magnitude of outcome dispersion), NOT a value of\ninformation (E[value|info] \u2212 E[value]). The old name and its \"difference\nbetween value with and without information\" claim were unsupported.",
         "example": {
-          "information_value": 15000.0,
           "optimal_waiting_value": 20000.0,
           "options_at_stage": [
             {
@@ -6270,15 +6088,11 @@
               "total_value": 20000
             }
           ],
+          "resolved_uncertainty": 15000.0,
           "stage_index": 0,
           "stage_label": "Investment Decision"
         },
         "properties": {
-          "information_value": {
-            "description": "Value of information revealed at this stage",
-            "title": "Information Value",
-            "type": "number"
-          },
           "optimal_waiting_value": {
             "anyOf": [
               {
@@ -6288,7 +6102,7 @@
                 "type": "null"
               }
             ],
-            "description": "Value of delaying decision (if applicable)",
+            "description": "Proxy for the value of delaying the stage-0 decision, computed as discount_factor \u00d7 the next stage's `resolved_uncertainty`. It is a discounted outcome-dispersion magnitude, NOT a true option value (the difference between the wait-and-decide and commit-now policies).",
             "title": "Optimal Waiting Value"
           },
           "options_at_stage": {
@@ -6298,6 +6112,11 @@
             },
             "title": "Options At Stage",
             "type": "array"
+          },
+          "resolved_uncertainty": {
+            "description": "Magnitude of outcome dispersion resolved at this stage: sqrt of the summed variance of the chance nodes that resolve here, in payoff units. This is NOT a value of information (E[value|info] \u2212 E[value]); it does not compare a with-information policy to a without-information one.",
+            "title": "Resolved Uncertainty",
+            "type": "number"
           },
           "stage_index": {
             "description": "Stage index",
@@ -6315,7 +6134,7 @@
           "stage_index",
           "stage_label",
           "options_at_stage",
-          "information_value"
+          "resolved_uncertainty"
         ],
         "title": "StageAnalysis",
         "type": "object"
@@ -6506,7 +6325,7 @@
         "type": "object"
       },
       "UncertaintyBreakdown": {
-        "description": "Breakdown of uncertainty sources.",
+        "description": "Overall uncertainty of the counterfactual outcome.\n\nA3 (2026-07-22): the per-factor `sources` list is OMITTED \u2014 it reported each\nexogenous input's OWN variance as its \"impact\" on the outcome, a\nleverage-blind fabrication whose ranking inverted the true sensitivity. Only\nthe honest overall level (from the OUTCOME distribution) is emitted.",
         "properties": {
           "overall": {
             "allOf": [
@@ -6515,19 +6334,10 @@
               }
             ],
             "description": "Overall uncertainty level"
-          },
-          "sources": {
-            "description": "Individual uncertainty sources",
-            "items": {
-              "$ref": "#/components/schemas/UncertaintySource"
-            },
-            "title": "Sources",
-            "type": "array"
           }
         },
         "required": [
-          "overall",
-          "sources"
+          "overall"
         ],
         "title": "UncertaintyBreakdown",
         "type": "object"
@@ -6541,55 +6351,6 @@
         ],
         "title": "UncertaintyLevel",
         "type": "string"
-      },
-      "UncertaintySource": {
-        "description": "Source of uncertainty in the analysis.",
-        "example": {
-          "basis": "Historical data from 3 previous price changes",
-          "confidence": "medium",
-          "explanation": "Brand changes take 2-4 weeks to affect revenue",
-          "factor": "Brand perception lag",
-          "impact": 3000
-        },
-        "properties": {
-          "basis": {
-            "description": "Evidence source for this factor",
-            "title": "Basis",
-            "type": "string"
-          },
-          "confidence": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ConfidenceLevel"
-              }
-            ],
-            "description": "Confidence in this estimate"
-          },
-          "explanation": {
-            "description": "Plain English explanation",
-            "title": "Explanation",
-            "type": "string"
-          },
-          "factor": {
-            "description": "Name of uncertainty factor",
-            "title": "Factor",
-            "type": "string"
-          },
-          "impact": {
-            "description": "Contribution to variance",
-            "title": "Impact",
-            "type": "number"
-          }
-        },
-        "required": [
-          "factor",
-          "impact",
-          "confidence",
-          "explanation",
-          "basis"
-        ],
-        "title": "UncertaintySource",
-        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -6714,7 +6475,7 @@
     },
     "/api/v1/causal/counterfactual": {
       "post": {
-        "description": "Analyzes what would happen under a counterfactual intervention.\n\n    Provides:\n    - Point estimates and confidence intervals\n    - Uncertainty breakdown by source\n    - Robustness analysis\n    - Critical assumptions\n\n    **Use when:** Evaluating \"what if\" scenarios for decision making.",
+        "description": "Analyzes what would happen under a counterfactual intervention.\n\n    Provides:\n    - Point estimate (median of the Monte Carlo outcome samples)\n    - Percentile-based prediction interval (named `confidence_interval`)\n    - Overall outcome uncertainty level\n\n    **Use when:** Evaluating \"what if\" scenarios for decision making.",
         "operationId": "analyze_counterfactual_api_v1_causal_counterfactual_post",
         "parameters": [
           {

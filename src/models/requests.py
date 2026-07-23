@@ -2020,9 +2020,10 @@ class SequentialAnalysisRequest(BaseModel):
         description="Risk tolerance: 'averse', 'neutral', 'seeking'",
         pattern="^(averse|neutral|seeking)$",
     )
-    monte_carlo_samples: int = Field(
-        default=1000, description="Number of Monte Carlo samples for uncertainty", ge=100, le=10000
-    )
+    # A3 (2026-07-22): `monte_carlo_samples` REMOVED (F4a). It was accepted,
+    # bounds-validated and documented but had ZERO readers — backward induction is
+    # deterministic and draws no samples, so mcs in {100, 1k, 10k} produced
+    # identical output. Advertising a knob that does nothing is dishonest.
 
     model_config = {
         "json_schema_extra": {
@@ -2089,7 +2090,6 @@ class SequentialAnalysisRequest(BaseModel):
                 ],
                 "discount_factor": 0.95,
                 "risk_tolerance": "neutral",
-                "monte_carlo_samples": 1000,
             }
         }
     }
