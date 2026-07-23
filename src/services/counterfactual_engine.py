@@ -465,6 +465,23 @@ class CounterfactualEngine:
                     f"Exogenous distribution for variable '{var_name}' (type "
                     f"'{dist.type.value}') is missing required parameter '{missing}'."
                 ) from e
+            except ValueError as e:
+                # Input hardening (F3): a client-supplied distribution parameter
+                # outside its valid domain — most reachably a NEGATIVE `std` on a
+                # normal, since the Distribution model does not constrain std >= 0,
+                # which numpy rejects as a bare `ValueError: scale < 0` — reaches
+                # the RNG helper as an un-actionable message that does not name the
+                # variable. Re-raise it NAMING the offending variable and its
+                # distribution (route D-12(cf) -> 422), preserving the underlying
+                # domain reason. Scoped to this single sample call: `_sample_
+                # distribution` only invokes numpy RNG helpers on client params, so
+                # any ValueError here is a client parameter-domain defect, not an
+                # internal bug (its sole internal ValueError, an unknown distribution
+                # type, is unreachable behind the Pydantic-validated enum).
+                raise ValueError(
+                    f"Exogenous distribution for variable '{var_name}' (type "
+                    f"'{dist.type.value}') has an invalid parameter: {e}."
+                ) from e
 
         # Apply intervention (set intervened variables to fixed values)
         for var_name, value in request.intervention.items():
