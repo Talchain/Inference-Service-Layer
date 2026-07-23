@@ -30,7 +30,7 @@ from src.models.robustness_v2 import (
     StrengthDistribution,
 )
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
-from src.utils.evppi import FactorEvppiEstimate
+from src.utils.evppi import REGRESSION_EVPPI_METHOD, FactorEvppiEstimate
 
 SQRT_2_OVER_PI = math.sqrt(2.0 / math.pi)
 
@@ -203,6 +203,75 @@ class TestClampDisclosure:
         # Emitted value is the bound rounded to 6 dp.
         assert theta["evppi"] == round(bound, 6)
         assert theta["evppi"] <= bound + 1e-6
+
+
+def _two_free_factor_request(n_samples=2000, seed=999):
+    """m is the lever (both options intervene); theta1 and theta2 are two FREE
+    uncertain factors, each with signal to the outcome. Both get factor_evppi rows.
+    Used to prove per-factor degradation: if one factor's estimator raises, the
+    OTHER factor's computable row must survive (hunter F-4)."""
+    nodes = [
+        NodeV2(id="theta1", kind="factor", label="T1", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="theta2", kind="factor", label="T2", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="m", kind="factor", label="M", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="outcome", kind="outcome", label="Out", observed_state=ObservedState(value=0.0)),
+    ]
+    edges = [
+        EdgeV2(**{"from": "theta1"}, to="m", strength=StrengthDistribution(mean=1.0, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "m"}, to="outcome", strength=StrengthDistribution(mean=1.0, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "theta1"}, to="outcome", strength=StrengthDistribution(mean=-0.5, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "theta2"}, to="outcome", strength=StrengthDistribution(mean=0.7, std=0.002), exists_probability=1.0),
+    ]
+    return RobustnessRequestV2(
+        graph=GraphV2(nodes=nodes, edges=edges),
+        options=[
+            InterventionOption(id="opt_pin", label="Pin m", interventions={"m": 0.0}),
+            InterventionOption(id="opt_free", label="Free", interventions={}),
+        ],
+        goal_node_id="outcome",
+        seed=seed,
+        n_samples=n_samples,
+        parameter_uncertainties=[
+            ParameterUncertainty(node_id="theta1", distribution="normal", std=2.0),
+            ParameterUncertainty(node_id="theta2", distribution="normal", std=2.0),
+        ],
+        include_voi=True,
+    )
+
+
+class TestPerFactorEstimatorDegrade:
+    """Hunter F-4: one factor whose estimator raises (e.g. poisoned ±inf theta ->
+    Polynomial.fit LinAlgError) must NOT drop the ENTIRE factor_evppi block — the
+    other factors' computable rows are kept, the failing factor is omitted."""
+
+    def test_one_factor_estimator_error_keeps_other_rows(self, monkeypatch):
+        real = analyzer_mod.factor_evppi_estimate
+        state = {"n": 0}
+
+        def flaky(theta, option_outcomes, *, seed, **kw):
+            # First non-lever factor processed raises like Polynomial.fit on inf
+            # theta; the rest compute normally via the real estimator.
+            state["n"] += 1
+            if state["n"] == 1:
+                raise __import__("numpy").linalg.LinAlgError(
+                    "SVD did not converge in Linear Least Squares"
+                )
+            return real(theta, option_outcomes, seed=seed, **kw)
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", flaky)
+        r = RobustnessAnalyzerV2().analyze(_two_free_factor_request())
+
+        # Pre-fix: the raise propagates out of _compute_factor_evppi, the outer
+        # except drops the WHOLE block -> factor_evppi is None (RED here).
+        # Post-fix: the failing factor is omitted, the computable factor's row is kept.
+        assert r.factor_evppi is not None, "whole factor_evppi block was dropped"
+        ids = {e["factor_id"] for e in r.factor_evppi}
+        # Exactly one of the two free factors failed; the other survives.
+        assert len(r.factor_evppi) == 1, f"expected 1 surviving row, got {ids}"
+        # The surviving row is a real, honest computation (has a method + status).
+        surviving = r.factor_evppi[0]
+        assert surviving["method"] == REGRESSION_EVPPI_METHOD
+        assert surviving["status"] in ("resolved", "below_resolution")
 
 
 class TestCorrelationEmission:

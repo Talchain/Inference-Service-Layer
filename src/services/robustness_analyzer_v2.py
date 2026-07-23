@@ -1871,6 +1871,10 @@ class RobustnessAnalyzerV2:
             # this is the exact cap the emission clamps to (with disclosure).
             finite_regrets = [r for r in pre_noise_expected_regret.values() if math.isfinite(r)]
             decision_evpi_bound = min(finite_regrets) if finite_regrets else None
+            # Per-factor estimator failures degrade IN-LOOP (that factor omitted,
+            # computable rows kept — hunter F-4). This outer guard is a last-resort
+            # for an unexpected WHOLE-call failure (not a per-factor estimator raise),
+            # preserving the never-500 contract; on legal input it is not reached.
             try:
                 factor_evppi = self._compute_factor_evppi(
                     request,
@@ -1880,7 +1884,7 @@ class RobustnessAnalyzerV2:
                     decision_evpi_bound,
                     correlation_active,
                 )
-            except Exception:  # pragma: no cover - defensive degrade-with-disclosure
+            except Exception:
                 self.logger.warning("factor_evppi_failed", exc_info=True)
                 factor_evppi = None
                 inference_warnings.append(
@@ -4611,7 +4615,20 @@ class RobustnessAnalyzerV2:
             floor_seed = int(
                 hashlib.sha256(f"{seed}:evppi:{fid}".encode()).hexdigest()[:8], 16
             )
-            est = factor_evppi_estimate(theta, pre_noise_option_outcomes, seed=floor_seed)
+            # Per-factor degrade (hunter F-4): a single factor whose estimator raises
+            # (e.g. a poisoned ±inf theta on a goal-disconnected factor makes
+            # Polynomial.fit raise LinAlgError) must NOT drop the WHOLE factor_evppi
+            # block. Omit THIS factor (missing != zero — no fabricated value) and keep
+            # every other factor's perfectly-computable row.
+            try:
+                est = factor_evppi_estimate(theta, pre_noise_option_outcomes, seed=floor_seed)
+            except Exception:
+                self.logger.warning(
+                    "factor_evppi_estimator_error",
+                    extra={"factor_id": fid},
+                    exc_info=True,
+                )
+                continue
 
             # Howard non-negativity clamp — DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by
             # construction for the regression estimator (LS mean-preservation +
