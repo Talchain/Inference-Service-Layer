@@ -7,6 +7,7 @@ with Monte Carlo simulation for uncertainty quantification.
 
 import ast
 import logging
+import math
 import operator
 import re
 import threading
@@ -254,6 +255,40 @@ class CounterfactualEngine:
                 f"the observational baseline for a question that was never "
                 f"evaluated. Provide each key from the model's known variables, or "
                 f"add the variable to the model."
+            )
+
+        # C1 residual (F-1, A3 2026-07-23): reject a NON-FINITE intervention/context
+        # VALUE (NaN or +/-inf) BEFORE sampling. The unknown-key guard above admits
+        # any key in the model's known set, and `_require_finite_outcome` checks only
+        # the OUTCOME samples — so a non-finite value on a declared-but-DISCONNECTED
+        # variable (one no equation reads) passes both guards, leaves the outcome
+        # finite, and is echoed back into `scenario.intervention`/`scenario.context`.
+        # Starlette's JSONResponse renders with `allow_nan=False` and raises OUTSIDE
+        # the route try -> an unhandled 500 (ISL_COMPUTATION_ERROR, retryable:true —
+        # which is false: it fails deterministically forever). That is a client-input
+        # defect, not a server incident: raise ValueError -> route D-12(cf) -> a clean
+        # 422. Validated HERE, the single validation home, alongside the do/observe
+        # and unknown-key guards.
+        #
+        # Redaction (F11 discipline): the message names the offending KEY(s) and the
+        # category word "non-finite" only — never the request VALUE (a client's
+        # private scenario input; this message is surfaced to the client AND written
+        # to the route's `counterfactual_invalid_input` warning log). Values are
+        # `Dict[str, float]` per CounterfactualRequest, so `math.isfinite` applies.
+        nonfinite_keys = sorted(
+            {
+                key
+                for source in (request.intervention, request.context or {})
+                for key, value in source.items()
+                if not math.isfinite(value)
+            }
+        )
+        if nonfinite_keys:
+            raise ValueError(
+                f"Intervention/context key(s) {nonfinite_keys} have a non-finite "
+                f"value (NaN or +/-infinity). A non-finite input cannot be used in a "
+                f"structural computation and would fail response serialization. "
+                f"Provide a finite numeric value for each key."
             )
 
         resolvable = (

@@ -1,25 +1,36 @@
-"""A3 honesty-residuals (2026-07-23): reject-not-fabricate for unknown
-intervention/context keys on the LIVE /api/v1/causal/counterfactual route.
+"""A3 honesty-residuals (2026-07-23): reject-not-fabricate for malformed
+intervention/context INPUTS on the LIVE /api/v1/causal/counterfactual route.
 
-The F3d residual: an intervention (or context) key naming a variable that is
-ABSENT from the structural model silently no-ops. `_run_fixed_monte_carlo`
-writes `samples[key] = np.full(...)`, but nothing ever reads it, so the model
-returns the OBSERVATIONAL BASELINE with HTTP 200 — a plausible answer to a
-question that was never evaluated (a client typo like {"Q": 5} on a model of
-X,Z,Y). The `context` channel has the identical hole (same unread np.full write).
+Two residual classes, both closed in the single validation home
+(`CounterfactualEngine._require_resolvable_outcome`, which already carries the
+PR#93 do/observe collision guard):
 
-Fix: validate intervention AND context keys against the model's known-variable
-set (variables | equations | distributions) in the ONE validation home that
-already carries the PR#93 do/observe collision guard
-(`CounterfactualEngine._require_resolvable_outcome`). Unknown keys -> ValueError
--> route D-12(cf) -> 422 naming the unknown key(s) and the known-set SIZE. The
-message names KEYS + a size only; it never echoes request VALUES (they are the
-client's private scenario inputs; the message is also written to the
+1. The F3d residual (unknown KEY): an intervention (or context) key naming a
+   variable ABSENT from the structural model silently no-ops.
+   `_run_fixed_monte_carlo` writes `samples[key] = np.full(...)`, but nothing
+   ever reads it, so the model returns the OBSERVATIONAL BASELINE with HTTP 200 —
+   a plausible answer to a question that was never evaluated (a client typo like
+   {"Q": 5} on a model of X,Z,Y). The `context` channel has the identical hole.
+   Fix: validate keys against the model's known-variable set (variables |
+   equations | distributions) -> unknown keys ValueError -> route D-12(cf) -> 422
+   naming the unknown key(s) and the known-set SIZE.
+
+2. The C1 residual (non-finite VALUE, F-1): a NON-FINITE intervention/context
+   value (NaN or +/-inf) on a declared-but-DISCONNECTED variable (one no equation
+   reads) passes the unknown-key AND finite-outcome guards, leaves the outcome
+   finite, is echoed into `scenario.intervention`/`scenario.context`, and crashes
+   Starlette's `allow_nan=False` JSON render OUTSIDE the route try -> an unhandled
+   500 (ISL_COMPUTATION_ERROR, retryable:true — which is false: it fails forever).
+   Fix: sweep intervention/context VALUES for non-finiteness -> ValueError -> a
+   clean 422 naming the offending KEY(s).
+
+Both messages name KEYS (+ a size for class 1) only; they NEVER echo request
+VALUES (client-private scenario inputs; the message is also written to the
 `counterfactual_invalid_input` warning log).
 
-RED-first: `test_unknown_intervention_key_returns_422` and
-`test_unknown_context_key_returns_422` FAIL at HEAD (route returns 200 with the
-observational baseline) and pass after the fix (422).
+RED-first: `test_unknown_*_key_returns_422` FAIL at HEAD with 200 (observational
+baseline); the `TestNonFiniteInterventionValues` tests FAIL at HEAD with 500
+(serialization crash, retryable:true). All pass after the fix (422).
 """
 
 import pytest
@@ -182,3 +193,139 @@ class TestKnownKeyPositiveControls:
         resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
         assert resp.status_code == 200, resp.text
         assert resp.json()["prediction"]["point_estimate"] == pytest.approx(120.0 + 500 * 15.0)
+
+
+# D is declared in `variables` but referenced by NO equation (Y depends only on
+# X); a non-finite value on D therefore leaves the outcome finite and slips past
+# both the unknown-key guard (D is "known") and the finite-outcome guard (Y is
+# finite) — the exact class the C1 non-finite sweep closes.
+def _disconnected_d_model() -> dict:
+    return {"variables": ["X", "Y", "D"], "equations": {"Y": "2 * X"}, "distributions": {}}
+
+
+class TestNonFiniteInterventionValues:
+    """C1 (F-1, 2026-07-23): non-finite intervention/context VALUE -> 500 today,
+    422 after the fix.
+
+    RED at HEAD: each request below returns 500 (ISL_COMPUTATION_ERROR,
+    retryable:true — Starlette allow_nan=False crash OUTSIDE the route try) before
+    the fix; a clean 422 (validation_failed, retryable:false) after.
+    """
+
+    @pytest.mark.asyncio
+    async def test_nonfinite_nan_intervention_returns_422(self, cf_client):
+        """do(D=NaN) on the disconnected D -> 500 at HEAD, 422 after."""
+        request = {
+            "model": _disconnected_d_model(),
+            "intervention": {"D": float("nan")},
+            "context": {"X": 5.0},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["reason"] == "validation_failed"
+        assert body["source"] == "isl"
+        # The HEAD 500 falsely advertised retryable:true (it fails forever). The
+        # 422 correction must NOT claim retryable.
+        assert body["retryable"] is False
+        assert "D" in body["message"]
+        assert "non-finite" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_nonfinite_nan_context_returns_422(self, cf_client):
+        """The context channel has the identical hole: observe(D=NaN) alongside a
+        valid do(X=5) -> 500 at HEAD, 422 after, naming D."""
+        request = {
+            "model": _disconnected_d_model(),
+            "intervention": {"X": 5.0},
+            "context": {"D": float("nan")},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["reason"] == "validation_failed"
+        assert body["retryable"] is False
+        assert "D" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_nonfinite_positive_infinity_returns_422(self, cf_client):
+        request = {
+            "model": _disconnected_d_model(),
+            "intervention": {"D": float("inf")},
+            "context": {"X": 5.0},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_nonfinite_negative_infinity_returns_422(self, cf_client):
+        request = {
+            "model": _disconnected_d_model(),
+            "intervention": {"D": float("-inf")},
+            "context": {"X": 5.0},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["retryable"] is False
+
+    @pytest.mark.asyncio
+    async def test_nonfinite_on_connected_variable_returns_422_naming_key(self, cf_client):
+        """do(X=NaN) where X FEEDS the outcome: the non-finite sweep now fires
+        first (before the finite-outcome guard), so the 422 names the offending
+        KEY 'X' rather than blaming 'the structural model'."""
+        request = {
+            "model": _disconnected_d_model(),
+            "intervention": {"X": float("nan")},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["retryable"] is False
+        assert "X" in body["message"]
+        assert "non-finite" in body["message"]
+
+    @pytest.mark.asyncio
+    async def test_nonfinite_message_names_key_not_covalues(self, cf_client):
+        """Redaction (F11): only the offending KEY is named. A finite sentinel
+        VALUE co-submitted on another known key must NOT appear in the message
+        (proves the guard names keys, not the intervention dict)."""
+        model = {
+            "variables": ["X", "Y", "D", "W"],
+            "equations": {"Y": "2 * X"},
+            "distributions": {},
+        }
+        request = {
+            "model": model,
+            "intervention": {"D": float("nan"), "W": _SENTINEL_VALUE},
+            "context": {"X": 5.0},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 422, resp.text
+        message = resp.json()["message"]
+        assert "D" in message
+        assert "non-finite" in message
+        # The finite co-value on W is never echoed.
+        assert str(_SENTINEL_VALUE) not in message
+        assert "424242" not in message
+
+    @pytest.mark.asyncio
+    async def test_finite_disconnected_value_still_200(self, cf_client):
+        """Positive control: a finite (even large) value on the disconnected D is
+        a legitimate no-op probe and still 200s with the exact baseline estimate
+        (Y = 2 * X = 10.0 at X=5)."""
+        request = {
+            "model": _disconnected_d_model(),
+            "intervention": {"D": 500000.0},
+            "context": {"X": 5.0},
+            "outcome": "Y",
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["prediction"]["point_estimate"] == pytest.approx(10.0)
