@@ -1210,6 +1210,11 @@ async def _analyze_robustness_v2_enhanced(
         # without metadata having been populated.
         builder.set_auto_noise_applied(v1_response.metadata.auto_noise_applied)
 
+        # B3-S1: surface the correlated-factors disclosure (Gaussian copula method,
+        # mandatory tail-independence caveat, any Higham PSD projection, suppressed-
+        # attribution manifest). None when correlation is inactive → absent on wire.
+        builder.set_correlation_model(v1_response.correlation_model)
+
         # T1-6: Path decomposition passthrough (additive; request-gated by
         # include_path_decomposition so it only appears when asked for).
         # Previously computed by the analyzer on request but dropped from the

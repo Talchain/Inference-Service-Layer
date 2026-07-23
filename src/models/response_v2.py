@@ -1034,6 +1034,97 @@ class PathDecompositionV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class CorrelationProjectionV2(BaseModel):
+    """PSD-repair disclosure for a client-supplied correlation matrix (B3-S1).
+
+    Present inside ``correlation_model.psd_projection`` ONLY when the assembled
+    correlation matrix was not positive-semidefinite and was projected to the
+    nearest correlation matrix (Higham 2002). Absent (null) when the input was
+    already PSD, so the presence of this block is itself the disclosure that the
+    supplied correlations were adjusted.
+    """
+
+    applied: bool = Field(
+        ..., description="Always true when this block is present (the matrix was projected)."
+    )
+    method: str = Field(
+        ...,
+        description="Projection method — 'higham_2002_nearest_correlation' (true "
+        "nearest-correlation via alternating eigenvalue projections).",
+    )
+    frobenius_distance: float = Field(
+        ...,
+        description="Frobenius norm of (projected - supplied) — how far the supplied "
+        "matrix was moved to reach the nearest valid correlation matrix.",
+    )
+    max_abs_off_diagonal_adjustment: float = Field(
+        ...,
+        description="Largest absolute change to any single off-diagonal correlation "
+        "entry during projection.",
+    )
+    iterations: int = Field(
+        ..., description="Alternating-projection iterations used to converge."
+    )
+
+    model_config = {"extra": "ignore"}
+
+
+class CorrelationModelV2(BaseModel):
+    """Disclosure block for the active factor-correlation model (B3-S1, D-23.4).
+
+    Present ONLY when the request supplied ``factor_correlations`` (independence
+    stays the silent default). It discloses the copula method, the MANDATORY
+    tail-independence caveat (load-bearing whenever the copula co-ships with the
+    downside/CVaR block), any PSD projection, and which independence-assuming
+    per-factor attributions were suppressed and why.
+    """
+
+    method: str = Field(
+        ...,
+        description="Correlation model — 'gaussian_copula_v1' (Gaussian copula over the "
+        "factors' existing marginals).",
+    )
+    active: bool = Field(
+        ..., description="Always true when this block is present."
+    )
+    correlated_factors: List[str] = Field(
+        ...,
+        description="Factor node IDs drawn jointly under the copula (canonical draw order).",
+    )
+    n_pairs: int = Field(..., description="Number of supplied pairwise correlations.")
+    tail_dependence: str = Field(
+        default="none",
+        description="Tail-dependence coefficient class of the copula — 'none' for the "
+        "Gaussian copula (zero upper/lower tail dependence).",
+    )
+    tail_dependence_note: str = Field(
+        ...,
+        description="MANDATORY caveat: the Gaussian copula has zero tail dependence, so "
+        "joint extreme co-movements may be understated and downside/CVaR can be "
+        "optimistic when factors are strongly correlated.",
+    )
+    psd_projection: Optional[CorrelationProjectionV2] = Field(
+        None,
+        description="Present only when the supplied matrix was not PSD and was projected "
+        "to the nearest correlation matrix (Higham 2002). Null/absent when the input was "
+        "already valid.",
+    )
+    suppressed_attributions: List[str] = Field(
+        default_factory=list,
+        description="Independence-assuming per-factor attributions omitted under active "
+        "correlation (e.g. factor_sensitivity, factor_evpi, conditional_winners). Absent "
+        "from the response, not null — this list names what was withheld.",
+    )
+    suppression_reason: str = Field(
+        default="not_separable_under_correlation",
+        description="Why the listed attributions were suppressed: per-factor "
+        "independence-assuming decompositions are not separable once factors are "
+        "correlated.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
 # =============================================================================
 # Main V2 Response
 # =============================================================================
@@ -1137,6 +1228,16 @@ class ISLResponseV2(BaseModel):
         "factor sensitivity, and the fragile-edge classification derived from them "
         "(currently the first option in the request). Disclosure only — consumers "
         "should surface that sensitivity results are relative to this option.",
+    )
+
+    # Correlated-factors disclosure (B3-S1 — additive optional). Present only when
+    # the request supplied factor_correlations (Gaussian copula active).
+    correlation_model: Optional[CorrelationModelV2] = Field(
+        None,
+        description="Disclosure of the active factor-correlation model (Gaussian copula): "
+        "method, mandatory tail-independence caveat, any PSD projection, and which "
+        "independence-assuming per-factor attributions were suppressed. Absent when "
+        "correlation is inactive (the independent-factor default).",
     )
 
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can

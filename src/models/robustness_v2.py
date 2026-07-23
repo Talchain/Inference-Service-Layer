@@ -26,6 +26,7 @@ from src.constants import (
 
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
 from src.models.response_v2 import (
+    CorrelationModelV2,
     CritiqueV2,
     InferenceWarning,
     StabilityThresholdsResponse,
@@ -1538,6 +1539,16 @@ class RobustnessResponseV2(BaseModel):
         "intervention targets: top-3 simple directed paths to the goal with signed structural "
         "contributions. Structural decomposition of the modelled effect, not a causal claim "
         "about realised outcomes. Gated by include_path_decomposition.",
+    )
+
+    # Correlated-factors disclosure (B3-S1). Present only when the request
+    # supplied factor_correlations (Gaussian copula active). Carries the tail-
+    # independence caveat, any Higham PSD projection, and the suppressed-
+    # attribution manifest through to the wire.
+    correlation_model: Optional[CorrelationModelV2] = Field(
+        None,
+        description="Disclosure of the active factor-correlation (Gaussian copula) model. "
+        "Absent when correlation is inactive (independent-factor default).",
     )
 
     model_config = {

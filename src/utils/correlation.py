@@ -29,7 +29,7 @@ by the marginal (copula) transform lives in ``FactorSampler`` (``math.erfc``).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
@@ -57,6 +57,17 @@ _CHOLESKY_EIGEN_FLOOR = 1e-8
 
 
 @dataclass(frozen=True)
+class ProjectionInfo:
+    """On-wire disclosure payload for a Higham nearest-correlation projection."""
+
+    applied: bool
+    method: str
+    frobenius_distance: float
+    max_abs_off_diagonal_adjustment: float
+    iterations: int
+
+
+@dataclass(frozen=True)
 class CorrelationPlan:
     """Everything ``FactorSampler`` needs for a joint copula draw.
 
@@ -64,12 +75,12 @@ class CorrelationPlan:
     (first appearance in ``parameter_uncertainties``). ``cholesky`` is the
     lower-triangular ``L`` with ``L @ L.T`` == the (possibly projected)
     correlation matrix. ``projection`` is ``None`` when the assembled matrix was
-    already PSD, else the on-wire disclosure payload for the Higham projection.
+    already PSD, else the disclosure payload for the Higham projection.
     """
 
     factor_order: List[str]
     cholesky: np.ndarray
-    projection: Optional[Dict[str, object]]
+    projection: Optional[ProjectionInfo]
 
 
 def assemble_correlation_matrix(
@@ -168,7 +179,7 @@ def build_correlation_plan(
 ) -> CorrelationPlan:
     """Assemble → PSD-check → (Higham project + disclose) → Cholesky."""
     matrix = assemble_correlation_matrix(factor_order, pairs)
-    projection: Optional[Dict[str, object]] = None
+    projection: Optional[ProjectionInfo] = None
     used = matrix
     if not is_positive_semidefinite(matrix):
         projected, iterations = nearest_correlation_higham(matrix)
@@ -177,13 +188,13 @@ def build_correlation_plan(
         off = diff.copy()
         np.fill_diagonal(off, 0.0)
         max_off = float(np.max(np.abs(off))) if off.size else 0.0
-        projection = {
-            "applied": True,
-            "method": HIGHAM_METHOD,
-            "frobenius_distance": frobenius_distance,
-            "max_abs_off_diagonal_adjustment": max_off,
-            "iterations": iterations,
-        }
+        projection = ProjectionInfo(
+            applied=True,
+            method=HIGHAM_METHOD,
+            frobenius_distance=frobenius_distance,
+            max_abs_off_diagonal_adjustment=max_off,
+            iterations=iterations,
+        )
         used = projected
     cholesky = _safe_cholesky(used)
     return CorrelationPlan(
