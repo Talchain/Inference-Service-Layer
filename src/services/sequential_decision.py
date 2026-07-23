@@ -804,12 +804,15 @@ class SequentialDecisionEngine:
             # replacing the deleted `optimal_waiting_value` (discount × sqrt(Σvar)
             # heuristic). Computed for this stage's decision node (the first valid
             # one, matching _build_policy) as E_C[max_a Q] − max_a E_C[Q] on the
-            # exact backward-induction tree. `stage_evpi_status` (F-3) discloses WHY
-            # a null value is null: absent when computed (incl. a real EVPI of 0);
-            # 'no_decision_node' when the stage has no decision to inform;
-            # 'skipped_joint_space_too_large' when the decide-after joint enumeration
-            # would exceed the safety cap (an honest skip of an auxiliary metric —
-            # the exact analysis itself is unaffected).
+            # backward-induction tree. `stage_evpi_status` discloses the value's
+            # status: absent (None) when COMPUTED and EXACT (incl. a real EVPI of 0,
+            # the identified single-chance case); 'no_decision_node' when the stage
+            # has no decision to inform (null value); 'skipped_joint_space_too_large'
+            # when the decide-after joint enumeration would exceed the safety cap
+            # (F-3 honest skip of an auxiliary metric, null value); or
+            # 'assumed_independent_coupling' with coupling_assumption populated (F1,
+            # D-23.11) when the value is COMPUTED but under an independence assumption
+            # across >=2 action-specific chance nodes that the tree does not identify.
             primary_decision = next(
                 (
                     nid
@@ -819,11 +822,17 @@ class SequentialDecisionEngine:
                 None,
             )
             if primary_decision is not None:
-                stage_evpi, stage_evpi_status = self._compute_stage_evpi(
-                    primary_decision, graph_data, node_values, discount_factor
+                stage_evpi, stage_evpi_status, coupling_assumption = (
+                    self._compute_stage_evpi(
+                        primary_decision, graph_data, node_values, discount_factor
+                    )
                 )
             else:
-                stage_evpi, stage_evpi_status = None, "no_decision_node"
+                stage_evpi, stage_evpi_status, coupling_assumption = (
+                    None,
+                    "no_decision_node",
+                    None,
+                )
 
             analyses.append(
                 StageAnalysis(
@@ -833,6 +842,7 @@ class SequentialDecisionEngine:
                     resolved_uncertainty=resolved_uncertainty,
                     stage_evpi=stage_evpi,
                     stage_evpi_status=stage_evpi_status,
+                    coupling_assumption=coupling_assumption,
                 )
             )
 
@@ -881,16 +891,20 @@ class SequentialDecisionEngine:
         graph_data: Dict[str, Any],
         node_values: Dict[str, float],
         discount_factor: float,
-    ) -> Tuple[Optional[float], Optional[str]]:
+    ) -> Tuple[Optional[float], Optional[str], Optional[str]]:
         """Honest per-stage EVPI (S3 — A3 VOI, D-23.8): the expected value of
         perfectly resolving the chance node(s) this decision faces BEFORE choosing,
         minus deciding without that information.
 
             stage_evpi = E_C[max_a Q(a | C)] − max_a E_C[Q(a)]   (>= 0, outcome units)
 
-        Returns ``(stage_evpi, status)``:
-        * ``(value, None)`` — computed (value may be a real 0.0);
-        * ``(None, "skipped_joint_space_too_large")`` — the decide-after joint
+        Returns ``(stage_evpi, status, coupling_assumption)``:
+        * ``(value, None, None)`` — computed EXACT value (may be a real 0.0); the
+          IDENTIFIED case (see below);
+        * ``(value, "assumed_independent_coupling", "independence_across_actions")``
+          — computed but under an UNIDENTIFIED independence assumption (F1, D-23.11);
+          the value is present but NOT exact for the supplied tree — see below;
+        * ``(None, "skipped_joint_space_too_large", None)`` — the decide-after joint
           enumeration ∏(branch counts) exceeds ``_STAGE_EVPI_JOINT_CELL_CAP``, an
           F-3 honest skip of this auxiliary metric (the exact O(nodes) analysis is
           untouched). The join size is measured multiplicatively with an
@@ -898,19 +912,42 @@ class SequentialDecisionEngine:
 
         This REPLACES the deleted ``optimal_waiting_value`` (a discount × sqrt(Σvar)
         dispersion heuristic dressed as an option value) with a real value of
-        information. Both legs are exact reads of the backward-induction tree the
-        engine already builds — no new sampling, no heuristic:
+        information. Both legs read the backward-induction tree the engine already
+        builds — no new sampling, no heuristic:
 
         * decide-now leg = ``node_values[decision]`` = ``max_a E_C[Q(a)]`` (the value
           the optimal policy maximises: commit the action before the chance resolves).
         * decide-after leg = ``E_C[max_a Q(a | C=outcome)]``: for each realised
           outcome of the immediate chance node(s) under the decision's actions,
-          re-pick the best action, then average over the (independent) chance
-          outcomes. Jensen's inequality makes it >= the decide-now leg.
+          re-pick the best action, then average over the chance outcomes. Jensen's
+          inequality makes it >= the decide-now leg.
 
         It is exactly 0 when one action dominates in every chance branch (perfect
         information never changes the choice) and when the decision faces no
         immediate chance node at all (nothing to resolve).
+
+        IDENTIFIABILITY (F1, D-23.11 — the joint law across actions is NOT in the
+        tree). The tree supplies only the MARGINAL outcome distribution under each
+        action. Two regimes:
+
+        * IDENTIFIED — the decision faces a SINGLE distinct chance node (one action
+          with a chance child, or all actions sharing one chance node). One shared
+          realised state C is resolved; the decide-after leg is an exact
+          ``E_C[max_a Q(a|C)]`` over that state. Returned with no status — EXACT.
+        * UNIDENTIFIED — >=2 mutually-exclusive actions each lead to their OWN
+          distinct chance node. The decide-after leg below takes ``itertools.product``
+          over those per-action marginals, i.e. it ASSUMES the potential outcome under
+          one action is INDEPENDENT of the potential outcome under another. The tree
+          does not identify that joint law — the same marginals also admit same-state
+          coupling (EVPI can be 0), opposite coupling (larger EVPI), etc. So the number
+          is one unrequested modelling choice, NOT exact for the supplied tree. Per
+          D-23.11 (disclose-and-status, NOT nullify — the value stays useful and the
+          endpoint stays live) it is returned WITH
+          ``status='assumed_independent_coupling'`` and
+          ``coupling_assumption='independence_across_actions'`` so a consumer never
+          reads it as identified/exact. (Doctrine alternative — require a shared
+          scenario variable, or emit status-only with a null value — is a Paul/Neil
+          flag; this implements disclose+value+status.)
 
         RISK POSTURE (documented choice; flagged for review): the legs use the
         engine's own risk-ADJUSTED ``node_values`` for every continuation, so each
@@ -929,7 +966,7 @@ class SequentialDecisionEngine:
 
         action_edges = edges.get(decision_node_id, [])
         if not action_edges:
-            return 0.0, None
+            return 0.0, None, None
 
         # The immediate chance node(s) directly under the decision's actions = the
         # uncertainty this decision faces. If none, perfect information is worth 0.
@@ -937,7 +974,7 @@ class SequentialDecisionEngine:
             nodes.get(e["to"], {}).get("type") == "chance" for e in action_edges
         )
         if not has_chance:
-            return 0.0, None
+            return 0.0, None, None
 
         # decide-now leg is exactly what backward induction stored for the decision.
         decide_now = node_values[decision_node_id]
@@ -1003,12 +1040,28 @@ class SequentialDecisionEngine:
         for _, branches in resolved:
             joint_cells *= len(branches)
             if joint_cells > _STAGE_EVPI_JOINT_CELL_CAP:
-                return None, "skipped_joint_space_too_large"
+                return None, "skipped_joint_space_too_large", None
 
-        # Enumerate the JOINT outcome space of the resolved (independent) chance
-        # nodes. Under each joint outcome an action keeps its unconditional Q unless
-        # its child IS one of the resolved chance nodes, in which case it takes that
-        # node's realised branch value; then max over actions, average by joint prob.
+        # F1 IDENTIFIABILITY (D-23.11). The tree gives only the per-action MARGINAL
+        # chance distribution. If the decide-after leg is a product over >=2 DISTINCT
+        # chance nodes (each under its own mutually-exclusive action), that product
+        # SILENTLY ASSUMES independence of the potential outcomes across actions — a
+        # joint law the tree does NOT identify (the same marginals also admit
+        # same-state or opposite coupling, with different EVPIs). A single distinct
+        # chance node (one action with a chance child, or all actions sharing one
+        # chance node) resolves ONE shared realised state and IS identified. Disclose
+        # the assumption on the emitted value rather than labelling it exact (ruling:
+        # disclose-and-status, not nullify).
+        distinct_chance_children = {cid for cid, _ in resolved}
+        assumes_independence = len(distinct_chance_children) >= 2
+
+        # Enumerate the JOINT outcome space of the resolved chance nodes. When there
+        # are >=2 distinct chance nodes this product treats them as INDEPENDENT (the
+        # F1 assumption disclosed above, `assumes_independence`); with a single
+        # distinct chance node it is the exact E_C[max_a Q(a|C)] over one shared state.
+        # Under each joint outcome an action keeps its unconditional Q unless its child
+        # IS one of the resolved chance nodes, in which case it takes that node's
+        # realised branch value; then max over actions, average by joint prob.
         e_after = 0.0
         for combo in itertools.product(*[branches for _, branches in resolved]):
             joint_p = 1.0
@@ -1029,7 +1082,14 @@ class SequentialDecisionEngine:
                     best = q
             e_after += joint_p * best
 
-        return max(0.0, e_after - decide_now), None
+        stage_evpi_value = max(0.0, e_after - decide_now)
+        if assumes_independence:
+            return (
+                stage_evpi_value,
+                "assumed_independent_coupling",
+                "independence_across_actions",
+            )
+        return stage_evpi_value, None, None
 
     def _compute_value_of_flexibility(
         self,
