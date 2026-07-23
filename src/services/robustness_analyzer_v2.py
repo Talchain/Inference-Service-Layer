@@ -2415,7 +2415,20 @@ class RobustnessAnalyzerV2:
                 continue
 
             samples_array = np.array(samples)
-            outcome_std = float(np.std(samples_array))
+
+            # Compute the noise std over the FINITE samples only. Over the whole
+            # array a single non-finite sample makes np.std → nan/inf, and
+            # rng.normal(0, nan) then poisons EVERY sample — destroying the option's
+            # finite majority too (all-nan → downside omitted, mean non-finite).
+            # Masking (mirroring the downside percentile family, which filters to
+            # finite_cleaned) keeps the std honest; non-finite entries are left
+            # as-is for the downstream finite-mask machinery (n_valid_samples,
+            # finite_cleaned percentiles, per-index downside regret).
+            finite_mask = np.isfinite(samples_array)
+            finite_samples = samples_array[finite_mask]
+            if finite_samples.size == 0:
+                continue  # no finite sample to scale noise from
+            outcome_std = float(np.std(finite_samples))
 
             # If std ≈ 0, skip noise (no model uncertainty to match).
             # Tolerance handles floating-point noise from identical intervention values.
@@ -2437,7 +2450,13 @@ class RobustnessAnalyzerV2:
             noise = np.array(
                 [rng.normal(0, outcome_std * noise_multiplier) for _ in range(len(samples))]
             )
-            option_outcomes[option_id] = (samples_array + noise).tolist()
+            # Add noise to the FINITE samples only; leave non-finite entries as-is.
+            # The RNG draw count is unchanged (len(samples)), and on the all-finite
+            # path (the norm) finite_mask is all-True so this is byte-identical to
+            # samples_array + noise — goldens are unmoved.
+            noised = samples_array.copy()
+            noised[finite_mask] = samples_array[finite_mask] + noise[finite_mask]
+            option_outcomes[option_id] = noised.tolist()
             any_noise_added = True
 
         return option_outcomes, any_noise_added

@@ -34,6 +34,14 @@ from src.models.response_v2 import (
 )
 
 
+# Distribution families the Gaussian-copula marginal transform supports (B3-S1).
+# ALLOWLIST, not a blocklist: the correlation validator rejects any family not in
+# this set with a typed 422, so a future distribution family fails loud at request
+# validation rather than reaching _copula_transform's fail-closed branch (which the
+# enhanced handler maps to a 500). Keep in lockstep with FactorSampler._copula_transform.
+_CORRELATION_SUPPORTED_DISTRIBUTIONS = frozenset({"normal", "uniform"})
+
+
 # =============================================================================
 # Enums
 # =============================================================================
@@ -882,10 +890,12 @@ class RobustnessRequestV2(BaseModel):
 
         - a referenced factor is not a graph node (unknown factor id),
         - a referenced factor has no parameter_uncertainty (nothing to correlate),
-        - a referenced factor's distribution is point_mass (zero variance — a
-          correlation is ill-defined; STOP-gate rather than approximate),
-        - a self-pair (factor_a == factor_b) with rho != 1.0 (a factor is
-          perfectly correlated with itself by definition),
+        - a referenced factor's distribution is not in the supported allowlist
+          {normal, uniform} (point_mass has zero variance; any other family has no
+          copula marginal transform — allowlisted so a new family fails loud here),
+        - a self-pair (factor_a == factor_b), any rho (a factor is trivially
+          correlated with itself; the pair declares no cross-factor dependence yet
+          would activate the correlation regime — B3 P3-2),
         - a duplicate unordered pair {a, b} (redundant or conflicting).
 
         ``rho`` bounds are enforced by the FactorCorrelation field itself.
@@ -901,15 +911,19 @@ class RobustnessRequestV2(BaseModel):
         for corr in self.factor_correlations:
             a, b = corr.factor_a, corr.factor_b
 
-            # Self-pair: only a redundant rho==1.0 is tolerated (diagonal no-op).
+            # Self-pair: rejected outright, any rho (B3 P3-2). A factor is
+            # trivially perfectly correlated with itself, so a self-pair expresses
+            # no dependence between distinct factors — yet supplying one still
+            # ACTIVATES the correlation regime (correlation_model disclosure +
+            # suppression of the independence-assuming per-factor attributions).
+            # That is a withhold-for-nothing, so a self-pair is never valid input.
             if a == b:
-                if corr.rho != 1.0:
-                    raise ValueError(
-                        "factor_correlations: self-correlation for factor "
-                        f"'{a}' must have rho=1.0 (a factor is perfectly "
-                        "correlated with itself)"
-                    )
-                # rho == 1.0 self-pair is a no-op; still range/existence-checked below.
+                raise ValueError(
+                    "factor_correlations: self-correlation is not permitted for "
+                    f"factor '{a}' (a factor is trivially correlated with itself; "
+                    "declaring the pair expresses no dependence between distinct "
+                    "factors)"
+                )
 
             for factor_id in (a, b):
                 if factor_id not in node_ids:
@@ -922,11 +936,15 @@ class RobustnessRequestV2(BaseModel):
                         "has no parameter_uncertainty; correlation requires both "
                         "factors to carry a sampled uncertainty"
                     )
-                if dist_by_factor[factor_id] == "point_mass":
+                dist = dist_by_factor[factor_id]
+                if dist not in _CORRELATION_SUPPORTED_DISTRIBUTIONS:
+                    # Allowlist (B3 INFO-2): only normal/uniform marginals have a
+                    # copula transform. point_mass (zero variance) and any future
+                    # family are rejected here rather than 500ing mid-analysis.
                     raise ValueError(
-                        "factor_correlations: correlation not supported for "
-                        f"distribution type 'point_mass' (factor '{factor_id}' has "
-                        "zero variance)"
+                        "factor_correlations: correlation is only supported for "
+                        "factors with a normal or uniform distribution; factor "
+                        f"'{factor_id}' has distribution '{dist}'"
                     )
 
             if a != b:

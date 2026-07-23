@@ -1,5 +1,14 @@
 #!/bin/bash
 # Generate TypeScript types and client from OpenAPI schema
+#
+# NOTE (A3 hygiene batch, 2026-07-23): the previously-committed generated output
+# under clients/typescript/ was DELETED. It was auto-generated, ancient-stale
+# (typed the pre-#93 wire), and had no package.json, no CI, and no importer —
+# a stale mirror is a trap for future readers. This generator is kept so the
+# client can be regenerated DELIBERATELY if a consumer ever needs it: running
+# this script recreates the whole clients/typescript/ directory from the current
+# openapi.json. Do not run it casually — re-commit generated output only when a
+# real consumer exists.
 
 set -e
 
