@@ -93,4 +93,9 @@ class TestCacheDeterminismMatrix:
         assert body["reason"] == "validation_failed"
         assert body["source"] == "isl"
         assert body["retryable"] is False
-        assert "log" in body["message"]
+        # F6 / D-23.15: the redacted message names the DEFINED variable being
+        # evaluated (Y) + category; the client equation TEXT (the referenced
+        # `log`) is not echoed. Determinism is asserted above (r1.json()==r2.json()).
+        assert "Y" in body["message"]
+        assert "equation" in body["message"].lower()
+        assert "log" not in body["message"]
