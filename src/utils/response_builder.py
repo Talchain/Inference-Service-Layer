@@ -106,7 +106,9 @@ class ResponseBuilder:
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
         self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
         self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
-        self.factor_evpi: Optional[list] = None  # EVPI per factor (enhancement)
+        # S2 (D-23.8) HONEST RELABEL: per-factor win-probability sensitivity (was
+        # factor_evpi — NOT value-of-information). Enhancement passthrough.
+        self.p_win_sensitivity: Optional[list] = None
         # Decision-level EVPI (S1 — A3 VOI, D-23.8): min_o expected_regret[o] in
         # outcome units. None until set from the option regret population; absent
         # (exclude_none) on the wire when no regret population exists.
@@ -143,14 +145,14 @@ class ResponseBuilder:
         robustness: Optional[RobustnessResultV2] = None,
         factor_sensitivity: Optional[List[FactorSensitivityV2]] = None,
         stability_thresholds: Optional[StabilityThresholdsResponse] = None,
-        factor_evpi: Optional[list] = None,
+        p_win_sensitivity: Optional[list] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
         self.robustness = robustness
         self.factor_sensitivity = factor_sensitivity
         self.stability_thresholds = stability_thresholds
-        self.factor_evpi = factor_evpi
+        self.p_win_sensitivity = p_win_sensitivity
 
     def set_conditional_winners(
         self, conditional_winners: Optional[List[ConditionalWinnerV2]]
@@ -278,7 +280,7 @@ class ResponseBuilder:
             factor_sensitivity=self.factor_sensitivity,
             conditional_winners=self.conditional_winners,
             stability_thresholds=self.stability_thresholds,  # 3C
-            factor_evpi=self.factor_evpi,
+            p_win_sensitivity=self.p_win_sensitivity,  # S2 — A3 VOI relabel (D-23.8)
             decision_evpi=self.decision_evpi,  # S1 — A3 VOI (D-23.8)
             path_decomposition=self.path_decomposition,  # T1-6
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5

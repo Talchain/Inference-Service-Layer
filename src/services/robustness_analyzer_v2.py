@@ -150,6 +150,16 @@ MARGINAL_K_SAMPLES = 100
 EVPI_NOISE_FLOOR_Z = 1.96
 EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
 
+# S2 (D-23.8) HONEST RELABEL method tag for the win-probability sensitivity block
+# (emitted as ``p_win_sensitivity`` — the wire block that was mislabelled
+# ``factor_evpi``). The quantity is a decision-held-fixed win-probability delta at
+# the factor's mean, computed with its OWN MC redraw — NOT value-of-information.
+# The tag makes the method self-describing on the wire so no consumer can read the
+# number as EVPI. Internal identifiers (``_compute_evpi``, ``EVPI_*`` budget/
+# noise constants, log event names) retain their EVPI naming as an implementation
+# detail — this tag governs what the WIRE calls the quantity.
+P_WIN_SENSITIVITY_METHOD = "p_win_delta_at_mean_v1"
+
 # Per-factor EVPI Monte Carlo depth cap: EVPI uses min(request.n_samples,
 # EVPI_SAMPLE_CAP) draws per pass. Paul-ruled lenient defaults 2026-07-17:
 # raised 500 → 2000 (EVPI was the noisiest displayed number — a hard 500-
@@ -1756,16 +1766,26 @@ class RobustnessAnalyzerV2:
         recommended_option_id = max(option_wins, key=lambda k: option_wins[k])
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
-        # Compute EVPI per factor if requested. OPTIONAL phase — gated at entry AND
-        # (Codex F7) governed by an internal wall-clock deadline once started, so it
-        # degrades-with-disclosure instead of running unbounded past the budget.
-        # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor EVPI
-        # removes one factor's uncertainty while its correlated partners stay
-        # uncertain, but learning that factor also resolves the correlated ones,
-        # so the individual EVPIs are neither additive nor separable. Omitted with
-        # the correlation_model disclosure marker (group-level VOI is a later
-        # slice, per D-23.4).
-        factor_evpi = None
+        # Compute the per-factor win-probability sensitivity if requested. OPTIONAL
+        # phase — gated at entry AND (Codex F7) governed by an internal wall-clock
+        # deadline once started, so it degrades-with-disclosure instead of running
+        # unbounded past the budget.
+        # B3-S1 (D-23.4): SUPPRESSED under active correlation — this OAT-style
+        # win-probability delta fixes one factor at its mean while its correlated
+        # partners stay uncertain, an off-manifold move that mis-attributes shared
+        # variance. Omitted with the correlation_model disclosure marker. (Note: the
+        # NEW factor_evppi below is a conditional-expectation quantity computed on
+        # the joint copula samples and is EMITTED under correlation — see that block.)
+        # S2 (D-23.8) HONEST RELABEL: this phase produces ``p_win_sensitivity``
+        # (was mislabelled ``factor_evpi``) — a decision-held-fixed win-probability
+        # delta at each factor's mean, NOT value-of-information. The variable is
+        # renamed to match the wire field; the compute (_compute_evpi) and its
+        # budget/deadline machinery are unchanged (internal EVPI_* naming retained
+        # as an implementation detail). The degradation warning keeps its
+        # operational code ("EVPI_UNAVAILABLE") — PLoT surfaces it by SEVERITY, not
+        # code (see _optional_phase_unavailable_warning) — but its ``field`` now
+        # points at the renamed wire field ``p_win_sensitivity``.
+        p_win_sensitivity = None
         if request.include_voi and factor_sampler.has_uncertainties() and not correlation_active:
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.EVPI_MIN_BUDGET_MS:
@@ -1777,21 +1797,22 @@ class RobustnessAnalyzerV2:
                 inference_warnings.append(
                     self._optional_phase_unavailable_warning(
                         "EVPI_UNAVAILABLE",
-                        # F4: factor_evpi is TOP-LEVEL on the V2 envelope, not nested
-                        # under robustness.
-                        "factor_evpi",
+                        # F4: p_win_sensitivity is TOP-LEVEL on the V2 envelope, not
+                        # nested under robustness.
+                        "p_win_sensitivity",
                         "request_budget_exhausted",
                         elapsed_ms,
-                        "EVPI (value-of-information) was skipped: insufficient "
-                        "request budget remained. Base analysis is unaffected.",
+                        "Win-probability sensitivity (p_win_sensitivity) was "
+                        "skipped: insufficient request budget remained. Base "
+                        "analysis is unaffected.",
                     )
                 )
             else:
-                # F7: thread the governing request deadline into EVPI. min(cap,
-                # remaining) measured against EVPI's own monotonic t0 == the
+                # F7: thread the governing request deadline into the sweep. min(cap,
+                # remaining) measured against its own monotonic t0 == the
                 # OVERALL_REQUEST_BUDGET_MS deadline (identical maths to the E-value
                 # sweep). On overrun _compute_evpi returns None (all-or-nothing).
-                factor_evpi = self._compute_evpi(
+                p_win_sensitivity = self._compute_evpi(
                     request,
                     sampler,
                     factor_sampler,
@@ -1800,7 +1821,7 @@ class RobustnessAnalyzerV2:
                     recommended_option_id,
                     budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
                 )
-                if factor_evpi is None:
+                if p_win_sensitivity is None:
                     # Reachable ONLY as a deadline trip here: the has_uncertainties()
                     # guard guarantees parameter_uncertainties is non-empty, so
                     # _compute_evpi's benign no-uncertainties None is unreachable on
@@ -1809,12 +1830,12 @@ class RobustnessAnalyzerV2:
                     inference_warnings.append(
                         self._optional_phase_unavailable_warning(
                             "EVPI_UNAVAILABLE",
-                            "factor_evpi",
+                            "p_win_sensitivity",
                             "evpi_budget_exceeded",
                             elapsed_ms,
-                            "EVPI (value-of-information) exceeded its time budget "
-                            "and was omitted (all-or-nothing). Base analysis is "
-                            "unaffected.",
+                            "Win-probability sensitivity (p_win_sensitivity) "
+                            "exceeded its time budget and was omitted "
+                            "(all-or-nothing). Base analysis is unaffected.",
                         )
                     )
 
@@ -1916,7 +1937,7 @@ class RobustnessAnalyzerV2:
             conditional_winners=conditional_winners,
             stability_thresholds=stability_thresholds,
             edge_e_values=edge_e_values,
-            factor_evpi=factor_evpi,
+            p_win_sensitivity=p_win_sensitivity,
             path_decomposition=path_decomposition,
             correlation_model=correlation_model,
         )
@@ -2000,7 +2021,11 @@ class RobustnessAnalyzerV2:
         if has_uncertainties and len(request.options) > 1:
             suppressed.append("conditional_winners")
         if has_uncertainties and request.include_voi:
-            suppressed.append("factor_evpi")
+            # S2 (D-23.8): the win-probability sensitivity block (renamed from
+            # factor_evpi) stays suppressed under correlation (off-manifold OAT).
+            # The NEW factor_evppi is NOT listed here — it is a conditional-
+            # expectation quantity on the joint copula samples and IS emitted.
+            suppressed.append("p_win_sensitivity")
 
         return CorrelationModelV2(
             method=CORRELATION_METHOD,
@@ -4603,53 +4628,68 @@ class RobustnessAnalyzerV2:
                 )
                 return None
 
-            evpi_raw = perfect_metric - baseline_metric
+            delta_raw = perfect_metric - baseline_metric
 
-            # Producer clamp (F1 residual r1, defense-in-depth): EVPI is
-            # definitionally non-negative (Howard) — a negative difference of
-            # two MC proportion estimates is estimator noise, so clamp it to
-            # 0.0 at the producer rather than relying solely on the PLoT
-            # boundary guard (PR #219). The raw components remain auditable
-            # via perfect_metric / current_metric; evpi_clamped flags the
-            # entries where the clamp fired.
-            evpi_clamped = evpi_raw < 0.0
-            evpi = 0.0 if evpi_clamped else evpi_raw
+            # Producer clamp (F1 residual r1, defense-in-depth): this quantity
+            # is definitionally non-negative — a negative difference of two MC
+            # proportion estimates is estimator noise, so clamp it to 0.0 at the
+            # producer rather than relying solely on the PLoT boundary guard
+            # (PR #219). The raw components remain auditable via perfect_metric /
+            # current_metric; ``clamped`` flags the entries where the clamp fired.
+            delta_clamped = delta_raw < 0.0
+            delta = 0.0 if delta_clamped else delta_raw
 
-            # Below-resolution labelling (provisional_doctrine_v0): flag EVPI
+            # Below-resolution labelling (provisional_doctrine_v0): flag
             # estimates smaller in magnitude than the MC noise floor for this
             # sample budget. Applied to the emitted (clamped) value, so a
             # clamped-to-zero entry is always below_resolution.
             noise_floor = evpi_noise_floor(n_samples)
-            below_resolution = abs(evpi) < noise_floor
+            below_resolution = abs(delta) < noise_floor
 
+            # S2 (D-23.8) HONEST RELABEL: this block WAS emitted as ``factor_evpi``
+            # with an ``evpi`` field, but it is NOT value-of-information. It holds
+            # the decision FIXED at the recommended option and reports how much the
+            # recommended option's WIN PROBABILITY moves when this factor is fixed
+            # at its mean — a win-probability sensitivity in probability units, with
+            # its OWN MC redraw (not the CRN joint population). It structurally
+            # cannot capture option-switching (the value of information), so calling
+            # it EVPI was a mislabel. Renamed to ``p_win_sensitivity`` with
+            # de-EVPI'd field names + a ``method`` tag; the numbers are byte-
+            # identical to the pre-S2 ``factor_evpi`` values (pure key rename, the
+            # arithmetic above is untouched). The honest decision-value quantities
+            # are ``decision_evpi`` (S1) and ``factor_evppi`` (S2), both in outcome
+            # units on the joint CRN population.
             results.append(
                 {
                     "factor_id": uncertainty.node_id,
-                    "evpi": round(evpi, 6),
-                    "evpi_percentage_points": round(evpi * 100, 2),
+                    "p_win_delta": round(delta, 6),
+                    "p_win_delta_percentage_points": round(delta * 100, 2),
                     "current_metric": round(baseline_metric, 6),
                     "perfect_metric": round(perfect_metric, 6),
                     "metric_type": "p_joint_goal"
                     if request.goal_constraints
                     else "p_win_recommended",
-                    "n_evpi_samples": n_samples,
+                    "method": P_WIN_SENSITIVITY_METHOD,
+                    "n_samples": n_samples,
                     # Additive labelling fields (provisional_doctrine_v0).
-                    # Safe additive extension: factor_evpi entries are
+                    # Safe additive extension: p_win_sensitivity entries are
                     # Dict[str, Any] at every hop (analyzer -> V1 model ->
                     # V2 envelope) and no cross-service consumer parses
                     # these entries strictly (verified 2026-07-07: PLoT has
-                    # no factor_evpi reference; DGAI debug export treats it
-                    # as unknown[]).
-                    "evpi_status": "below_resolution" if below_resolution else "resolved",
-                    "evpi_clamped": evpi_clamped,
-                    "evpi_noise_floor": round(noise_floor, 6),
-                    "evpi_noise_floor_method": "z95_worst_case_bernoulli_diff",
-                    "evpi_labelling_doctrine": EVPI_LABELLING_DOCTRINE,
+                    # no factor_evpi/p_win_sensitivity reference; DGAI debug
+                    # export treats it as unknown[]).
+                    "status": "below_resolution" if below_resolution else "resolved",
+                    "clamped": delta_clamped,
+                    "noise_floor": round(noise_floor, 6),
+                    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+                    "labelling_doctrine": EVPI_LABELLING_DOCTRINE,
                 }
             )
 
-        # Sort by EVPI descending (most valuable information first)
-        results.sort(key=lambda x: float(x["evpi"]), reverse=True)
+        # Sort by the win-probability delta descending (most sensitive factor
+        # first) — same order as the pre-S2 factor_evpi block (sorted on ``evpi``,
+        # the same value now named ``p_win_delta``).
+        results.sort(key=lambda x: float(x["p_win_delta"]), reverse=True)
         return results
 
     def _compute_evpi_metric(

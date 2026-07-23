@@ -167,7 +167,7 @@ class TestEvpiDefensiveDedup:
         dup = req.parameter_uncertainties[0]
         req.parameter_uncertainties = [dup, dup, dup]
         resp = RobustnessAnalyzerV2().analyze(req)
-        rows = resp.factor_evpi or []
+        rows = resp.p_win_sensitivity or []
         # Deduped to the single unique node_id — NOT 3 rows.
         assert len(rows) == 1
         assert rows[0]["factor_id"] == "f0"

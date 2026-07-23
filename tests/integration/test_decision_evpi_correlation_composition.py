@@ -94,8 +94,8 @@ class TestDecisionEvpiUnderCorrelation:
         assert "decision_evpi" not in suppressed
         # positive control: correlation IS genuinely active (the per-factor
         # attributions ARE suppressed), so this is not a vacuous pass.
-        assert "factor_evpi" in suppressed
-        assert body.get("factor_evpi") is None
+        assert "p_win_sensitivity" in suppressed
+        assert body.get("p_win_sensitivity") is None
         assert body.get("factor_sensitivity") is None
 
     def test_suppressed_factor_evpi_does_not_trip_decision_evpi_validator(self, client):

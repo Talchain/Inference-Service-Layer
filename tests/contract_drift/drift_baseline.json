@@ -538,11 +538,6 @@
     },
     {
       "isl_model": "ISLResponseV2",
-      "prop": "factor_evpi",
-      "reason": "ISL superset — ISLResponseV2.factor_evpi is not present in the paired contract schema (ISL emits ahead of contract adoption)"
-    },
-    {
-      "isl_model": "ISLResponseV2",
       "prop": "factor_sensitivity_status",
       "reason": "ISL superset — ISLResponseV2.factor_sensitivity_status is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
@@ -550,6 +545,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "options",
       "reason": "ISL superset — ISLResponseV2.options is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "p_win_sensitivity",
+      "reason": "ISL superset — ISLResponseV2.p_win_sensitivity is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",

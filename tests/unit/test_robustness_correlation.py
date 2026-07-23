@@ -215,7 +215,7 @@ class TestInertWhenAbsent:
         # (so their suppression under correlation is a real change, not vacuous).
         resp = analyzer.analyze(_request(None))
         assert len(resp.factor_sensitivity) > 0
-        assert resp.factor_evpi is not None
+        assert resp.p_win_sensitivity is not None
 
     def test_factor_sampler_plan_none_is_deterministic_independent(self):
         # A plan=None FactorSampler must draw exactly the independent stream.
@@ -327,7 +327,7 @@ class TestCorrelationSuppression:
             _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
         )
         assert resp.factor_sensitivity == []
-        assert resp.factor_evpi is None
+        assert resp.p_win_sensitivity is None
         assert resp.conditional_winners is None
 
     def test_correlation_model_disclosure_present(self, analyzer):
@@ -356,7 +356,7 @@ class TestCorrelationSuppression:
         )
         cm = resp.correlation_model
         assert "factor_sensitivity" in cm.suppressed_attributions
-        assert "factor_evpi" in cm.suppressed_attributions
+        assert "p_win_sensitivity" in cm.suppressed_attributions
         assert "conditional_winners" in cm.suppressed_attributions
         assert cm.suppression_reason == "not_separable_under_correlation"
 
@@ -367,7 +367,7 @@ class TestCorrelationSuppression:
             _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)], voi=False)
         )
         cm = resp.correlation_model
-        assert "factor_evpi" not in cm.suppressed_attributions
+        assert "p_win_sensitivity" not in cm.suppressed_attributions
         assert "factor_sensitivity" in cm.suppressed_attributions
 
     def test_joint_quantities_preserved(self, analyzer):

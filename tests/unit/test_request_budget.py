@@ -131,7 +131,7 @@ class TestDegradeAndDisclose:
         resp = RobustnessAnalyzerV2().analyze(_request(voi=True, path_decomp=True))
         assert resp.edge_e_values, "e-values should be present under full budget"
         assert any(e.get("stability") for e in resp.edge_e_values), "bands present"
-        assert resp.factor_evpi, "EVPI present under full budget"
+        assert resp.p_win_sensitivity, "EVPI present under full budget"
         assert resp.path_decomposition is not None, "path decomposition present"
         assert not (
             _codes(resp)
@@ -160,7 +160,7 @@ class TestDegradeAndDisclose:
         # skipped directly by the exhausted budget; bands ride on the e-value
         # sweep, so their absence is honestly attributed to e_values_unavailable.
         assert resp.edge_e_values is None
-        assert resp.factor_evpi is None
+        assert resp.p_win_sensitivity is None
         assert resp.path_decomposition is None
         expected_reason = {
             E_VALUES_UNAVAILABLE: "request_budget_exhausted",

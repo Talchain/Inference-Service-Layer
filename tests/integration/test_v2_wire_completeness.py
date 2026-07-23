@@ -173,7 +173,7 @@ class TestFactorEvpiLabellingOnWire:
     def test_evpi_labelling_keys_on_http_response(self, client):
         body = post_v2(client, full_request())
 
-        factor_evpi = body.get("factor_evpi")
+        factor_evpi = body.get("p_win_sensitivity")
         assert isinstance(factor_evpi, list) and factor_evpi, (
             "factor_evpi must be present when include_voi=true and "
             "parameter_uncertainties are supplied"
@@ -182,20 +182,20 @@ class TestFactorEvpiLabellingOnWire:
         for entry in factor_evpi:
             # Base keys
             assert entry["factor_id"] == "price"
-            assert isinstance(entry["evpi"], (int, float))
-            assert isinstance(entry["evpi_percentage_points"], (int, float))
+            assert isinstance(entry["p_win_delta"], (int, float))
+            assert isinstance(entry["p_win_delta_percentage_points"], (int, float))
             assert entry["metric_type"] in ("p_joint_goal", "p_win_recommended")
-            assert entry["n_evpi_samples"] == 300
+            assert entry["n_samples"] == 300
             # The 4 additive labelling keys (lane 4 producer; PLoT forward-tolerates)
-            assert entry["evpi_status"] in ("below_resolution", "resolved")
-            assert isinstance(entry["evpi_noise_floor"], (int, float))
-            assert entry["evpi_noise_floor"] > 0
-            assert entry["evpi_noise_floor_method"] == "z95_worst_case_bernoulli_diff"
-            assert entry["evpi_labelling_doctrine"] == "provisional_doctrine_v0"
+            assert entry["status"] in ("below_resolution", "resolved")
+            assert isinstance(entry["noise_floor"], (int, float))
+            assert entry["noise_floor"] > 0
+            assert entry["noise_floor_method"] == "z95_worst_case_bernoulli_diff"
+            assert entry["labelling_doctrine"] == "provisional_doctrine_v0"
 
     def test_factor_evpi_absent_without_include_voi(self, client):
         body = post_v2(client, base_request())
-        assert "factor_evpi" not in body
+        assert "p_win_sensitivity" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +261,7 @@ class TestWireCompletenessInvariants:
         body_b = post_v2(client, copy.deepcopy(request))
 
         assert body_a["robustness"]["edge_sensitivity"] == body_b["robustness"]["edge_sensitivity"]
-        assert body_a["factor_evpi"] == body_b["factor_evpi"]
+        assert body_a["p_win_sensitivity"] == body_b["p_win_sensitivity"]
         assert body_a["path_decomposition"] == body_b["path_decomposition"]
         assert (
             body_a["sensitivity_reference_option_id"] == body_b["sensitivity_reference_option_id"]

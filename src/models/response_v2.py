@@ -1108,8 +1108,10 @@ class CorrelationModelV2(BaseModel):
     suppressed_attributions: List[str] = Field(
         default_factory=list,
         description="Independence-assuming per-factor attributions omitted under active "
-        "correlation (e.g. factor_sensitivity, factor_evpi, conditional_winners). Absent "
-        "from the response, not null — this list names what was withheld.",
+        "correlation (e.g. factor_sensitivity, p_win_sensitivity, conditional_winners). "
+        "factor_evppi is NOT listed — it is a conditional-expectation quantity on the "
+        "joint copula samples and remains emitted. Absent from the response, not null — "
+        "this list names what was withheld.",
     )
     suppression_reason: str = Field(
         default="not_separable_under_correlation",
@@ -1206,11 +1208,26 @@ class ISLResponseV2(BaseModel):
         "Provisional — pending scientific review. NOT included in response_hash.",
     )
 
-    # EVPI results (enhancement — gated by include_voi flag)
-    factor_evpi: Optional[List[Dict[str, Any]]] = Field(
+    # Per-factor win-probability sensitivity (enhancement — gated by include_voi).
+    # S2 (D-23.8) HONEST RELABEL: this wire block was ``factor_evpi`` with an
+    # ``evpi`` field, but it is NOT value-of-information (it holds the decision fixed
+    # and reports a win-probability delta), so it was mislabelled. Renamed to
+    # ``p_win_sensitivity`` with de-EVPI'd field names + a ``method`` tag; the
+    # numbers are byte-identical to the pre-S2 ``factor_evpi`` values.
+    p_win_sensitivity: Optional[List[Dict[str, Any]]] = Field(
         None,
-        description="Expected Value of Perfect Information per factor: how much does "
-        "removing this factor's uncertainty improve the decision metric?",
+        description="Per-factor win-probability sensitivity: for each uncertain "
+        "factor, how much the recommended option's win probability (or P(joint_goal) "
+        "when goal_constraints are set) moves when that factor is FIXED at its mean, "
+        "with the decision held fixed at the recommended option. Fields: p_win_delta "
+        "(probability units), p_win_delta_percentage_points, current_metric, "
+        "perfect_metric, metric_type (p_win_recommended|p_joint_goal), method "
+        "('p_win_delta_at_mean_v1'), n_samples, status, clamped, noise_floor. This is "
+        "NOT value-of-information: holding the decision fixed, it structurally cannot "
+        "capture option-switching, and it is in probability (not outcome) units, with "
+        "its OWN Monte Carlo redraw (not the CRN joint population). For decision value "
+        "use decision_evpi (whole decision) and factor_evppi (per-factor), both in "
+        "outcome units. Non-negative (negative estimates clamped to 0, clamped=true).",
     )
 
     # Decision-level EVPI (S1 — A3 VOI honesty, D-23.8). Additive-optional; a READ
@@ -1226,7 +1243,7 @@ class ISLResponseV2(BaseModel):
         "expected regret: min_o expected_regret[o]. The identity "
         "E[max]−max_o E[o] = min_o (E[max]−E[o]) is exact, so this is the value of "
         "resolving ALL uncertainty before choosing — it captures option-switching, "
-        "unlike the per-factor win-probability sensitivity in factor_evpi. Zero new "
+        "unlike the per-factor win-probability sensitivity in p_win_sensitivity. Zero new "
         "sampling: a read of the regret already emitted per option. >= 0 by "
         "construction (min of non-negative regrets). Present EXACTLY when the "
         "downside/regret population is present (>=1 option carries "

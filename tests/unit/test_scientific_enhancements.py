@@ -399,8 +399,8 @@ class TestEVPI:
         )
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        assert len(response.factor_evpi) == 2  # Two factors with uncertainties
+        assert response.p_win_sensitivity is not None
+        assert len(response.p_win_sensitivity) == 2  # Two factors with uncertainties
 
     def test_evpi_not_computed_without_flag(self):
         """include_voi=False → no factor_evpi."""
@@ -408,7 +408,7 @@ class TestEVPI:
         request = _make_request(graph, include_voi=False, include_uncertainties=True)
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is None
+        assert response.p_win_sensitivity is None
 
     def test_evpi_not_computed_without_uncertainties(self):
         """No parameter_uncertainties → no factor_evpi even with flag."""
@@ -416,7 +416,7 @@ class TestEVPI:
         request = _make_request(graph, include_voi=True, include_uncertainties=False)
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is None
+        assert response.p_win_sensitivity is None
 
     def test_evpi_sorted_descending(self):
         """EVPI results are sorted by EVPI value descending."""
@@ -429,8 +429,8 @@ class TestEVPI:
         )
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        evpi_values = [e["evpi"] for e in response.factor_evpi]
+        assert response.p_win_sensitivity is not None
+        evpi_values = [e["p_win_delta"] for e in response.p_win_sensitivity]
         assert evpi_values == sorted(evpi_values, reverse=True)
 
     def test_evpi_fields_present(self):
@@ -444,16 +444,16 @@ class TestEVPI:
         )
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        for evpi in response.factor_evpi:
+        assert response.p_win_sensitivity is not None
+        for evpi in response.p_win_sensitivity:
             assert "factor_id" in evpi
-            assert "evpi" in evpi
-            assert "evpi_percentage_points" in evpi
+            assert "p_win_delta" in evpi
+            assert "p_win_delta_percentage_points" in evpi
             assert "current_metric" in evpi
             assert "perfect_metric" in evpi
             assert "metric_type" in evpi
-            assert "n_evpi_samples" in evpi
-            assert evpi["n_evpi_samples"] <= EVPI_SAMPLE_CAP  # Budget cap
+            assert "n_samples" in evpi
+            assert evpi["n_samples"] <= EVPI_SAMPLE_CAP  # Budget cap
 
     def test_evpi_cap_binds_at_2000_on_the_wire(self):
         """A request deeper than the cap gets EVPI at exactly EVPI_SAMPLE_CAP
@@ -469,11 +469,11 @@ class TestEVPI:
         )
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        assert len(response.factor_evpi) > 0
-        for evpi in response.factor_evpi:
-            assert evpi["n_evpi_samples"] == EVPI_SAMPLE_CAP == 2000
-            assert evpi["evpi_noise_floor"] == round(evpi_noise_floor(EVPI_SAMPLE_CAP), 6)
+        assert response.p_win_sensitivity is not None
+        assert len(response.p_win_sensitivity) > 0
+        for evpi in response.p_win_sensitivity:
+            assert evpi["n_samples"] == EVPI_SAMPLE_CAP == 2000
+            assert evpi["noise_floor"] == round(evpi_noise_floor(EVPI_SAMPLE_CAP), 6)
 
 
 class TestEVPIBelowResolutionLabelling:
@@ -507,12 +507,12 @@ class TestEVPIBelowResolutionLabelling:
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=200)
         response = RobustnessAnalyzerV2().analyze(request)
-        assert response.factor_evpi is not None
-        for entry in response.factor_evpi:
-            assert entry["evpi_status"] in ("below_resolution", "resolved")
-            assert entry["evpi_noise_floor"] == round(evpi_noise_floor(entry["n_evpi_samples"]), 6)
-            assert entry["evpi_noise_floor_method"] == "z95_worst_case_bernoulli_diff"
-            assert entry["evpi_labelling_doctrine"] == "provisional_doctrine_v0"
+        assert response.p_win_sensitivity is not None
+        for entry in response.p_win_sensitivity:
+            assert entry["status"] in ("below_resolution", "resolved")
+            assert entry["noise_floor"] == round(evpi_noise_floor(entry["n_samples"]), 6)
+            assert entry["noise_floor_method"] == "z95_worst_case_bernoulli_diff"
+            assert entry["labelling_doctrine"] == "provisional_doctrine_v0"
 
     def test_status_consistent_with_floor(self):
         """evpi_status is below_resolution iff |evpi| < noise floor."""
@@ -521,25 +521,25 @@ class TestEVPIBelowResolutionLabelling:
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
         response = RobustnessAnalyzerV2().analyze(request)
-        assert response.factor_evpi is not None
-        for entry in response.factor_evpi:
-            floor = evpi_noise_floor(entry["n_evpi_samples"])
+        assert response.p_win_sensitivity is not None
+        for entry in response.p_win_sensitivity:
+            floor = evpi_noise_floor(entry["n_samples"])
             # Guard: skip entries within rounding distance of the boundary
             # (evpi is rounded to 6 dp before serialisation).
-            if abs(abs(entry["evpi"]) - floor) < 2e-6:
+            if abs(abs(entry["p_win_delta"]) - floor) < 2e-6:
                 continue
-            expected = "below_resolution" if abs(entry["evpi"]) < floor else "resolved"
-            assert entry["evpi_status"] == expected
+            expected = "below_resolution" if abs(entry["p_win_delta"]) < floor else "resolved"
+            assert entry["status"] == expected
 
     def test_small_sample_entries_labelled_below_resolution(self):
         """At n=100 (floor ~0.139) the deterministic fixture EVPIs are all noise."""
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=100)
         response = RobustnessAnalyzerV2().analyze(request)
-        assert response.factor_evpi is not None
-        assert len(response.factor_evpi) == 2
-        for entry in response.factor_evpi:
-            assert entry["evpi_status"] == "below_resolution"
+        assert response.p_win_sensitivity is not None
+        assert len(response.p_win_sensitivity) == 2
+        for entry in response.p_win_sensitivity:
+            assert entry["status"] == "below_resolution"
 
     def test_negative_intermediate_clamped_to_zero_on_wire(self):
         """F1 producer clamp: negative intermediate EVPI → 0.0 on the wire.
@@ -555,43 +555,101 @@ class TestEVPIBelowResolutionLabelling:
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
         response = RobustnessAnalyzerV2().analyze(request)
-        assert response.factor_evpi is not None
+        assert response.p_win_sensitivity is not None
 
         raw_negatives = [
-            e for e in response.factor_evpi if e["perfect_metric"] - e["current_metric"] < 0
+            e for e in response.p_win_sensitivity if e["perfect_metric"] - e["current_metric"] < 0
         ]
         assert raw_negatives, "fixture regression: expected a raw negative EVPI intermediate"
 
-        for entry in response.factor_evpi:
+        for entry in response.p_win_sensitivity:
             # Nothing negative ever reaches the wire.
-            assert entry["evpi"] >= 0.0
-            assert entry["evpi_percentage_points"] >= 0.0
+            assert entry["p_win_delta"] >= 0.0
+            assert entry["p_win_delta_percentage_points"] >= 0.0
 
         for entry in raw_negatives:
-            assert entry["evpi"] == 0.0
-            assert entry["evpi_percentage_points"] == 0.0
-            assert entry["evpi_clamped"] is True
+            assert entry["p_win_delta"] == 0.0
+            assert entry["p_win_delta_percentage_points"] == 0.0
+            assert entry["clamped"] is True
             # A clamped-to-zero estimate is by construction below resolution.
-            assert entry["evpi_status"] == "below_resolution"
+            assert entry["status"] == "below_resolution"
 
     def test_positive_evpi_untouched_by_clamp(self):
         """Positive intermediates pass through the clamp unaltered."""
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)
         response = RobustnessAnalyzerV2().analyze(request)
-        assert response.factor_evpi is not None
+        assert response.p_win_sensitivity is not None
 
         positives = [
-            e for e in response.factor_evpi if e["perfect_metric"] - e["current_metric"] > 0
+            e for e in response.p_win_sensitivity if e["perfect_metric"] - e["current_metric"] > 0
         ]
         assert positives, "fixture regression: expected a positive EVPI intermediate"
         for entry in positives:
-            assert entry["evpi_clamped"] is False
+            assert entry["clamped"] is False
             assert math.isclose(
-                entry["evpi"],
+                entry["p_win_delta"],
                 entry["perfect_metric"] - entry["current_metric"],
                 abs_tol=2e-6,
             )
+
+
+class TestPWinSensitivityHonestRelabel:
+    """S2 (D-23.8) honest relabel of the mislabelled ``factor_evpi`` block.
+
+    The win-probability-delta quantity is NOT value-of-information (it holds the
+    decision fixed and reports a probability delta), so it was renamed to
+    ``p_win_sensitivity`` with de-EVPI'd field names + a ``method`` tag. These
+    tests pin (a) the OLD name is GONE, (b) NO wire key says EVPI, (c) the method
+    tag is present, and (d) VALUE-IDENTITY: the numbers are the same computed
+    quantity as before (pure key rename, arithmetic untouched) — p_win_delta is
+    exactly the clamped, rounded win-probability difference.
+    """
+
+    def _run(self, n_samples=500):
+        graph = _make_graph()
+        request = _make_request(
+            graph, include_voi=True, include_uncertainties=True, n_samples=n_samples
+        )
+        return RobustnessAnalyzerV2().analyze(request)
+
+    def test_old_factor_evpi_attribute_is_gone(self):
+        """The mislabelled ``factor_evpi`` field no longer exists on the model."""
+        response = self._run()
+        assert not hasattr(response, "factor_evpi")
+        assert response.p_win_sensitivity is not None
+
+    def test_no_wire_key_contains_evpi(self):
+        """Nothing in the emitted block calls the quantity EVPI (D-23.8)."""
+        response = self._run()
+        assert response.p_win_sensitivity is not None
+        for entry in response.p_win_sensitivity:
+            stray = [k for k in entry if "evpi" in k.lower()]
+            assert not stray, f"p_win_sensitivity entry still has EVPI-named key(s): {stray}"
+
+    def test_method_tag_present_on_every_entry(self):
+        """Each entry is self-describing via the method tag."""
+        response = self._run()
+        assert response.p_win_sensitivity is not None
+        assert len(response.p_win_sensitivity) > 0
+        for entry in response.p_win_sensitivity:
+            assert entry["method"] == "p_win_delta_at_mean_v1"
+
+    def test_value_identity_delta_is_clamped_rounded_difference(self):
+        """VALUE-IDENTITY: p_win_delta == round(max(0, perfect - current), 6).
+
+        This is the exact quantity the pre-S2 ``factor_evpi.evpi`` field carried
+        (the F1 producer clamp + 6dp round); the relabel is a pure key rename, so
+        the arithmetic must be bit-identical. A recompute (not a rename) would
+        break this identity.
+        """
+        response = self._run()
+        assert response.p_win_sensitivity is not None
+        for entry in response.p_win_sensitivity:
+            expected = round(max(0.0, entry["perfect_metric"] - entry["current_metric"]), 6)
+            assert entry["p_win_delta"] == expected
+            assert entry["p_win_delta_percentage_points"] == round(entry["p_win_delta"] * 100, 2)
+            assert entry["clamped"] is (entry["perfect_metric"] - entry["current_metric"] < 0.0)
 
 
 # ===========================================================================
@@ -769,10 +827,10 @@ class TestResponseShapeIntegration:
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
         # Internal model has factor_evpi
-        assert response.factor_evpi is not None
+        assert response.p_win_sensitivity is not None
         # Serialize and check it survives
         d = response.model_dump(exclude_none=True)
-        assert "factor_evpi" in d
+        assert "p_win_sensitivity" in d
 
     def test_confidence_source_in_serialized_response(self):
         """confidence_source appears in FactorSensitivityV2 serialization."""
@@ -843,10 +901,10 @@ class TestResponseShapeIntegration:
         )
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        for evpi in response.factor_evpi:
-            assert "n_evpi_samples" in evpi
-            assert isinstance(evpi["n_evpi_samples"], int)
+        assert response.p_win_sensitivity is not None
+        for evpi in response.p_win_sensitivity:
+            assert "n_samples" in evpi
+            assert isinstance(evpi["n_samples"], int)
 
 
 # ===========================================================================
@@ -863,8 +921,8 @@ class TestEVPIMetricType:
         request = _make_request(graph, include_voi=True, include_uncertainties=True)
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        for evpi in response.factor_evpi:
+        assert response.p_win_sensitivity is not None
+        for evpi in response.p_win_sensitivity:
             assert evpi["metric_type"] == "p_win_recommended"
 
     def test_metric_type_is_p_joint_goal_with_constraints(self):
@@ -890,8 +948,8 @@ class TestEVPIMetricType:
         )
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
-        assert response.factor_evpi is not None
-        for evpi in response.factor_evpi:
+        assert response.p_win_sensitivity is not None
+        for evpi in response.p_win_sensitivity:
             assert evpi["metric_type"] == "p_joint_goal"
 
 
