@@ -454,10 +454,14 @@ async def analyze_robustness(
             regions_found=analysis.region_count,
         )
 
-        # Create response with metadata
+        # Create response with metadata. sampling=True (A3, 2026-07-23): robustness
+        # runs real Monte Carlo, so config_details honestly advertises
+        # monte_carlo_samples. This is the default, so the wire is byte-unchanged;
+        # it is stated explicitly so every live route declares its own sampling
+        # nature at the call site (derive-don't-mirror; no route list in the helper).
         response = RobustnessResponse(
             analysis=analysis,
-            metadata=create_response_metadata(request_id),
+            metadata=create_response_metadata(request_id, sampling=True),
         )
 
         logger.info(
