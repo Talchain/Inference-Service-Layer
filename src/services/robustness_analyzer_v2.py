@@ -1610,6 +1610,13 @@ class RobustnessAnalyzerV2:
                 request, option_outcomes, sampler, rng_edge, evaluator
             )
 
+        # B3-S1 (D-23.4) suppression RECORD (not PREDICT): each compute-gate below
+        # that skips its block BECAUSE of active correlation appends to this list at
+        # the skip site; `_build_correlation_disclosure` emits exactly this record, so
+        # the manifest cannot drift from what the run actually withheld (altitude Q2,
+        # CLAUDE.md #12). Order follows code (gate) order.
+        suppressed_attributions: List[str] = []
+
         # Compute factor sensitivity if factor uncertainties are specified.
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor OAT
         # elasticity perturbs one factor holding the others at their mean, an
@@ -1617,14 +1624,20 @@ class RobustnessAnalyzerV2:
         # correlated factors. Omitted (absent, not fabricated) with the
         # correlation_model disclosure marker naming the reason.
         factor_sensitivity: List[FactorSensitivityResult] = []
-        if (
-            factor_sampler.has_uncertainties()
-            and "sensitivity" in request.analysis_types
-            and not correlation_active
-        ):
-            factor_sensitivity = self._compute_factor_sensitivity(
-                request, option_outcomes, rng_factor, evaluator
-            )
+        if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
+            if correlation_active:
+                suppressed_attributions.append("factor_sensitivity")
+                # stability_thresholds is a CHILD of factor_sensitivity's bootstrap
+                # (which runs unconditionally whenever there are uncertainties, so it
+                # is emitted iff factor_sensitivity ran). It therefore vanishes with
+                # factor_sensitivity under correlation — record it at the SAME skip
+                # site so the manifest names it too (hunter F-1: it previously
+                # vanished silently, unnamed).
+                suppressed_attributions.append("stability_thresholds")
+            else:
+                factor_sensitivity = self._compute_factor_sensitivity(
+                    request, option_outcomes, rng_factor, evaluator
+                )
 
         # Compute conditional winners (factor-partitioned win probabilities).
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — a single-factor
@@ -1633,18 +1646,17 @@ class RobustnessAnalyzerV2:
         # partners, so the per-factor attribution is confounded. Omitted with the
         # disclosure marker (joint win_probability itself stays valid).
         conditional_winners = None
-        if (
-            factor_sampler.has_uncertainties()
-            and len(request.options) > 1
-            and not correlation_active
-        ):
-            conditional_winners = self._compute_conditional_winners(
-                factor_values_per_sample,
-                winner_per_sample,
-                option_outcomes,
-                factor_sampler,
-                request,
-            )
+        if factor_sampler.has_uncertainties() and len(request.options) > 1:
+            if correlation_active:
+                suppressed_attributions.append("conditional_winners")
+            else:
+                conditional_winners = self._compute_conditional_winners(
+                    factor_values_per_sample,
+                    winner_per_sample,
+                    option_outcomes,
+                    factor_sampler,
+                    request,
+                )
 
         # Compute robustness assessment (with alternative winner analysis)
         robustness = self._compute_robustness(
@@ -1798,7 +1810,10 @@ class RobustnessAnalyzerV2:
         # code (see _optional_phase_unavailable_warning) — but its ``field`` now
         # points at the renamed wire field ``p_win_sensitivity``.
         p_win_sensitivity = None
-        if request.include_voi and factor_sampler.has_uncertainties() and not correlation_active:
+        if request.include_voi and factor_sampler.has_uncertainties() and correlation_active:
+            # SUPPRESSED under active correlation — record at the skip site.
+            suppressed_attributions.append("p_win_sensitivity")
+        elif request.include_voi and factor_sampler.has_uncertainties():
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.EVPI_MIN_BUDGET_MS:
                 elapsed_ms = _elapsed_ms()
@@ -1956,7 +1971,7 @@ class RobustnessAnalyzerV2:
         # Carries the tail-independence caveat, any Higham PSD projection, and the
         # manifest of suppressed independence-assuming per-factor attributions.
         correlation_model = self._build_correlation_disclosure(
-            request, correlation_plan, factor_sampler.has_uncertainties()
+            request, correlation_plan, suppressed_attributions
         )
 
         # Include stability thresholds when bootstrap stability was computed
@@ -2051,17 +2066,22 @@ class RobustnessAnalyzerV2:
     def _build_correlation_disclosure(
         request: RobustnessRequestV2,
         correlation_plan: Optional[CorrelationPlan],
-        has_uncertainties: bool,
+        suppressed_attributions: List[str],
     ) -> Optional[CorrelationModelV2]:
         """Assemble the ``correlation_model`` disclosure block (B3-S1, D-23.4).
 
         Returns None when correlation is inactive. When active it carries the
         method tag, the MANDATORY tail-independence caveat, any Higham PSD
         projection, and the manifest of suppressed independence-assuming per-
-        factor attributions. Only attributions that WOULD have been computed
-        (their enabling preconditions hold) are listed as suppressed — a field
-        that was never going to be emitted is absent for a different reason and is
-        not claimed as correlation-suppressed.
+        factor attributions.
+
+        RECORD, not PREDICT (altitude Q2): ``suppressed_attributions`` is the list
+        the compute path APPENDED to at each skip site where a block was withheld
+        because of active correlation — it is the ground truth of what the run
+        actually skipped, not a second precondition-forecast that could drift from
+        the gates (CLAUDE.md #12). This includes ``stability_thresholds`` (hunter
+        F-1), which rides on factor_sensitivity's bootstrap and previously vanished
+        unnamed.
         """
         if correlation_plan is None:
             return None
@@ -2079,18 +2099,6 @@ class RobustnessAnalyzerV2:
             else None
         )
 
-        suppressed: List[str] = []
-        if has_uncertainties and "sensitivity" in request.analysis_types:
-            suppressed.append("factor_sensitivity")
-        if has_uncertainties and len(request.options) > 1:
-            suppressed.append("conditional_winners")
-        if has_uncertainties and request.include_voi:
-            # S2 (D-23.8): the win-probability sensitivity block (renamed from
-            # factor_evpi) stays suppressed under correlation (off-manifold OAT).
-            # The NEW factor_evppi is NOT listed here — it is a conditional-
-            # expectation quantity on the joint copula samples and IS emitted.
-            suppressed.append("p_win_sensitivity")
-
         return CorrelationModelV2(
             method=CORRELATION_METHOD,
             active=True,
@@ -2099,7 +2107,7 @@ class RobustnessAnalyzerV2:
             tail_dependence="none",
             tail_dependence_note=_CORRELATION_TAIL_NOTE,
             psd_projection=psd_projection,
-            suppressed_attributions=suppressed,
+            suppressed_attributions=list(suppressed_attributions),
             suppression_reason=_CORRELATION_SUPPRESSION_REASON,
         )
 
