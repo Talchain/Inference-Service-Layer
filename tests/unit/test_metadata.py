@@ -62,12 +62,13 @@ def test_config_details_no_secrets():
     """Config details don't expose secrets."""
     details = generate_config_details()
 
-    # Should have useful info
-    assert "monte_carlo_samples" in details
+    # Should have useful info. `monte_carlo_samples` was removed (C2, F-3): no
+    # live path reads MAX_MONTE_CARLO_ITERATIONS as its operative budget, so it
+    # was a fabricated disclosure.
     assert "confidence_level" in details
+    assert "monte_carlo_samples" not in details
 
     # Check types
-    assert isinstance(details["monte_carlo_samples"], int)
     assert isinstance(details["confidence_level"], float)
     assert isinstance(details["redis_enabled"], bool)
 
@@ -139,19 +140,23 @@ def test_response_metadata_pydantic_model():
 
 
 def test_config_details_has_expected_keys():
-    """Config details includes expected keys."""
+    """Config details emits EXACTLY the four determinism-relevant keys, in order.
+
+    `monte_carlo_samples` is NOT among them (C2, F-3, 2026-07-23): no live compute
+    path reads MAX_MONTE_CARLO_ITERATIONS as its operative sample budget, so
+    advertising it was a fabricated disclosure and the key was removed. This is the
+    presence positive control AND the order/absence pin — re-adding the key makes
+    the exact-list assertion RED (the C2 mutation check).
+    """
     details = generate_config_details()
 
-    expected_keys = [
-        "monte_carlo_samples",
+    assert list(details.keys()) == [
         "confidence_level",
         "response_timeout",
         "redis_enabled",
         "deterministic_mode",
     ]
-
-    for key in expected_keys:
-        assert key in details, f"Missing expected key: {key}"
+    assert "monte_carlo_samples" not in details
 
 
 def test_fingerprint_with_random_seed(monkeypatch):

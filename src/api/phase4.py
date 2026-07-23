@@ -213,11 +213,12 @@ async def analyze_sequential_decision(
             },
         )
 
-        # Add metadata. sampling=False (A3, 2026-07-23): the sequential-decision
-        # engine is deterministic (expectimax over the decision tree — it draws no
-        # Monte Carlo samples), so config_details must not advertise
-        # `monte_carlo_samples`. The key becomes absent (absent-not-null).
-        result.metadata = create_response_metadata(request_id, sampling=False)
+        # Add metadata. config_details no longer advertises `monte_carlo_samples`
+        # (C2, F-3, 2026-07-23): the key was DELETED from generate_config_details as a
+        # fabricated disclosure (no live path uses MAX_MONTE_CARLO_ITERATIONS as its
+        # budget). The sequential-decision engine is deterministic (expectimax over the
+        # decision tree — it draws no Monte Carlo samples) regardless.
+        result.metadata = create_response_metadata(request_id)
 
         return result
 

@@ -466,12 +466,14 @@ async def analyze_robustness(
         # populated on the wire. This matches the working pattern the counterfactual
         # (causal.py) and sequential (phase4.py) live routes already use.
         #
-        # sampling=True: robustness runs real Monte Carlo, so config_details honestly
-        # advertises monte_carlo_samples (see generate_config_details). Each live
-        # route declares its own sampling nature at the call site (derive-don't-mirror;
-        # no route list in the helper).
+        # config_details no longer advertises `monte_carlo_samples` (C2, F-3,
+        # 2026-07-23). Robustness runs real Monte Carlo, but its budget is
+        # `request.min_samples`-driven — NOT MAX_MONTE_CARLO_ITERATIONS. The V1 wire
+        # served `monte_carlo_samples: 10000` beside its own `samples_tested`, a
+        # self-contradiction, so the fabricated key was DELETED from
+        # generate_config_details (no live path uses that cap as its operative budget).
         response = RobustnessResponse(analysis=analysis)
-        response.metadata = create_response_metadata(request_id, sampling=True)
+        response.metadata = create_response_metadata(request_id)
 
         logger.info(
             "robustness_analysis_completed",

@@ -41,7 +41,6 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from src.api.main import app
-from src.config import get_settings
 from src.models.metadata import create_response_metadata, generate_config_details
 
 
@@ -140,10 +139,8 @@ class TestConfigDetailsPerRouteHonesty:
         client. The route now attribute-assigns the metadata after construction
         (the counterfactual/sequential live routes' working pattern).
 
-        robustness draws real Monte Carlo (sampling=True), so config_details
-        honestly carries monte_carlo_samples. Doubles as the WIRE-level positive
-        control (trap #13): the suite can SEE a populated `_metadata` on a live
-        route."""
+        Doubles as the WIRE-level positive control (trap #13): the suite can SEE a
+        populated `_metadata` on a live route."""
         resp = await client.post("/api/v1/robustness/analyze", json=_robustness_payload())
         assert resp.status_code == 200, resp.text
         meta = resp.json()["_metadata"]
@@ -152,11 +149,17 @@ class TestConfigDetailsPerRouteHonesty:
         assert isinstance(meta["config_fingerprint"], str) and meta["config_fingerprint"]
         assert meta["request_id"]
         cd = meta["config_details"]
-        assert "monte_carlo_samples" in cd
-        assert cd["monte_carlo_samples"] == get_settings().MAX_MONTE_CARLO_ITERATIONS
-        # honest sampling-route config_details: the other transparency keys remain
-        assert "confidence_level" in cd
-        assert "deterministic_mode" in cd
+        # config_details no longer carries monte_carlo_samples (C2, F-3): robustness
+        # draws real Monte Carlo but its budget is request.min_samples-driven, NOT
+        # MAX_MONTE_CARLO_ITERATIONS, so the fixed 10000 was a fabricated disclosure.
+        assert "monte_carlo_samples" not in cd
+        # the four determinism-relevant transparency keys remain
+        assert list(cd.keys()) == [
+            "confidence_level",
+            "response_timeout",
+            "redis_enabled",
+            "deterministic_mode",
+        ]
 
     @pytest.mark.asyncio
     async def test_counterfactual_omits_monte_carlo_samples(self, client):
@@ -185,44 +188,30 @@ class TestConfigDetailsPerRouteHonesty:
 
 
 # ===========================================================================
-# Helper-level: the sampling flag + robustness byte-order invariance
+# Helper-level: config_details emits exactly four keys, no monte_carlo_samples
 # ===========================================================================
-class TestGenerateConfigDetailsSamplingFlag:
-    def test_sampling_true_has_key_in_original_order(self):
-        """sampling=True (the robustness/default path) is byte-order-invariant:
-        monte_carlo_samples is present, first, and the full key order is
-        unchanged -> the robustness _metadata JSON is byte-identical."""
-        d = generate_config_details(sampling=True)
+class TestGenerateConfigDetails:
+    def test_config_details_is_exactly_four_keys_in_order(self):
+        """config_details emits EXACTLY the four determinism-relevant keys, in
+        order — monte_carlo_samples is gone (C2, F-3). Presence positive control
+        AND order/absence pin: re-adding the key makes this RED (C2 mutation)."""
+        d = generate_config_details()
         assert list(d.keys()) == [
-            "monte_carlo_samples",
             "confidence_level",
             "response_timeout",
             "redis_enabled",
             "deterministic_mode",
         ]
-        assert d["monte_carlo_samples"] == get_settings().MAX_MONTE_CARLO_ITERATIONS
-
-    def test_sampling_false_omits_key_only(self):
-        """sampling=False drops monte_carlo_samples and NOTHING else; the
-        remaining keys keep their relative order."""
-        d = generate_config_details(sampling=False)
         assert "monte_carlo_samples" not in d
-        assert list(d.keys()) == [
+
+    def test_create_response_metadata_config_details_omits_mc(self):
+        """create_response_metadata's config_details carries the same four keys and
+        never monte_carlo_samples (no route re-introduces the fabricated cap)."""
+        cd = create_response_metadata("req_a").config_details
+        assert "monte_carlo_samples" not in cd
+        assert list(cd.keys()) == [
             "confidence_level",
             "response_timeout",
             "redis_enabled",
             "deterministic_mode",
         ]
-
-    def test_create_response_metadata_threads_sampling_flag(self):
-        """create_response_metadata forwards sampling to config_details."""
-        with_mc = create_response_metadata("req_a", sampling=True).config_details
-        without_mc = create_response_metadata("req_b", sampling=False).config_details
-        assert "monte_carlo_samples" in with_mc
-        assert "monte_carlo_samples" not in without_mc
-
-    def test_default_preserves_key_for_untouched_callers(self):
-        """The default is sampling=True so untouched/dark callers keep their
-        current wire (monte_carlo_samples present)."""
-        assert "monte_carlo_samples" in generate_config_details()
-        assert "monte_carlo_samples" in create_response_metadata("req_c").config_details
