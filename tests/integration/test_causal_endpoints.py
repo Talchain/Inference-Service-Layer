@@ -201,8 +201,14 @@ class TestCounterfactualEngineErrorMapping:
         assert body["reason"] == "validation_failed"
         assert body["source"] == "isl"
         assert body["code"] == "ISL_VALIDATION_ERROR"
-        # message carries the engine's diagnostic naming the offending equation
-        assert "NopeVar" in body["message"]
+        # F6 / D-23.15: the message names the DEFINED variable + category, and the
+        # client equation TEXT (the referenced name `NopeVar`, the constant `500`)
+        # is redacted — a structural equation is client-private and must not be
+        # round-tripped through the platform's central logs/errors.
+        assert "Revenue" in body["message"]
+        assert "equation" in body["message"].lower()
+        assert "NopeVar" not in body["message"]
+        assert "500" not in body["message"]
 
     @pytest.mark.asyncio
     async def test_circular_equation_dependencies_returns_422_envelope(

@@ -218,14 +218,25 @@ class TestF5EquationErrorSeverity:
     """C6 (F-5, 2026-07-23): `_evaluate_equation` logged client equation
     syntax/eval errors at ERROR, so every invalid-equation 422 paged as a server
     incident. Demote to WARNING (the #95 convention). The genuine internal-fault
-    ERROR + traceback path (analyze()'s except Exception) stays intact."""
+    ERROR + traceback path (analyze()'s except Exception) stays intact.
 
-    def test_invalid_client_equation_logs_warning_not_error(self, caplog):
-        """RED at HEAD: `_evaluate_equation`'s syntax-error log is ERROR-level.
-        `2 */ X` passes the equation charset but fails ast.parse -> ValueError ->
-        422; its engine log must be WARNING, not ERROR."""
+    F6 / D-23.15 (2026-07-24): log OWNERSHIP for a client-equation defect moved
+    to the ROUTE (the single owner, the only layer with a request_id). The engine
+    now raises a typed `CounterfactualClientInputError` and does NOT log — so at
+    the engine level a client equation error must produce NO record at all (and,
+    critically, never an ERROR/server-incident record). The route-level WARNING +
+    redaction is asserted in test_a3_cf_equation_privacy.py."""
+
+    def test_invalid_client_equation_is_not_a_server_incident(self, caplog):
+        """`2 */ X` passes the equation charset but fails ast.parse -> a typed
+        client-input ValueError -> 422. The engine must NOT log it at ERROR (it is
+        a client error, not a server incident); post-F6 the engine does not log it
+        at all, delegating the single owner record to the route."""
         from src.models.requests import CounterfactualRequest, StructuralModel
-        from src.services.counterfactual_engine import CounterfactualEngine
+        from src.services.counterfactual_engine import (
+            CounterfactualClientInputError,
+            CounterfactualEngine,
+        )
 
         engine = CounterfactualEngine()
         request = CounterfactualRequest(
@@ -237,15 +248,19 @@ class TestF5EquationErrorSeverity:
             context=None,
         )
         with caplog.at_level(logging.DEBUG, logger="src.services.counterfactual_engine"):
-            with pytest.raises(ValueError):
+            with pytest.raises(CounterfactualClientInputError):
                 engine.analyze(request)
 
-        eqn_recs = [r for r in caplog.records if "equation" in str(r.msg).lower()]
-        assert eqn_recs, "expected an equation-error log from _evaluate_equation"
-        assert all(r.levelname != "ERROR" for r in eqn_recs), (
-            "invalid client equation still logged at ERROR (should be WARNING)"
+        engine_recs = [
+            r for r in caplog.records if r.name == "src.services.counterfactual_engine"
+        ]
+        assert all(r.levelname != "ERROR" for r in engine_recs), (
+            "invalid client equation must never log at ERROR (not a server incident)"
         )
-        assert any(r.levelname == "WARNING" for r in eqn_recs)
+        # F6: the engine no longer emits an equation-error record (route is owner)
+        assert not [
+            r for r in engine_recs if "equation" in str(r.getMessage()).lower()
+        ], "engine must not log the client equation error (route is the single owner)"
 
     def test_genuine_internal_fault_still_logs_error_with_traceback(self, caplog):
         """Positive control: the ERROR + traceback path for a REAL server fault
