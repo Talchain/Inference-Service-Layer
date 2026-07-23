@@ -336,14 +336,24 @@ class TestPCDDeterminism:
         ref_json = json.loads(ref.model_dump_json())
         off_json = json.loads(off.model_dump_json())
 
-        # POSITIVE CONTROL that the comparison can SEE drift: the ONLY pre-
-        # normalisation difference is the volatile wall-clock execution_time_ms.
-        # If any science byte drifted, this would flag a second differing path.
+        # The offloaded and in-process runs may or may not differ on the ONE
+        # volatile field, the wall-clock ``metadata.execution_time_ms``: a slow
+        # runner records two different timings; a fast runner rounds them to the
+        # same integer ms and the diff set is empty. BOTH are correct. The old
+        # ``diffs == ["metadata.execution_time_ms"]`` REQUIRED the timings to
+        # differ and inverted into a false-RED (``diffs == []``) whenever a fast
+        # runner produced identical timings (22-23 Jul PR runs). Accept the
+        # timing field as the ONLY PERMITTED difference (subset — empty is fine)
+        # while still failing on ANY drift in a science path.
         diffs = _diff_paths(ref_json, off_json)
-        assert diffs == [
+        assert set(diffs) <= {
             "metadata.execution_time_ms"
-        ], f"offloaded science drifted from in-process: differing paths {diffs}"
-        # And after zeroing that one field, byte-identical.
+        }, f"offloaded science drifted from in-process: differing paths {diffs}"
+        # Byte-identical on the science after zeroing that one volatile field.
+        # This pair (subset check + science equality) is the positive control
+        # that the comparison can SEE drift: a genuine offloaded-worker byte
+        # change (the #1 mutation proof) adds a science path to ``diffs`` and
+        # breaks this equality, turning BOTH assertions RED.
         assert _science(ref) == _science(off)
 
 

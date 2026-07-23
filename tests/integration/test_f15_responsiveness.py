@@ -126,8 +126,10 @@ def _teardown_pool():
 
 async def _run_case(client: AsyncClient, *, offload: bool):
     """Fire one heavy analysis; measure (a) the max event-loop stall via a 20 ms
-    heartbeat, and (b) a /health latency sampled during the analysis. Returns
-    ``(max_stall_s, health_latency_s, health_status, analyze_status)``.
+    heartbeat, (b) a /health latency sampled during the analysis, and (c) the
+    analysis wall-clock (denominator for the self-normalising stall bound in
+    ``test_offload_keeps_event_loop_responsive``). Returns
+    ``(max_stall_s, health_latency_s, health_status, analyze_status, analyze_wall_s)``.
     """
     stalls = []
     health_latency = {"value": None, "status": None}
@@ -153,11 +155,13 @@ async def _run_case(client: AsyncClient, *, offload: bool):
     # Give the heartbeat one tick head-start so the analyze doesn't win the very
     # first scheduling slot.
     await asyncio.sleep(0.03)
+    t_analyze = time.monotonic()
     resp = await client.post(ANALYZE, json=heavy_request(), headers={"X-ISL-Response-Version": "2"})
+    analyze_wall = time.monotonic() - t_analyze
     stop.set()
     await hb
     max_stall = max(stalls) if stalls else 0.0
-    return max_stall, health_latency["value"], health_latency["status"], resp.status_code
+    return max_stall, health_latency["value"], health_latency["status"], resp.status_code, analyze_wall
 
 
 class TestPCAResponsiveness:
@@ -167,7 +171,7 @@ class TestPCAResponsiveness:
         blocking it claims F15 removes."""
         _install_no_pool(workers=1)
         try:
-            max_stall, health_lat, health_status, analyze_status = await _run_case(
+            max_stall, health_lat, health_status, analyze_status, _analyze_wall = await _run_case(
                 client, offload=False
             )
         finally:
@@ -185,17 +189,34 @@ class TestPCAResponsiveness:
         -ms stall, and /health returns 200 fast while the heavy analysis runs."""
         _install_pool(workers=1)
         try:
-            max_stall, health_lat, health_status, analyze_status = await _run_case(
+            max_stall, health_lat, health_status, analyze_status, analyze_wall = await _run_case(
                 client, offload=True
             )
         finally:
             _teardown_pool()
         assert analyze_status == 200, "heavy analysis should succeed via the pool"
         assert health_status == 200, "/health must be served during the analysis"
-        # The loop never froze for anywhere near the ~1.5s compute.
-        assert max_stall < 0.2, (
-            f"event loop stalled {max_stall*1000:.0f}ms with offload on — "
-            "expected < 200ms (loop should be free during worker compute)"
+        # Discriminate a GENUINE event-loop block from mere runner jitter by
+        # comparing the max stall to the analysis wall-clock, which self-normalises
+        # to runner speed. A synchronous compute ON the loop stalls it for ~the
+        # WHOLE analysis (empirically stall/wall ~1.0 and >1.5s absolute — see the
+        # in-process positive control above and the #2 mutation proof); a FREE loop
+        # under even the worst runner jitter stalls only a small fraction of it
+        # (empirically ~0.01-0.02 ratio, ~30-80ms).
+        #
+        # This replaces a fixed ``max_stall < 0.2`` ceiling that false-RED'd at
+        # 0.257s on a loaded GitHub runner (PR #94 first run; passed on re-run,
+        # zero coupling to that diff). The ratio + 1s ceiling tolerate that jitter
+        # (0.257s over a >1.5s analysis ⇒ ratio ~0.15, well under 0.5) while still
+        # catching a real block. A ratio is chosen over a pre-analysis idle
+        # baseline because jitter that strikes DURING the analysis is invisible in
+        # a pre-analysis sample (so a baseline can itself false-RED); the wall-clock
+        # inflates together with the stall on a loaded runner, a fixed baseline does
+        # not. The absolute 1s ceiling backstops a pathologically inflated wall.
+        assert max_stall < 0.5 * analyze_wall and max_stall < 1.0, (
+            f"event loop stalled {max_stall*1000:.0f}ms during a {analyze_wall*1000:.0f}ms "
+            f"analysis (ratio {max_stall / analyze_wall:.2f}) with offload on — expected the "
+            "loop free during worker compute (stall < 0.5x wall AND < 1s)"
         )
         # /health, sampled mid-analysis, returns well under the 100ms SLA.
         assert health_lat is not None and health_lat < 0.1, (
