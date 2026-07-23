@@ -23,6 +23,7 @@ so the "sentinel is absent" assertion is non-vacuous.
 
 import hashlib
 import logging
+import traceback
 
 import pytest
 
@@ -172,6 +173,40 @@ class TestF6EquationTextPrivacy:
         assert exc.code == "cf_equation_eval_failed"
         # engine emitted no record carrying the equation text
         assert not _records_leaking(caplog.records, EQUATION_SENTINEL)
+        # Chain-suppression pin (adversarial M3, 2026-07-24): `from None` is
+        # load-bearing — the suppressed underlying exception here is
+        # ValueError("Unknown variable: <sentinel>_UNDEF"), so if a refactor drops
+        # `from None`, the rendered exc_info chain re-leaks the equation fragment.
+        assert exc.__cause__ is None
+        assert exc.__suppress_context__ is True
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        assert (
+            EQUATION_SENTINEL not in rendered
+        ), "underlying exception (equation fragment) leaked into the rendered chain"
+
+    def test_syntax_branch_chain_suppressed(self):
+        """Chain-suppression pin for the SYNTAX branch (adversarial M3,
+        2026-07-24): a SyntaxError's `.text` IS the raw equation line, and
+        `traceback.format_exception` prints it — so `from None` is the mechanism
+        that keeps the equation out of any exc_info rendering. Pin it: dropping
+        `from None` must turn this RED."""
+        import numpy as np
+
+        from src.services.counterfactual_engine import (
+            CounterfactualClientInputError,
+            CounterfactualEngine,
+        )
+
+        engine = CounterfactualEngine()
+        with pytest.raises(CounterfactualClientInputError) as ei:
+            engine._evaluate_equation(MALFORMED_EQUATION, {"X": np.array([1.0])}, var_name="Y")
+        exc = ei.value
+        assert exc.__cause__ is None
+        assert exc.__suppress_context__ is True
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        assert (
+            EQUATION_SENTINEL not in rendered
+        ), "SyntaxError.text (the raw equation) leaked into the rendered chain"
 
     def test_typed_error_is_valueerror_subclass(self):
         """The typed error must subclass ValueError so the existing route/engine
