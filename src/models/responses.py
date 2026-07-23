@@ -3080,12 +3080,29 @@ class StageAnalysis(BaseModel):
         "E[value]); it does not compare a with-information policy to a "
         "without-information one.",
     )
-    optimal_waiting_value: Optional[float] = Field(
+    stage_evpi: Optional[float] = Field(
         default=None,
-        description="Proxy for the value of delaying the stage-0 decision, "
-        "computed as discount_factor × the next stage's `resolved_uncertainty`. "
-        "It is a discounted outcome-dispersion magnitude, NOT a true option value "
-        "(the difference between the wait-and-decide and commit-now policies).",
+        description="Honest per-stage expected value of perfect information, in "
+        "OUTCOME (payoff) UNITS. EXACT FORM: stage_evpi = E_C[max_a Q(a | C)] − "
+        "max_a E_C[Q(a)] — the expected value of perfectly resolving the chance "
+        "node(s) this stage's decision faces BEFORE choosing an action, minus "
+        "deciding without that information. Both legs are exact reads of the "
+        "backward-induction tree (node_values + branch probabilities): the "
+        "decide-now leg is the decision's backward-induction value (max_a E_C[Q]); "
+        "the decide-after leg re-picks the best action for each realised chance "
+        "outcome and averages over outcomes (E_C[max_a Q]). >= 0 by construction "
+        "(Jensen), and EXACTLY 0 when one action dominates in every chance branch "
+        "or the decision faces no chance node. This REPLACES the removed "
+        "`optimal_waiting_value` (a discount × sqrt(Σvar) dispersion heuristic that "
+        "was NOT an option value). null (JSON null) for a stage with no decision "
+        "node — this endpoint does not omit None fields, matching the prior "
+        "optimal_waiting_value convention. RISK POSTURE: computed on the engine's "
+        "risk-ADJUSTED node values, so "
+        "each per-outcome choice matches the optimal policy; for "
+        "risk_tolerance='neutral' this is the standard risk-neutral EVPI. The "
+        "resolved chance's own variance is not re-penalised in the outer average "
+        "(perfect information removes it); deeper continuations keep their risk "
+        "adjustment.",
     )
 
     model_config = {
@@ -3110,7 +3127,7 @@ class StageAnalysis(BaseModel):
                     },
                 ],
                 "resolved_uncertainty": 15000.0,
-                "optimal_waiting_value": 20000.0,
+                "stage_evpi": 11220.0,
             }
         }
     }
@@ -3182,7 +3199,7 @@ class SequentialAnalysisResponse(BaseModel):
                             }
                         ],
                         "resolved_uncertainty": 15000.0,
-                        "optimal_waiting_value": 20000.0,
+                        "stage_evpi": 11220.0,
                     }
                 ],
                 "value_of_flexibility": 25000.0,
