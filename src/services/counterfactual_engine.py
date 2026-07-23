@@ -6,6 +6,7 @@ with Monte Carlo simulation for uncertainty quantification.
 """
 
 import ast
+import hashlib
 import heapq
 import logging
 import math
@@ -34,6 +35,74 @@ from src.utils.rng import SeededRNG
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _hash_equation(equation: str) -> str:
+    """A short, one-way correlation id for a client structural equation.
+
+    F6 / D-23.15: a structural equation is client-private (it can encode
+    proprietary model structure, factor labels, and constants), so it must never
+    be written in clear to a log or an error message. This hash lets an operator
+    correlate a redacted 422 with the client's own copy of the equation WITHOUT
+    the platform ever persisting the text. SHA-256 truncated to 12 hex chars: a
+    one-way digest (the equation cannot be recovered from it), stable across the
+    request's layers so the single owner log and the client both key on the same
+    id.
+    """
+    return hashlib.sha256(equation.encode("utf-8")).hexdigest()[:12]
+
+
+class CounterfactualClientInputError(ValueError):
+    """A client-input defect in a structural equation, carrying a SAFE public
+    message plus REDACTED structured fields for logging.
+
+    F6 / D-23.15. A malformed or evaluation-failing structural equation is a
+    client error (-> 422), but the equation TEXT is client-private. This exception
+    separates the two concerns:
+
+    * ``str(exc)`` — a safe public message that NAMES THE VARIABLE and the error
+      CATEGORY only, never the equation text. It is surfaced verbatim to the
+      client as the 422 ``message`` AND is the ``error`` field the route logs, so
+      both are leak-free by construction.
+    * ``safe_log_extra()`` — the structured fields the SINGLE log owner (the
+      route, the only layer with a ``request_id``) attaches: a stable ``code``, the
+      offending ``variable`` id, a one-way ``equation_hash`` for correlation, and
+      the ``category``. Never the equation, never ``str`` of the underlying parse
+      exception.
+
+    Subclasses ``ValueError`` so the existing engine/route ``except ValueError``
+    D-12(cf) mappings still catch it and map it to a clean 422 — the client-wire
+    STATUS is unchanged; only the message content and the log fields change.
+    """
+
+    def __init__(
+        self,
+        public_message: str,
+        *,
+        code: str,
+        variable: Optional[str],
+        category: str,
+        equation_hash: Optional[str] = None,
+    ) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.code = code
+        self.variable = variable
+        self.category = category
+        self.equation_hash = equation_hash
+
+    def safe_log_extra(self) -> Dict[str, Any]:
+        """Redacted structured fields for the single owner log — no equation text."""
+        extra: Dict[str, Any] = {
+            "code": self.code,
+            "category": self.category,
+        }
+        if self.variable is not None:
+            extra["variable"] = self.variable
+        if self.equation_hash is not None:
+            extra["equation_hash"] = self.equation_hash
+        return extra
+
 
 # C2(cf): bound for the topological-sort cache. The former cache was an unbounded dict
 # keyed by json.dumps(equations) (client-controllable), never evicted, on the live
@@ -174,18 +243,26 @@ class CounterfactualEngine:
                 explanation=explanation,
             )
 
-        except ValueError as e:
+        except ValueError:
             # Client-input defects — an undefined/dangling outcome, a malformed or
             # circular structural equation, a non-finite outcome, or a numpy
             # scale<0 — fail loud as ValueError, and the route's D-12(cf) handler
             # maps them to a clean 422 (the only internal ValueError source,
             # unknown distribution type, is unreachable behind the Pydantic enum).
-            # These are client errors, not server incidents: log at WARNING without
-            # a server-path traceback (the route also logs counterfactual_invalid_input
-            # at WARNING). Reserve ERROR + traceback for genuinely unexpected faults.
-            logger.warning("counterfactual_analysis_failed", extra={"error": str(e)})
+            #
+            # F6 / D-23.15: this layer does NOT log the client-input error. The ROUTE
+            # is the SINGLE log owner (it is the only layer with a request_id, and it
+            # already logs `counterfactual_invalid_input` at WARNING). Re-logging here
+            # (the former `counterfactual_analysis_failed` WARNING carrying `str(e)`)
+            # duplicated the record AND, for a malformed equation, wrote the raw
+            # equation text a second time via `str(e)`. Catching ValueError explicitly
+            # (before `except Exception`) still keeps a client-input defect off the
+            # ERROR + traceback path below — it just propagates without re-logging.
             raise
-        except Exception as e:
+        except Exception:
+            # Genuine internal/server fault (not a client-input ValueError): log at
+            # ERROR with a traceback (enough to debug — code path + trace, no client
+            # data) and re-raise for the route's 500 mapping.
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
 
@@ -593,7 +670,9 @@ class CounterfactualEngine:
         sorted_equations = self._topological_sort_equations(request.model.equations)
         for var_name, equation in sorted_equations:
             if var_name not in samples:  # Skip if already set by intervention/context
-                eq_value = self._evaluate_equation(equation, samples)
+                # F6 / D-23.15: pass var_name so a malformed/failing equation names the
+                # VARIABLE (not the equation text) in its safe 422 + redacted log.
+                eq_value = self._evaluate_equation(equation, samples, var_name=var_name)
                 # F-A (A3, 2026-07-23, adversarial review): reject a COMPLEX-valued
                 # equation result BEFORE it can be coerced to a real number. Complex
                 # enters only via an explicit imaginary literal (`5j`, `X * 1j`) or
@@ -659,7 +738,9 @@ class CounterfactualEngine:
         else:
             raise ValueError(f"Unknown distribution type: {dist_type}")
 
-    def _evaluate_equation(self, equation: str, samples: Dict[str, np.ndarray]) -> np.ndarray:
+    def _evaluate_equation(
+        self, equation: str, samples: Dict[str, np.ndarray], var_name: Optional[str] = None
+    ) -> np.ndarray:
         """
         Safely evaluate a structural equation using AST parsing instead of eval().
 
@@ -668,6 +749,9 @@ class CounterfactualEngine:
         Args:
             equation: Mathematical expression
             samples: Dictionary of variable samples
+            var_name: The model variable this equation defines (used to NAME the
+                variable in the safe error message + log fields; the live call site
+                passes it — see ``_run_fixed_monte_carlo``).
 
         Returns:
             Array of evaluated results
@@ -684,21 +768,47 @@ class CounterfactualEngine:
             result = self._eval_ast_node(tree.body, samples, depth=0)
 
             return np.array(result)
-        except SyntaxError as e:
-            # C6 (F-5, A3 2026-07-23): a malformed client equation is a client-input
-            # defect (this re-raises as ValueError -> route D-12(cf) -> 422), not a
-            # server incident — log at WARNING to match the #95 convention, so an
-            # invalid-equation 422 no longer pages as an ERROR. The genuine
-            # internal-fault ERROR + traceback path (analyze()'s except Exception)
-            # is unchanged. (The raw-equation-text in the message is unchanged; its
-            # privacy is a standing doctrine row, out of scope here.)
-            logger.warning(f"Syntax error in equation '{equation}': {e}")
-            raise ValueError(f"Invalid equation syntax: {equation}")
-        except Exception as e:
-            # Same class: an equation that parses but cannot evaluate (client input)
-            # -> ValueError -> 422. WARNING, not ERROR (see the SyntaxError branch).
-            logger.warning(f"Failed to evaluate equation '{equation}': {e}")
-            raise ValueError(f"Invalid equation: {equation}")
+        except SyntaxError:
+            # F6 / D-23.15: a malformed client equation is a client-input defect
+            # (-> CounterfactualClientInputError, a ValueError, -> route D-12(cf) ->
+            # 422), not a server incident. The equation TEXT is client-private, so it
+            # is NEVER logged or echoed here: this layer raises a typed error whose
+            # message names the VARIABLE + category only, and does NOT log (the route
+            # is the single log owner — the only layer with a request_id). `from None`
+            # suppresses the SyntaxError context so its `.text` (the source line, i.e.
+            # the equation) cannot ride along in any downstream traceback. Its stable
+            # `code`/`category`/`equation_hash` give the operator correlation without
+            # the text.
+            _named = f" for variable '{var_name}'" if var_name else ""
+            raise CounterfactualClientInputError(
+                f"Invalid equation syntax{_named}: the structural equation could not "
+                f"be parsed. Provide a syntactically valid arithmetic expression.",
+                code="cf_equation_syntax_invalid",
+                variable=var_name,
+                category="equation_syntax_invalid",
+                equation_hash=_hash_equation(equation),
+            ) from None
+        except CounterfactualClientInputError:
+            # Already redacted/typed (e.g. a nested evaluation raised it) — propagate
+            # unchanged; do not re-wrap (which would drop the specific code/category).
+            raise
+        except Exception:
+            # Same class: an equation that PARSES but cannot evaluate (an undefined
+            # variable reference, an unsafe/unsupported op, excessive nesting) is a
+            # client-input defect -> typed ValueError -> 422. The underlying exception
+            # can carry equation fragments (e.g. "Unknown variable: <name>"), so it is
+            # suppressed with `from None`; only the safe variable-named message + the
+            # redacted log fields survive. No log here (route is the owner).
+            _named = f" for variable '{var_name}'" if var_name else ""
+            raise CounterfactualClientInputError(
+                f"Invalid equation{_named}: the structural equation could not be "
+                f"evaluated. Ensure it references only declared model variables and "
+                f"uses supported operations.",
+                code="cf_equation_eval_failed",
+                variable=var_name,
+                category="equation_eval_failed",
+                equation_hash=_hash_equation(equation),
+            ) from None
 
     def _eval_ast_node(self, node: ast.AST, samples: Dict[str, np.ndarray], depth: int = 0) -> Any:
         """
