@@ -1067,6 +1067,17 @@ class CorrelationProjectionV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+# Suppressed-attribution manifest tokens (B3-S1). Single source of truth shared by
+# the PRODUCER (the analyzer's correlation skip-site appends) and the CONSUMER
+# (response_builder's factor_sensitivity_status derivation), so the token cannot drift
+# across files (CLAUDE.md #12: a bare-string literal duplicated producer↔consumer is a
+# silent-drift seam — if the two spellings diverge the status quietly under-discloses).
+SUPPRESSED_ATTR_FACTOR_SENSITIVITY = "factor_sensitivity"
+SUPPRESSED_ATTR_STABILITY_THRESHOLDS = "stability_thresholds"
+SUPPRESSED_ATTR_CONDITIONAL_WINNERS = "conditional_winners"
+SUPPRESSED_ATTR_P_WIN_SENSITIVITY = "p_win_sensitivity"
+
+
 class CorrelationModelV2(BaseModel):
     """Disclosure block for the active factor-correlation model (B3-S1, D-23.4).
 

@@ -21,6 +21,7 @@ from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
 from src.models.critique import INTERNAL_ERROR
 from src.models.response_v2 import (
+    SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
     ConditionalWinnerV2,
     CorrelationModelV2,
     CritiqueV2,
@@ -250,7 +251,8 @@ class ResponseBuilder:
             factor_sensitivity_status = "unavailable"
         elif (
             self.correlation_model is not None
-            and "factor_sensitivity" in self.correlation_model.suppressed_attributions
+            and SUPPRESSED_ATTR_FACTOR_SENSITIVITY
+            in self.correlation_model.suppressed_attributions
         ):
             # B3-S1: active correlation deliberately WITHHELD factor_sensitivity
             # because per-factor OAT attributions are non-separable when factors

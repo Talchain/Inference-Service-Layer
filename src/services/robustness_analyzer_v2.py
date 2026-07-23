@@ -52,6 +52,10 @@ from src.models.robustness_v2 import (
     StabilityThresholdsResponse,
 )
 from src.models.response_v2 import (
+    SUPPRESSED_ATTR_CONDITIONAL_WINNERS,
+    SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
+    SUPPRESSED_ATTR_P_WIN_SENSITIVITY,
+    SUPPRESSED_ATTR_STABILITY_THRESHOLDS,
     CorrelationModelV2,
     CorrelationProjectionV2,
     ZeroSensitivityReason,
@@ -1626,14 +1630,14 @@ class RobustnessAnalyzerV2:
         factor_sensitivity: List[FactorSensitivityResult] = []
         if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
             if correlation_active:
-                suppressed_attributions.append("factor_sensitivity")
+                suppressed_attributions.append(SUPPRESSED_ATTR_FACTOR_SENSITIVITY)
                 # stability_thresholds is a CHILD of factor_sensitivity's bootstrap
                 # (which runs unconditionally whenever there are uncertainties, so it
                 # is emitted iff factor_sensitivity ran). It therefore vanishes with
                 # factor_sensitivity under correlation — record it at the SAME skip
                 # site so the manifest names it too (hunter F-1: it previously
                 # vanished silently, unnamed).
-                suppressed_attributions.append("stability_thresholds")
+                suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
                 factor_sensitivity = self._compute_factor_sensitivity(
                     request, option_outcomes, rng_factor, evaluator
@@ -1648,7 +1652,7 @@ class RobustnessAnalyzerV2:
         conditional_winners = None
         if factor_sampler.has_uncertainties() and len(request.options) > 1:
             if correlation_active:
-                suppressed_attributions.append("conditional_winners")
+                suppressed_attributions.append(SUPPRESSED_ATTR_CONDITIONAL_WINNERS)
             else:
                 conditional_winners = self._compute_conditional_winners(
                     factor_values_per_sample,
@@ -1812,7 +1816,7 @@ class RobustnessAnalyzerV2:
         p_win_sensitivity = None
         if request.include_voi and factor_sampler.has_uncertainties() and correlation_active:
             # SUPPRESSED under active correlation — record at the skip site.
-            suppressed_attributions.append("p_win_sensitivity")
+            suppressed_attributions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
         elif request.include_voi and factor_sampler.has_uncertainties():
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.EVPI_MIN_BUDGET_MS:
@@ -3014,6 +3018,22 @@ class RobustnessAnalyzerV2:
             for option in request.options
             for factor_id in (option.interventions or {})
         }
+
+    @staticmethod
+    def _dedup_uncertainties(request: RobustnessRequestV2) -> List:
+        """Deduplicate parameter_uncertainties by node_id, first-seen order (dict
+        preserves insertion order → deterministic). Parse-time validation rejects
+        duplicate node_ids with a 422, but a direct internal caller could bypass it,
+        so a repeated node_id can never double-count in the per-factor VOI loops."""
+        return list({u.node_id: u for u in (request.parameter_uncertainties or [])}.values())
+
+    @staticmethod
+    def _per_factor_seed(seed: int, phase: str, node_id: str) -> int:
+        """Deterministic per-factor sub-seed for the VOI estimators. The ``phase``
+        tag ('evpi' / 'evppi') INTENTIONALLY forks the RNG stream so the two
+        estimators never share permutation/redraw randomness (drift-tolerant by
+        design — the tag is the only per-site variation)."""
+        return int(hashlib.sha256(f"{seed}:{phase}:{node_id}".encode()).hexdigest()[:8], 16)
 
     def _compute_factor_sensitivity(
         self,
@@ -4605,9 +4625,7 @@ class RobustnessAnalyzerV2:
 
         # Deduplicate uncertainties by node_id (parse-time validation already
         # rejects duplicates; defensive, first-seen order for determinism).
-        unique_uncertainties = list(
-            {u.node_id: u for u in request.parameter_uncertainties}.values()
-        )
+        unique_uncertainties = self._dedup_uncertainties(request)
 
         n_samples = len(factor_values_per_sample)
         results: List[Dict[str, Any]] = []
@@ -4626,11 +4644,8 @@ class RobustnessAnalyzerV2:
             except (KeyError, IndexError):
                 continue
 
-            # Deterministic per-factor seed for the permutation-null floor (mirrors
-            # the _compute_evpi per-factor seeding pattern).
-            floor_seed = int(
-                hashlib.sha256(f"{seed}:evppi:{fid}".encode()).hexdigest()[:8], 16
-            )
+            # Deterministic per-factor seed for the permutation-null floor.
+            floor_seed = self._per_factor_seed(seed, "evppi", fid)
             # Per-factor degrade (hunter F-4): a single factor whose estimator raises
             # (e.g. a poisoned ±inf theta on a goal-disconnected factor makes
             # Polynomial.fit raise LinAlgError) must NOT drop the WHOLE factor_evppi
@@ -4651,6 +4666,14 @@ class RobustnessAnalyzerV2:
             # Jensen), so this never fires on the live path; a clamped_low=True in
             # telemetry would mean the estimator changed. Kept as defence-in-depth.
             clamped_low = est.evppi_raw < 0.0
+            if clamped_low:
+                # Altitude Q5: fire the switch the instant it trips instead of relying
+                # on a human spotting the bool on the wire. A negative raw means the
+                # estimator lost its Howard >= 0 guarantee (e.g. a lost intercept).
+                self.logger.warning(
+                    "evppi_estimator_regressed",
+                    extra={"factor_id": fid, "evppi_raw": est.evppi_raw},
+                )
             evppi = max(0.0, est.evppi_raw)
 
             # Per-factor ≤ whole-decision EVPI theorem: cap at decision_evpi.
@@ -4759,9 +4782,7 @@ class RobustnessAnalyzerV2:
         # time, but a direct internal caller could bypass it. Dedup by node_id,
         # keeping first-seen order (dict preserves insertion order → deterministic)
         # so a repeated node_id can never re-trigger the EVPI multiplier here.
-        unique_uncertainties = list(
-            {u.node_id: u for u in request.parameter_uncertainties}.values()
-        )
+        unique_uncertainties = self._dedup_uncertainties(request)
 
         # F7: internal wall-clock deadline (was entry-gated only). deadline anchors
         # t0 at the EVPI phase; budget_ms is the remaining governing request budget
@@ -4835,9 +4856,8 @@ class RobustnessAnalyzerV2:
                 u for u in unique_uncertainties if u.node_id != uncertainty.node_id
             ]
 
-            # Deterministic seed per factor
-            factor_seed_str = f"{seed}:evpi:{uncertainty.node_id}"
-            factor_seed = int(hashlib.sha256(factor_seed_str.encode()).hexdigest()[:8], 16)
+            # Deterministic seed per factor.
+            factor_seed = self._per_factor_seed(seed, "evpi", uncertainty.node_id)
 
             perfect_rng_edge = SeededRNG(factor_seed)
             perfect_rng_factor = SeededRNG(factor_seed + 1)

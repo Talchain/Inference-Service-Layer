@@ -105,7 +105,7 @@ class CounterfactualEngine:
         # Input hardening (A3, 2026-07-22): fail loud on an unresolvable outcome
         # BEFORE any sampling, so a client-input defect maps to a clean 422 (via the
         # route's D-12(cf) except-ValueError) instead of a mislabeled KeyError-500.
-        self._require_resolvable_outcome(request)
+        self._validate_counterfactual_inputs(request)
 
         # Create per-request RNG for thread-safe determinism
         rng = make_deterministic(request.model_dump())
@@ -189,9 +189,17 @@ class CounterfactualEngine:
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
 
-    def _require_resolvable_outcome(self, request: CounterfactualRequest) -> None:
-        """Fail loud (input hardening) when `outcome` names a variable the model
-        can never produce a value for.
+    def _validate_counterfactual_inputs(self, request: CounterfactualRequest) -> None:
+        """Pre-sampling input hardening for a counterfactual request. Runs FOUR
+        ordered, most-actionable-first checks (each fail-loud → route D-12(cf) 422):
+          1. do/observe COLLISION — a variable in both `intervention` and `context`;
+          2. UNKNOWN KEY — an intervention/context variable not in the model;
+          3. NON-FINITE VALUE — an inf/nan intervention or context value;
+          4. RESOLVABLE OUTCOME — `outcome` names a variable the model can never
+             produce a value for (the check this method was formerly named for).
+        (The name was widened from `_require_resolvable_outcome`, which advertised only
+        check 4 — a maintainer hunting "where do we reject unknown keys / non-finite
+        inputs" would not have looked behind it.)
 
         `_run_fixed_monte_carlo` populates the `samples` dict from exactly four
         sources: the exogenous distributions, the intervention, the context, and
