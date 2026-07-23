@@ -66,6 +66,20 @@ def _edge_probability(edge: Dict[str, Any], num_siblings: int) -> float:
     return float(prob)
 
 
+def _edge_immediate_payoff(edge: Dict[str, Any]) -> float:
+    """Immediate payoff of traversing an edge, defaulting a missing or falsy
+    value to 0.
+
+    Single convention for the immediate-payoff read off a graph_data edge dict:
+    `edge.get("immediate_payoff", 0) or 0` -- a missing key OR a None/0 stored
+    value both read as 0. `_build_graph_data` always writes the key (as
+    `edge.immediate_payoff or 0`), so the `.get` default is defensive; keeping
+    the read in one place stops any consumer diverging on how an absent-or-None
+    payoff is treated (the absent-as-0 convention this engine enforces).
+    """
+    return edge.get("immediate_payoff", 0) or 0
+
+
 # Risk-aversion coefficient for the mean-standard-deviation adjustment applied to a
 # chance node's value under risk_tolerance="averse": value = mean - k * sqrt(variance).
 # DOCTRINE-PENDING(Neil): ruling D-13 fixes only the UNITS here — variance (currency^2)
@@ -348,7 +362,7 @@ class SequentialDecisionEngine:
             branches so the `immediate + discount_factor * resolve(child)` formula
             lives in exactly one place (the module-level `_discounted_edge_value`).
             Closes over resolve(), defined below."""
-            immediate = edge.get("immediate_payoff", 0) or 0
+            immediate = _edge_immediate_payoff(edge)
             return _discounted_edge_value(immediate, discount_factor, resolve(edge["to"]))
 
         def resolve(node_id: str) -> float:
@@ -496,7 +510,7 @@ class SequentialDecisionEngine:
         for edge in outgoing_edges:
             child_id = edge["to"]
             prob = _edge_probability(edge, len(outgoing_edges))
-            immediate = edge.get("immediate_payoff", 0) or 0
+            immediate = _edge_immediate_payoff(edge)
 
             if child_id not in node_values:
                 # RW-6a: absent != zero. A child missing from node_values has an
@@ -611,7 +625,7 @@ class SequentialDecisionEngine:
                     # guard a KeyError would be a true internal invariant breach --
                     # still fail loud, never fabricate continuation 0 (the
                     # absent-as-0 class this lane kills; cf. RW-6a's fail-loud).
-                    immediate = edge.get("immediate_payoff", 0) or 0
+                    immediate = _edge_immediate_payoff(edge)
                     ev = _discounted_edge_value(
                         immediate, discount_factor, node_values[child_id]
                     )
@@ -748,7 +762,7 @@ class SequentialDecisionEngine:
                 for edge in outgoing:
                     action = edge.get("action", edge["to"])
                     child_id = edge["to"]
-                    immediate = edge.get("immediate_payoff", 0) or 0
+                    immediate = _edge_immediate_payoff(edge)
 
                     # Direct-index, NOT node_values.get(child_id, 0): past the guard
                     # above this decision node is valued, so every child is present
@@ -905,7 +919,7 @@ class SequentialDecisionEngine:
         best_committed_value = float("-inf")
 
         for edge in outgoing:
-            immediate = edge.get("immediate_payoff", 0) or 0
+            immediate = _edge_immediate_payoff(edge)
 
             # Calculate expected continuation without optimal future decisions
             # (use average outcomes instead of max)
@@ -946,7 +960,7 @@ class SequentialDecisionEngine:
         # For both decision and chance nodes, take average (not max or expected)
         values = []
         for edge in outgoing:
-            immediate = edge.get("immediate_payoff", 0) or 0
+            immediate = _edge_immediate_payoff(edge)
             continuation = self._calculate_average_continuation(
                 edge["to"], graph_data, discount_factor, visited.copy()
             )
