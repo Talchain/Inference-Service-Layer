@@ -248,7 +248,9 @@ class TestCorrelationActivation:
         graph = _two_factor_graph()
         unc = [
             ParameterUncertainty(node_id="fa", distribution="normal", std=0.5),
-            ParameterUncertainty(node_id="fb", distribution="uniform", range_min=0.0, range_max=2.0),
+            ParameterUncertainty(
+                node_id="fb", distribution="uniform", range_min=0.0, range_max=2.0
+            ),
         ]
         absent = _outcome(analyzer.analyze(_request(None, unc=unc, graph=graph)))
         rho0 = _outcome(
@@ -273,7 +275,9 @@ class TestCorrelationActivation:
         graph = _two_factor_graph()
         unc = [
             ParameterUncertainty(node_id="fa", distribution="normal", std=0.5),
-            ParameterUncertainty(node_id="fb", distribution="uniform", range_min=0.2, range_max=0.9),
+            ParameterUncertainty(
+                node_id="fb", distribution="uniform", range_min=0.2, range_max=0.9
+            ),
         ]
         from src.services.robustness_analyzer_v2 import FactorSampler
         from src.utils.rng import SeededRNG
@@ -292,13 +296,17 @@ class TestCorrelationActivation:
 
 class TestCorrelationSuppression:
     def test_attributions_suppressed_under_correlation(self, analyzer):
-        resp = analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)]))
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
+        )
         assert resp.factor_sensitivity == []
         assert resp.factor_evpi is None
         assert resp.conditional_winners is None
 
     def test_correlation_model_disclosure_present(self, analyzer):
-        resp = analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)]))
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
+        )
         cm = resp.correlation_model
         assert cm is not None
         assert cm.method == "gaussian_copula_v1"
@@ -307,14 +315,18 @@ class TestCorrelationSuppression:
         assert cm.n_pairs == 1
 
     def test_mandatory_tail_dependence_disclosure(self, analyzer):
-        resp = analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)]))
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
+        )
         cm = resp.correlation_model
         assert cm.tail_dependence == "none"
         assert "tail" in cm.tail_dependence_note.lower()
         assert cm.tail_dependence_note  # non-empty — the load-bearing caveat
 
     def test_suppressed_attribution_manifest(self, analyzer):
-        resp = analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)]))
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
+        )
         cm = resp.correlation_model
         assert "factor_sensitivity" in cm.suppressed_attributions
         assert "factor_evpi" in cm.suppressed_attributions
@@ -333,7 +345,9 @@ class TestCorrelationSuppression:
 
     def test_joint_quantities_preserved(self, analyzer):
         # win_probability + downside stay present under correlation (joint-valid).
-        resp = analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)]))
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
+        )
         for r in resp.results:
             assert r.win_probability is not None
 
@@ -369,7 +383,9 @@ _UNC3 = [
 
 class TestPSDProjection:
     def test_psd_input_no_projection(self, analyzer):
-        resp = analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.9)]))
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.9)])
+        )
         assert resp.correlation_model.psd_projection is None
 
     def test_non_psd_triggers_higham_with_disclosure(self, analyzer):
@@ -381,7 +397,9 @@ class TestPSDProjection:
         ]
         resp = analyzer.analyze(
             _request(
-                non_psd, unc=_UNC3, graph=_three_factor_graph(),
+                non_psd,
+                unc=_UNC3,
+                graph=_three_factor_graph(),
                 options=[
                     InterventionOption(id="o1", label="O1", interventions={}),
                     InterventionOption(id="o2", label="O2", interventions={"fa": 1.0}),

@@ -895,9 +895,7 @@ class RobustnessRequestV2(BaseModel):
 
         node_ids = {node.id for node in self.graph.nodes}
         # Distribution per factor that actually has a sampled uncertainty.
-        dist_by_factor = {
-            u.node_id: u.distribution for u in (self.parameter_uncertainties or [])
-        }
+        dist_by_factor = {u.node_id: u.distribution for u in (self.parameter_uncertainties or [])}
 
         seen_pairs: set[tuple[str, str]] = set()
         for corr in self.factor_correlations:
@@ -916,8 +914,7 @@ class RobustnessRequestV2(BaseModel):
             for factor_id in (a, b):
                 if factor_id not in node_ids:
                     raise ValueError(
-                        "factor_correlations references non-existent factor node: "
-                        f"{factor_id}"
+                        "factor_correlations references non-existent factor node: " f"{factor_id}"
                     )
                 if factor_id not in dist_by_factor:
                     raise ValueError(

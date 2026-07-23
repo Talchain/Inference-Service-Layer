@@ -679,9 +679,7 @@ class FactorSampler:
             factor_values[node_id] = value
             self._value_sums[node_id] += value
 
-    def _copula_transform(
-        self, uncertainty: ParameterUncertainty, mean: float, y: float
-    ) -> float:
+    def _copula_transform(self, uncertainty: ParameterUncertainty, mean: float, y: float) -> float:
         """Map a correlated standard-normal draw ``y`` onto a factor's marginal.
 
         - normal:  x = mean + std * y  (exact — no CDF round-trip, so an identity

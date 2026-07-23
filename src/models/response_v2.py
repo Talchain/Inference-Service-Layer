@@ -1062,9 +1062,7 @@ class CorrelationProjectionV2(BaseModel):
         description="Largest absolute change to any single off-diagonal correlation "
         "entry during projection.",
     )
-    iterations: int = Field(
-        ..., description="Alternating-projection iterations used to converge."
-    )
+    iterations: int = Field(..., description="Alternating-projection iterations used to converge.")
 
     model_config = {"extra": "ignore"}
 
@@ -1084,9 +1082,7 @@ class CorrelationModelV2(BaseModel):
         description="Correlation model — 'gaussian_copula_v1' (Gaussian copula over the "
         "factors' existing marginals).",
     )
-    active: bool = Field(
-        ..., description="Always true when this block is present."
-    )
+    active: bool = Field(..., description="Always true when this block is present.")
     correlated_factors: List[str] = Field(
         ...,
         description="Factor node IDs drawn jointly under the copula (canonical draw order).",
