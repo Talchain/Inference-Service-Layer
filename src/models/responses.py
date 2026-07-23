@@ -3083,20 +3083,39 @@ class StageAnalysis(BaseModel):
     stage_evpi: Optional[float] = Field(
         default=None,
         description="Honest per-stage expected value of perfect information, in "
-        "OUTCOME (payoff) UNITS. EXACT FORM: stage_evpi = E_C[max_a Q(a | C)] − "
+        "OUTCOME (payoff) UNITS: stage_evpi = E_C[max_a Q(a | C)] − "
         "max_a E_C[Q(a)] — the expected value of perfectly resolving the chance "
         "node(s) this stage's decision faces BEFORE choosing an action, minus "
-        "deciding without that information. Both legs are exact reads of the "
-        "backward-induction tree (node_values + branch probabilities): the "
-        "decide-now leg is the decision's backward-induction value (max_a E_C[Q]); "
-        "the decide-after leg re-picks the best action for each realised chance "
-        "outcome and averages over outcomes (E_C[max_a Q]). >= 0 by construction "
-        "(Jensen), and EXACTLY 0 when one action dominates in every chance branch "
-        "or the decision faces no chance node. This REPLACES the removed "
-        "`optimal_waiting_value` (a discount × sqrt(Σvar) dispersion heuristic that "
-        "was NOT an option value). null (JSON null) for a stage with no decision "
-        "node — this endpoint does not omit None fields, matching the prior "
-        "optimal_waiting_value convention. RISK POSTURE: computed on the engine's "
+        "deciding without that information. The decide-now leg is the decision's "
+        "backward-induction value (max_a E_C[Q]); the decide-after leg re-picks the "
+        "best action for each realised chance outcome and averages over outcomes "
+        "(E_C[max_a Q]). >= 0 by construction (Jensen), and EXACTLY 0 when one action "
+        "dominates in every chance branch or the decision faces no chance node. This "
+        "REPLACES the removed `optimal_waiting_value` (a discount × sqrt(Σvar) "
+        "dispersion heuristic that was NOT an option value). null (JSON null) for a "
+        "stage with no decision node — this endpoint does not omit None fields, "
+        "matching the prior optimal_waiting_value convention. "
+        "SCOPE & IDENTIFIABILITY (F1, D-23.11): stage_evpi measures the value of "
+        "resolving the chance THIS stage's decision faces IMMEDIATELY (the chance "
+        "node(s) directly under its actions) before choosing. Chance that sits deeper "
+        "in the tree is a LATER stage's EVPI — resolved when that stage is analysed, "
+        "not folded in here. So a stage whose actions face NO immediate chance has "
+        "stage_evpi 0 with stage_evpi_status null (EXACT: there is no immediate "
+        "uncertainty to resolve at this stage, regardless of deeper chance). When the "
+        "decision DOES face immediate chance, the decide-after leg resolves it and "
+        "re-chooses: this is EXACT (status null) when at most ONE action faces any "
+        "reachable chance (every other action deterministic, its value coupling-"
+        "invariant). It is NOT exact — stage_evpi_status='assumed_independent_coupling' "
+        "with coupling_assumption='independence_across_actions' — when >=2 actions face "
+        "reachable chance (one immediate, another immediate OR one level deeper): the "
+        "leg then substitutes an AVERAGED value (the deeper action's unconditional Q) "
+        "for its conditional value, i.e. it ASSUMES the resolved chance is independent "
+        "of the other action's uncertainty. The tree supplies only the MARGINALS and "
+        "does not identify that joint law (the same marginals admit same-state or "
+        "opposite couplings with different EVPIs; a shared node reused under another "
+        "action identifies a different value than the emitted one), so consult those "
+        "two fields before reading stage_evpi as exact. "
+        "RISK POSTURE: computed on the engine's "
         "risk-ADJUSTED node values, so "
         "each per-outcome choice matches the optimal policy; for "
         "risk_tolerance='neutral' this is the standard risk-neutral EVPI. The "
@@ -3105,20 +3124,48 @@ class StageAnalysis(BaseModel):
         "adjustment.",
     )
     stage_evpi_status: Optional[
-        Literal["no_decision_node", "skipped_joint_space_too_large"]
+        Literal[
+            "no_decision_node",
+            "skipped_joint_space_too_large",
+            "assumed_independent_coupling",
+        ]
     ] = Field(
         default=None,
-        description="Disclosure for WHY stage_evpi is null (F-3). null/absent when "
-        "stage_evpi is COMPUTED — including a genuine EVPI of 0.0 (which is a real "
-        "value, not a skip). 'no_decision_node': the stage has no decision node, so "
-        "there is no choice for information to inform. "
-        "'skipped_joint_space_too_large': the decide-after leg's joint enumeration "
+        description="Disclosure of stage_evpi's status (F-3 skip reasons + F1 "
+        "identifiability). null/absent when stage_evpi is EXACT — either the stage "
+        "faces NO immediate chance (EVPI 0; deeper chance is a later stage's EVPI, not "
+        "this one's), or the decision faces immediate chance but at most ONE action "
+        "faces any reachable chance, so resolving that single uncertainty is exact "
+        "(includes a genuine EVPI of 0.0). Two null-value skip reasons: "
+        "'no_decision_node' — the stage has no "
+        "decision node, so there is no choice for information to inform; "
+        "'skipped_joint_space_too_large' — the decide-after leg's joint enumeration "
         "(∏ of the decision's chance-child branch counts) exceeds the safety cap "
         "(4096 cells), so this AUXILIARY metric is honestly skipped rather than "
-        "pinning the event loop — the exact analysis (optimal_policy, "
-        "value_of_flexibility, resolved_uncertainty, options) is unaffected. "
-        "Distinguishes the two null causes so a consumer never reads a skip as a "
-        "real 0.",
+        "pinning the event loop (the exact analysis — optimal_policy, "
+        "value_of_flexibility, resolved_uncertainty, options — is unaffected). One "
+        "value-present disclosure: 'assumed_independent_coupling' (F1, D-23.11) — the "
+        "stage faces immediate chance AND >=2 actions face reachable chance (one "
+        "immediate, another immediate or one level deeper), so stage_evpi is COMPUTED "
+        "but under an ASSUMED independence coupling the tree does not identify (see "
+        "coupling_assumption); the value is present but is NOT exact. Lets a consumer "
+        "distinguish a real 0, a null skip, and an assumption-laden value.",
+    )
+    coupling_assumption: Optional[Literal["independence_across_actions"]] = Field(
+        default=None,
+        description="F1 (D-23.11) disclosure of the cross-action coupling assumption "
+        "under which stage_evpi was computed. Present EXACTLY when "
+        "stage_evpi_status=='assumed_independent_coupling'; null otherwise. "
+        "'independence_across_actions': the stage's decision faces immediate chance "
+        "AND >=2 of its mutually-exclusive actions face a reachable chance node (one "
+        "immediate, another immediate OR one level deeper), so the decide-after leg "
+        "mixed one action's per-branch realised value against another action's "
+        "AVERAGED value — i.e. it ASSUMED the resolved chance is independent of the "
+        "other action's (possibly deeper) uncertainty. The tree identifies only the "
+        "marginals, not this joint law; the assumption is one modelling choice (the "
+        "same marginals admit other couplings with different EVPIs, and a shared "
+        "reused node identifies a different value than the emitted one) and is "
+        "disclosed here rather than silently baked into a value labelled exact.",
     )
 
     model_config = {
@@ -3151,21 +3198,42 @@ class StageAnalysis(BaseModel):
 
     @model_validator(mode="after")
     def _status_present_iff_evpi_absent(self) -> "StageAnalysis":
-        """Sibling-presence emission-iff (altitude Q1, F-3): stage_evpi_status
-        discloses WHY stage_evpi is null and is present EXACTLY when stage_evpi is
-        None (no_decision_node / skipped_joint_space_too_large); a COMPUTED stage_evpi
-        — including a genuine 0.0 — carries no status. Fail loud in Pydantic if the
-        (value, status) pair ever desyncs (e.g. a fabricated status on a real value,
-        or a null value with no reason), matching the fail-loud altitude of
-        decision_evpi rather than relying on the tuple-return convention alone."""
-        value_absent = self.stage_evpi is None
-        status_present = self.stage_evpi_status is not None
-        if value_absent != status_present:
+        """Sibling-presence invariant (altitude Q1, F-3 + F1): fail loud in Pydantic
+        if the (stage_evpi, stage_evpi_status, coupling_assumption) triple ever
+        desyncs, matching decision_evpi's fail-loud altitude rather than relying on
+        the tuple-return convention alone. Three disjoint, exhaustive shapes:
+
+        * skip reason ('no_decision_node' | 'skipped_joint_space_too_large'):
+          stage_evpi is NULL (there is no value), coupling_assumption absent;
+        * 'assumed_independent_coupling' (F1, D-23.11): stage_evpi is COMPUTED but
+          under an unidentified independence assumption, so it rides WITH a value AND
+          a coupling_assumption naming that assumption;
+        * no status (None): stage_evpi is a COMPUTED, EXACT value (including a genuine
+          0.0), coupling_assumption absent.
+
+        Rejects a fabricated skip status on a real value, a null value with no
+        reason, a disclosed assumption with no value (or no coupling named), and a
+        coupling_assumption not backed by its status."""
+        value = self.stage_evpi
+        status = self.stage_evpi_status
+        coupling = self.coupling_assumption
+        _SKIP_STATUSES = {"no_decision_node", "skipped_joint_space_too_large"}
+
+        if status in _SKIP_STATUSES:
+            ok = value is None and coupling is None
+        elif status == "assumed_independent_coupling":
+            ok = value is not None and coupling == "independence_across_actions"
+        else:  # status is None
+            ok = value is not None and coupling is None
+
+        if not ok:
             raise ValueError(
-                "stage_evpi/stage_evpi_status emission-iff violated: stage_evpi="
-                f"{self.stage_evpi!r} with stage_evpi_status={self.stage_evpi_status!r}. "
-                "A status is present exactly when stage_evpi is null (a skip reason); "
-                "a computed value (including 0.0) carries no status."
+                "stage_evpi/stage_evpi_status/coupling_assumption invariant violated: "
+                f"stage_evpi={value!r}, stage_evpi_status={status!r}, "
+                f"coupling_assumption={coupling!r}. A skip status carries a null value "
+                "and no coupling; 'assumed_independent_coupling' carries a computed "
+                "value and coupling_assumption='independence_across_actions'; no status "
+                "carries a computed value (incl. 0.0) and no coupling."
             )
         return self
 
