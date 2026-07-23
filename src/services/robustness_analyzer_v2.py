@@ -1984,6 +1984,7 @@ class RobustnessAnalyzerV2:
                     seed,
                     decision_evpi_bound,
                     correlation_active,
+                    inference_warnings=inference_warnings,
                 )
             except Exception:
                 self.logger.warning("factor_evppi_failed", exc_info=True)
@@ -4709,6 +4710,7 @@ class RobustnessAnalyzerV2:
         seed: int,
         decision_evpi_bound: Optional[float],
         correlation_active: bool,
+        inference_warnings: Optional[List[InferenceWarning]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Per-factor EVPPI (Expected Value of Partial Perfect Information) in
         OUTCOME units, via single-loop Strong-Oakley regression on the retained
@@ -4729,8 +4731,19 @@ class RobustnessAnalyzerV2:
         is a CHOICE, not information to buy, so it is OMITTED entirely (absent, not
         zero — missing ≠ zero). Non-lever uncertain factors always get an entry.
 
+        PARTIAL-DROP DISCLOSURE (Codex F7, D-23.15): a REQUESTED (non-lever) factor
+        can still be dropped IN-LOOP when its per-sample values are non-finite (a
+        pathological uncertainty overflow) or its estimator raises (e.g. LinAlgError
+        on a goal-disconnected factor). That drop was previously SILENT — the wire
+        warning only fired for a WHOLE-call failure — so ``factor_evppi`` absence was
+        ambiguous (no-eligible-factor vs not-requested vs estimator-failed). When
+        ``inference_warnings`` is supplied and ≥1 requested factor is dropped, a
+        ``FACTOR_EVPPI_PARTIAL`` warning lists the safe + failed factor ids and each
+        failure's category (ids + categories only — never a request value), so the
+        absence/short-list is explicit. Computable rows are always preserved.
+
         Returns a list of per-factor dicts (sorted by evppi descending), or None if
-        no non-lever uncertain factor exists.
+        no non-lever uncertain factor produced a row.
         """
         if not request.parameter_uncertainties:
             return None
@@ -4748,9 +4761,15 @@ class RobustnessAnalyzerV2:
 
         n_samples = len(factor_values_per_sample)
         results: List[Dict[str, Any]] = []
+        # F7 (D-23.15): track REQUESTED (non-lever) factors that are dropped in-loop so
+        # the caller can disclose the drop (safe ids kept a row; failed ids + category).
+        safe_ids: List[str] = []
+        failed: List[Tuple[str, str]] = []  # (factor_id, failure_category)
         for uncertainty in unique_uncertainties:
             fid = uncertainty.node_id
-            # LEVER SUPPRESSION: omit option-controlled levers (missing ≠ zero).
+            # LEVER SUPPRESSION: omit option-controlled levers (missing ≠ zero). A
+            # lever is an INTENTIONAL omission, NOT a failure — never recorded in
+            # `failed` (it must not raise a partial-drop warning).
             if fid in intervention_factor_ids:
                 continue
 
@@ -4761,6 +4780,19 @@ class RobustnessAnalyzerV2:
             try:
                 theta = [factor_values_per_sample[s][fid] for s in range(n_samples)]
             except (KeyError, IndexError):
+                failed.append((fid, "missing_sample_value"))
+                continue
+
+            # F7 cheap pre-regression validation: a non-finite theta (e.g. an overflow
+            # from a pathological uncertainty std) would make the polynomial fit raise
+            # or return NaN deep inside. Catch it here, cheaply and with a precise
+            # category, before the estimator (bound/validate sampled θ pre-regression).
+            if not all(math.isfinite(t) for t in theta):
+                self.logger.warning(
+                    "factor_evppi_non_finite_theta",
+                    extra={"factor_id": fid},
+                )
+                failed.append((fid, "non_finite_theta"))
                 continue
 
             # Deterministic per-factor seed for the permutation-null floor.
@@ -4778,6 +4810,7 @@ class RobustnessAnalyzerV2:
                     extra={"factor_id": fid},
                     exc_info=True,
                 )
+                failed.append((fid, "estimator_error"))
                 continue
 
             # Howard non-negativity clamp — DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by
@@ -4843,6 +4876,35 @@ class RobustnessAnalyzerV2:
                     # (it never assumes independence). True iff correlation active.
                     "correlation_active": correlation_active,
                 }
+            )
+            safe_ids.append(fid)
+
+        # F7 (D-23.15): disclose any requested factor dropped in-loop. Emitted whether
+        # or not any row survived — so `factor_evppi: absent` with a dropped factor is
+        # never silent (it disambiguates estimator-failed from no-eligible-factor).
+        # severity='warning' so PLoT's severity=='warning' mapping surfaces it (an
+        # 'info' would be hidden, re-silencing the drop). Ids + categories only — no
+        # request values (mirrors the correlation/EVPC validators' disclosure discipline).
+        if failed and inference_warnings is not None:
+            inference_warnings.append(
+                InferenceWarning(
+                    code="FACTOR_EVPPI_PARTIAL",
+                    field="factor_evppi",
+                    severity="warning",
+                    detail={
+                        "reason": "per_factor_dropped",
+                        "safe_factor_ids": safe_ids,
+                        "failed_factor_ids": [fid for fid, _ in failed],
+                        "failures": [
+                            {"factor_id": fid, "category": category} for fid, category in failed
+                        ],
+                        "message": (
+                            "Per-factor EVPPI could not be computed for "
+                            f"{len(failed)} requested factor(s); the remaining "
+                            f"{len(safe_ids)} were computed. Base analysis is unaffected."
+                        ),
+                    },
+                )
             )
 
         if not results:
