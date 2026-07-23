@@ -1205,6 +1205,26 @@ class ISLResponseV2(BaseModel):
         "removing this factor's uncertainty improve the decision metric?",
     )
 
+    # Decision-level EVPI (S1 — A3 VOI honesty, D-23.8). Additive-optional; a READ
+    # of the already-computed pre-noise joint regret (no new sampling).
+    decision_evpi: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Expected value of perfect information for the WHOLE decision, in "
+        "the same OUTCOME UNITS as outcome.mean (not win-probability points). "
+        "EXACT FORM: decision_evpi = E[max_o U] − max_o E[U], computed on the JOINT "
+        "pre-noise Common-Random-Numbers sample population (the same population as "
+        "win_probability and downside.expected_regret) as the MINIMUM per-option "
+        "expected regret: min_o expected_regret[o]. The identity "
+        "E[max]−max_o E[o] = min_o (E[max]−E[o]) is exact, so this is the value of "
+        "resolving ALL uncertainty before choosing — it captures option-switching, "
+        "unlike the per-factor win-probability sensitivity in factor_evpi. Zero new "
+        "sampling: a read of the regret already emitted per option. >= 0 by "
+        "construction (min of non-negative regrets). Present EXACTLY when the "
+        "downside/regret population is present (>=1 option carries "
+        "downside.expected_regret); omitted (never a JSON null) otherwise.",
+    )
+
     # Path decomposition (T1-6 wire completeness — additive optional, request-gated
     # by include_path_decomposition so payload size is opt-in; matches the V1
     # response's top-level placement)
@@ -1260,6 +1280,53 @@ class ISLResponseV2(BaseModel):
         description="Origin of seed_used: 'client_provided' if seed was in the request, "
         "'server_computed' if ISL derived it from graph structure",
     )
+
+    @model_validator(mode="after")
+    def _decision_evpi_matches_regret_population(self) -> "ISLResponseV2":
+        """S1 (A3 VOI, D-23.8): guard decision_evpi BOTH directions (S2-marker style).
+
+        decision_evpi is the honest decision-level EVPI = min_o expected_regret[o]
+        on the joint pre-noise CRN population. The per-option regrets reach the wire
+        as ``options[].downside.expected_regret``, and a downside block is emitted
+        exactly when the option has valid MC samples — which every regret-bearing
+        (hence finite-sample) option has, including the argmax-mean (== argmin-regret)
+        option. So the wire downside set contains the true minimiser, and:
+
+        (1) EMISSION-IFF (both directions): decision_evpi is present EXACTLY when the
+            regret population is present (>=1 option carries downside.expected_regret).
+            This mirrors the per-option downside emission rule and fails loud if a
+            mutation ever emits the number without the population (fabrication) or
+            drops it when the population exists (silent loss).
+        (2) VALUE: when present, decision_evpi EQUALS the minimum per-option expected
+            regret on the wire, and is non-negative. Catches a min->max / wrong-field
+            mutation (it would no longer equal the wire minimum).
+        """
+        regrets = [
+            o.downside.expected_regret
+            for o in (self.options or [])
+            if o.downside is not None
+        ]
+        evpi = self.decision_evpi
+        present = evpi is not None
+        if present != bool(regrets):
+            raise ValueError(
+                "decision_evpi emission-iff violated: decision_evpi is "
+                f"{'present' if present else 'absent'} but the joint regret "
+                f"population is {'present' if regrets else 'absent'}. decision_evpi "
+                "must be emitted EXACTLY when >=1 option carries "
+                "downside.expected_regret (min_o expected_regret[o])."
+            )
+        if evpi is not None:
+            min_regret = min(regrets)
+            tol = 1e-9 + 1e-9 * abs(min_regret)
+            if evpi < -tol or abs(evpi - min_regret) > tol:
+                raise ValueError(
+                    "decision_evpi must equal the MINIMUM per-option expected regret "
+                    f"(min_o downside.expected_regret = {min_regret!r}) and be "
+                    f">= 0; got {evpi!r}. It is E[max]−max E on the "
+                    "joint pre-noise population = min_o expected_regret[o]."
+                )
+        return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.

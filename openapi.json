@@ -3023,6 +3023,19 @@
             "title": "Critiques",
             "type": "array"
           },
+          "decision_evpi": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected value of perfect information for the WHOLE decision, in the same OUTCOME UNITS as outcome.mean (not win-probability points). EXACT FORM: decision_evpi = E[max_o U] \u2212 max_o E[U], computed on the JOINT pre-noise Common-Random-Numbers sample population (the same population as win_probability and downside.expected_regret) as the MINIMUM per-option expected regret: min_o expected_regret[o]. The identity E[max]\u2212max_o E[o] = min_o (E[max]\u2212E[o]) is exact, so this is the value of resolving ALL uncertainty before choosing \u2014 it captures option-switching, unlike the per-factor win-probability sensitivity in factor_evpi. Zero new sampling: a read of the regret already emitted per option. >= 0 by construction (min of non-negative regrets). Present EXACTLY when the downside/regret population is present (>=1 option carries downside.expected_regret); omitted (never a JSON null) otherwise.",
+            "title": "Decision Evpi"
+          },
           "diagnostics": {
             "anyOf": [
               {
@@ -5897,7 +5910,6 @@
           "sensitivity_to_timing": "medium",
           "stage_analyses": [
             {
-              "optimal_waiting_value": 20000.0,
               "options_at_stage": [
                 {
                   "continuation_value": 95000,
@@ -5908,6 +5920,7 @@
                 }
               ],
               "resolved_uncertainty": 15000.0,
+              "stage_evpi": 11220.0,
               "stage_index": 0,
               "stage_label": "Investment Decision"
             }
@@ -6257,7 +6270,6 @@
       "StageAnalysis": {
         "description": "Analysis for a single stage.\n\nA3 (2026-07-22): `information_value` was relabeled `resolved_uncertainty`\n(F4c) \u2014 the quantity is sqrt(\u03a3 variance) of the chance nodes resolving at this\nstage (a payoff-unit magnitude of outcome dispersion), NOT a value of\ninformation (E[value|info] \u2212 E[value]). The old name and its \"difference\nbetween value with and without information\" claim were unsupported.",
         "example": {
-          "optimal_waiting_value": 20000.0,
           "options_at_stage": [
             {
               "continuation_value": 95000,
@@ -6275,22 +6287,11 @@
             }
           ],
           "resolved_uncertainty": 15000.0,
+          "stage_evpi": 11220.0,
           "stage_index": 0,
           "stage_label": "Investment Decision"
         },
         "properties": {
-          "optimal_waiting_value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Proxy for the value of delaying the stage-0 decision, computed as discount_factor \u00d7 the next stage's `resolved_uncertainty`. It is a discounted outcome-dispersion magnitude, NOT a true option value (the difference between the wait-and-decide and commit-now policies).",
-            "title": "Optimal Waiting Value"
-          },
           "options_at_stage": {
             "description": "Options available at this stage with analysis",
             "items": {
@@ -6303,6 +6304,34 @@
             "description": "Magnitude of outcome dispersion resolved at this stage: sqrt of the summed variance of the chance nodes that resolve here, in payoff units. This is NOT a value of information (E[value|info] \u2212 E[value]); it does not compare a with-information policy to a without-information one.",
             "title": "Resolved Uncertainty",
             "type": "number"
+          },
+          "stage_evpi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Honest per-stage expected value of perfect information, in OUTCOME (payoff) UNITS. EXACT FORM: stage_evpi = E_C[max_a Q(a | C)] \u2212 max_a E_C[Q(a)] \u2014 the expected value of perfectly resolving the chance node(s) this stage's decision faces BEFORE choosing an action, minus deciding without that information. Both legs are exact reads of the backward-induction tree (node_values + branch probabilities): the decide-now leg is the decision's backward-induction value (max_a E_C[Q]); the decide-after leg re-picks the best action for each realised chance outcome and averages over outcomes (E_C[max_a Q]). >= 0 by construction (Jensen), and EXACTLY 0 when one action dominates in every chance branch or the decision faces no chance node. This REPLACES the removed `optimal_waiting_value` (a discount \u00d7 sqrt(\u03a3var) dispersion heuristic that was NOT an option value). null (JSON null) for a stage with no decision node \u2014 this endpoint does not omit None fields, matching the prior optimal_waiting_value convention. RISK POSTURE: computed on the engine's risk-ADJUSTED node values, so each per-outcome choice matches the optimal policy; for risk_tolerance='neutral' this is the standard risk-neutral EVPI. The resolved chance's own variance is not re-penalised in the outer average (perfect information removes it); deeper continuations keep their risk adjustment.",
+            "title": "Stage Evpi"
+          },
+          "stage_evpi_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_decision_node",
+                  "skipped_joint_space_too_large"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Disclosure for WHY stage_evpi is null (F-3). null/absent when stage_evpi is COMPUTED \u2014 including a genuine EVPI of 0.0 (which is a real value, not a skip). 'no_decision_node': the stage has no decision node, so there is no choice for information to inform. 'skipped_joint_space_too_large': the decide-after leg's joint enumeration (\u220f of the decision's chance-child branch counts) exceeds the safety cap (4096 cells), so this AUXILIARY metric is honestly skipped rather than pinning the event loop \u2014 the exact analysis (optimal_policy, value_of_flexibility, resolved_uncertainty, options) is unaffected. Distinguishes the two null causes so a consumer never reads a skip as a real 0.",
+            "title": "Stage Evpi Status"
           },
           "stage_index": {
             "description": "Stage index",

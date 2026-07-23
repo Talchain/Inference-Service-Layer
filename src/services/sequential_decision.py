@@ -5,6 +5,7 @@ Implements backward induction for multi-stage decision problems,
 computing optimal policies and value of flexibility.
 """
 
+import itertools
 import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -94,6 +95,18 @@ RISK_AVERSION_COEFFICIENT = 0.5
 # float error in the equal-split default (e.g. 3 * (1/3) = 0.999999999999…) yet
 # tight enough to reject a genuinely malformed distribution.
 _PROB_SUM_TOLERANCE = 1e-6
+
+# F-3 (A3 VOI adversarial): safety cap on the number of joint cells the per-stage
+# stage_evpi decide-after leg enumerates (∏ branch-counts over the decision's chance
+# children = B^K for K chance-child actions with B branches each). A legal request
+# (SequentialGraph caps: ≤100 nodes / ≤300 edges) can build a decision with ~97
+# chance-child actions ⇒ 2^97 cells, an un-preemptable CPU DoS on the async route.
+# 4096 = 2^12 caps the enumeration at trivial cost (each cell is O(K); 4096 cells is
+# well under a millisecond) while never rejecting a legitimate decision — real
+# decisions face a handful of independent chance nodes (6 binary = 64 cells, even
+# 12 binary = 4096); the DoS shapes need K ≥ 13. Over the cap, stage_evpi honestly
+# SKIPS (null + status) rather than 422-ing the whole (valid, O(nodes)) analysis.
+_STAGE_EVPI_JOINT_CELL_CAP = 4096
 
 
 class SequentialDecisionEngine:
@@ -787,12 +800,30 @@ class SequentialDecisionEngine:
                 stage, graph_data, node_values, discount_factor
             )
 
-            # Calculate waiting value if applicable
-            waiting_value = None
-            if stage.stage_index == 0 and len(stages) > 1:
-                waiting_value = self._calculate_waiting_value(
-                    graph_data, stages, node_values, discount_factor
+            # S3 (A3 VOI honesty, D-23.8): honest per-stage EVPI in outcome units,
+            # replacing the deleted `optimal_waiting_value` (discount × sqrt(Σvar)
+            # heuristic). Computed for this stage's decision node (the first valid
+            # one, matching _build_policy) as E_C[max_a Q] − max_a E_C[Q] on the
+            # exact backward-induction tree. `stage_evpi_status` (F-3) discloses WHY
+            # a null value is null: absent when computed (incl. a real EVPI of 0);
+            # 'no_decision_node' when the stage has no decision to inform;
+            # 'skipped_joint_space_too_large' when the decide-after joint enumeration
+            # would exceed the safety cap (an honest skip of an auxiliary metric —
+            # the exact analysis itself is unaffected).
+            primary_decision = next(
+                (
+                    nid
+                    for nid in stage.decision_nodes
+                    if nid in nodes and nodes[nid]["type"] == "decision"
+                ),
+                None,
+            )
+            if primary_decision is not None:
+                stage_evpi, stage_evpi_status = self._compute_stage_evpi(
+                    primary_decision, graph_data, node_values, discount_factor
                 )
+            else:
+                stage_evpi, stage_evpi_status = None, "no_decision_node"
 
             analyses.append(
                 StageAnalysis(
@@ -800,7 +831,8 @@ class SequentialDecisionEngine:
                     stage_label=stage.stage_label,
                     options_at_stage=options,
                     resolved_uncertainty=resolved_uncertainty,
-                    optimal_waiting_value=waiting_value,
+                    stage_evpi=stage_evpi,
+                    stage_evpi_status=stage_evpi_status,
                 )
             )
 
@@ -843,34 +875,161 @@ class SequentialDecisionEngine:
         # sqrt of total variance = standard-deviation-scale dispersion magnitude
         return np.sqrt(total_variance) if total_variance > 0 else 0
 
-    def _calculate_waiting_value(
+    def _compute_stage_evpi(
         self,
+        decision_node_id: str,
         graph_data: Dict[str, Any],
-        stages: List[DecisionStage],
         node_values: Dict[str, float],
         discount_factor: float,
-    ) -> float:
-        """Calculate value of waiting/delaying first stage decision."""
-        # Simplified: value of waiting is related to information gained
-        # by observing chance node outcomes before committing
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """Honest per-stage EVPI (S3 — A3 VOI, D-23.8): the expected value of
+        perfectly resolving the chance node(s) this decision faces BEFORE choosing,
+        minus deciding without that information.
 
-        if len(stages) < 2:
-            return 0
+            stage_evpi = E_C[max_a Q(a | C)] − max_a E_C[Q(a)]   (>= 0, outcome units)
 
-        # Get value at stage 0 without waiting
-        root_value = self._get_root_value(graph_data, node_values)
+        Returns ``(stage_evpi, status)``:
+        * ``(value, None)`` — computed (value may be a real 0.0);
+        * ``(None, "skipped_joint_space_too_large")`` — the decide-after joint
+          enumeration ∏(branch counts) exceeds ``_STAGE_EVPI_JOINT_CELL_CAP``, an
+          F-3 honest skip of this auxiliary metric (the exact O(nodes) analysis is
+          untouched). The join size is measured multiplicatively with an
+          overflow-safe early exit — the ∏ is NEVER materialised.
 
-        # F4c: proxy = discount_factor × the next stage's resolved-uncertainty
-        # magnitude. This is a discounted outcome-dispersion magnitude, NOT a true
-        # option value (the wait-and-decide vs commit-now difference); the field
-        # description discloses that.
-        next_stage_uncertainty = self._calculate_resolved_uncertainty(
-            stages[1] if len(stages) > 1 else stages[0], graph_data, node_values, discount_factor
+        This REPLACES the deleted ``optimal_waiting_value`` (a discount × sqrt(Σvar)
+        dispersion heuristic dressed as an option value) with a real value of
+        information. Both legs are exact reads of the backward-induction tree the
+        engine already builds — no new sampling, no heuristic:
+
+        * decide-now leg = ``node_values[decision]`` = ``max_a E_C[Q(a)]`` (the value
+          the optimal policy maximises: commit the action before the chance resolves).
+        * decide-after leg = ``E_C[max_a Q(a | C=outcome)]``: for each realised
+          outcome of the immediate chance node(s) under the decision's actions,
+          re-pick the best action, then average over the (independent) chance
+          outcomes. Jensen's inequality makes it >= the decide-now leg.
+
+        It is exactly 0 when one action dominates in every chance branch (perfect
+        information never changes the choice) and when the decision faces no
+        immediate chance node at all (nothing to resolve).
+
+        RISK POSTURE (documented choice; flagged for review): the legs use the
+        engine's own risk-ADJUSTED ``node_values`` for every continuation, so each
+        per-outcome argmax selects exactly the action the optimal policy would —
+        consistent with how the policy chooses actions (argmax over risk-adjusted
+        values). The outer average over the RESOLVED chance is NOT re-penalised for
+        that chance's own variance (perfect information has removed it), while every
+        deeper continuation keeps its ``node_values`` adjustment. For
+        ``risk_tolerance='neutral'`` this is the standard risk-neutral EVPI. Because
+        mean−kσ is a DOCTRINE-PENDING(Neil) heuristic rather than a coherent utility,
+        the ``max(0, ·)`` clamp guards its rare negative under risk aversion; for
+        neutral it never binds.
+        """
+        nodes = graph_data["nodes"]
+        edges = graph_data["edges"]
+
+        action_edges = edges.get(decision_node_id, [])
+        if not action_edges:
+            return 0.0, None
+
+        # The immediate chance node(s) directly under the decision's actions = the
+        # uncertainty this decision faces. If none, perfect information is worth 0.
+        has_chance = any(
+            nodes.get(e["to"], {}).get("type") == "chance" for e in action_edges
         )
+        if not has_chance:
+            return 0.0, None
 
-        waiting_value = discount_factor * next_stage_uncertainty
+        # decide-now leg is exactly what backward induction stored for the decision.
+        decide_now = node_values[decision_node_id]
 
-        return waiting_value
+        # Each action's UNCONDITIONAL Q(a) = immediate + γ·V(child) — used when the
+        # action's child is not one of the chance nodes resolved in a joint outcome.
+        unconditional_q: List[float] = []
+        for e in action_edges:
+            child = e["to"]
+            if child not in node_values:
+                # absent != zero (engine doctrine): a staged decision has every
+                # child valued by backward induction; a missing one is a breach.
+                raise ValueError(
+                    f"stage_evpi references unvalued child '{child}' of decision "
+                    f"'{decision_node_id}'."
+                )
+            unconditional_q.append(
+                _discounted_edge_value(
+                    _edge_immediate_payoff(e), discount_factor, node_values[child]
+                )
+            )
+
+        # For each resolved chance node (a chance child of an action), its outcome
+        # branches with NORMALISED probabilities and the value AT the chance node
+        # given that outcome (edge_value(C→branch)) — the same normalisation and
+        # edge valuation resolve() uses, so the leg is consistent with node_values.
+        resolved: List[Tuple[str, List[Tuple[float, float]]]] = []
+        for e in action_edges:
+            cid = e["to"]
+            if nodes.get(cid, {}).get("type") != "chance":
+                continue
+            out = edges.get(cid, [])
+            weighted = [(_edge_probability(b, len(out)), b) for b in out]
+            total_p = sum(p for p, _ in weighted)
+            if total_p <= _PROB_SUM_TOLERANCE:
+                # Mirrors resolve()'s F4d guard: a zero-mass distribution has no EVPI.
+                raise ValueError(
+                    f"stage_evpi: chance node '{cid}' has effectively zero total "
+                    f"probability mass; its expected value is undefined."
+                )
+            branches: List[Tuple[float, float]] = []
+            for p, b in weighted:
+                bchild = b["to"]
+                if bchild not in node_values:
+                    raise ValueError(
+                        f"stage_evpi: unvalued branch child '{bchild}' of chance "
+                        f"node '{cid}'."
+                    )
+                branch_value = _discounted_edge_value(
+                    _edge_immediate_payoff(b), discount_factor, node_values[bchild]
+                )
+                branches.append((p / total_p, branch_value))
+            resolved.append((cid, branches))
+
+        # F-3 SAFETY GUARD: the decide-after leg enumerates ∏(branch counts) joint
+        # cells = B^K for K chance-child actions. A legal request can drive K ~97
+        # (2^97 cells) — an un-preemptable CPU freeze of the async event loop.
+        # Measure the joint size MULTIPLICATIVELY with an overflow-safe early exit
+        # (never materialise the ∏, so K=97 costs ~13 multiplications then bails). If
+        # it exceeds the cap, honestly SKIP this auxiliary metric (null + status)
+        # rather than 422-ing the valid, O(nodes) analysis (over-rejection).
+        joint_cells = 1
+        for _, branches in resolved:
+            joint_cells *= len(branches)
+            if joint_cells > _STAGE_EVPI_JOINT_CELL_CAP:
+                return None, "skipped_joint_space_too_large"
+
+        # Enumerate the JOINT outcome space of the resolved (independent) chance
+        # nodes. Under each joint outcome an action keeps its unconditional Q unless
+        # its child IS one of the resolved chance nodes, in which case it takes that
+        # node's realised branch value; then max over actions, average by joint prob.
+        e_after = 0.0
+        for combo in itertools.product(*[branches for _, branches in resolved]):
+            joint_p = 1.0
+            realised: Dict[str, float] = {}
+            for (cid, _), (branch_p, branch_value) in zip(resolved, combo):
+                joint_p *= branch_p
+                realised[cid] = branch_value
+            best = float("-inf")
+            for idx, e in enumerate(action_edges):
+                child = e["to"]
+                if child in realised:
+                    q = _discounted_edge_value(
+                        _edge_immediate_payoff(e), discount_factor, realised[child]
+                    )
+                else:
+                    q = unconditional_q[idx]
+                if q > best:
+                    best = q
+            e_after += joint_p * best
+
+        return max(0.0, e_after - decide_now), None
 
     def _compute_value_of_flexibility(
         self,

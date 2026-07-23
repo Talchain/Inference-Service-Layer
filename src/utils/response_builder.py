@@ -107,6 +107,10 @@ class ResponseBuilder:
         self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
         self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
         self.factor_evpi: Optional[list] = None  # EVPI per factor (enhancement)
+        # Decision-level EVPI (S1 — A3 VOI, D-23.8): min_o expected_regret[o] in
+        # outcome units. None until set from the option regret population; absent
+        # (exclude_none) on the wire when no regret population exists.
+        self.decision_evpi: Optional[float] = None
         # Auto-noise disclosure (B3): None until explicitly set from V1 metadata.
         # Preserves False as False; never coerced to None on the path through the route.
         self.auto_noise_applied: Optional[bool] = None
@@ -153,6 +157,14 @@ class ResponseBuilder:
     ) -> None:
         """Set conditional winner analysis results."""
         self.conditional_winners = conditional_winners
+
+    def set_decision_evpi(self, decision_evpi: Optional[float]) -> None:
+        """Set the decision-level EVPI (S1 — A3 VOI, D-23.8).
+
+        ``decision_evpi`` = min over options of the pre-noise joint expected regret
+        = E[max]−max E on the CRN population, in outcome units. None => omitted.
+        """
+        self.decision_evpi = decision_evpi
 
     def set_auto_noise_applied(self, flag: Optional[bool]) -> None:
         """Set the auto-noise disclosure flag for the V2 envelope (B3)."""
@@ -257,6 +269,7 @@ class ResponseBuilder:
             conditional_winners=self.conditional_winners,
             stability_thresholds=self.stability_thresholds,  # 3C
             factor_evpi=self.factor_evpi,
+            decision_evpi=self.decision_evpi,  # S1 — A3 VOI (D-23.8)
             path_decomposition=self.path_decomposition,  # T1-6
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
             correlation_model=self.correlation_model,  # B3-S1
