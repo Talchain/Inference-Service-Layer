@@ -535,6 +535,53 @@ def test_stage_evpi_shared_chance_not_falsely_skipped_by_cap(engine):
     assert s0.stage_evpi_status != "skipped_joint_space_too_large"
 
 
+def test_stage_evpi_zero_immediate_chance_but_deeper_is_exact_immediate_scope(engine):
+    """R2-F1 pin (round-2 metric-scope). T4: D--A-->D_a(decision)--ga-->CA(0/100);
+    D--B-->D_b(decision)--gb-->CB(0/100). The stage-0 decision D faces NO immediate
+    chance (both children are decisions), so its stage_evpi is EXACTLY 0.0 with status
+    None — the INTENDED per-immediate-stage semantics, NOT a missed disclosure. Even
+    though >=2 actions have chance reachable DEEPER, that deeper chance is a LATER
+    stage's EVPI (surfaced when D_a / D_b are analysed), and no independence product
+    runs at stage 0 (there is no immediate chance to product over). The value 0.0 is
+    coupling-invariant-exact. Guards the description's immediate-scope claim: status
+    None here does NOT mean 'no chance anywhere in the subtree'."""
+    g = SequentialGraph(
+        nodes=[
+            SequentialGraphNode(id="D", type="decision", label="D"),
+            SequentialGraphNode(id="D_a", type="decision", label="D_a"),
+            SequentialGraphNode(id="D_b", type="decision", label="D_b"),
+            SequentialGraphNode(id="CA", type="chance", label="CA"),
+            SequentialGraphNode(id="CB", type="chance", label="CB"),
+            SequentialGraphNode(id="a_lo", type="terminal", label="a_lo", payoff=0),
+            SequentialGraphNode(id="a_hi", type="terminal", label="a_hi", payoff=100),
+            SequentialGraphNode(id="b_lo", type="terminal", label="b_lo", payoff=0),
+            SequentialGraphNode(id="b_hi", type="terminal", label="b_hi", payoff=100),
+        ],
+        edges=[
+            SequentialGraphEdge(from_node="D", to_node="D_a", action="A"),
+            SequentialGraphEdge(from_node="D", to_node="D_b", action="B"),
+            SequentialGraphEdge(from_node="D_a", to_node="CA", action="ga"),
+            SequentialGraphEdge(from_node="D_b", to_node="CB", action="gb"),
+            SequentialGraphEdge(from_node="CA", to_node="a_lo", outcome="a0", probability=0.5),
+            SequentialGraphEdge(from_node="CA", to_node="a_hi", outcome="a1", probability=0.5),
+            SequentialGraphEdge(from_node="CB", to_node="b_lo", outcome="b0", probability=0.5),
+            SequentialGraphEdge(from_node="CB", to_node="b_hi", outcome="b1", probability=0.5),
+        ],
+        stage_assignments={"D": 0, "D_a": 1, "D_b": 1, "CA": 2, "CB": 2, "a_lo": 3, "a_hi": 3, "b_lo": 3, "b_hi": 3},
+    )
+    stages = [
+        DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+        DecisionStage(stage_index=1, stage_label="s1", decision_nodes=["D_a", "D_b"], resolution_nodes=[]),
+        DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[], resolution_nodes=["CA", "CB"]),
+        DecisionStage(stage_index=3, stage_label="s3", decision_nodes=[]),
+    ]
+    req = SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=1.0, risk_tolerance="neutral")
+    s0 = _stage_map(engine.analyze(req))[0]
+    assert s0.stage_evpi == 0.0
+    assert s0.stage_evpi_status is None
+    assert s0.coupling_assumption is None
+
+
 # ---------------------------------------------------------------------------
 # Independent identity cross-check (two implementations must agree)
 # ---------------------------------------------------------------------------

@@ -954,36 +954,42 @@ class SequentialDecisionEngine:
         information never changes the choice) and when the decision faces no
         immediate chance node at all (nothing to resolve).
 
-        IDENTIFIABILITY (F1, D-23.11 — the joint law across actions is NOT in the
-        tree; detection broadened in the Fable adversarial round). The tree supplies
-        only the MARGINAL outcome distribution under each action. The classifier scans
-        each action's WHOLE subtree (``_subtree_reaches_chance``), not just its
-        immediate child. Two regimes:
+        SCOPE & IDENTIFIABILITY (F1, D-23.11 — the joint law across actions is NOT in
+        the tree; detection broadened in the Fable adversarial round; scope clarified
+        in round 2). stage_evpi is scoped to THIS stage's IMMEDIATE chance — the chance
+        node(s) directly under the decision's actions. Chance deeper in the tree is a
+        LATER stage's EVPI (computed when that stage is analysed), NOT folded in here.
+        Hence the two early returns above (no action edges / no immediate chance) yield
+        an EXACT 0.0 with no status: a stage facing no immediate uncertainty has nothing
+        to resolve, whatever chance lies deeper (round-2 T4). Only once the decision
+        DOES face immediate chance does identifiability bite — and there the tree
+        supplies only the MARGINAL outcome distribution under each action:
 
         * IDENTIFIED (EXACT, no status) — at most ONE action faces reachable chance
           (every other action's subtree is chance-free). Resolving that single
           uncertainty and re-maxing over actions — each deterministic action carrying
           its exact ``Q`` — is an exact ``E_C[max_a Q(a|C)]``.
-        * UNIDENTIFIED — >=2 actions each have a chance node reachable somewhere in
-          their subtree (immediate OR deeper). The decide-after leg then mixes one
-          action's per-branch realised value against another action's AVERAGED value
-          (its ``unconditional_q`` = ``E[Q_b]`` substituted for ``E[Q_b | C]``), i.e. it
-          ASSUMES the resolved chance is INDEPENDENT of the other action's (possibly
-          deeper) uncertainty. The tree does not identify that joint law — the same
-          marginals also admit same-state coupling (EVPI can be 0), opposite coupling
-          (larger EVPI), etc. So the number is one unrequested modelling choice, NOT
-          exact for the supplied tree. Per D-23.11 (disclose-and-status, NOT nullify —
-          the value stays useful and the endpoint stays live) it is returned WITH
-          ``status='assumed_independent_coupling'`` and
+        * UNIDENTIFIED — >=2 actions each have a chance node reachable in their subtree
+          (one immediate, another immediate OR one level deeper). The decide-after leg
+          then mixes one action's per-branch realised value against another action's
+          AVERAGED value (its ``unconditional_q`` = ``E[Q_b]`` substituted for
+          ``E[Q_b | C]``), i.e. it ASSUMES the resolved chance is INDEPENDENT of the
+          other action's (possibly deeper) uncertainty. The tree does not identify that
+          joint law — the same marginals also admit same-state coupling (EVPI can be 0),
+          opposite coupling (larger EVPI), etc. So the number is one unrequested
+          modelling choice, NOT exact for the supplied tree. Per D-23.11 (disclose-and-
+          status, NOT nullify — the value stays useful and the endpoint stays live) it
+          is returned WITH ``status='assumed_independent_coupling'`` and
           ``coupling_assumption='independence_across_actions'`` so a consumer never
           reads it as identified/exact. NOTE (value-refinement, flagged for Paul/Neil):
           when the deeper node is the SAME chance node reused under another action, the
           tree DOES identify the joint (same-state) and the exact EVPI differs from the
           emitted independence value (e.g. 0 vs 25); this round SAFELY CONTAINS that by
           disclosing (never claiming exact), not by recomputing the shared-state value.
-          (Doctrine alternative — require a shared scenario variable, or emit
-          status-only with a null value — is a Paul/Neil flag; this implements
-          disclose+value+status.)
+          (Doctrine alternatives — require a shared scenario variable; emit status-only
+          with a null value; or give the no-immediate-chance-but-deeper case its own
+          status [metric-scope question, round-2 R2-F1] — are Paul/Neil flags; this
+          implements disclose+value+status with per-immediate-stage scope.)
 
         RISK POSTURE (documented choice; flagged for review): the legs use the
         engine's own risk-ADJUSTED ``node_values`` for every continuation, so each
@@ -1005,7 +1011,13 @@ class SequentialDecisionEngine:
             return 0.0, None, None
 
         # The immediate chance node(s) directly under the decision's actions = the
-        # uncertainty this decision faces. If none, perfect information is worth 0.
+        # uncertainty this decision faces AT THIS STAGE. If none, this stage has no
+        # immediate uncertainty to resolve, so its EVPI is EXACTLY 0 (status None) —
+        # per-immediate-stage scope (round-2 R2-F1): any chance deeper in the tree
+        # belongs to a LATER stage's EVPI, computed when that stage is analysed, and is
+        # NOT an unidentified-coupling case here (no independence product runs when
+        # there is no immediate chance to product over). The subtree scan below only
+        # discriminates identified vs unidentified once immediate chance DOES exist.
         has_chance = any(
             nodes.get(e["to"], {}).get("type") == "chance" for e in action_edges
         )
