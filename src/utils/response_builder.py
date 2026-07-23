@@ -113,6 +113,9 @@ class ResponseBuilder:
         # S2 (D-23.8): per-factor regression EVPPI in outcome units. Enhancement
         # passthrough; None => omitted on the wire.
         self.factor_evppi: Optional[list] = None
+        # S4 (D-23.8): per-lever EVPC (value of control) in outcome units. Enhancement
+        # passthrough; None => omitted on the wire (request-driven by control_candidates).
+        self.factor_evpc: Optional[list] = None
         # Decision-level EVPI (S1 — A3 VOI, D-23.8): min_o expected_regret[o] in
         # outcome units. None until set from the option regret population; absent
         # (exclude_none) on the wire when no regret population exists.
@@ -151,6 +154,7 @@ class ResponseBuilder:
         stability_thresholds: Optional[StabilityThresholdsResponse] = None,
         p_win_sensitivity: Optional[list] = None,
         factor_evppi: Optional[list] = None,
+        factor_evpc: Optional[list] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
@@ -159,6 +163,7 @@ class ResponseBuilder:
         self.stability_thresholds = stability_thresholds
         self.p_win_sensitivity = p_win_sensitivity
         self.factor_evppi = factor_evppi
+        self.factor_evpc = factor_evpc
 
     def set_conditional_winners(
         self, conditional_winners: Optional[List[ConditionalWinnerV2]]
@@ -289,6 +294,7 @@ class ResponseBuilder:
             stability_thresholds=self.stability_thresholds,  # 3C
             p_win_sensitivity=self.p_win_sensitivity,  # S2 — A3 VOI relabel (D-23.8)
             factor_evppi=self.factor_evppi,  # S2 — A3 VOI regression EVPPI (D-23.8)
+            factor_evpc=self.factor_evpc,  # S4 — A3 value-of-control (D-23.8)
             decision_evpi=self.decision_evpi,  # S1 — A3 VOI (D-23.8)
             path_decomposition=self.path_decomposition,  # T1-6
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5

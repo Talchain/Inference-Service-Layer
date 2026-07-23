@@ -657,6 +657,40 @@
         "title": "ConstraintResultV2",
         "type": "object"
       },
+      "ControlCandidate": {
+        "description": "A value-of-control (EVPC) candidate: a factor the user could pull to one of\na bounded set of chosen values (A3 S4, D-23.8).\n\nFor each candidate value ``x`` the engine evaluates ``do(factor_id = x)`` on the\nSAME retained joint Common-Random-Numbers draws that scored the options (the\nintervention overrides the drawn value for this factor while every other factor \u2014\nincluding its correlated partners \u2014 keeps its per-sample joint draw), and reports\n``EVPC = max_x E[U | do(factor_id=x)] \u2212 max_a E[U_a]`` in outcome units. This is a\nrequest-side input only; ISL lands it FIRST because the request models carry\n``extra:\"ignore\"`` and would silently drop a producer-first field.",
+        "example": {
+          "factor_id": "price",
+          "values": [
+            0.3,
+            0.5,
+            0.7
+          ]
+        },
+        "properties": {
+          "factor_id": {
+            "description": "ID of the graph node to control (do-intervene). Must exist in the graph and must not be the goal node itself.",
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "values": {
+            "description": "Candidate values to grid over for do(factor_id=value). At least one, at most 7. Each value must be finite. More values tighten the grid approximation of the true (continuous) value of control.",
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 7,
+            "minItems": 1,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "factor_id",
+          "values"
+        ],
+        "title": "ControlCandidate",
+        "type": "object"
+      },
       "CorrelationModelV2": {
         "description": "Disclosure block for the active factor-correlation model (B3-S1, D-23.4).\n\nPresent ONLY when the request supplied ``factor_correlations`` (independence\nstays the silent default). It discloses the copula method, the MANDATORY\ntail-independence caveat (load-bearing whenever the copula co-ships with the\ndownside/CVaR block), any PSD projection, and which independence-assuming\nper-factor attributions were suppressed and why.",
         "properties": {
@@ -3136,6 +3170,21 @@
             "title": "Engine Version",
             "type": "string"
           },
+          "factor_evpc": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-lever Expected Value of CONTROL (EVPC) in the SAME OUTCOME UNITS as outcome.mean and decision_evpi: for each control candidate the request supplied, how much better the decision could be if that factor were PULLED to its best candidate value rather than left as-is. Computed by gridding do(factor=value) over the candidate's values on the retained joint pre-noise CRN samples (NO nested Monte Carlo, NO new sampling \u2014 the same draws and the same SCM evaluator that scored the options; the intervention overrides the factor's drawn value while its correlated partners keep their joint draws): EVPC = max_x E[U|do(factor=x)] \u2212 max_a E[U_a] (the second term is the value of the best current option). GRID-APPROXIMATION SEMANTICS: the value grid is discrete, so this is a LOWER BOUND on the true (continuous) value of control \u2014 more candidate values tighten it. Fields: factor_id, evpc (clamped to >= 0: a lever you may pull to any candidate value cannot be worth less than leaving it), evpc_raw (pre-clamp audit), best_candidate_value (argmax over the grid \u2014 ALWAYS reported, even when EVPC = 0, so 'control adds nothing' names the best value tried), baseline_max_expected_utility, best_do_expected_utility, units ('outcome'), method ('grid_do_v1'), n_samples, n_candidate_values, clamped_low (raw was negative grid/finite-sample slack), correlation_active. EVPC is the value of CONTROL \u2014 the mirror of factor_evppi's value of INFORMATION (EVPPI): control replaces a factor's value with a chosen one, information reveals its true value before choosing. Because control is the point, option-controlled levers are NOT suppressed here (unlike factor_evppi). Present EXACTLY when control_candidates was supplied; emitted (like factor_evppi) under active correlation.",
+            "title": "Factor Evpc"
+          },
           "factor_evppi": {
             "anyOf": [
               {
@@ -4987,6 +5036,22 @@
             "title": "Confidence Level",
             "type": "number"
           },
+          "control_candidates": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ControlCandidate"
+                },
+                "maxItems": 5,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value-of-control (EVPC) candidates: factors the user could pull to chosen values. When provided, ISL grids do(factor=value) over each candidate's values on the retained joint CRN samples and emits factor_evpc (per-lever EVPC in outcome units). At most 5 candidates; each factor_id must exist in the graph, must not be the goal node, and may appear at most once. Independent of include_voi.",
+            "title": "Control Candidates"
+          },
           "factor_correlations": {
             "anyOf": [
               {
@@ -5270,6 +5335,21 @@
             ],
             "description": "E-value analogue per edge: minimum strength perturbation to flip recommendation. Only included when computed within time budget.",
             "title": "Edge E Values"
+          },
+          "factor_evpc": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-lever Expected Value of Control (EVPC) in OUTCOME units, via grid do(factor=value) on the retained joint CRN samples. Method 'grid_do_v1'. Present only when control_candidates was supplied. See ISLResponseV2.factor_evpc.",
+            "title": "Factor Evpc"
           },
           "factor_evppi": {
             "anyOf": [

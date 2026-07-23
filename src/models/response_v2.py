@@ -11,6 +11,7 @@ P2 Brief Alignment:
 - 422 responses use unwrapped ISLV2Error422 format
 """
 
+import math
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
@@ -18,7 +19,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
-from src.constants import RESPONSE_SCHEMA_VERSION_V2
+from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
 
 class InferenceWarning(BaseModel):
@@ -1336,6 +1337,36 @@ class ISLResponseV2(BaseModel):
         "zero: their uncertainty is a choice, not information to buy).",
     )
 
+    # Per-lever EVPC (S4 — A3 value-of-control, D-23.8). Additive-optional; grid
+    # do() on the retained joint CRN samples (no new sampling). Request-driven.
+    factor_evpc: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-lever Expected Value of CONTROL (EVPC) in the SAME OUTCOME "
+        "UNITS as outcome.mean and decision_evpi: for each control candidate the "
+        "request supplied, how much better the decision could be if that factor were "
+        "PULLED to its best candidate value rather than left as-is. Computed by "
+        "gridding do(factor=value) over the candidate's values on the retained joint "
+        "pre-noise CRN samples (NO nested Monte Carlo, NO new sampling — the same "
+        "draws and the same SCM evaluator that scored the options; the intervention "
+        "overrides the factor's drawn value while its correlated partners keep their "
+        "joint draws): EVPC = max_x E[U|do(factor=x)] − max_a E[U_a] (the second term "
+        "is the value of the best current option). GRID-APPROXIMATION SEMANTICS: the "
+        "value grid is discrete, so this is a LOWER BOUND on the true (continuous) "
+        "value of control — more candidate values tighten it. Fields: factor_id, evpc "
+        "(clamped to >= 0: a lever you may pull to any candidate value cannot be worth "
+        "less than leaving it), evpc_raw (pre-clamp audit), best_candidate_value "
+        "(argmax over the grid — ALWAYS reported, even when EVPC = 0, so 'control adds "
+        "nothing' names the best value tried), baseline_max_expected_utility, "
+        "best_do_expected_utility, units ('outcome'), method ('grid_do_v1'), "
+        "n_samples, n_candidate_values, clamped_low (raw was negative grid/finite-"
+        "sample slack), correlation_active. EVPC is the value of CONTROL — the mirror "
+        "of factor_evppi's value of INFORMATION (EVPPI): control replaces a factor's "
+        "value with a chosen one, information reveals its true value before choosing. "
+        "Because control is the point, option-controlled levers are NOT suppressed "
+        "here (unlike factor_evppi). Present EXACTLY when control_candidates was "
+        "supplied; emitted (like factor_evppi) under active correlation.",
+    )
+
     # Path decomposition (T1-6 wire completeness — additive optional, request-gated
     # by include_path_decomposition so payload size is opt-in; matches the V1
     # response's top-level placement)
@@ -1437,6 +1468,73 @@ class ISLResponseV2(BaseModel):
                     f">= 0; got {evpi!r}. It is E[max]−max E on the "
                     "joint pre-noise population = min_o expected_regret[o]."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _factor_evpc_entries_are_well_formed(self) -> "ISLResponseV2":
+        """S4 (A3 value-of-control, D-23.8): guard every factor_evpc entry BOTH ways.
+
+        factor_evpc is emitted request-driven (present iff control_candidates was
+        supplied — enforced structurally in the analyzer + covered by the absent/
+        present wire tests); this validator is the VALUE-integrity gate that fails
+        loud on a compute/emission mutation. For each entry:
+
+        (1) CLAMP IDENTITY (both directions): evpc == max(0, evpc_raw). Catches a
+            forgotten clamp (raw shipped as evpc) or a stray clamp on a positive raw.
+            EVPC is non-negative by construction (control cannot hurt).
+        (2) best_candidate_value is present and finite — ALWAYS reported, even when
+            evpc == 0 (all candidates underperform). Catches a drop of the argmax.
+        (3) evpc_raw / baseline / best_do EUs are finite (no NaN/inf on the wire).
+        (4) method == 'grid_do_v1' and units == 'outcome' (self-describing method +
+            units tags a consumer relies on to read the number correctly).
+        """
+        if self.factor_evpc is None:
+            return self
+
+        for entry in self.factor_evpc:
+            fid = entry.get("factor_id")
+            evpc = entry.get("evpc")
+            evpc_raw = entry.get("evpc_raw")
+            best_value = entry.get("best_candidate_value")
+
+            if not isinstance(evpc, (int, float)) or not isinstance(evpc_raw, (int, float)):
+                raise ValueError(
+                    f"factor_evpc entry for '{fid}' must carry numeric evpc and "
+                    f"evpc_raw; got evpc={evpc!r}, evpc_raw={evpc_raw!r}."
+                )
+            if not math.isfinite(evpc) or not math.isfinite(evpc_raw):
+                raise ValueError(
+                    f"factor_evpc entry for '{fid}' must be finite; got "
+                    f"evpc={evpc!r}, evpc_raw={evpc_raw!r}."
+                )
+
+            expected_evpc = max(0.0, float(evpc_raw))
+            tol = 1e-9 + 1e-9 * abs(expected_evpc)
+            if float(evpc) < -tol or abs(float(evpc) - expected_evpc) > tol:
+                raise ValueError(
+                    f"factor_evpc entry for '{fid}': evpc must equal max(0, evpc_raw) "
+                    f"= {expected_evpc!r} and be >= 0; got evpc={evpc!r}, "
+                    f"evpc_raw={evpc_raw!r}. EVPC is the clamped value of control."
+                )
+
+            if not isinstance(best_value, (int, float)) or not math.isfinite(best_value):
+                raise ValueError(
+                    f"factor_evpc entry for '{fid}' must always report a finite "
+                    f"best_candidate_value (the argmax over the grid, even when "
+                    f"evpc == 0); got {best_value!r}."
+                )
+
+            if entry.get("units") != "outcome":
+                raise ValueError(
+                    f"factor_evpc entry for '{fid}' must be in outcome units "
+                    f"(units == 'outcome'); got {entry.get('units')!r}."
+                )
+            if entry.get("method") != GRID_DO_EVPC_METHOD:
+                raise ValueError(
+                    f"factor_evpc entry for '{fid}' must be method-tagged "
+                    f"'{GRID_DO_EVPC_METHOD}'; got {entry.get('method')!r}."
+                )
+
         return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.

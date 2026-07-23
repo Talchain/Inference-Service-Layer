@@ -64,6 +64,7 @@ from src.constants import (
     ELASTICITY_CLAMP_MAX,
     FACTOR_SENSITIVITY_BASELINE_EPSILON,
     FACTOR_SENSITIVITY_VALUE_EPSILON,
+    GRID_DO_EVPC_METHOD,
     MAX_GRAPH_EDGES,
     MAX_GRAPH_NODES,
     MAX_OPTIONS,
@@ -164,6 +165,13 @@ EVPI_LABELLING_DOCTRINE = "provisional_doctrine_v0"
 # noise constants, log event names) retain their EVPI naming as an implementation
 # detail — this tag governs what the WIRE calls the quantity.
 P_WIN_SENSITIVITY_METHOD = "p_win_delta_at_mean_v1"
+
+# S4 (D-23.8) value-of-control (EVPC) method tag. factor_evpc grids do(factor=value)
+# over each control candidate's values on the retained joint CRN samples and takes
+# max_x E[U|do(x)] − max_a E[U_a]; the grid is a discrete approximation, so the
+# reported EVPC is a LOWER BOUND on the true (continuous) EVPC — more values tighten
+# it. Imported from src.constants so the producer tag and the ISLResponseV2 validator
+# share ONE source of truth (see GRID_DO_EVPC_METHOD there).
 
 # Per-factor EVPI Monte Carlo depth cap: EVPI uses min(request.n_samples,
 # EVPI_SAMPLE_CAP) draws per pass. Paul-ruled lenient defaults 2026-07-17:
@@ -1503,13 +1511,18 @@ class RobustnessAnalyzerV2:
         # noised p10/p50/p90/mean).
         pre_noise_expected_regret = expected_regret_per_option(option_outcomes)
 
-        # S2 (D-23.8) factor_evppi needs the PRE-noise per-option outcomes — the
-        # same CRN-aligned joint population that produced pre_noise_expected_regret
-        # and win_probability. _apply_auto_scaled_noise below reassigns each option's
-        # list IN PLACE (independent per-option noise breaks CRN alignment), so snapshot
-        # the pre-noise lists here. Only taken when the VOI phase will run.
+        # S2 (D-23.8) factor_evppi and S4 (D-23.8) factor_evpc both need the PRE-noise
+        # per-option outcomes — the same CRN-aligned joint population that produced
+        # pre_noise_expected_regret and win_probability. _apply_auto_scaled_noise below
+        # reassigns each option's list IN PLACE (independent per-option noise breaks CRN
+        # alignment), so snapshot the pre-noise lists here. Taken when the VOI phase
+        # (include_voi) OR the value-of-control phase (control_candidates) will run —
+        # EVPC uses max_a E[U_a] over this population as its baseline and is NOT gated
+        # on include_voi (control is a distinct capability from information).
         pre_noise_option_outcomes: Optional[Dict[str, List[float]]] = None
-        if request.include_voi and factor_sampler.has_uncertainties():
+        if (
+            request.include_voi and factor_sampler.has_uncertainties()
+        ) or request.control_candidates:
             pre_noise_option_outcomes = {
                 oid: list(vals) for oid, vals in option_outcomes.items()
             }
@@ -1921,6 +1934,42 @@ class RobustnessAnalyzerV2:
                     )
                 )
 
+        # S4 (D-23.8): per-lever value of control (EVPC). Grid do(factor=value) on
+        # the SAME retained joint CRN samples via the SAME evaluator used for the
+        # options — no nested MC, no new sampling. Request-driven: gated purely on
+        # control_candidates presence (NOT include_voi — control is a distinct
+        # capability from information). Emitted under active correlation (the do()
+        # runs on the joint copula draws). Degrade-with-disclosure on any unexpected
+        # failure (never 500s the response).
+        factor_evpc = None
+        if request.control_candidates and pre_noise_option_outcomes is not None:
+            try:
+                factor_evpc = self._compute_factor_evpc(
+                    request,
+                    evaluator,
+                    edge_configs_per_sample,
+                    factor_values_per_sample,
+                    pre_noise_option_outcomes,
+                    correlation_active,
+                )
+            except Exception:  # pragma: no cover - defensive degrade-with-disclosure
+                self.logger.warning("factor_evpc_failed", exc_info=True)
+                factor_evpc = None
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="FACTOR_EVPC_UNAVAILABLE",
+                        field="factor_evpc",
+                        severity="warning",
+                        detail={
+                            "reason": "compute_error",
+                            "message": (
+                                "Value of control (factor_evpc) could not be computed "
+                                "and was omitted. Base analysis is unaffected."
+                            ),
+                        },
+                    )
+                )
+
         # Compute structural pathway decomposition for the recommended option if requested.
         # Pass evaluator.graph — the post-filter graph the SCM actually computed on
         # (filter_inference_graph was applied before the evaluator was constructed), so the
@@ -2021,6 +2070,7 @@ class RobustnessAnalyzerV2:
             edge_e_values=edge_e_values,
             p_win_sensitivity=p_win_sensitivity,
             factor_evppi=factor_evppi,
+            factor_evpc=factor_evpc,
             path_decomposition=path_decomposition,
             correlation_model=correlation_model,
         )
@@ -4731,6 +4781,131 @@ class RobustnessAnalyzerV2:
 
         # Sort by EVPPI descending (most valuable information first).
         results.sort(key=lambda x: float(x["evppi"]), reverse=True)
+        return results
+
+    def _compute_factor_evpc(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
+        factor_values_per_sample: List[Dict[str, float]],
+        pre_noise_option_outcomes: Dict[str, List[float]],
+        correlation_active: bool,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Per-lever Expected Value of Control (EVPC) in OUTCOME units, via grid
+        do(factor=value) on the retained joint CRN samples (S4, D-23.8). No nested
+        MC, no new sampling — reuses the SAME joint draws that scored the options.
+
+        For each control candidate the user supplied, and each candidate value ``x``,
+        re-evaluate every retained sample under ``do(factor_id = x)`` on that sample's
+        own (edge_config, factor_values) joint draw via the SAME ``SCMEvaluatorV2``
+        used for the options. The intervention OVERRIDES the factor's drawn value
+        while every other factor — including its correlated partners — keeps its joint
+        draw (#100 override-after-joint-draw: partners unaffected; verified against
+        ``evaluate()`` lines 909-949). Then::
+
+            E[U | do(factor=x)]  = mean over samples of the do(x) outcome
+            EVPC_raw(factor)     = max_x E[U | do(factor=x)] − max_a E[U_a]
+            EVPC(factor)         = max(0, EVPC_raw)      (control cannot hurt: a lever
+                                   you may pull to any candidate value is never worse
+                                   than not pulling it; a negative raw is grid/finite-
+                                   sample slack, clamped with disclosure)
+
+        where ``max_a E[U_a]`` is the baseline value of the best CURRENT option on the
+        pre-noise CRN population — the SAME population behind win_probability,
+        decision_evpi and factor_evppi. ``best_candidate_value`` (argmax over the
+        grid) is ALWAYS reported, even when every candidate underperforms the baseline
+        (EVPC = 0): the honest reading is "controlling this factor to these values adds
+        nothing, and this was the best of them".
+
+        EVPC is the value of CONTROL, the mirror of EVPPI's value of INFORMATION — so,
+        unlike factor_evppi, option-controlled levers are NOT suppressed here: the user
+        explicitly asks what a lever is worth, and control is precisely the point. It
+        is a grid approximation (a LOWER BOUND on the true continuous EVPC; more values
+        tighten it) and is EMITTED under active correlation (the do() runs on the joint
+        copula draws, so it is honest under correlation).
+
+        Returns a list of per-lever dicts (sorted by EVPC descending, factor_id
+        tie-break), or None when control_candidates is absent (request-driven gate) or
+        no sample population exists.
+        """
+        if not request.control_candidates:
+            return None
+
+        n_samples = len(factor_values_per_sample)
+        if n_samples == 0:
+            return None
+
+        # Baseline max_a E[U_a]: the best current option's expected outcome on the
+        # pre-noise CRN population (np.mean — the engine's mean convention).
+        option_means = {
+            oid: float(np.mean(vals)) for oid, vals in pre_noise_option_outcomes.items() if vals
+        }
+        finite_option_means = {oid: m for oid, m in option_means.items() if math.isfinite(m)}
+        if not finite_option_means:
+            return None
+        baseline_max_eu = max(finite_option_means.values())
+
+        results: List[Dict[str, Any]] = []
+        for candidate in request.control_candidates:
+            fid = candidate.factor_id
+
+            # Grid do(fid = x) over the candidate values on the retained joint draws.
+            best_value: Optional[float] = None
+            best_do_eu = -math.inf
+            for x in candidate.values:
+                do_outcomes = [
+                    evaluator.evaluate(
+                        edge_strengths=edge_configs_per_sample[i],
+                        interventions={fid: x},
+                        goal_node=request.goal_node_id,
+                        factor_values=factor_values_per_sample[i],
+                    )
+                    for i in range(n_samples)
+                ]
+                do_eu = float(np.mean(do_outcomes))
+                # Skip a non-finite grid point (pathological graph) rather than let
+                # inf/nan reach the wire; strict '>' keeps the FIRST (request-order)
+                # value on ties → deterministic argmax.
+                if math.isfinite(do_eu) and do_eu > best_do_eu:
+                    best_do_eu = do_eu
+                    best_value = x
+
+            if best_value is None:
+                # Every grid point was non-finite (never on a 200 response — a single
+                # non-finite outcome also poisons option means / the JSON serializer,
+                # which 500s first). Omit rather than fabricate; no disclosure needed.
+                continue
+
+            evpc_raw = best_do_eu - baseline_max_eu
+            clamped_low = evpc_raw < 0.0
+            evpc = max(0.0, evpc_raw)
+
+            results.append(
+                {
+                    "factor_id": fid,
+                    "evpc": round(evpc, 6),
+                    # Pre-clamp raw + audit legs (mirrors factor_evppi auditability).
+                    "evpc_raw": round(evpc_raw, 6),
+                    "best_candidate_value": best_value,
+                    "baseline_max_expected_utility": round(baseline_max_eu, 6),
+                    "best_do_expected_utility": round(best_do_eu, 6),
+                    "units": "outcome",
+                    "method": GRID_DO_EVPC_METHOD,
+                    "n_samples": n_samples,
+                    "n_candidate_values": len(candidate.values),
+                    # Control-cannot-hurt clamp fired (raw was negative grid slack).
+                    "clamped_low": clamped_low,
+                    # Disclosure: do() ran on joint copula draws → honest under corr.
+                    "correlation_active": correlation_active,
+                }
+            )
+
+        if not results:
+            return None
+
+        # Sort by EVPC descending (most valuable lever first), factor_id tie-break.
+        results.sort(key=lambda r: (-float(r["evpc"]), str(r["factor_id"])))
         return results
 
     def _compute_evpi(
