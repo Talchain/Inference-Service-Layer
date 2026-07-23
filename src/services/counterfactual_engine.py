@@ -586,6 +586,27 @@ class CounterfactualEngine:
         for var_name, equation in sorted_equations:
             if var_name not in samples:  # Skip if already set by intervention/context
                 eq_value = self._evaluate_equation(equation, samples)
+                # F-A (A3, 2026-07-23, adversarial review): reject a COMPLEX-valued
+                # equation result BEFORE it can be coerced to a real number. Complex
+                # enters only via an explicit imaginary literal (`5j`, `X * 1j`) or
+                # `pow()` on a negative base with a fractional exponent (`(-1) ** 0.5`);
+                # numpy float arrays yield NaN — never complex — for those, so no
+                # real-valued model produces a complex result. Casting complex -> float
+                # SILENTLY DISCARDS the imaginary part: the 0-d broadcast below with
+                # `dtype=float` fabricated a real value (`{"Y":"5j"}` returned 200 with
+                # point_estimate 0.0), and a 1-d complex outcome instead reached
+                # `np.percentile` and raised a mislabeled retryable 500. Both are
+                # dishonest on a deterministic client-input defect. Reject at this one
+                # locus for ANY shape (0-d literal or 1-d array) -> ValueError -> route
+                # D-12(cf) 422, naming the variable only (F11: no value echo).
+                if np.asarray(eq_value).dtype.kind == "c":
+                    raise ValueError(
+                        f"Structural equation for variable '{var_name}' produced a "
+                        f"complex-valued result, which cannot be a real counterfactual "
+                        f"outcome. Provide equations that evaluate to real numbers "
+                        f"(avoid imaginary literals such as 'j' and fractional powers "
+                        f"of negative numbers)."
+                    )
                 # Defect (A3, 2026-07-23, HUNT-VALIDATION F-4): a CONSTANT structural
                 # equation (e.g. "5") evaluates to a 0-d array — no operand carries the
                 # sample dimension. Broadcast it to `num_samples` so every equation

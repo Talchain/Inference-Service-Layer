@@ -276,6 +276,53 @@ class TestConstantEquation:
         assert response.prediction.confidence_interval.upper == pytest.approx(7.0, abs=1e-9)
 
 
+class TestComplexEquationRejected:
+    """F-A (A3, 2026-07-23, adversarial review): a complex-valued equation result
+    must be rejected (422), never coerced to a fabricated real. Complex enters only
+    via an imaginary literal (`5j`, `X*1j`) or `pow()` of a negative base by a
+    fractional exponent (`(-1)**0.5`) — no real-valued model produces it. RED at
+    HEAD (d71ae6d): `{"Y":"5j"}` -> 200 point_estimate 0.0 (imaginary discarded via
+    the 0-d broadcast's `dtype=float`); `{"Y":"X*1j"}` -> a mislabeled retryable 500
+    at np.percentile. Removing the complex guard makes these RED (fabricated 0.0 /
+    500 return)."""
+
+    def _analyze(self, eqs, variables, interv, outcome="Y"):
+        engine = CounterfactualEngine()
+        model = StructuralModel(variables=variables, equations=eqs, distributions={})
+        request = CounterfactualRequest(
+            model=model, intervention=interv, outcome=outcome, context={}
+        )
+        return engine.analyze(request)
+
+    def test_complex_literal_outcome_rejected(self):
+        """RED at HEAD: `{"Y":"5j"}` -> 200 pe=0.0 (5j real part 0.0, imaginary dropped)."""
+        with pytest.raises(ValueError, match="complex-valued"):
+            self._analyze({"Y": "5j"}, ["Y", "D"], {"D": 1.0})
+
+    def test_complex_array_outcome_rejected(self):
+        """Non-0-d complex (`X*1j` -> 1-d complex) was a mislabeled 500 at
+        np.percentile; the ndim-agnostic guard rejects it as a clean 422."""
+        with pytest.raises(ValueError, match="complex-valued"):
+            self._analyze({"Y": "X * 1j"}, ["X", "Y"], {"X": 3.0})
+
+    def test_complex_intermediate_rejected_names_the_variable(self):
+        """A complex INTERMEDIATE (C=2j) feeding the outcome is rejected naming C
+        (RED at HEAD: 200 pe=0.0 — C fabricated to 0.0 so Y=0*X)."""
+        with pytest.raises(ValueError, match=r"variable 'C'.*complex-valued"):
+            self._analyze({"C": "2j", "Y": "C * X"}, ["X", "C", "Y", "D"], {"X": 3.0, "D": 1.0})
+
+    def test_pow_complex_result_rejected(self):
+        """A real-LOOKING equation that yields complex via pow (`(-1)**0.5`) was
+        fabricated to ~0.0 (real part) at HEAD; now rejected."""
+        with pytest.raises(ValueError, match="complex-valued"):
+            self._analyze({"Y": "(-1) ** 0.5"}, ["Y", "D"], {"D": 1.0})
+
+    def test_real_control_still_200(self):
+        """Positive control: a real equation is unaffected by the complex guard."""
+        resp = self._analyze({"Y": "X * 2"}, ["X", "Y"], {"X": 3.0})
+        assert resp.prediction.point_estimate == pytest.approx(6.0, abs=1e-9)
+
+
 class TestDistributionSampling:
     """Test sampling from different distributions."""
 

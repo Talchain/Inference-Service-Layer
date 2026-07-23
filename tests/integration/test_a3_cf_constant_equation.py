@@ -54,3 +54,40 @@ class TestConstantEquationRoute:
         resp = await cf_client.post(_URL, json=request, headers=_HDR)
         assert resp.status_code == 200, resp.text
         assert resp.json()["prediction"]["point_estimate"] == pytest.approx(7.0, abs=1e-9)
+
+
+class TestComplexEquationRejectedRoute:
+    """F-A (adversarial review): a complex-valued equation must be rejected 422 at
+    the live route, not fabricated. Imaginary literals (`5j`, `X*1j`) pass the
+    Pydantic equation charset (letters+numbers), so they are client-reachable. RED
+    at HEAD: `{"Y":"5j"}` -> 200 point_estimate 0.0; `{"Y":"X*1j"}` -> retryable 500."""
+
+    @pytest.mark.asyncio
+    async def test_complex_literal_returns_422(self, cf_client):
+        request = {
+            "model": {"variables": ["Y", "D"], "equations": {"Y": "5j"}, "distributions": {}},
+            "intervention": {"D": 1}, "outcome": "Y",
+        }
+        counterfactual_engine._topo_sort_cache.clear()
+        resp = await cf_client.post(_URL, json=request, headers=_HDR)
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        # Engine-raised (validation_failed) — NOT a Pydantic invalid_schema pre-reject:
+        # the message naming "complex" proves the request reached the engine guard.
+        assert body["reason"] == "validation_failed"
+        assert body["retryable"] is False
+        assert "complex" in body["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_complex_array_returns_422(self, cf_client):
+        """Non-0-d complex path (`X*1j` -> 1-d complex) was a mislabeled retryable
+        500; now an honest 422."""
+        request = {
+            "model": {"variables": ["X", "Y"], "equations": {"Y": "X * 1j"}, "distributions": {}},
+            "intervention": {"X": 3}, "outcome": "Y",
+        }
+        counterfactual_engine._topo_sort_cache.clear()
+        resp = await cf_client.post(_URL, json=request, headers=_HDR)
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["retryable"] is False
+        assert "complex" in resp.json()["message"].lower()
