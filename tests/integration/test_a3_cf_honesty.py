@@ -209,3 +209,74 @@ class TestF11ConformalLogRedaction:
         assert getattr(rec, "intervention_keys", None) == []
         assert getattr(rec, "intervention_count", None) == 0
         assert not hasattr(rec, "intervention"), "raw intervention dict still logged"
+
+
+# ===========================================================================
+# F5 — an invalid client equation is a client error, not a server incident
+# ===========================================================================
+class TestF5EquationErrorSeverity:
+    """C6 (F-5, 2026-07-23): `_evaluate_equation` logged client equation
+    syntax/eval errors at ERROR, so every invalid-equation 422 paged as a server
+    incident. Demote to WARNING (the #95 convention). The genuine internal-fault
+    ERROR + traceback path (analyze()'s except Exception) stays intact."""
+
+    def test_invalid_client_equation_logs_warning_not_error(self, caplog):
+        """RED at HEAD: `_evaluate_equation`'s syntax-error log is ERROR-level.
+        `2 */ X` passes the equation charset but fails ast.parse -> ValueError ->
+        422; its engine log must be WARNING, not ERROR."""
+        from src.models.requests import CounterfactualRequest, StructuralModel
+        from src.services.counterfactual_engine import CounterfactualEngine
+
+        engine = CounterfactualEngine()
+        request = CounterfactualRequest(
+            model=StructuralModel(
+                variables=["X", "Y"], equations={"Y": "2 */ X"}, distributions={}
+            ),
+            intervention={"X": 5.0},
+            outcome="Y",
+            context=None,
+        )
+        with caplog.at_level(logging.DEBUG, logger="src.services.counterfactual_engine"):
+            with pytest.raises(ValueError):
+                engine.analyze(request)
+
+        eqn_recs = [r for r in caplog.records if "equation" in str(r.msg).lower()]
+        assert eqn_recs, "expected an equation-error log from _evaluate_equation"
+        assert all(r.levelname != "ERROR" for r in eqn_recs), (
+            "invalid client equation still logged at ERROR (should be WARNING)"
+        )
+        assert any(r.levelname == "WARNING" for r in eqn_recs)
+
+    def test_genuine_internal_fault_still_logs_error_with_traceback(self, caplog):
+        """Positive control: the ERROR + traceback path for a REAL server fault
+        (analyze()'s except Exception) is intact — not collateral of the demotion."""
+        from src.models.requests import CounterfactualRequest, StructuralModel
+        from src.services.counterfactual_engine import CounterfactualEngine
+
+        engine = CounterfactualEngine()
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("synthetic internal fault")
+
+        engine._compute_prediction = _boom  # a genuine (non-ValueError) server fault
+        request = CounterfactualRequest(
+            model=StructuralModel(
+                variables=["X", "Y"],
+                equations={"Y": "2 * X"},
+                distributions={"X": {"type": "normal", "parameters": {"mean": 5, "std": 1}}},
+            ),
+            intervention={"X": 5.0},
+            outcome="Y",
+            context=None,
+        )
+        with caplog.at_level(logging.DEBUG, logger="src.services.counterfactual_engine"):
+            with pytest.raises(RuntimeError):
+                engine.analyze(request)
+
+        errs = [
+            r
+            for r in caplog.records
+            if r.msg == "counterfactual_analysis_failed" and r.levelname == "ERROR"
+        ]
+        assert errs, "genuine internal fault must still log ERROR"
+        assert any(r.exc_info is not None for r in errs), "ERROR must carry a traceback (exc_info)"

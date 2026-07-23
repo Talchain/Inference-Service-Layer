@@ -620,10 +620,19 @@ class CounterfactualEngine:
 
             return np.array(result)
         except SyntaxError as e:
-            logger.error(f"Syntax error in equation '{equation}': {e}")
+            # C6 (F-5, A3 2026-07-23): a malformed client equation is a client-input
+            # defect (this re-raises as ValueError -> route D-12(cf) -> 422), not a
+            # server incident — log at WARNING to match the #95 convention, so an
+            # invalid-equation 422 no longer pages as an ERROR. The genuine
+            # internal-fault ERROR + traceback path (analyze()'s except Exception)
+            # is unchanged. (The raw-equation-text in the message is unchanged; its
+            # privacy is a standing doctrine row, out of scope here.)
+            logger.warning(f"Syntax error in equation '{equation}': {e}")
             raise ValueError(f"Invalid equation syntax: {equation}")
         except Exception as e:
-            logger.error(f"Failed to evaluate equation '{equation}': {e}")
+            # Same class: an equation that parses but cannot evaluate (client input)
+            # -> ValueError -> 422. WARNING, not ERROR (see the SyntaxError branch).
+            logger.warning(f"Failed to evaluate equation '{equation}': {e}")
             raise ValueError(f"Invalid equation: {equation}")
 
     def _eval_ast_node(self, node: ast.AST, samples: Dict[str, np.ndarray], depth: int = 0) -> Any:
