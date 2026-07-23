@@ -94,6 +94,20 @@ _STRONGLY_INCONSISTENT = [
 ]
 
 
+# Sparse HUB: (fa,fb)=r + (fb,fc)=r stated, (fa,fc) UNSTATED (zero-filled to 0).
+# The two stated pairs are jointly satisfiable; the inconsistency comes from the
+# ASSUMED-ZERO (fa,fc). At r=0.75 lambda_min = 1 - 0.75*sqrt(2) = -0.0607 → REJECT;
+# at r=0.74 lambda_min = -0.0465 → ADMIT, projection moves (fa,fc) to ~0.0185.
+_HUB_REJECT = [
+    FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.75),
+    FactorCorrelation(factor_a="fb", factor_b="fc", rho=0.75),
+]
+_HUB_ADMIT = [
+    FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.74),
+    FactorCorrelation(factor_a="fb", factor_b="fc", rho=0.74),
+]
+
+
 @pytest.fixture(scope="module")
 def analyzer():
     return RobustnessAnalyzerV2()
@@ -175,6 +189,67 @@ def _stated_rho(e):
     stated = {("fa", "fb"): 0.51, ("fa", "fc"): -0.51, ("fb", "fc"): 0.51}
     key = (e.factor_a, e.factor_b)
     return stated.get(key, stated.get((e.factor_b, e.factor_a)))
+
+
+class TestSparseHubHonesty:
+    """F-1 (Fable): a sparse HUB reject must be HONEST about the zero-fill. The
+    inconsistency in (fa,fb)=0.75 + (fb,fc)=0.75 with (fa,fc) UNSTATED comes from the
+    ASSUMED-ZERO (fa,fc), not from the two stated pairs (which are jointly satisfiable).
+    The message must name the unstated pair + the zero-fill role, and must not steer the
+    user to only weaken true correlations."""
+
+    def test_hub_reject_message_names_unstated_pair_and_zero_fill(self):
+        try:
+            _request3(_HUB_REJECT)
+            assert False, "sparse hub 0.75/0.75 should be rejected"
+        except ValidationError as exc:
+            msg = exc.errors()[0]["msg"]
+            # Names the UNSTATED pair that the zero-fill implicated.
+            assert "'fa'" in msg and "'fc'" in msg
+            # Explains the zero-fill / assumed-independence role.
+            low = msg.lower()
+            assert "unstated" in low
+            assert ("assumed" in low and "zero" in low) or "independent" in low
+            # Offers stating the unstated pair (not only weakening).
+            assert "state" in low
+
+    def test_hub_reject_does_not_only_blame_stated_pairs(self):
+        # Regression on the misattribution: the message must go beyond naming just the
+        # two stated (jointly-satisfiable) pairs.
+        try:
+            _request3(_HUB_REJECT)
+            assert False
+        except ValidationError as exc:
+            msg = exc.errors()[0]["msg"]
+            # It should mention the unstated pair explicitly.
+            assert "(fa, fc)" in msg or "('fa', 'fc')" in msg
+
+
+class TestMovedUnstatedPairDisclosure:
+    """F-2 (Fable): when projection moves an UNSTATED (zero-filled) pair, that moved
+    pair must be disclosed in effective_correlations so the effective matrix is
+    reconstructable (completeness)."""
+
+    def test_hub_admit_discloses_moved_unstated_pair(self, analyzer):
+        resp = analyzer.analyze(_request3(_HUB_ADMIT))
+        proj = resp.correlation_model.psd_projection
+        assert proj is not None  # 0.74 hub projects (admitted, near-PSD)
+        eff = proj.effective_correlations
+        assert eff is not None
+        # The moved unstated (fa,fc) pair is present, flagged stated=False, requested 0.
+        unstated = [e for e in eff if {e.factor_a, e.factor_b} == {"fa", "fc"}]
+        assert len(unstated) == 1, "moved unstated (fa,fc) pair must be disclosed"
+        u = unstated[0]
+        assert u.stated is False
+        assert u.requested_rho == 0.0
+        assert abs(u.effective_rho) > 1e-4  # genuinely moved off the zero-fill
+        assert u.adjustment == pytest.approx(u.effective_rho - u.requested_rho, abs=1e-12)
+        # The two stated pairs are present and flagged stated=True.
+        stated = [e for e in eff if e.stated]
+        assert {frozenset((e.factor_a, e.factor_b)) for e in stated} == {
+            frozenset(("fa", "fb")),
+            frozenset(("fb", "fc")),
+        }
 
 
 class TestValidPathUnchanged:

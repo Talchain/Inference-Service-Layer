@@ -1044,12 +1044,19 @@ class EffectiveCorrelationV2(BaseModel):
     silent change the projection made. Together with the unit diagonal these entries
     reconstruct the effective correlation matrix, so a caller sees which correlations
     really drove the numbers — not only the aggregate Frobenius distance.
+
+    ``stated`` distinguishes a pair the caller supplied (True) from an UNSTATED pair
+    that defaulted to correlation 0 (assumed-independent) and was MOVED off 0 by the
+    projection (False, ``requested_rho == 0.0``) — those moved zero-fill pairs are
+    disclosed too so the effective matrix is complete (F-2).
     """
 
     factor_a: str = Field(..., description="ID of the first factor node in the pair.")
     factor_b: str = Field(..., description="ID of the second factor node in the pair.")
     requested_rho: float = Field(
-        ..., description="The correlation the caller supplied for this pair."
+        ...,
+        description="The correlation the caller supplied for this pair, or 0.0 for an "
+        "unstated (assumed-independent) pair.",
     )
     effective_rho: float = Field(
         ...,
@@ -1059,7 +1066,12 @@ class EffectiveCorrelationV2(BaseModel):
     adjustment: float = Field(
         ...,
         description="effective_rho - requested_rho: the signed change the projection "
-        "silently applied to this stated correlation.",
+        "silently applied to this correlation.",
+    )
+    stated: bool = Field(
+        ...,
+        description="True if the caller supplied this pair; False if it was an unstated "
+        "(assumed-zero) pair the projection moved off 0.",
     )
 
     model_config = {"extra": "ignore"}

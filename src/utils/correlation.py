@@ -47,6 +47,12 @@ HIGHAM_TOL = 1e-10
 # projected + disclosed.
 PSD_EIGEN_TOL = 1e-10
 
+# An UNSTATED (zero-filled) pair is disclosed in the effective-matrix payload (F-2)
+# only when the projection moved its off-diagonal off 0 by more than this tolerance —
+# far above the Higham residual float-noise floor (convergence ~1e-10), far below any
+# meaningful correlation signal.
+EFFECTIVE_DISCLOSURE_MOVE_TOL = 1e-9
+
 # ---------------------------------------------------------------------------
 # Hard-invalid admissibility band (F4, D-23.13 — enforcing D-23.4 +
 # PARAMETER-RESEARCH-2026-07-23.md:49-59). The agreed doctrine is "reject
@@ -97,14 +103,16 @@ _CHOLESKY_EIGEN_FLOOR = 1e-8
 
 @dataclass(frozen=True)
 class EffectivePair:
-    """The EFFECTIVE (post-projection) correlation for one supplied pair (F4).
+    """The EFFECTIVE (post-projection) correlation for one factor pair (F4).
 
     ``requested_rho`` is what the caller stated; ``effective_rho`` is the
     off-diagonal that the Higham-projected matrix ACTUALLY used to drive the copula
     draw; ``adjustment`` is ``effective_rho - requested_rho`` (how far, and which
-    way, the projection silently moved that correlation). Disclosed so a caller can
-    reconstruct which correlations really drove the numbers — not just the aggregate
-    Frobenius distance.
+    way, the projection silently moved that correlation). ``stated`` is True for a
+    pair the caller supplied and False for an UNSTATED pair that defaulted to zero
+    (assumed-independent) and was MOVED by the projection — those moved zero-fill
+    pairs are disclosed too (F-2) so the effective matrix is fully reconstructable,
+    not just the aggregate Frobenius distance.
     """
 
     factor_a: str
@@ -112,6 +120,7 @@ class EffectivePair:
     requested_rho: float
     effective_rho: float
     adjustment: float
+    stated: bool
 
 
 @dataclass(frozen=True)
@@ -317,17 +326,41 @@ def build_correlation_plan(
         # F4: per-pair EFFECTIVE off-diagonals — the correlations the copula actually
         # used after projection, and how far each moved from what the caller stated.
         idx = {f: i for i, f in enumerate(factor_order)}
-        effective_pairs = tuple(
+        stated_keys = {frozenset((a, b)) for a, b, _ in pairs if a != b}
+        effective_list = [
             EffectivePair(
                 factor_a=a,
                 factor_b=b,
                 requested_rho=float(rho),
                 effective_rho=float(projected[idx[a], idx[b]]),
                 adjustment=float(projected[idx[a], idx[b]]) - float(rho),
+                stated=True,
             )
             for a, b, rho in pairs
             if a != b
-        )
+        ]
+        # F-2: an UNSTATED pair defaults to correlation 0 (assumed-independent). When
+        # the projection MOVES such a zero-filled entry off 0, disclose it too — else
+        # the effective matrix the copula actually used is not reconstructable. The
+        # threshold filters Higham residual float-noise (converges to ~1e-10).
+        n = len(factor_order)
+        for i in range(n):
+            for j in range(i + 1, n):
+                if frozenset((factor_order[i], factor_order[j])) in stated_keys:
+                    continue
+                eff = float(projected[i, j])
+                if abs(eff) > EFFECTIVE_DISCLOSURE_MOVE_TOL:
+                    effective_list.append(
+                        EffectivePair(
+                            factor_a=factor_order[i],
+                            factor_b=factor_order[j],
+                            requested_rho=0.0,
+                            effective_rho=eff,
+                            adjustment=eff,
+                            stated=False,
+                        )
+                    )
+        effective_pairs = tuple(effective_list)
         projection = ProjectionInfo(
             applied=True,
             method=HIGHAM_METHOD,

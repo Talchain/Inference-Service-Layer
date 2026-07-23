@@ -2156,6 +2156,7 @@ class RobustnessAnalyzerV2:
                         requested_rho=ep.requested_rho,
                         effective_rho=ep.effective_rho,
                         adjustment=ep.adjustment,
+                        stated=ep.stated,
                     )
                     for ep in projection.effective_pairs
                 ],

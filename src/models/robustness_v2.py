@@ -42,6 +42,7 @@ from src.utils.correlation import (
     CORRELATION_ADMISSION_METHOD_VERSION,
     CORRELATION_REJECT_MAX_ADJUSTMENT,
     CORRELATION_REJECT_MIN_EIGENVALUE,
+    EFFECTIVE_DISCLOSURE_MOVE_TOL,
     assemble_correlation_matrix,
     evaluate_correlation_admissibility,
 )
@@ -1081,20 +1082,28 @@ class RobustnessRequestV2(BaseModel):
         matrix = assemble_correlation_matrix(factor_order, pairs)
         verdict = evaluate_correlation_admissibility(matrix)
         if not verdict.admissible:
-            idx = {f: i for i, f in enumerate(factor_order)}
-            # Name the pairs the projection would move the most (the ones driving the
-            # inadmissibility) — the correlation's OWN factor ids plus derived scalar
-            # metrics only; no raw rho or other request values are echoed.
-            offending = sorted(
-                (
-                    (a, b, abs(float(verdict.projected[idx[a], idx[b]]) - float(rho)))
-                    for a, b, rho in pairs
-                    if a != b
-                ),
-                key=lambda t: t[2],
-                reverse=True,
-            )
-            top = [f"('{a}', '{b}')" for a, b, adj in offending if adj > 0.0][:3]
+            # HONEST attribution (F-1). The inadmissibility may be driven not by the
+            # stated pairs (which can be jointly satisfiable) but by UNSTATED pairs that
+            # were ZERO-FILLED (assumed-independent): e.g. a hub rho(a,b)=rho(b,c)=0.75
+            # with rho(a,c) unstated forces (a,c)=0, which transitivity cannot honour.
+            # Rank EVERY pair over the correlated set by how far the projection would
+            # move it off its assembled value, and split stated vs zero-filled so the
+            # message names the real culprits and offers the right remedy. Only pair ids
+            # (already supplied/omitted by the client) + derived scalar metrics are
+            # echoed — never raw rho or other request values.
+            stated_keys = {frozenset((a, b)) for a, b, _ in pairs if a != b}
+            n = len(factor_order)
+            moved: List[Tuple[str, str, float, bool]] = []
+            for i in range(n):
+                for j in range(i + 1, n):
+                    adj = abs(float(verdict.projected[i, j]) - float(matrix[i, j]))
+                    if adj > EFFECTIVE_DISCLOSURE_MOVE_TOL:
+                        is_stated = frozenset((factor_order[i], factor_order[j])) in stated_keys
+                        moved.append((factor_order[i], factor_order[j], adj, is_stated))
+            moved.sort(key=lambda t: t[2], reverse=True)
+            stated_moved = [f"('{a}', '{b}')" for a, b, _adj, st in moved if st][:3]
+            unstated_moved = [f"('{a}', '{b}')" for a, b, _adj, st in moved if not st][:3]
+
             criteria: List[str] = []
             if "min_eigenvalue" in verdict.reasons:
                 criteria.append(
@@ -1103,19 +1112,39 @@ class RobustnessRequestV2(BaseModel):
                 )
             if "max_adjustment" in verdict.reasons:
                 criteria.append(
-                    "nearest-correlation projection would move a stated correlation by up "
-                    f"to {verdict.max_abs_off_diagonal_adjustment:.4f} > "
+                    "nearest-correlation projection would move a correlation by up to "
+                    f"{verdict.max_abs_off_diagonal_adjustment:.4f} > "
                     f"{CORRELATION_REJECT_MAX_ADJUSTMENT}"
+                )
+            band = (
+                "the assembled correlation matrix is not positive-semidefinite beyond "
+                "the near-PSD repair band (" + "; ".join(criteria) + ")"
+            )
+            version = f"(admission method {CORRELATION_ADMISSION_METHOD_VERSION})"
+
+            if unstated_moved:
+                # Zero-fill is implicated: be honest that unstated pairs default to 0
+                # and offer BOTH remedies (state the pair, or weaken the stated ones).
+                raise ValueError(
+                    "factor_correlations: the correlations you stated, combined with the "
+                    "ASSUMED-ZERO correlation for the unstated pair(s) "
+                    + ", ".join(unstated_moved)
+                    + ", are mutually inconsistent — "
+                    + band
+                    + ". Unstated factor pairs "
+                    "are treated as independent (correlation 0), and here that zero-fill "
+                    "cannot coexist with the correlations you stated. To resolve, either "
+                    "state the unstated pair(s) explicitly with a compatible value, or "
+                    "weaken the stated correlations"
+                    + ((" " + ", ".join(stated_moved)) if stated_moved else "")
+                    + ". "
+                    + version
                 )
             raise ValueError(
                 "factor_correlations: the supplied pairwise correlations are mutually "
-                "inconsistent — the assembled correlation matrix is not "
-                "positive-semidefinite beyond the near-PSD repair band ("
-                + "; ".join(criteria)
-                + "). This is a hard-invalid specification, not floating-point noise, so it "
-                "is rejected rather than silently projected. Reconcile the offending pairs: "
-                + ", ".join(top)
-                + f". (admission method {CORRELATION_ADMISSION_METHOD_VERSION})"
+                "inconsistent — " + band + ". This is a hard-invalid specification, not "
+                "floating-point noise, so it is rejected rather than silently projected. "
+                "Reconcile the offending pairs: " + ", ".join(stated_moved) + ". " + version
             )
 
         return self
