@@ -6,6 +6,7 @@ with Monte Carlo simulation for uncertainty quantification.
 """
 
 import ast
+import heapq
 import logging
 import math
 import operator
@@ -43,7 +44,10 @@ settings = get_settings()
 # tests/performance/test_optimization_gains.py, so it is BOUNDED rather than removed:
 # at capacity the oldest-inserted entry is evicted, capping growth regardless of how
 # many distinct models are seen. Entries are small ((var, equation) lists) and
-# content-addressed, so a cache hit is always correct for that exact equation set.
+# content-addressed. The sort is now a DETERMINISTIC pure function of the equation
+# content (Kahn with a variable-name tie-break, see _topological_sort_equations), so
+# the content-addressed key and the computed order agree and a cache hit is always
+# correct for that exact equation set — regardless of key insertion order (F-4).
 _TOPO_SORT_CACHE_MAX = 128
 
 
@@ -379,21 +383,41 @@ class CounterfactualEngine:
             # Only keep variables that are in the equations dict
             dependencies[var_name] = var_refs & set(equations.keys())
 
-        # Topological sort using Kahn's algorithm
-        sorted_vars = []
+        # Topological sort using Kahn's algorithm with a DETERMINISTIC tie-break.
+        #
+        # Defect (A3, 2026-07-23, HUNT-VALIDATION F-4): the cache key above is
+        # `json.dumps(equations, sort_keys=True)` — insensitive to the equations
+        # dict's INSERTION order — but a plain FIFO queue (`queue.pop(0)` plus
+        # `dependencies.items()`-order appends) made Kahn's order DEPEND on that
+        # insertion order whenever two variables are simultaneously ready (a tie).
+        # Two requests with identical equation CONTENT but different key insertion
+        # order then collided on one cache key while computing different orders, so
+        # the SAME request bytes could return 200 / 422 / 500 depending on which
+        # order populated the cache first (process history). Fix at the mechanism:
+        # break ties by variable NAME via a min-heap, so the resulting order is a
+        # pure function of the dependency graph — hence of the equation content —
+        # and therefore AGREES with the content-addressed cache key. For a
+        # well-formed DAG every valid topological order yields identical values
+        # (equation evaluation is pure arithmetic and exogenous sampling iterates
+        # `distributions`, not this order), so this changes no correct result; it
+        # only makes the outcome independent of insertion order and cache history.
+        sorted_vars: List[str] = []
+        placed: set = set()
         in_degree = {var: len(deps) for var, deps in dependencies.items()}
-        queue = [var for var, degree in in_degree.items() if degree == 0]
+        ready = [var for var, degree in in_degree.items() if degree == 0]
+        heapq.heapify(ready)  # min-heap keyed by variable name
 
-        while queue:
-            var = queue.pop(0)
+        while ready:
+            var = heapq.heappop(ready)
             sorted_vars.append(var)
+            placed.add(var)
 
             # Reduce in-degree for dependent variables
             for other_var, deps in dependencies.items():
-                if var in deps and other_var not in sorted_vars:
+                if var in deps and other_var not in placed:
                     in_degree[other_var] -= 1
                     if in_degree[other_var] == 0:
-                        queue.append(other_var)
+                        heapq.heappush(ready, other_var)
 
         # Check for cycles
         if len(sorted_vars) != len(equations):

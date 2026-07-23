@@ -196,6 +196,42 @@ class TestTopologicalSorting:
             engine._topological_sort_equations(equations)
 
 
+class TestTopologicalSortDeterminism:
+    """Defect 1 (A3, 2026-07-23, HUNT-VALIDATION F-4): the topo order must be a
+    canonical PURE FUNCTION of equation CONTENT so it agrees with the
+    content-addressed cache key. Reverting the variable-name tie-break makes these
+    RED (insertion order leaks into the order for ties)."""
+
+    def test_tie_order_is_insertion_order_independent(self):
+        """Two equally-ready variables (a Kahn tie) must be ordered by NAME, not by
+        dict insertion order — otherwise `{...P,Q...}` and `{...Q,P...}` compute
+        different orders while colliding on the same content-sorted cache key.
+
+        FRESH engine per call: order1 and order2 have identical CONTENT (hence an
+        identical topo cache key), so a single shared engine would serve order1's
+        cached result to order2 and mask the sort entirely — the cache masking IS
+        the F-4 defect. Separate engines force each order through the sort."""
+        # P and Q are both roots (deps on exogenous A/B, not on each other) -> a tie.
+        order1 = CounterfactualEngine()._topological_sort_equations(
+            {"P": "2 * A", "Q": "3 * B", "Y": "P + Q"})
+        order2 = CounterfactualEngine()._topological_sort_equations(
+            {"Y": "P + Q", "Q": "3 * B", "P": "2 * A"})
+        assert order1 == order2, (order1, order2)
+        # Canonical: the two tied roots come out name-sorted (P before Q).
+        names = [v for v, _ in order1]
+        assert names.index("P") < names.index("Q")
+
+    def test_diamond_tie_order_canonical(self):
+        """A diamond A -> {B,C} -> D: B and C tie and must be name-ordered
+        regardless of how the dict is built. Fresh engines per call defeat the
+        content-addressed topo cache (see test above)."""
+        o1 = [v for v, _ in CounterfactualEngine()._topological_sort_equations(
+            {"A": "1", "B": "A", "C": "A", "D": "B + C"})]
+        o2 = [v for v, _ in CounterfactualEngine()._topological_sort_equations(
+            {"D": "B + C", "C": "A", "B": "A", "A": "1"})]
+        assert o1 == o2 == ["A", "B", "C", "D"]
+
+
 class TestDistributionSampling:
     """Test sampling from different distributions."""
 
