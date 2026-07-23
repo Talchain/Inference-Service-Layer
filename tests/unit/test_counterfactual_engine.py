@@ -696,3 +696,47 @@ class TestBoundedTopoSortCache:
         second = engine._topological_sort_equations(dict(equations))
         assert first == second
         assert len(engine._topo_sort_cache) == 1
+
+    def test_cache_read_and_write_run_under_the_lock(self):
+        """The cache read and the insert/evict both run under the instance lock.
+
+        The engine is a module-level singleton served on a concurrent request path
+        (``counterfactual_engine`` in causal.py); the FIFO evict step
+        (``pop(next(iter(...)))`` racing an insert) is only concurrency-safe because
+        every read/insert/evict is wrapped in ``self._topo_sort_cache_lock``.
+
+        This is a DETERMINISTIC mechanism check (no threads): under CPython's GIL a
+        thread race on this dict is not deterministically observable — the individual
+        ops are GIL-atomic and the compound-op effects are benign (no wrong value),
+        so a "hammer N threads, assert no exception" test would pass with OR without
+        the lock (vacuous). Instead a counting proxy over the real lock proves the
+        guards execute: an initial MISS enters the lock twice (read guard + insert/
+        evict guard) and a subsequent HIT enters it once (read guard). Reverting
+        either ``with self._topo_sort_cache_lock:`` drops the count and fails here.
+        """
+        engine = CounterfactualEngine()
+
+        class _CountingLock:
+            def __init__(self, inner):
+                self._inner = inner
+                self.acquisitions = 0
+
+            def __enter__(self):
+                self.acquisitions += 1
+                return self._inner.__enter__()
+
+            def __exit__(self, *exc):
+                return self._inner.__exit__(*exc)
+
+        counting = _CountingLock(engine._topo_sort_cache_lock)
+        engine._topo_sort_cache_lock = counting
+
+        equations = {"B": "2 * A", "C": "B + 3"}
+        engine._topological_sort_equations(equations)  # miss: read guard + insert/evict guard
+        assert counting.acquisitions >= 2, "read and insert/evict must each acquire the lock"
+
+        acquisitions_after_miss = counting.acquisitions
+        engine._topological_sort_equations(dict(equations))  # hit: read guard only
+        assert (
+            counting.acquisitions == acquisitions_after_miss + 1
+        ), "the cache read must acquire the lock"
