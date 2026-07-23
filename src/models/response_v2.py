@@ -11,6 +11,7 @@ P2 Brief Alignment:
 - 422 responses use unwrapped ISLV2Error422 format
 """
 
+import math
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
@@ -18,7 +19,7 @@ from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
-from src.constants import RESPONSE_SCHEMA_VERSION_V2
+from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
 
 class InferenceWarning(BaseModel):
@@ -1178,6 +1179,81 @@ class FactorEvppiEntryV2(BaseModel):
     correlation_active: bool
 
 
+class FactorEvpcEntryV2(BaseModel):
+    """One per-lever EVPC entry (S4, D-23.8). Typed to match the FactorEvppiEntryV2
+    house style (#104 C3): a producer typo, a dropped field, or a wrong-typed audit
+    field fails loud in Pydantic instead of serialising clean. best_candidate_value is
+    a REQUIRED float, so it is always present even when evpc == 0 (all candidates
+    underperform) — the missing-argmax mutation now fails at the type layer.
+
+    Field ORDER is load-bearing: it matches the emission dict in ``_compute_factor_evpc``
+    exactly, so serialization is byte-identical to the prior ``Dict[str, Any]`` payload.
+
+    The CROSS-FIELD value-integrity guard below is the EVPC analogue of the lifted
+    decision_evpi / correlation_model emission-iff validators — it keeps the clamp
+    identity ON this block, NOT coupled into ISLResponseV2's own validators.
+    """
+
+    factor_id: str
+    evpc: float
+    evpc_raw: float
+    best_candidate_value: float
+    baseline_max_expected_utility: float
+    best_do_expected_utility: float
+    units: str
+    method: str
+    n_samples: int
+    n_candidate_values: int
+    clamped_low: bool
+    correlation_active: bool
+
+    @model_validator(mode="after")
+    def _value_integrity(self) -> "FactorEvpcEntryV2":
+        """Guard the EVPC value BOTH ways (fail loud on a compute/emission mutation):
+
+        (1) FINITE: evpc, evpc_raw, best_candidate_value and the audit EUs are finite
+            (a bare ``float`` still admits NaN/inf, which must never reach the wire).
+        (2) CLAMP IDENTITY (both directions): evpc == max(0, evpc_raw). Catches a
+            forgotten clamp (raw shipped as evpc) or a stray clamp on a positive raw.
+            EVPC is non-negative by construction (control cannot hurt).
+        (3) TAGS: units == 'outcome' and method == 'grid_do_v1' — the self-describing
+            tags a consumer relies on to read the number in the right units/method.
+        """
+        for name, val in (
+            ("evpc", self.evpc),
+            ("evpc_raw", self.evpc_raw),
+            ("best_candidate_value", self.best_candidate_value),
+            ("baseline_max_expected_utility", self.baseline_max_expected_utility),
+            ("best_do_expected_utility", self.best_do_expected_utility),
+        ):
+            if not math.isfinite(val):
+                raise ValueError(
+                    f"factor_evpc entry for '{self.factor_id}': {name} must be "
+                    f"finite; got {val!r}."
+                )
+
+        expected_evpc = max(0.0, self.evpc_raw)
+        tol = 1e-9 + 1e-9 * abs(expected_evpc)
+        if self.evpc < -tol or abs(self.evpc - expected_evpc) > tol:
+            raise ValueError(
+                f"factor_evpc entry for '{self.factor_id}': evpc must equal "
+                f"max(0, evpc_raw) = {expected_evpc!r} and be >= 0; got "
+                f"evpc={self.evpc!r}, evpc_raw={self.evpc_raw!r}. EVPC is the "
+                "clamped value of control."
+            )
+        if self.units != "outcome":
+            raise ValueError(
+                f"factor_evpc entry for '{self.factor_id}' must be in outcome units "
+                f"(units == 'outcome'); got {self.units!r}."
+            )
+        if self.method != GRID_DO_EVPC_METHOD:
+            raise ValueError(
+                f"factor_evpc entry for '{self.factor_id}' must be method-tagged "
+                f"'{GRID_DO_EVPC_METHOD}'; got {self.method!r}."
+            )
+        return self
+
+
 # =============================================================================
 # Main V2 Response
 # =============================================================================
@@ -1334,6 +1410,43 @@ class ISLResponseV2(BaseModel):
         "regression conditions on the joint). Option-controlled levers (any option "
         "intervenes on the factor — union across options) are OMITTED (absent, not "
         "zero: their uncertainty is a choice, not information to buy).",
+    )
+
+    # Per-lever EVPC (S4 — A3 value-of-control, D-23.8). Additive-optional; grid
+    # do() on the retained joint CRN samples (no new sampling). Request-driven.
+    # Typed (C3 house style, #104): FactorEvpcEntryV2 fails a producer typo / dropped
+    # field / wrong-typed audit field loud in Pydantic, and its own model_validator
+    # holds the clamp identity (not coupled into ISLResponseV2's validators).
+    factor_evpc: Optional[List[FactorEvpcEntryV2]] = Field(
+        None,
+        description="Per-lever Expected Value of CONTROL (EVPC) in the SAME OUTCOME "
+        "UNITS as outcome.mean and decision_evpi: for each control candidate the "
+        "request supplied, how much better the decision could be if that factor were "
+        "PULLED to its best candidate value rather than left as-is. Computed by "
+        "gridding do(factor=value) over the candidate's values on the retained joint "
+        "pre-noise CRN samples (NO nested Monte Carlo, NO new sampling — the same "
+        "draws and the same SCM evaluator that scored the options; the intervention "
+        "overrides the factor's drawn value while its correlated partners keep their "
+        "joint draws): EVPC = max_x E[U|do(factor=x)] − max_a E[U_a] (the second term "
+        "is the value of the best current option). COMPARATOR SEMANTICS: each "
+        "do(factor=x) is a STANDALONE control action that REPLACES the option choice "
+        "for that sample — it is NOT composed on top of any option's other "
+        "interventions; composed control-plus-option evaluation is out of scope for "
+        "grid_do_v1. GRID-APPROXIMATION SEMANTICS: the "
+        "value grid is discrete, so this is a LOWER BOUND on the true (continuous) "
+        "value of control — more candidate values tighten it. Fields: factor_id, evpc "
+        "(clamped to >= 0: a lever you may pull to any candidate value cannot be worth "
+        "less than leaving it), evpc_raw (pre-clamp audit), best_candidate_value "
+        "(argmax over the grid — ALWAYS reported, even when EVPC = 0, so 'control adds "
+        "nothing' names the best value tried), baseline_max_expected_utility, "
+        "best_do_expected_utility, units ('outcome'), method ('grid_do_v1'), "
+        "n_samples, n_candidate_values, clamped_low (raw was negative grid/finite-"
+        "sample slack), correlation_active. EVPC is the value of CONTROL — the mirror "
+        "of factor_evppi's value of INFORMATION (EVPPI): control replaces a factor's "
+        "value with a chosen one, information reveals its true value before choosing. "
+        "Because control is the point, option-controlled levers are NOT suppressed "
+        "here (unlike factor_evppi). Present EXACTLY when control_candidates was "
+        "supplied; emitted (like factor_evppi) under active correlation.",
     )
 
     # Path decomposition (T1-6 wire completeness — additive optional, request-gated

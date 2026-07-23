@@ -120,3 +120,20 @@ MAX_PARAMETER_UNCERTAINTIES = 50
 # MAX_PARAMETER_UNCERTAINTIES (not a hand-computed literal) so the cap tracks its own
 # stated derivation if MAX_PARAMETER_UNCERTAINTIES ever changes (CLAUDE.md #12).
 MAX_FACTOR_CORRELATIONS = MAX_PARAMETER_UNCERTAINTIES * (MAX_PARAMETER_UNCERTAINTIES - 1) // 2
+
+# A3 S4 (D-23.8) value-of-control (EVPC): request-side `control_candidates` caps.
+# A control candidate is a factor the user could pull to a chosen value; EVPC grids
+# do(factor=value) over the candidate's value list on the retained joint CRN draws.
+# Bounded per D-23.8 scoping Q4 rationale: EVPC re-evaluates all retained samples
+# for every (candidate, value) pair, so cost scales with
+# n_samples * sum(len(values)); the caps keep the added latency comparable to the
+# other budgeted enhancement phases while covering realistic lever grids. Both are
+# imported by the request model so the enforced cap can never drift from the field.
+MAX_CONTROL_CANDIDATES = 5
+MAX_CONTROL_VALUES = 7
+
+# EVPC wire method tag (A3 S4, D-23.8). SINGLE SOURCE OF TRUTH: the analyzer stamps
+# it onto each factor_evpc entry and the ISLResponseV2 value-integrity validator
+# asserts against it, so a neutral leaf module (both import here) prevents the tag
+# from drifting between producer and validator (derive, don't mirror).
+GRID_DO_EVPC_METHOD = "grid_do_v1"

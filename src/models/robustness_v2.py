@@ -17,6 +17,8 @@ import re
 
 from src.constants import (
     DEFAULT_EXISTS_PROBABILITY,
+    MAX_CONTROL_CANDIDATES,
+    MAX_CONTROL_VALUES,
     MAX_FACTOR_CORRELATIONS,
     MAX_GRAPH_EDGES,
     MAX_GRAPH_NODES,
@@ -671,6 +673,60 @@ class GoalConstraint(BaseModel):
 # =============================================================================
 
 
+class ControlCandidate(BaseModel):
+    """A value-of-control (EVPC) candidate: a factor the user could pull to one of
+    a bounded set of chosen values (A3 S4, D-23.8).
+
+    For each candidate value ``x`` the engine evaluates ``do(factor_id = x)`` on the
+    SAME retained joint Common-Random-Numbers draws that scored the options (the
+    intervention overrides the drawn value for this factor while every other factor —
+    including its correlated partners — keeps its per-sample joint draw), and reports
+    ``EVPC = max_x E[U | do(factor_id=x)] − max_a E[U_a]`` in outcome units. This is a
+    request-side input only; ISL lands it FIRST because the request models carry
+    ``extra:"ignore"`` and would silently drop a producer-first field.
+    """
+
+    factor_id: str = Field(
+        ...,
+        description="ID of the graph node to control (do-intervene). Must exist in "
+        "the graph and must not be the goal node itself.",
+    )
+    values: List[float] = Field(
+        ...,
+        min_length=1,
+        max_length=MAX_CONTROL_VALUES,
+        description="Candidate values to grid over for do(factor_id=value). At least "
+        f"one, at most {MAX_CONTROL_VALUES}. Each value must be finite. More values "
+        "tighten the grid approximation of the true (continuous) value of control.",
+    )
+
+    @field_validator("values")
+    @classmethod
+    def validate_values_finite(cls, v: List[float], info: Any) -> List[float]:
+        """Reject NaN/inf candidate values with a factor-named 422.
+
+        The message names only the offending factor id — never any other request
+        value — mirroring the correlation validator's disclosure discipline.
+        """
+        factor_id = info.data.get("factor_id", "<unknown>")
+        for value in v:
+            if not math.isfinite(value):
+                raise ValueError(
+                    "control_candidates: values must all be finite numbers (not NaN "
+                    f"or infinite) for factor '{factor_id}'"
+                )
+        return v
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    # This is a documented contract promise; do not change without cross-service coordination.
+    model_config = {
+        "extra": "ignore",
+        "json_schema_extra": {
+            "example": {"factor_id": "price", "values": [0.3, 0.5, 0.7]},
+        },
+    }
+
+
 class RobustnessRequestV2(BaseModel):
     """
     V2.2 robustness analysis request.
@@ -794,6 +850,24 @@ class RobustnessRequestV2(BaseModel):
         description="Multiple goal constraints for joint probability analysis. "
         "When provided, computes per-constraint probabilities, joint probability, "
         "and conditional probabilities. Requires nodes to exist in graph.",
+    )
+
+    # A3 S4 value-of-control (EVPC, D-23.8). Additive + optional, request-driven.
+    # When absent the analysis is BYTE-IDENTICAL (inert-when-absent); when supplied,
+    # ISL emits the top-level `factor_evpc` block. NOT coupled to include_voi: EVPI/
+    # EVPPI (include_voi) measure the value of INFORMATION about a factor, EVPC
+    # measures the value of CONTROLLING one — distinct capabilities, so control_
+    # candidates presence is its own sufficient opt-in gate. Landed ISL-first because
+    # request models carry extra:"ignore" (a producer-first field would be dropped).
+    control_candidates: Optional[List[ControlCandidate]] = Field(
+        None,
+        max_length=MAX_CONTROL_CANDIDATES,
+        description="Value-of-control (EVPC) candidates: factors the user could pull "
+        "to chosen values. When provided, ISL grids do(factor=value) over each "
+        "candidate's values on the retained joint CRN samples and emits factor_evpc "
+        f"(per-lever EVPC in outcome units). At most {MAX_CONTROL_CANDIDATES} "
+        "candidates; each factor_id must exist in the graph, must not be the goal "
+        "node, and may appear at most once. Independent of include_voi.",
     )
 
     @field_validator("options")
@@ -957,6 +1031,50 @@ class RobustnessRequestV2(BaseModel):
                         "at most once)"
                     )
                 seen_pairs.add(key)
+
+        return self
+
+    @model_validator(mode="after")
+    def validate_control_candidates(self) -> "RobustnessRequestV2":
+        """Validate control_candidates (A3 S4 EVPC, D-23.8) → fail closed, typed 422.
+
+        Rejected here (before any compute) so a malformed do()-grid never reaches
+        the evaluator. Messages name the offending factor id only — never any other
+        request value:
+
+        - a candidate factor is not a graph node (unknown lever),
+        - a candidate factor IS the goal node (do(goal=x) sets the outcome by fiat —
+          not a lever; it would report a meaningless "value of control"),
+        - a duplicate factor_id across candidates (ambiguous value grid).
+
+        Per-value finiteness is enforced on ControlCandidate.values; the candidate
+        count (<= MAX_CONTROL_CANDIDATES) and per-candidate value count
+        (<= MAX_CONTROL_VALUES) are enforced by the list max_length bounds, which
+        raise a typed 422 automatically.
+        """
+        if not self.control_candidates:
+            return self
+
+        node_ids = {node.id for node in self.graph.nodes}
+        seen: set[str] = set()
+        for candidate in self.control_candidates:
+            fid = candidate.factor_id
+            if fid not in node_ids:
+                raise ValueError(
+                    "control_candidates references non-existent factor node: " f"{fid}"
+                )
+            if fid == self.goal_node_id:
+                raise ValueError(
+                    f"control_candidates may not target the goal node '{fid}': "
+                    "do(goal=x) sets the outcome by fiat and is not a controllable "
+                    "lever (its 'value of control' would be meaningless)"
+                )
+            if fid in seen:
+                raise ValueError(
+                    "control_candidates contains a duplicate factor_id "
+                    f"'{fid}' (each factor may appear at most once)"
+                )
+            seen.add(fid)
 
         return self
 
@@ -1569,6 +1687,16 @@ class RobustnessResponseV2(BaseModel):
         "retained joint CRN samples. Method 'regression_evppi_v1'. Option-controlled "
         "levers are OMITTED (absent, not zero). Emitted under active correlation. "
         "See ISLResponseV2.factor_evppi.",
+    )
+
+    # Per-lever EVPC (S4 — A3 value-of-control, D-23.8). Grid do() on the retained
+    # joint CRN samples (no new sampling); see ISLResponseV2.factor_evpc.
+    factor_evpc: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-lever Expected Value of Control (EVPC) in OUTCOME units, "
+        "via grid do(factor=value) on the retained joint CRN samples. Method "
+        "'grid_do_v1'. Present only when control_candidates was supplied. See "
+        "ISLResponseV2.factor_evpc.",
     )
 
     # Path decomposition (enhancement — optional, gated by include_path_decomposition flag)
