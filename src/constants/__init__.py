@@ -137,3 +137,13 @@ MAX_CONTROL_VALUES = 7
 # asserts against it, so a neutral leaf module (both import here) prevents the tag
 # from drifting between producer and validator (derive, don't mirror).
 GRID_DO_EVPC_METHOD = "grid_do_v1"
+
+# Node kinds that must NOT participate in inference. `filter_inference_graph`
+# (src.services.robustness_analyzer_v2) drops these nodes and their incident edges
+# before the evaluator is built, so a request field that names one of them (e.g. a
+# control_candidate) references a node that will never reach the compute. SINGLE
+# SOURCE OF TRUTH: the analyzer's filter AND the request-model validators
+# (control_candidates post-filter check, D-23.14) both read THIS, so the post-filter
+# node set the validator checks can never drift from the set the filter actually
+# removes (derive, don't mirror — CLAUDE.md #12). Compared case-insensitively.
+NON_INFERENCE_KINDS = frozenset({"decision", "option", "constraint"})

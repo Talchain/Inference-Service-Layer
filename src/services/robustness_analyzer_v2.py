@@ -66,10 +66,13 @@ from src.constants import (
     FACTOR_SENSITIVITY_BASELINE_EPSILON,
     FACTOR_SENSITIVITY_VALUE_EPSILON,
     GRID_DO_EVPC_METHOD,
+    MAX_CONTROL_CANDIDATES,
+    MAX_CONTROL_VALUES,
     MAX_GRAPH_EDGES,
     MAX_GRAPH_NODES,
     MAX_OPTIONS,
     MAX_PARAMETER_UNCERTAINTIES,
+    NON_INFERENCE_KINDS,
     ZERO_VARIANCE_TOLERANCE,
 )
 from src.models.critique import (
@@ -83,7 +86,12 @@ from src.models.critique import (
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import expected_regret_per_option
-from src.utils.evppi import REGRESSION_EVPPI_METHOD, factor_evppi_estimate
+from src.utils.evppi import (
+    REGRESSION_EVPPI_METHOD,
+    REGRESSION_EVPPI_NULL_PERMUTATIONS,
+    REGRESSION_EVPPI_POLY_DEGREE,
+    factor_evppi_estimate,
+)
 from src.utils.correlation import CORRELATION_METHOD, CorrelationPlan, build_correlation_plan
 from src.validation.request_validator import detect_graph_cycle
 from src.__version__ import __version__
@@ -95,8 +103,10 @@ from src.config.stability_thresholds import (
 
 logger = logging.getLogger(__name__)
 
-# Safety net: nodes that must not participate in inference
-NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+# Safety net: nodes that must not participate in inference. Defined in src.constants
+# (single source of truth) so the request-model control_candidate validator and this
+# filter can never fork on which kinds are non-inference (derive, don't mirror).
+# Re-exported here for existing importers of the analyzer symbol.
 
 # Path-decomposition safety budget: maximum number of simple intervention-target-to-goal
 # paths to enumerate. A layered DAG valid under the 50-node/200-edge schema limits can have
@@ -234,7 +244,11 @@ FLIP_STABILITY_N_SEEDS = 10
 
 # Formula version — advertised on /health so a version-guarded consumer (PLoT)
 # can fail loud on an unknown future shape rather than silently mis-plan.
-COMPLEXITY_FORMULA_VERSION = "v2-weighted-2026-07"
+# v3 (A3 Codex-fix-A, D-23.12): added the EVPC (value-of-control) and full-
+# population EVPPI (S2 regression) terms — both were UNPRICED, so a request with
+# max control_candidates was admitted charging ~90M actual work units against the
+# 24M ceiling. The formula SHAPE changed, so the version bumps.
+COMPLEXITY_FORMULA_VERSION = "v3-evpc-evppi-2026-07-24"
 
 # Per-phase structural weights (provisional; the calibration harness is the
 # source of truth for refining them — do not hand-tune without re-running it).
@@ -243,6 +257,27 @@ W_SENS_COEF = 4  # edge sensitivity: 4 sub-sweeps per edge (existence +/- , magn
 W_EVAL_COEF = 20  # e-values: ~binary-search depth per edge (wall-clock-capped, so flat)
 W_BANDS_COEF = 200  # stability bands: 10 seeds x ~20 search per edge (capped, so flat)
 W_PATH_COEF = 1  # path decomposition: analytic, bounded by MAX_DECOMPOSITION_PATHS
+
+# Value-of-control (EVPC, S4) grid-do cost coefficient. _compute_factor_evpc grids
+# do(factor=x) over EVERY (candidate, value) pair on EVERY retained sample, each a
+# full SCM evaluate() (cost ~W = nodes+edges) — structurally identical to a base-MC
+# sample-option. So the phase costs BASE_COST_COEF * S * W * sum_candidates(len(values)).
+# Priced at BASE_COST_COEF so a grid point charges exactly like a base-MC unit (an
+# HONEST lower bound on the true wall-clock; conservative because the do()-evaluator
+# runs with epsilon noise disabled, i.e. no per-sample RNG overhead).
+W_EVPC_COEF = BASE_COST_COEF  # 1 unit per (grid-point x sample x struct)
+
+# Full-population EVPPI (S2 regression) cost coefficient. _compute_factor_evppi runs,
+# per non-lever uncertain factor, (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) polynomial
+# regressions (1 real + K permutation-null fits) over the FULL retained population S —
+# NOT the min(S, EVPI_SAMPLE_CAP) subsample the p_win 'evpi' term prices. Each regression
+# evaluates the degree-(REGRESSION_EVPPI_POLY_DEGREE) fitted mean for all O options over
+# all S samples, i.e. (deg+1) work per (option, sample). Priced O-linearly per the D-23.12
+# formula n_factors*(1+K)*n_options*degree-work with degree-work = (deg+1)*S. This is the
+# conservative (over-charging) reading the ruling asked for: the estimator's E1-SAFE design
+# actually SHARES one multi-RHS SVD across options, so the true cost is sub-O-linear and this
+# term over-bounds it. PROVISIONAL — staging recalibration owed (mirrors the ceiling posture).
+W_EVPPI_DEGREE_COEF = REGRESSION_EVPPI_POLY_DEGREE + 1  # 5: per-(option,sample) degree work
 
 # PROVISIONAL admission ceiling in cost units.
 #
@@ -309,20 +344,31 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
     """Weighted compute-admission cost for a v2 request, in cost units.
 
         cost = S*O*W                                       (base MC, always)
-             + (U+1)*min(S, EVPI_SAMPLE_CAP)*O*W           (EVPI, if include_voi & U>0)
+             + (U+1)*min(S, EVPI_SAMPLE_CAP)*O*W           (EVPI/p_win, if include_voi & U>0)
+             + W_EVPPI_DEGREE_COEF*U*(1+K)*O*S             (full-pop EVPPI, if include_voi & U>0)
+             + W_EVPC_COEF*S*W*Sum_c(len(c.values))        (EVPC, if control_candidates)
              + W_SENS_COEF*E*min(100, S//10)*W             (edge sensitivity)
              + W_EVAL_COEF*E*O                             (e-values, if include_e_values)
              + W_BANDS_COEF*E*O                            (bands, ride on e-values)
              + W_PATH_COEF*min(MAX_DECOMPOSITION_PATHS, E*E) (path decomp)
 
     where S=n_samples, O=len(options), N=n_nodes, E=n_edges, W=N+E (per-evaluate()
-    structural work), U=number of UNIQUE parameter_uncertainties. Every term
-    mirrors an actual loop body in the analyzer (see the F8 design phase
-    inventory). Optional-phase enable conditions match analyze():
-      - EVPI: request.include_voi AND at least one parameter_uncertainty
+    structural work), U=number of UNIQUE parameter_uncertainties, K=
+    REGRESSION_EVPPI_NULL_PERMUTATIONS. Every term mirrors an actual loop body in
+    the analyzer (see the F8 design phase inventory). Optional-phase enable
+    conditions match analyze():
+      - EVPI (p_win) AND full-pop EVPPI: include_voi AND at least one parameter_uncertainty
+      - EVPC (value-of-control): control_candidates present (NOT gated on include_voi —
+        control is a distinct capability from information, per _compute_factor_evpc)
       - edge sensitivity: "sensitivity" in analysis_types
       - e-values / bands: request.include_e_values (bands are default-on with e-values)
       - path decomposition: request.include_path_decomposition
+
+    D-23.12 (Codex-fix-A): the EVPC and full-population EVPPI terms were previously
+    ABSENT, so a request could add up to MAX_CONTROL_CANDIDATES*MAX_CONTROL_VALUES do()
+    grids (each a full S-sample SCM sweep) at ZERO admitted cost. The EVPPI term also
+    corrects the sample-count: the p_win 'evpi' term caps at EVPI_SAMPLE_CAP, but the
+    S2 regression runs on the FULL S, so it needs its own full-S term.
     """
     S = request.n_samples
     O = len(request.options)
@@ -332,13 +378,31 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
 
     terms: Dict[str, int] = {"base_mc": BASE_COST_COEF * S * O * W}
 
-    # EVPI — priced on the DEDUPLICATED factor count (uniqueness is enforced at
-    # parse time, but count unique defensively so admission never over-prices a
-    # duplicate that somehow reached here).
+    # EVPI (p_win sensitivity) — priced on the DEDUPLICATED factor count (uniqueness
+    # is enforced at parse time, but count unique defensively so admission never
+    # over-prices a duplicate that somehow reached here). Capped at EVPI_SAMPLE_CAP
+    # because _compute_evpi caps its MC redraw at that sample budget.
     if request.include_voi and request.parameter_uncertainties:
         u = len({pu.node_id for pu in request.parameter_uncertainties})
         if u > 0:
             terms["evpi"] = (u + 1) * min(S, EVPI_SAMPLE_CAP) * O * W
+            # Full-population EVPPI (S2 regression) — SEPARATE term because the
+            # regression runs on the FULL retained population S (never the
+            # EVPI_SAMPLE_CAP subsample). (1+K) fits per factor, O options, S samples,
+            # (deg+1) work each. Uses the same defensive unique factor count u (an
+            # over-count vs the analyzer's lever-suppressed set — conservative).
+            terms["evppi_full"] = (
+                W_EVPPI_DEGREE_COEF * u * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * O * S
+            )
+
+    # EVPC (S4 value-of-control) — grid do() over every (candidate, value) pair on
+    # the FULL retained population, each a full SCM evaluate() (cost ~W). Gated on
+    # control_candidates presence ONLY (not include_voi). The dominant free-ride the
+    # v2 formula admitted before D-23.12.
+    if request.control_candidates:
+        grid_points = sum(len(c.values) for c in request.control_candidates)
+        if grid_points > 0:
+            terms["evpc"] = W_EVPC_COEF * S * W * grid_points
 
     # Edge sensitivity — reference option only (not multiplied by O).
     if "sensitivity" in request.analysis_types:
@@ -370,6 +434,9 @@ def build_compute_admission() -> Dict[str, Any]:
         "weights": {
             "base_per_sample_per_option_per_struct": BASE_COST_COEF,
             "evpi_sample_cap": EVPI_SAMPLE_CAP,
+            "evpc_coef": W_EVPC_COEF,
+            "evppi_full_degree_coef": W_EVPPI_DEGREE_COEF,
+            "evppi_null_permutations": REGRESSION_EVPPI_NULL_PERMUTATIONS,
             "sensitivity_coef": W_SENS_COEF,
             "evalue_coef": W_EVAL_COEF,
             "bands_coef": W_BANDS_COEF,
@@ -381,6 +448,8 @@ def build_compute_admission() -> Dict[str, Any]:
             "max_nodes": MAX_GRAPH_NODES,
             "max_edges": MAX_GRAPH_EDGES,
             "max_parameter_uncertainties": MAX_PARAMETER_UNCERTAINTIES,
+            "max_control_candidates": MAX_CONTROL_CANDIDATES,
+            "max_control_values": MAX_CONTROL_VALUES,
         },
     }
 
@@ -1916,6 +1985,7 @@ class RobustnessAnalyzerV2:
                     seed,
                     decision_evpi_bound,
                     correlation_active,
+                    inference_warnings=inference_warnings,
                 )
             except Exception:
                 self.logger.warning("factor_evppi_failed", exc_info=True)
@@ -4652,6 +4722,7 @@ class RobustnessAnalyzerV2:
         seed: int,
         decision_evpi_bound: Optional[float],
         correlation_active: bool,
+        inference_warnings: Optional[List[InferenceWarning]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Per-factor EVPPI (Expected Value of Partial Perfect Information) in
         OUTCOME units, via single-loop Strong-Oakley regression on the retained
@@ -4672,8 +4743,19 @@ class RobustnessAnalyzerV2:
         is a CHOICE, not information to buy, so it is OMITTED entirely (absent, not
         zero — missing ≠ zero). Non-lever uncertain factors always get an entry.
 
+        PARTIAL-DROP DISCLOSURE (Codex F7, D-23.15): a REQUESTED (non-lever) factor
+        can still be dropped IN-LOOP when its per-sample values are non-finite (a
+        pathological uncertainty overflow) or its estimator raises (e.g. LinAlgError
+        on a goal-disconnected factor). That drop was previously SILENT — the wire
+        warning only fired for a WHOLE-call failure — so ``factor_evppi`` absence was
+        ambiguous (no-eligible-factor vs not-requested vs estimator-failed). When
+        ``inference_warnings`` is supplied and ≥1 requested factor is dropped, a
+        ``FACTOR_EVPPI_PARTIAL`` warning lists the safe + failed factor ids and each
+        failure's category (ids + categories only — never a request value), so the
+        absence/short-list is explicit. Computable rows are always preserved.
+
         Returns a list of per-factor dicts (sorted by evppi descending), or None if
-        no non-lever uncertain factor exists.
+        no non-lever uncertain factor produced a row.
         """
         if not request.parameter_uncertainties:
             return None
@@ -4691,9 +4773,15 @@ class RobustnessAnalyzerV2:
 
         n_samples = len(factor_values_per_sample)
         results: List[Dict[str, Any]] = []
+        # F7 (D-23.15): track REQUESTED (non-lever) factors that are dropped in-loop so
+        # the caller can disclose the drop (safe ids kept a row; failed ids + category).
+        safe_ids: List[str] = []
+        failed: List[Tuple[str, str]] = []  # (factor_id, failure_category)
         for uncertainty in unique_uncertainties:
             fid = uncertainty.node_id
-            # LEVER SUPPRESSION: omit option-controlled levers (missing ≠ zero).
+            # LEVER SUPPRESSION: omit option-controlled levers (missing ≠ zero). A
+            # lever is an INTENTIONAL omission, NOT a failure — never recorded in
+            # `failed` (it must not raise a partial-drop warning).
             if fid in intervention_factor_ids:
                 continue
 
@@ -4704,6 +4792,19 @@ class RobustnessAnalyzerV2:
             try:
                 theta = [factor_values_per_sample[s][fid] for s in range(n_samples)]
             except (KeyError, IndexError):
+                failed.append((fid, "missing_sample_value"))
+                continue
+
+            # F7 cheap pre-regression validation: a non-finite theta (e.g. an overflow
+            # from a pathological uncertainty std) would make the polynomial fit raise
+            # or return NaN deep inside. Catch it here, cheaply and with a precise
+            # category, before the estimator (bound/validate sampled θ pre-regression).
+            if not all(math.isfinite(t) for t in theta):
+                self.logger.warning(
+                    "factor_evppi_non_finite_theta",
+                    extra={"factor_id": fid},
+                )
+                failed.append((fid, "non_finite_theta"))
                 continue
 
             # Deterministic per-factor seed for the permutation-null floor.
@@ -4721,6 +4822,7 @@ class RobustnessAnalyzerV2:
                     extra={"factor_id": fid},
                     exc_info=True,
                 )
+                failed.append((fid, "estimator_error"))
                 continue
 
             # Howard non-negativity clamp — DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by
@@ -4786,6 +4888,35 @@ class RobustnessAnalyzerV2:
                     # (it never assumes independence). True iff correlation active.
                     "correlation_active": correlation_active,
                 }
+            )
+            safe_ids.append(fid)
+
+        # F7 (D-23.15): disclose any requested factor dropped in-loop. Emitted whether
+        # or not any row survived — so `factor_evppi: absent` with a dropped factor is
+        # never silent (it disambiguates estimator-failed from no-eligible-factor).
+        # severity='warning' so PLoT's severity=='warning' mapping surfaces it (an
+        # 'info' would be hidden, re-silencing the drop). Ids + categories only — no
+        # request values (mirrors the correlation/EVPC validators' disclosure discipline).
+        if failed and inference_warnings is not None:
+            inference_warnings.append(
+                InferenceWarning(
+                    code="FACTOR_EVPPI_PARTIAL",
+                    field="factor_evppi",
+                    severity="warning",
+                    detail={
+                        "reason": "per_factor_dropped",
+                        "safe_factor_ids": safe_ids,
+                        "failed_factor_ids": [fid for fid, _ in failed],
+                        "failures": [
+                            {"factor_id": fid, "category": category} for fid, category in failed
+                        ],
+                        "message": (
+                            "Per-factor EVPPI could not be computed for "
+                            f"{len(failed)} requested factor(s); the remaining "
+                            f"{len(safe_ids)} were computed. Base analysis is unaffected."
+                        ),
+                    },
+                )
             )
 
         if not results:

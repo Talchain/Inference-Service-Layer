@@ -24,6 +24,7 @@ from src.constants import (
     MAX_GRAPH_NODES,
     MAX_OPTIONS,
     MAX_PARAMETER_UNCERTAINTIES,
+    NON_INFERENCE_KINDS,
 )
 
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
@@ -1160,7 +1161,24 @@ class RobustnessRequestV2(BaseModel):
         - a candidate factor is not a graph node (unknown lever),
         - a candidate factor IS the goal node (do(goal=x) sets the outcome by fiat —
           not a lever; it would report a meaningless "value of control"),
+        - a candidate factor is removed by the inference-node filter, i.e. its kind
+          is in NON_INFERENCE_KINDS (decision/option/constraint). Such a node never
+          reaches the evaluator, so do() would silently no-op and EVPC would clamp to
+          a FALSE 0 (Codex F5, D-23.14) — reject before compute.
         - a duplicate factor_id across candidates (ambiguous value grid).
+
+        The kind check validates against the POST-FILTER inference node set — exactly
+        the nodes that survive filter_inference_graph and reach the evaluator, derived
+        from the SAME NON_INFERENCE_KINDS the analyzer's filter uses so the validator
+        and the filter cannot fork. A candidate that survives the filter (factor,
+        chance, or a non-goal outcome mediator) computes a REAL, non-clamped EVPC and
+        is ACCEPTED — the S4 design controls intermediate `chance` nodes (see
+        tests/integration/test_factor_evpc_wire.py). Only the FILTERED kinds carry the
+        Codex false-0 defect, so only they are rejected. (D-23.14's "kind==factor
+        allowlist" phrasing is read here as its own positive-control intent — "filtered
+        kinds fail before compute" / "reject if it won't reach the evaluator" — because
+        a strict factor-only allowlist would regress the shipped chance-control
+        capability; flagged for review as A3 Codex-fix-A decision.)
 
         Per-value finiteness is enforced on ControlCandidate.values; the candidate
         count (<= MAX_CONTROL_CANDIDATES) and per-candidate value count
@@ -1170,11 +1188,16 @@ class RobustnessRequestV2(BaseModel):
         if not self.control_candidates:
             return self
 
-        node_ids = {node.id for node in self.graph.nodes}
+        node_kind = {node.id: node.kind for node in self.graph.nodes}
+        # Post-filter inference node set: exactly the nodes filter_inference_graph
+        # keeps (kind NOT in NON_INFERENCE_KINDS), i.e. those that reach the evaluator.
+        inference_node_ids = {
+            nid for nid, kind in node_kind.items() if kind.lower() not in NON_INFERENCE_KINDS
+        }
         seen: set[str] = set()
         for candidate in self.control_candidates:
             fid = candidate.factor_id
-            if fid not in node_ids:
+            if fid not in node_kind:
                 raise ValueError(
                     "control_candidates references non-existent factor node: " f"{fid}"
                 )
@@ -1183,6 +1206,16 @@ class RobustnessRequestV2(BaseModel):
                     f"control_candidates may not target the goal node '{fid}': "
                     "do(goal=x) sets the outcome by fiat and is not a controllable "
                     "lever (its 'value of control' would be meaningless)"
+                )
+            if fid not in inference_node_ids:
+                # kind in NON_INFERENCE_KINDS (decision/option/constraint) -> removed by
+                # filter_inference_graph before the evaluator is built, so do(fid=x) never
+                # reaches the compute and EVPC would clamp to a plausible FALSE 0 (Codex F5).
+                raise ValueError(
+                    f"control_candidates factor '{fid}' has kind '{node_kind[fid]}', which is "
+                    "removed by the inference-node filter and would never reach the evaluator "
+                    "(its value of control would clamp to a false 0); only nodes that survive "
+                    "the inference filter are controllable levers"
                 )
             if fid in seen:
                 raise ValueError(

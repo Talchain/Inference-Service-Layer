@@ -168,6 +168,20 @@ def _admission_suggestion(request: RobustnessRequestV2, cost: WeightedCost) -> s
             f"options (currently {len(request.options)}), or parameter_uncertainties "
             f"(currently {n_uncertainties}); or set include_voi=false."
         )
+    if dominant == "evppi_full":
+        return (
+            f"Per-factor EVPPI regression dominates: reduce n_samples (currently "
+            f"{request.n_samples}), options (currently {len(request.options)}), or "
+            f"parameter_uncertainties (currently {n_uncertainties}); or set include_voi=false."
+        )
+    if dominant == "evpc":
+        n_candidates = len(request.control_candidates or [])
+        n_grid = sum(len(c.values) for c in (request.control_candidates or []))
+        return (
+            f"Value-of-control (EVPC) dominates: reduce n_samples (currently "
+            f"{request.n_samples}), control_candidates (currently {n_candidates}), or the "
+            f"number of candidate values ({n_grid} grid points total); or omit control_candidates."
+        )
     if dominant == "sensitivity":
         return (
             f"Edge sensitivity dominates: reduce n_samples (currently {request.n_samples}) "

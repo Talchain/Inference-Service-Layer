@@ -24,11 +24,14 @@ from src.services.robustness_analyzer_v2 import (
     EVPI_SAMPLE_CAP,
     W_BANDS_COEF,
     W_EVAL_COEF,
+    W_EVPC_COEF,
+    W_EVPPI_DEGREE_COEF,
     W_PATH_COEF,
     W_SENS_COEF,
     compute_weighted_cost,
     get_max_cost_units,
 )
+from src.utils.evppi import REGRESSION_EVPPI_NULL_PERMUTATIONS
 
 ENDPOINT = "/api/v1/robustness/analyze/v2"
 
@@ -130,9 +133,17 @@ class TestWeightedCostShape:
     def test_evpi_term_uses_unique_factor_count_and_sample_cap(self):
         req = RobustnessRequestV2(**_request_dict(40, 120, 5000, 10, evpi_factors=5))
         wc = compute_weighted_cost(req)
-        # (U+1) * min(S, cap) * O * W = 6 * 2000 * 10 * 160
+        # (U+1) * min(S, cap) * O * W = 6 * 2000 * 10 * 160 (p_win term, sample-capped).
         assert wc.terms["evpi"] == 6 * min(5000, EVPI_SAMPLE_CAP) * 10 * 160
-        assert wc.dominant_term == "evpi"
+        # D-23.12: the S2 EVPPI regression is a SEPARATE term on the FULL S (not the
+        # 2000 cap): (deg+1) * U * (1+K) * O * S = 5 * 5 * 17 * 10 * 5000 = 21.25M.
+        assert wc.terms["evppi_full"] == (
+            W_EVPPI_DEGREE_COEF * 5 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 10 * 5000
+        )
+        # Because the full-S EVPPI term (21.25M) exceeds the sample-capped p_win term
+        # (19.2M) at 5000 samples, evppi_full is now the dominant term for VOI-heavy
+        # requests (GOLDEN CHANGED by D-23.12; previously "evpi").
+        assert wc.dominant_term == "evppi_full"
 
     def test_evalues_add_evalue_and_bands_terms(self):
         base = _request_dict(12, 40, 3000, 3, sensitivity=False)
@@ -164,7 +175,8 @@ class TestPC2OptionRepricing:
         assert resp.status_code == 422
         data = resp.json()
         assert data["cost_units"] > data["limit"]
-        assert data["dominant_term"] == "evpi"
+        # D-23.12: full-S EVPPI term now dominates over the sample-capped p_win term.
+        assert data["dominant_term"] == "evppi_full"
         assert data["complexity_formula_version"] == COMPLEXITY_FORMULA_VERSION
 
     def test_ten_option_evpi_legacy_endpoint_returns_422(self):
@@ -187,7 +199,8 @@ class TestPC2OptionRepricing:
         # stringified-into-message form, so this discriminates the normalisation.
         assert data["detail"] == "Request compute cost exceeds limit"
         assert data["cost_units"] > data["limit"]
-        assert data["dominant_term"] == "evpi"
+        # D-23.12: full-S EVPPI term now dominates over the sample-capped p_win term.
+        assert data["dominant_term"] == "evppi_full"
 
     def test_admission_422_preserves_x_request_id_both_handlers(self):
         """Both v2 handlers' compute-cost 422 echo X-Request-Id + serve the flat
@@ -218,6 +231,97 @@ class TestPC2OptionRepricing:
         assert enhanced.status_code == 422
         assert enhanced.headers.get("X-Request-Id") == rid
         assert enhanced.json()["cost_units"] > enhanced.json()["limit"]
+
+
+# ---------------------------------------------------------------------------
+# D-23.12 (Codex-fix-A F2) — the EVPC + full-pop EVPPI free-ride must be priced
+# ---------------------------------------------------------------------------
+def _max_controls(n_factor_ids: int = 5, n_values: int = 7, start: int = 1) -> list:
+    """MAX_CONTROL_CANDIDATES(5) x MAX_CONTROL_VALUES(7) control candidates on the
+    factor nodes n{start}..; distinct ids, finite values."""
+    return [
+        {"factor_id": f"n{start + k}", "values": [0.1 * (v + 1) for v in range(n_values)]}
+        for k in range(n_factor_ids)
+    ]
+
+
+class TestEvpcAdmission:
+    """Codex F2 repro (D-23.12): a 50n/200e/10000s request charged the SAME with vs
+    without max 5x7 control_candidates and admitted ~90M work against the 24M ceiling.
+    The EVPC term must now change the charge and flip admit->reject."""
+
+    def test_max_controls_changes_the_charge(self):
+        """RED pre-fix: EVPC unpriced -> with-controls total == without-controls total."""
+        without = _cost(50, 200, 10000, 1)
+        body = _request_dict(50, 200, 10000, 1)
+        body["control_candidates"] = _max_controls()
+        with_controls = compute_weighted_cost(RobustnessRequestV2(**body)).total
+        # The charge must strictly INCREASE by exactly the EVPC term (D-23.12).
+        S, W, grid = 10000, 50 + 200, 5 * 7
+        assert with_controls == without + W_EVPC_COEF * S * W * grid
+        assert with_controls > without
+
+    def test_evpc_term_at_least_S_W_sum_values(self):
+        """The D-23.12 floor: EVPC term >= S * W * sum_candidates(len(values))."""
+        body = _request_dict(50, 200, 10000, 1)
+        body["control_candidates"] = _max_controls()
+        wc = compute_weighted_cost(RobustnessRequestV2(**body))
+        S, W, grid = 10000, 50 + 200, 5 * 7
+        assert wc.terms["evpc"] >= S * W * grid
+        assert wc.terms["evpc"] == 87_500_000  # 10000 * 250 * 35 (pinned exact)
+
+    def test_max_controls_flips_admit_to_reject(self):
+        """The load-bearing flip (Codex's exact matrix): a near-ceiling request that
+        ADMITS without controls REJECTS once max controls are added.
+
+        MUTATION ANCHOR: reverting the EVPC term in compute_weighted_cost makes this
+        request admit again (with_controls collapses back to ~2.5M)."""
+        ceiling = get_max_cost_units()
+        without = _cost(50, 200, 10000, 1)
+        assert without <= ceiling, f"baseline must admit (cost={without:,})"
+
+        body = _request_dict(50, 200, 10000, 1)
+        body["control_candidates"] = _max_controls()
+        with_controls = compute_weighted_cost(RobustnessRequestV2(**body)).total
+        assert with_controls > ceiling, f"max controls must reject (cost={with_controls:,})"
+
+    def test_max_controls_endpoint_returns_422_evpc_dominant(self):
+        client = TestClient(app)
+        body = _request_dict(50, 200, 10000, 1)
+        body["control_candidates"] = _max_controls()
+        resp = client.post(ENDPOINT, json=body, headers={"X-ISL-Response-Version": "2"})
+        assert resp.status_code == 422
+        data = resp.json()
+        assert data["cost_units"] > data["limit"]
+        assert data["dominant_term"] == "evpc"
+        assert "control_candidates" in data["suggestion"]
+
+
+class TestFullPopulationEvppiTerm:
+    """D-23.12: the S2 EVPPI regression runs on the FULL S, not the EVPI_SAMPLE_CAP
+    subsample the p_win 'evpi' term prices, so it needs its own full-S term."""
+
+    def test_evppi_full_uses_full_S_not_sample_cap(self):
+        # At S=10000 (>> cap 2000) the term must scale with the FULL S.
+        s_small = compute_weighted_cost(
+            RobustnessRequestV2(**_request_dict(20, 40, 2000, 3, evpi_factors=4))
+        ).terms["evppi_full"]
+        s_big = compute_weighted_cost(
+            RobustnessRequestV2(**_request_dict(20, 40, 10000, 3, evpi_factors=4))
+        ).terms["evppi_full"]
+        # 5x the samples -> 5x the term (linear in FULL S, unlike the capped 'evpi').
+        assert s_big == 5 * s_small
+
+    def test_evppi_full_formula(self):
+        wc = compute_weighted_cost(
+            RobustnessRequestV2(**_request_dict(20, 40, 10000, 3, evpi_factors=4))
+        )
+        expected = W_EVPPI_DEGREE_COEF * 4 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 3 * 10000
+        assert wc.terms["evppi_full"] == expected
+
+    def test_evppi_full_absent_without_voi(self):
+        wc = compute_weighted_cost(RobustnessRequestV2(**_request_dict(20, 40, 5000, 3)))
+        assert "evppi_full" not in wc.terms
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +359,13 @@ class TestCalibrationPins:
         assert W_BANDS_COEF == 200
         assert W_PATH_COEF == 1
         assert EVPI_SAMPLE_CAP == 2000
+        # D-23.12 EVPC + full-pop EVPPI coefficients (silent-revert guard).
+        assert W_EVPC_COEF == 1
+        assert W_EVPPI_DEGREE_COEF == 5  # REGRESSION_EVPPI_POLY_DEGREE (4) + 1
+        assert REGRESSION_EVPPI_NULL_PERMUTATIONS == 16
 
     def test_formula_version_pinned(self):
-        assert COMPLEXITY_FORMULA_VERSION == "v2-weighted-2026-07"
+        assert COMPLEXITY_FORMULA_VERSION == "v3-evpc-evppi-2026-07-24"
 
     def test_env_override_resolves_new_var_only(self, monkeypatch):
         """ISL_MAX_COST_UNITS overrides; the OLD ISL_MAX_COMPUTE_COMPLEXITY does NOT."""

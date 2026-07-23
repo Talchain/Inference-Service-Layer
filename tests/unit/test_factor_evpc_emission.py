@@ -406,6 +406,95 @@ class TestControlCandidateValidation:
         assert req.control_candidates is None
 
 
+def _kwargs_with_extra_node(node_id: str, kind: str) -> dict:
+    """_valid_request_kwargs plus an isolated extra node of the given kind, so a
+    control candidate can target a non-factor kind."""
+    nodes = [
+        NodeV2(id="lever", kind="factor", label="L", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="goal", kind="outcome", label="G", observed_state=ObservedState(value=0.0)),
+        NodeV2(id=node_id, kind=kind, label=node_id, observed_state=ObservedState(value=0.0)),
+    ]
+    edges = [
+        EdgeV2(
+            **{"from": "lever"},
+            to="goal",
+            strength=StrengthDistribution(mean=0.5, std=0.01),
+            exists_probability=1.0,
+        )
+    ]
+    return dict(
+        graph=GraphV2(nodes=nodes, edges=edges),
+        options=[InterventionOption(id="o", label="o", interventions={"lever": 0.5})],
+        goal_node_id="goal",
+        n_samples=200,
+    )
+
+
+class TestControlCandidateKindValidation:
+    """Codex F5 (D-23.14): control_candidates accepted a FILTERED node kind
+    (decision/option/constraint), which filter_inference_graph then removes -> do()
+    no-ops -> EVPC clamps to a FALSE 0. A filtered kind must 422 BEFORE compute,
+    naming only the offending factor. Kinds that SURVIVE the filter (factor / chance /
+    non-goal outcome) compute a real EVPC and are accepted (S4 design)."""
+
+    @pytest.mark.parametrize("kind", ["decision", "option", "constraint"])
+    def test_filtered_kind_rejected_before_compute(self, kind):
+        # RED pre-fix: these validated and reached analyze() with EVPC = 0.0 (clamped).
+        with pytest.raises(ValidationError, match=rf"factor 'x' has kind '{kind}'"):
+            RobustnessRequestV2(
+                **_kwargs_with_extra_node("x", kind),
+                control_candidates=[ControlCandidate(factor_id="x", values=[0.1, 0.5])],
+            )
+
+    def test_filtered_kind_message_names_filter_reason(self):
+        with pytest.raises(ValidationError, match="removed by the inference-node filter"):
+            RobustnessRequestV2(
+                **_kwargs_with_extra_node("d", "decision"),
+                control_candidates=[ControlCandidate(factor_id="d", values=[0.1])],
+            )
+
+    @pytest.mark.parametrize("kind", ["chance", "outcome"])
+    def test_filter_surviving_non_factor_kind_accepted(self, kind):
+        # A node that SURVIVES the filter (chance / non-goal outcome mediator) computes
+        # a REAL, non-clamped EVPC — the S4 design controls intermediate chance nodes
+        # (tests/integration/test_factor_evpc_wire.py) — so it is ACCEPTED. Only the
+        # FILTERED kinds carry the Codex false-0 defect. (Deviation from D-23.14's
+        # literal "kind==factor allowlist", per its own "reject if it won't reach the
+        # evaluator" intent — see the validator docstring; flagged for A3 review.)
+        req = RobustnessRequestV2(
+            **_kwargs_with_extra_node("c", kind),
+            control_candidates=[ControlCandidate(factor_id="c", values=[0.1, 0.5])],
+        )
+        assert req.control_candidates[0].factor_id == "c"  # validated, not rejected
+
+    def test_message_does_not_echo_other_request_values(self):
+        # The rejection MESSAGE (error["msg"], the text the API 422 handler surfaces to
+        # the client — src/api/main.py builds the body from msg, never pydantic's raw
+        # input) names only the offending factor id + its kind, never a candidate value
+        # (mirrors the correlation validator's disclosure discipline).
+        with pytest.raises(ValidationError) as exc:
+            RobustnessRequestV2(
+                **_kwargs_with_extra_node("bad", "decision"),
+                control_candidates=[ControlCandidate(factor_id="bad", values=[0.31337, 0.42424])],
+            )
+        msgs = " || ".join(err["msg"] for err in exc.value.errors())
+        assert "bad" in msgs  # names the offending factor
+        assert "0.31337" not in msgs and "0.42424" not in msgs
+
+    def test_valid_factor_candidate_reaches_evaluator(self):
+        """Positive control: a valid factor candidate passes validation AND emits a
+        real factor_evpc row (reaches the evaluator, not clamped by a silent filter)."""
+        resp = RobustnessAnalyzerV2().analyze(
+            RobustnessRequestV2(
+                **_valid_request_kwargs(),
+                control_candidates=[ControlCandidate(factor_id="lever", values=[0.2, 0.8])],
+            )
+        )
+        rows = {e["factor_id"]: e for e in (resp.factor_evpc or [])}
+        assert "lever" in rows
+        assert rows["lever"]["method"] == GRID_DO_EVPC_METHOD
+
+
 # ===========================================================================
 # 5. ISLResponseV2 value-integrity validator (both ways)
 # ===========================================================================

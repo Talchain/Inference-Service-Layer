@@ -462,3 +462,146 @@ class TestGatingAndDeterminism:
         r1 = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=3000))
         r2 = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=3000))
         assert r1.factor_evppi == r2.factor_evppi
+
+
+# ===========================================================================
+# F7 (D-23.15) — partial-drop disclosure: a dropped REQUESTED factor is no
+# longer silent. FACTOR_EVPPI_PARTIAL lists safe + failed ids + failure category.
+# ===========================================================================
+def _partial_drop_request(bad_std=1e308, n_samples=300, seed=1):
+    """fa -> goal (normal, computable). fb is goal-DISCONNECTED with a pathological
+    std (its sampled theta overflows to +/-inf). lev is the option-controlled lever.
+    So fa and fb are FREE (non-lever) requested factors; fb is dropped in-loop."""
+    nodes = [
+        NodeV2(id="fa", kind="factor", label="Fa", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="fb", kind="factor", label="Fb", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="lev", kind="factor", label="Lev", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="goal", kind="outcome", label="Goal", observed_state=ObservedState(value=0.0)),
+    ]
+    edges = [
+        EdgeV2(**{"from": "fa"}, to="goal", strength=StrengthDistribution(mean=0.6, std=0.05), exists_probability=1.0),
+        EdgeV2(**{"from": "lev"}, to="goal", strength=StrengthDistribution(mean=0.4, std=0.05), exists_probability=1.0),
+    ]
+    return RobustnessRequestV2(
+        graph=GraphV2(nodes=nodes, edges=edges),
+        options=[
+            InterventionOption(id="o1", label="A", interventions={"lev": 0.2}),
+            InterventionOption(id="o2", label="B", interventions={"lev": 0.8}),
+        ],
+        goal_node_id="goal",
+        seed=seed,
+        n_samples=n_samples,
+        parameter_uncertainties=[
+            ParameterUncertainty(node_id="fa", distribution="normal", std=0.1),
+            ParameterUncertainty(node_id="fb", distribution="normal", std=bad_std),
+        ],
+        include_voi=True,
+    )
+
+
+def _partial_warning(resp):
+    hits = [w for w in resp.inference_warnings if w.code == "FACTOR_EVPPI_PARTIAL"]
+    return hits[0] if hits else None
+
+
+class TestFactorEvppiPartialDisclosure:
+    """Codex F7 (D-23.15): a requested non-lever factor dropped IN-LOOP (non-finite
+    theta / estimator error) was previously silent — factor_evppi absence was
+    ambiguous. FACTOR_EVPPI_PARTIAL now discloses safe + failed ids + category."""
+
+    def test_non_finite_theta_drop_emits_partial_warning(self):
+        """Codex repro: goal-disconnected factor std=1e308 -> theta overflows ->
+        fb dropped. RED pre-fix: fb silently absent, NO warning. GREEN: warning
+        present, fa's computable row preserved."""
+        resp = RobustnessAnalyzerV2().analyze(_partial_drop_request())
+
+        # Computable row preserved (fa).
+        ids = {e["factor_id"] for e in (resp.factor_evppi or [])}
+        assert ids == {"fa"}, f"expected fa row preserved, got {ids}"
+
+        w = _partial_warning(resp)
+        assert w is not None, "FACTOR_EVPPI_PARTIAL warning missing (silent drop)"
+        assert w.severity == "warning"  # must surface (info would be hidden by PLoT)
+        assert w.field == "factor_evppi"
+        assert w.detail["safe_factor_ids"] == ["fa"]
+        assert w.detail["failed_factor_ids"] == ["fb"]
+        cats = {f["category"] for f in w.detail["failures"]}
+        assert cats == {"non_finite_theta"}
+        # Disclosure carries ids + category ONLY — never a request value (e.g. the std).
+        assert "1e+308" not in str(w.detail) and "1e308" not in str(w.detail)
+
+    def test_estimator_error_drop_emits_partial_warning(self, monkeypatch):
+        """A finite theta whose estimator raises (LinAlgError) -> category
+        'estimator_error'; the other factor's row survives."""
+        real = analyzer_mod.factor_evppi_estimate
+        state = {"n": 0}
+
+        def flaky(theta, option_outcomes, *, seed, **kw):
+            state["n"] += 1
+            if state["n"] == 1:  # first non-lever factor (theta1) fails
+                raise __import__("numpy").linalg.LinAlgError("SVD did not converge")
+            return real(theta, option_outcomes, seed=seed, **kw)
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", flaky)
+        resp = RobustnessAnalyzerV2().analyze(_two_free_factor_request())
+
+        assert len(resp.factor_evppi) == 1  # one survivor
+        w = _partial_warning(resp)
+        assert w is not None
+        assert w.severity == "warning"
+        assert w.detail["failed_factor_ids"] == ["theta1"]
+        assert w.detail["safe_factor_ids"] == ["theta2"]
+        assert w.detail["failures"] == [{"factor_id": "theta1", "category": "estimator_error"}]
+
+    def test_all_requested_factors_dropped_returns_none_but_warns(self):
+        """The ambiguous case F7 targets: the ONLY requested non-lever factor fails ->
+        factor_evppi is None. The warning disambiguates estimator-failed from
+        no-eligible-factor / not-requested."""
+        nodes = [
+            NodeV2(id="fb", kind="factor", label="Fb", observed_state=ObservedState(value=0.0)),
+            NodeV2(id="lev", kind="factor", label="Lev", observed_state=ObservedState(value=0.0)),
+            NodeV2(id="goal", kind="outcome", label="Goal", observed_state=ObservedState(value=0.0)),
+        ]
+        edges = [
+            EdgeV2(**{"from": "lev"}, to="goal", strength=StrengthDistribution(mean=0.4, std=0.05), exists_probability=1.0),
+        ]
+        req = RobustnessRequestV2(
+            graph=GraphV2(nodes=nodes, edges=edges),
+            options=[
+                InterventionOption(id="o1", label="A", interventions={"lev": 0.2}),
+                InterventionOption(id="o2", label="B", interventions={"lev": 0.8}),
+            ],
+            goal_node_id="goal", seed=1, n_samples=300, include_voi=True,
+            parameter_uncertainties=[ParameterUncertainty(node_id="fb", distribution="normal", std=1e308)],
+        )
+        resp = RobustnessAnalyzerV2().analyze(req)
+        assert resp.factor_evppi is None  # no row survived
+        w = _partial_warning(resp)
+        assert w is not None, "absence must be disclosed, not silent"
+        assert w.detail["safe_factor_ids"] == []
+        assert w.detail["failed_factor_ids"] == ["fb"]
+
+    def test_lever_suppression_is_not_a_partial_drop(self):
+        """A lever is an INTENTIONAL omission, not a failure -> no PARTIAL warning
+        (only the free factor_b is scored)."""
+        resp = RobustnessAnalyzerV2().analyze(_lever_request())
+        assert _partial_warning(resp) is None
+
+    def test_all_computable_emits_no_partial_warning(self):
+        """Positive control: every requested factor computes -> NO false PARTIAL."""
+        resp = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=3000))
+        assert resp.factor_evppi is not None
+        assert _partial_warning(resp) is None
+
+    def test_direct_call_without_warnings_list_tolerates_drops(self):
+        """Backward-compat: the direct call (inference_warnings default None) still
+        returns the surviving rows even when a factor drops — no crash, no emission."""
+        req = _partial_drop_request()
+        pre_noise = {"o1": [float(i % 7) for i in range(req.n_samples)],
+                     "o2": [float((i + 3) % 5) for i in range(req.n_samples)]}
+        # inject a non-finite theta for fb, finite for fa (lev is a lever, skipped)
+        factor_values = [{"fa": float(i) * 0.01, "fb": float("inf")} for i in range(req.n_samples)]
+        rows = RobustnessAnalyzerV2()._compute_factor_evppi(
+            req, pre_noise, factor_values, seed=1, decision_evpi_bound=None, correlation_active=False
+        )
+        assert {r["factor_id"] for r in rows} == {"fa"}  # fb dropped, fa kept, no crash
