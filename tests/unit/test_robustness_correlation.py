@@ -110,9 +110,13 @@ class TestFactorCorrelationValidation:
         req = _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.6)])
         assert len(req.factor_correlations) == 1
 
-    def test_self_pair_rho_one_is_noop_accepted(self):
-        req = _request([FactorCorrelation(factor_a="fa", factor_b="fa", rho=1.0)])
-        assert req.factor_correlations[0].rho == 1.0
+    def test_self_pair_rho_one_rejected(self):
+        # B3 P3-2: a self-pair {fa, fa, rho} is NOT a harmless no-op. Even at
+        # rho=1.0 it ACTIVATES the correlation regime (correlation_model disclosure
+        # + attribution suppression) while declaring no dependence between distinct
+        # factors — attributions withheld for nothing. Rejected outright, any rho.
+        with pytest.raises(ValidationError, match="self-correlation"):
+            _request([FactorCorrelation(factor_a="fa", factor_b="fa", rho=1.0)])
 
     def test_rho_above_one_rejected(self):
         with pytest.raises(ValidationError):

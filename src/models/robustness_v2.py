@@ -884,8 +884,9 @@ class RobustnessRequestV2(BaseModel):
         - a referenced factor has no parameter_uncertainty (nothing to correlate),
         - a referenced factor's distribution is point_mass (zero variance — a
           correlation is ill-defined; STOP-gate rather than approximate),
-        - a self-pair (factor_a == factor_b) with rho != 1.0 (a factor is
-          perfectly correlated with itself by definition),
+        - a self-pair (factor_a == factor_b), any rho (a factor is trivially
+          correlated with itself; the pair declares no cross-factor dependence yet
+          would activate the correlation regime — B3 P3-2),
         - a duplicate unordered pair {a, b} (redundant or conflicting).
 
         ``rho`` bounds are enforced by the FactorCorrelation field itself.
@@ -901,15 +902,19 @@ class RobustnessRequestV2(BaseModel):
         for corr in self.factor_correlations:
             a, b = corr.factor_a, corr.factor_b
 
-            # Self-pair: only a redundant rho==1.0 is tolerated (diagonal no-op).
+            # Self-pair: rejected outright, any rho (B3 P3-2). A factor is
+            # trivially perfectly correlated with itself, so a self-pair expresses
+            # no dependence between distinct factors — yet supplying one still
+            # ACTIVATES the correlation regime (correlation_model disclosure +
+            # suppression of the independence-assuming per-factor attributions).
+            # That is a withhold-for-nothing, so a self-pair is never valid input.
             if a == b:
-                if corr.rho != 1.0:
-                    raise ValueError(
-                        "factor_correlations: self-correlation for factor "
-                        f"'{a}' must have rho=1.0 (a factor is perfectly "
-                        "correlated with itself)"
-                    )
-                # rho == 1.0 self-pair is a no-op; still range/existence-checked below.
+                raise ValueError(
+                    "factor_correlations: self-correlation is not permitted for "
+                    f"factor '{a}' (a factor is trivially correlated with itself; "
+                    "declaring the pair expresses no dependence between distinct "
+                    "factors)"
+                )
 
             for factor_id in (a, b):
                 if factor_id not in node_ids:
