@@ -212,8 +212,11 @@ async def analyze_sequential_decision(
             },
         )
 
-        # Add metadata
-        result.metadata = create_response_metadata(request_id)
+        # Add metadata. sampling=False (A3, 2026-07-23): the sequential-decision
+        # engine is deterministic (expectimax over the decision tree — it draws no
+        # Monte Carlo samples), so config_details must not advertise
+        # `monte_carlo_samples`. The key becomes absent (absent-not-null).
+        result.metadata = create_response_metadata(request_id, sampling=False)
 
         return result
 

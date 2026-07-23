@@ -86,11 +86,24 @@ def generate_config_fingerprint() -> str:
     return hash_obj.hexdigest()[:12]
 
 
-def generate_config_details() -> Dict[str, Any]:
+def generate_config_details(sampling: bool = True) -> Dict[str, Any]:
     """
     Extract key configuration values for transparency.
 
     Returns detailed config without sensitive info.
+
+    Args:
+        sampling: whether the calling endpoint actually draws Monte Carlo
+            samples. `monte_carlo_samples` (the MAX_MONTE_CARLO_ITERATIONS cap)
+            is emitted ONLY when this is True — advertising a Monte-Carlo sample
+            budget on a deterministic route (e.g. the sequential engine, which
+            draws no samples) is a fabricated config value. Each endpoint
+            declares its own nature at its call site (derive-don't-mirror: no
+            route list lives here). When False the key is ABSENT (absent-not-null).
+            Default True preserves the wire of every untouched caller; passing
+            True also keeps the emitted dict's key ORDER unchanged
+            (`monte_carlo_samples` first), so a sampling route's serialized
+            `_metadata` is byte-identical to before this parameter existed.
     """
     settings = get_settings()
 
@@ -107,21 +120,26 @@ def generate_config_details() -> Dict[str, Any]:
     except Exception:
         pass
 
-    return {
-        "monte_carlo_samples": settings.MAX_MONTE_CARLO_ITERATIONS,
-        "confidence_level": settings.DEFAULT_CONFIDENCE_LEVEL,
-        "response_timeout": settings.RESPONSE_TIMEOUT_SECONDS,
-        "redis_enabled": redis_enabled,
-        "deterministic_mode": settings.ENABLE_DETERMINISTIC_MODE,
-    }
+    details: Dict[str, Any] = {}
+    if sampling:
+        details["monte_carlo_samples"] = settings.MAX_MONTE_CARLO_ITERATIONS
+    details["confidence_level"] = settings.DEFAULT_CONFIDENCE_LEVEL
+    details["response_timeout"] = settings.RESPONSE_TIMEOUT_SECONDS
+    details["redis_enabled"] = redis_enabled
+    details["deterministic_mode"] = settings.ENABLE_DETERMINISTIC_MODE
+    return details
 
 
-def create_response_metadata(request_id: str) -> ResponseMetadata:
+def create_response_metadata(request_id: str, sampling: bool = True) -> ResponseMetadata:
     """
     Create metadata for response.
 
     Args:
         request_id: Request ID from X-Request-Id header
+        sampling: whether the calling endpoint draws Monte Carlo samples;
+            forwarded to `generate_config_details` so `monte_carlo_samples` is
+            emitted only on sampling routes (see that function). Default True
+            keeps the wire of every untouched caller unchanged.
 
     Returns:
         ResponseMetadata with version, fingerprint, config
@@ -129,6 +147,6 @@ def create_response_metadata(request_id: str) -> ResponseMetadata:
     return ResponseMetadata(
         isl_version=__version__,
         config_fingerprint=generate_config_fingerprint(),
-        config_details=generate_config_details(),
+        config_details=generate_config_details(sampling=sampling),
         request_id=request_id,
     )

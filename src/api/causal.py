@@ -295,8 +295,12 @@ async def analyze_counterfactual(
 
         result = counterfactual_engine.analyze(request)
 
-        # Inject metadata
-        result.metadata = create_response_metadata(request_id)
+        # Inject metadata. sampling=False (A3, 2026-07-23): config_details must not
+        # advertise `monte_carlo_samples: MAX_MONTE_CARLO_ITERATIONS` here — the
+        # counterfactual engine uses ADAPTIVE Monte Carlo whose actual sample count
+        # is convergence-driven (and <= the cap), so the fixed 10000 misrepresents
+        # this route's compute. The key becomes absent (absent-not-null).
+        result.metadata = create_response_metadata(request_id, sampling=False)
 
         logger.info(
             "counterfactual_completed",
