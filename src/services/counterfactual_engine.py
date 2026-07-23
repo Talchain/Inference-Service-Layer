@@ -6,6 +6,7 @@ with Monte Carlo simulation for uncertainty quantification.
 """
 
 import ast
+import heapq
 import logging
 import math
 import operator
@@ -43,7 +44,10 @@ settings = get_settings()
 # tests/performance/test_optimization_gains.py, so it is BOUNDED rather than removed:
 # at capacity the oldest-inserted entry is evicted, capping growth regardless of how
 # many distinct models are seen. Entries are small ((var, equation) lists) and
-# content-addressed, so a cache hit is always correct for that exact equation set.
+# content-addressed. The sort is now a DETERMINISTIC pure function of the equation
+# content (Kahn with a variable-name tie-break, see _topological_sort_equations), so
+# the content-addressed key and the computed order agree and a cache hit is always
+# correct for that exact equation set — regardless of key insertion order (F-4).
 _TOPO_SORT_CACHE_MAX = 128
 
 
@@ -379,21 +383,41 @@ class CounterfactualEngine:
             # Only keep variables that are in the equations dict
             dependencies[var_name] = var_refs & set(equations.keys())
 
-        # Topological sort using Kahn's algorithm
-        sorted_vars = []
+        # Topological sort using Kahn's algorithm with a DETERMINISTIC tie-break.
+        #
+        # Defect (A3, 2026-07-23, HUNT-VALIDATION F-4): the cache key above is
+        # `json.dumps(equations, sort_keys=True)` — insensitive to the equations
+        # dict's INSERTION order — but a plain FIFO queue (`queue.pop(0)` plus
+        # `dependencies.items()`-order appends) made Kahn's order DEPEND on that
+        # insertion order whenever two variables are simultaneously ready (a tie).
+        # Two requests with identical equation CONTENT but different key insertion
+        # order then collided on one cache key while computing different orders, so
+        # the SAME request bytes could return 200 / 422 / 500 depending on which
+        # order populated the cache first (process history). Fix at the mechanism:
+        # break ties by variable NAME via a min-heap, so the resulting order is a
+        # pure function of the dependency graph — hence of the equation content —
+        # and therefore AGREES with the content-addressed cache key. For a
+        # well-formed DAG every valid topological order yields identical values
+        # (equation evaluation is pure arithmetic and exogenous sampling iterates
+        # `distributions`, not this order), so this changes no correct result; it
+        # only makes the outcome independent of insertion order and cache history.
+        sorted_vars: List[str] = []
+        placed: set = set()
         in_degree = {var: len(deps) for var, deps in dependencies.items()}
-        queue = [var for var, degree in in_degree.items() if degree == 0]
+        ready = [var for var, degree in in_degree.items() if degree == 0]
+        heapq.heapify(ready)  # min-heap keyed by variable name
 
-        while queue:
-            var = queue.pop(0)
+        while ready:
+            var = heapq.heappop(ready)
             sorted_vars.append(var)
+            placed.add(var)
 
             # Reduce in-degree for dependent variables
             for other_var, deps in dependencies.items():
-                if var in deps and other_var not in sorted_vars:
+                if var in deps and other_var not in placed:
                     in_degree[other_var] -= 1
                     if in_degree[other_var] == 0:
-                        queue.append(other_var)
+                        heapq.heappush(ready, other_var)
 
         # Check for cycles
         if len(sorted_vars) != len(equations):
@@ -561,7 +585,40 @@ class CounterfactualEngine:
         sorted_equations = self._topological_sort_equations(request.model.equations)
         for var_name, equation in sorted_equations:
             if var_name not in samples:  # Skip if already set by intervention/context
-                samples[var_name] = self._evaluate_equation(equation, samples)
+                eq_value = self._evaluate_equation(equation, samples)
+                # F-A (A3, 2026-07-23, adversarial review): reject a COMPLEX-valued
+                # equation result BEFORE it can be coerced to a real number. Complex
+                # enters only via an explicit imaginary literal (`5j`, `X * 1j`) or
+                # `pow()` on a negative base with a fractional exponent (`(-1) ** 0.5`);
+                # numpy float arrays yield NaN — never complex — for those, so no
+                # real-valued model produces a complex result. Casting complex -> float
+                # SILENTLY DISCARDS the imaginary part: the 0-d broadcast below with
+                # `dtype=float` fabricated a real value (`{"Y":"5j"}` returned 200 with
+                # point_estimate 0.0), and a 1-d complex outcome instead reached
+                # `np.percentile` and raised a mislabeled retryable 500. Both are
+                # dishonest on a deterministic client-input defect. Reject at this one
+                # locus for ANY shape (0-d literal or 1-d array) -> ValueError -> route
+                # D-12(cf) 422, naming the variable only (F11: no value echo).
+                if np.asarray(eq_value).dtype.kind == "c":
+                    raise ValueError(
+                        f"Structural equation for variable '{var_name}' produced a "
+                        f"complex-valued result, which cannot be a real counterfactual "
+                        f"outcome. Provide equations that evaluate to real numbers "
+                        f"(avoid imaginary literals such as 'j' and fractional powers "
+                        f"of negative numbers)."
+                    )
+                # Defect (A3, 2026-07-23, HUNT-VALIDATION F-4): a CONSTANT structural
+                # equation (e.g. "5") evaluates to a 0-d array — no operand carries the
+                # sample dimension. Broadcast it to `num_samples` so every equation
+                # variable is a proper length-`num_samples` array. A constant IS a valid
+                # structural equation: it takes that value in every Monte Carlo sample,
+                # so the broadcast is exact (std 0, point_estimate = the constant).
+                # Without it, a 0-d outcome reaches `_run_adaptive_monte_carlo`'s
+                # `.tolist()` as a Python scalar and the subsequent `len()` raises
+                # TypeError -> a mislabeled 500 on legal client input.
+                if np.ndim(eq_value) == 0:
+                    eq_value = np.full(num_samples, eq_value, dtype=float)
+                samples[var_name] = eq_value
 
         return samples
 

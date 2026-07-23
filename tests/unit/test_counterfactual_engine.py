@@ -196,6 +196,133 @@ class TestTopologicalSorting:
             engine._topological_sort_equations(equations)
 
 
+class TestTopologicalSortDeterminism:
+    """Defect 1 (A3, 2026-07-23, HUNT-VALIDATION F-4): the topo order must be a
+    canonical PURE FUNCTION of equation CONTENT so it agrees with the
+    content-addressed cache key. Reverting the variable-name tie-break makes these
+    RED (insertion order leaks into the order for ties)."""
+
+    def test_tie_order_is_insertion_order_independent(self):
+        """Two equally-ready variables (a Kahn tie) must be ordered by NAME, not by
+        dict insertion order — otherwise `{...P,Q...}` and `{...Q,P...}` compute
+        different orders while colliding on the same content-sorted cache key.
+
+        FRESH engine per call: order1 and order2 have identical CONTENT (hence an
+        identical topo cache key), so a single shared engine would serve order1's
+        cached result to order2 and mask the sort entirely — the cache masking IS
+        the F-4 defect. Separate engines force each order through the sort."""
+        # P and Q are both roots (deps on exogenous A/B, not on each other) -> a tie.
+        order1 = CounterfactualEngine()._topological_sort_equations(
+            {"P": "2 * A", "Q": "3 * B", "Y": "P + Q"})
+        order2 = CounterfactualEngine()._topological_sort_equations(
+            {"Y": "P + Q", "Q": "3 * B", "P": "2 * A"})
+        assert order1 == order2, (order1, order2)
+        # Canonical: the two tied roots come out name-sorted (P before Q).
+        names = [v for v, _ in order1]
+        assert names.index("P") < names.index("Q")
+
+    def test_diamond_tie_order_canonical(self):
+        """A diamond A -> {B,C} -> D: B and C tie and must be name-ordered
+        regardless of how the dict is built. Fresh engines per call defeat the
+        content-addressed topo cache (see test above)."""
+        o1 = [v for v, _ in CounterfactualEngine()._topological_sort_equations(
+            {"A": "1", "B": "A", "C": "A", "D": "B + C"})]
+        o2 = [v for v, _ in CounterfactualEngine()._topological_sort_equations(
+            {"D": "B + C", "C": "A", "B": "A", "A": "1"})]
+        assert o1 == o2 == ["A", "B", "C", "D"]
+
+
+class TestConstantEquation:
+    """Defect 2 (A3, 2026-07-23, HUNT-VALIDATION F-4): a constant structural
+    equation (e.g. "5") is legal client input. It used to evaluate to a 0-d array
+    whose `.tolist()` scalar hit `len()` in adaptive Monte Carlo -> TypeError -> 500.
+    A constant IS a valid structural equation; support it. Reverting the 0-d
+    broadcast makes these RED (500)."""
+
+    def test_constant_outcome_equation_returns_constant(self):
+        """RED at HEAD: `equations={"Y": "5"}` raised TypeError (500). Y=5 is a
+        constant in every sample -> point_estimate 5.0, CI exactly [5, 5]."""
+        engine = CounterfactualEngine()
+        model = StructuralModel(
+            variables=["Y", "D"], equations={"Y": "5"}, distributions={}
+        )
+        # do(D) is a disconnected no-op purely to satisfy the non-empty-intervention
+        # route guard; it does not feed Y.
+        request = CounterfactualRequest(
+            model=model, intervention={"D": 1.0}, outcome="Y", context={}
+        )
+        response = engine.analyze(request)
+        assert response.prediction.point_estimate == pytest.approx(5.0, abs=1e-9)
+        assert response.prediction.confidence_interval.lower == pytest.approx(5.0, abs=1e-9)
+        assert response.prediction.confidence_interval.upper == pytest.approx(5.0, abs=1e-9)
+
+    def test_constant_chain_to_outcome_supported(self):
+        """A chain of CONSTANT equations reaching the outcome keeps the outcome 0-d
+        (no operand carries the sample dimension): A=3, B=4, Y=A+B -> Y=7. RED at
+        HEAD (500). (A constant feeding an outcome that ALSO has a sampled/intervened
+        operand already broadcast to 1-d and never crashed — this all-constant chain
+        is the case the 0-d handling actually rescues.)"""
+        engine = CounterfactualEngine()
+        model = StructuralModel(
+            variables=["A", "B", "Y", "D"], equations={"A": "3", "B": "4", "Y": "A + B"},
+            distributions={},
+        )
+        request = CounterfactualRequest(
+            model=model, intervention={"D": 1.0}, outcome="Y", context={}
+        )
+        response = engine.analyze(request)
+        assert response.prediction.point_estimate == pytest.approx(7.0, abs=1e-9)
+        assert response.prediction.confidence_interval.lower == pytest.approx(7.0, abs=1e-9)
+        assert response.prediction.confidence_interval.upper == pytest.approx(7.0, abs=1e-9)
+
+
+class TestComplexEquationRejected:
+    """F-A (A3, 2026-07-23, adversarial review): a complex-valued equation result
+    must be rejected (422), never coerced to a fabricated real. Complex enters only
+    via an imaginary literal (`5j`, `X*1j`) or `pow()` of a negative base by a
+    fractional exponent (`(-1)**0.5`) — no real-valued model produces it. RED at
+    HEAD (d71ae6d): `{"Y":"5j"}` -> 200 point_estimate 0.0 (imaginary discarded via
+    the 0-d broadcast's `dtype=float`); `{"Y":"X*1j"}` -> a mislabeled retryable 500
+    at np.percentile. Removing the complex guard makes these RED (fabricated 0.0 /
+    500 return)."""
+
+    def _analyze(self, eqs, variables, interv, outcome="Y"):
+        engine = CounterfactualEngine()
+        model = StructuralModel(variables=variables, equations=eqs, distributions={})
+        request = CounterfactualRequest(
+            model=model, intervention=interv, outcome=outcome, context={}
+        )
+        return engine.analyze(request)
+
+    def test_complex_literal_outcome_rejected(self):
+        """RED at HEAD: `{"Y":"5j"}` -> 200 pe=0.0 (5j real part 0.0, imaginary dropped)."""
+        with pytest.raises(ValueError, match="complex-valued"):
+            self._analyze({"Y": "5j"}, ["Y", "D"], {"D": 1.0})
+
+    def test_complex_array_outcome_rejected(self):
+        """Non-0-d complex (`X*1j` -> 1-d complex) was a mislabeled 500 at
+        np.percentile; the ndim-agnostic guard rejects it as a clean 422."""
+        with pytest.raises(ValueError, match="complex-valued"):
+            self._analyze({"Y": "X * 1j"}, ["X", "Y"], {"X": 3.0})
+
+    def test_complex_intermediate_rejected_names_the_variable(self):
+        """A complex INTERMEDIATE (C=2j) feeding the outcome is rejected naming C
+        (RED at HEAD: 200 pe=0.0 — C fabricated to 0.0 so Y=0*X)."""
+        with pytest.raises(ValueError, match=r"variable 'C'.*complex-valued"):
+            self._analyze({"C": "2j", "Y": "C * X"}, ["X", "C", "Y", "D"], {"X": 3.0, "D": 1.0})
+
+    def test_pow_complex_result_rejected(self):
+        """A real-LOOKING equation that yields complex via pow (`(-1)**0.5`) was
+        fabricated to ~0.0 (real part) at HEAD; now rejected."""
+        with pytest.raises(ValueError, match="complex-valued"):
+            self._analyze({"Y": "(-1) ** 0.5"}, ["Y", "D"], {"D": 1.0})
+
+    def test_real_control_still_200(self):
+        """Positive control: a real equation is unaffected by the complex guard."""
+        resp = self._analyze({"Y": "X * 2"}, ["X", "Y"], {"X": 3.0})
+        assert resp.prediction.point_estimate == pytest.approx(6.0, abs=1e-9)
+
+
 class TestDistributionSampling:
     """Test sampling from different distributions."""
 
