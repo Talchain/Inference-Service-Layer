@@ -320,12 +320,15 @@ class TestCounterfactualUndefinedOutcome:
         """
         request = {
             "model": {
-                "variables": ["X"],
+                # Ctrl is a DECLARED control variable (A3 2026-07-23: the
+                # intervention-key guard rejects an intervention on a variable
+                # absent from the model, so the control var must be in `variables`).
+                "variables": ["X", "Ctrl"],
                 "equations": {},
                 "distributions": {"X": {"type": "normal", "parameters": {"mean": 10, "std": 1}}},
             },
-            # Non-empty intervention on a control variable (F3d rejects an empty
-            # one); the outcome X remains resolvable via its distribution alone.
+            # Non-empty intervention on a declared control variable (F3d rejects an
+            # empty one); the outcome X remains resolvable via its distribution alone.
             "intervention": {"Ctrl": 0.0},
             "outcome": "X",
         }
@@ -357,12 +360,14 @@ class TestCounterfactualMissingDistributionParameter:
         """
         request = {
             "model": {
-                "variables": ["X", "Y"],
+                # Ctrl declared (A3 2026-07-23): the intervention-key guard rejects
+                # an intervention on a variable absent from the model.
+                "variables": ["X", "Y", "Ctrl"],
                 "equations": {"Y": "10 + 2 * X"},
                 "distributions": {"X": {"type": "normal", "parameters": {"mean": 5}}},
             },
-            # Non-empty intervention on a control var (F3d rejects an empty one);
-            # the missing-std distribution error fires in the exogenous-sampling
+            # Non-empty intervention on a declared control var (F3d rejects an empty
+            # one); the missing-std distribution error fires in the exogenous-sampling
             # loop regardless, before the intervention is applied.
             "intervention": {"Ctrl": 1.0},
             "outcome": "Y",
@@ -387,12 +392,14 @@ class TestCounterfactualMissingDistributionParameter:
         """
         request = {
             "model": {
-                "variables": ["X", "Y"],
+                # Ctrl declared (A3 2026-07-23): the intervention-key guard rejects
+                # an intervention on a variable absent from the model.
+                "variables": ["X", "Y", "Ctrl"],
                 "equations": {"Y": "10 + 2 * X"},
                 "distributions": {"X": {"type": "uniform", "parameters": {"min": 0}}},
             },
-            # Non-empty intervention on a control var (F3d rejects an empty one);
-            # the missing-max distribution error fires in the exogenous-sampling
+            # Non-empty intervention on a declared control var (F3d rejects an empty
+            # one); the missing-max distribution error fires in the exogenous-sampling
             # loop regardless.
             "intervention": {"Ctrl": 1.0},
             "outcome": "Y",

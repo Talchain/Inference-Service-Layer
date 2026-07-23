@@ -191,6 +191,46 @@ class CounterfactualEngine:
                 f"each variable in exactly one of `intervention` or `context`."
             )
 
+        # F3d residual (A3, 2026-07-23): reject an intervention/context key that
+        # names a variable ABSENT from the structural model, rather than silently
+        # no-opping it. `_run_fixed_monte_carlo` writes `samples[key] = np.full(...)`
+        # for EVERY intervention and context key, but a key that is not a declared
+        # variable, an equation-defined variable, or an exogenous distribution is
+        # never READ by any equation — so the model returns the OBSERVATIONAL
+        # BASELINE with HTTP 200: a plausible-looking answer to a question that was
+        # never evaluated (a client typo do(Q=5) on a model of X,Z,Y). The `context`
+        # channel has the identical hole (same unread np.full write). Validate here,
+        # the single validation home that already carries the do/observe collision
+        # guard above, so there is ONE place a key is checked against the model.
+        #
+        # Redaction (F11 discipline): the message names the unknown KEYS and the
+        # known-variable-set SIZE only — never the request VALUES (a client's
+        # private scenario inputs). This message is surfaced verbatim to the client
+        # AND written to the route's `counterfactual_invalid_input` warning log.
+        known_variables = (
+            set(request.model.variables)
+            | set(request.model.equations)
+            | set(request.model.distributions)
+        )
+        unknown_intervention = sorted(set(request.intervention) - known_variables)
+        unknown_context = sorted(set(request.context or {}) - known_variables)
+        if unknown_intervention or unknown_context:
+            channels = []
+            if unknown_intervention:
+                channels.append(f"intervention key(s) {unknown_intervention}")
+            if unknown_context:
+                channels.append(f"context key(s) {unknown_context}")
+            raise ValueError(
+                f"{' and '.join(channels)} name variable(s) that are not defined "
+                f"by the structural model (the model declares {len(known_variables)} "
+                f"known variable(s): its `variables`, structural-equation, and "
+                f"exogenous-distribution names). An intervention or context on an "
+                f"unknown variable is silently ignored by the sampler and returns "
+                f"the observational baseline for a question that was never "
+                f"evaluated. Provide each key from the model's known variables, or "
+                f"add the variable to the model."
+            )
+
         resolvable = (
             set(request.model.distributions)
             | set(request.intervention)
