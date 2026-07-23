@@ -4601,7 +4601,10 @@ class RobustnessAnalyzerV2:
             )
             est = factor_evppi_estimate(theta, pre_noise_option_outcomes, seed=floor_seed)
 
-            # Howard non-negativity clamp.
+            # Howard non-negativity clamp — DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by
+            # construction for the regression estimator (LS mean-preservation +
+            # Jensen), so this never fires on the live path; a clamped_low=True in
+            # telemetry would mean the estimator changed. Kept as defence-in-depth.
             clamped_low = est.evppi_raw < 0.0
             evppi = max(0.0, est.evppi_raw)
 

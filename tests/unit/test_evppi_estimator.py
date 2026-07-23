@@ -124,3 +124,65 @@ class TestBoundAndMethod:
 
     def test_method_tag_value(self):
         assert REGRESSION_EVPPI_METHOD == "regression_evppi_v1"
+
+
+def _true_null_dataset(ds: int):
+    """A TRUE-NULL factor: theta is INDEPENDENT of the option outcomes, but the
+    decision genuinely flips on a hidden independent driver (so decision_evpi > 0).
+    A correct below_resolution floor must catch these — the true EVPPI of theta is
+    0. Varies theta's distribution (normal/heavy-tail/leverage-lumpy/uniform) and
+    the outcome noise. Deterministic (fixed per-ds seeds)."""
+    rng = np.random.default_rng(1000 + ds)
+    n = 2000
+    kind = ds % 4
+    if kind == 0:
+        theta = rng.standard_normal(n)
+    elif kind == 1:
+        theta = rng.standard_t(3, n)  # heavy tail => high-leverage points
+    elif kind == 2:
+        theta = rng.standard_normal(n)
+        theta[rng.integers(0, n, 20)] *= 8  # leverage-lumpy
+    else:
+        theta = rng.uniform(-2, 2, n)
+    noise = [0.2, 0.5, 1.0, 2.0][ds % 4]
+    driver = rng.standard_normal(n)  # independent of theta
+    return theta, {
+        "A": driver + noise * rng.standard_normal(n),
+        "B": -driver + noise * rng.standard_normal(n),
+    }
+
+
+class TestBelowResolutionFloorCalibration:
+    """F-1 fix: the permutation-null floor is the MAX (not the mean) of K nulls, a
+    permutation test at level ~1/(K+1). This pins the TRUE-NULL escape rate — the
+    fraction of zero-information factors that wrongly ship as ``resolved`` — well
+    below 10%. Reverting the aggregation to the mean (the pre-fix behaviour) drives
+    the escape rate to ~45% and turns this test RED (mutation guard)."""
+
+    N = 40
+    TARGET = 0.10
+
+    def test_true_null_escape_rate_below_10pct(self):
+        escapes = 0
+        for ds in range(self.N):
+            theta, oo = _true_null_dataset(ds)
+            est = factor_evppi_estimate(theta, oo, seed=7000 + ds)
+            # A true-null factor "escapes" when it is labelled resolved
+            # (evppi_raw strictly above its own noise floor).
+            if est.evppi_raw > est.noise_floor:
+                escapes += 1
+        rate = escapes / self.N
+        assert rate <= self.TARGET, (
+            f"true-null escape rate {rate:.0%} exceeds {self.TARGET:.0%} — the "
+            f"below_resolution floor is too permissive (mean-of-K aggregation?)."
+        )
+
+    def test_genuine_signal_not_floored_by_conservative_floor(self):
+        """The more conservative (larger) MAX floor must NOT newly floor a genuine
+        signal: the sign-flip shape's ~0.80 EVPPI stays resolved."""
+        n = 20000
+        theta = _standard_normal(n, seed=1)
+        est = factor_evppi_estimate(theta, {"A": theta, "B": -theta}, seed=42)
+        assert est.evppi_raw > est.noise_floor  # resolved
+        assert est.evppi_raw > 0.5
+        assert est.noise_floor < 0.05  # floor stays tiny relative to the signal

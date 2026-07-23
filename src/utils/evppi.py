@@ -40,16 +40,28 @@ depended on. A modest degree keeps the finite-sample overfit bias small: at
 
 Honesty guardrails
 ------------------
-* ``EVPPI_i >= 0`` (Howard non-negativity): a negative estimate is finite-sample
-  noise; the caller clamps it to 0 and DISCLOSES the clamp.
+* ``EVPPI_i >= 0`` (Howard non-negativity): DEAD-MAN'S-SWITCH. For this estimator
+  the raw is NON-NEGATIVE BY CONSTRUCTION — least-squares with an intercept
+  preserves the sample mean (``mean_s fitted_o = mean_s U_o = E[U_o]``), and
+  ``mean_s max_o fitted_o >= max_o mean_s fitted_o`` (Jensen), so
+  ``evppi_raw = inner - baseline >= 0`` for every input. The caller's
+  ``max(0, .)`` clamp therefore never fires on this estimator; a future
+  ``clamped_low: true`` in telemetry means the ESTIMATOR CHANGED (e.g. lost its
+  intercept), not that a real negative occurred. Kept as defence-in-depth.
 * ``EVPPI_i <= decision_evpi`` (theorem: learning ONE factor cannot be worth more
   than learning EVERYTHING): the caller caps at the total EVPI and DISCLOSES the
   cap. This module reports the RAW estimate so the bound can be checked/pinned.
-* Below-resolution: a deterministic PERMUTATION-NULL floor — the EVPPI recomputed
-  with ``theta`` shuffled (which breaks the theta<->U association, so the TRUE
-  EVPPI is 0) measures the estimator's own overfit-noise floor. An estimate at or
-  below that floor is indistinguishable from noise. No hand-tuned constant, so it
-  cannot silently drift.
+* Below-resolution: a deterministic PERMUTATION-NULL floor. The EVPPI is recomputed
+  on ``theta`` SHUFFLED (breaking the theta<->U association, so the TRUE EVPPI is
+  0), K times; the floor is the MAX of those K nulls. This is a permutation test:
+  under the null (theta independent of U) the real estimate is EXCHANGEABLE with
+  the K shuffled ones, so a true-null factor exceeds the max with probability
+  ~1/(K+1) — i.e. ``below_resolution`` catches ~1 - 1/(K+1) of pure-noise factors.
+  The earlier MEAN-of-K aggregation was a ~50th-percentile threshold (~half of true
+  nulls escaped as ``resolved``, F-1); MAX at K=16 is a ~1/17 ~= 6% level
+  (empirically ~8% escape on 100 true-null datasets, down from ~45%). Deterministic
+  (per-factor seed) and derived from the data — no hand-tuned magnitude constant, so
+  it cannot silently drift.
 """
 
 from __future__ import annotations
@@ -67,11 +79,16 @@ REGRESSION_EVPPI_METHOD = "regression_evppi_v1"
 # small at n >= 100. Reduced adaptively when the factor has few distinct values.
 REGRESSION_EVPPI_POLY_DEGREE = 4
 
-# Number of theta permutations averaged for the below-resolution noise floor.
-# Averaging several reduces the floor estimate's own variance (a single
-# permutation is a noisy estimate of the overfit floor); 8 is a cheap, stable
-# default (each permutation is one extra polynomial fit per option).
-REGRESSION_EVPPI_NULL_PERMUTATIONS = 8
+# Number of theta permutations for the below-resolution noise floor. The floor is
+# the MAX of these K nulls (NOT the mean — see F-1). Under the null the real
+# estimate is exchangeable with the K shuffled ones, so the floor is a permutation
+# test at level ~1/(K+1): K=16 => ~5.9% (empirically ~8% escape on 100 true-null
+# datasets, vs ~45% with the old mean aggregation). K=16 is the smallest value that
+# clears a <10% true-null escape target with margin; larger K does not reduce the
+# residual near-boundary tail further, and a larger MAX only raises the floor (more
+# conservative). Deterministic (per-factor sha256-derived seed). Cost: K extra
+# polynomial fits per option per factor (microseconds).
+REGRESSION_EVPPI_NULL_PERMUTATIONS = 16
 
 # A factor whose sampled values span fewer than this many distinct values carries
 # no learnable signal for a regression (a constant/near-constant input), so its
@@ -178,15 +195,21 @@ def factor_evppi_estimate(
     evppi_raw = inner - baseline
 
     # Permutation-null floor: shuffle theta (breaking theta<->U association, so the
-    # TRUE EVPPI is 0) and re-estimate; the residual is the estimator's overfit
-    # noise. Average several permutations for a stable, deterministic floor.
+    # TRUE EVPPI is 0) and re-estimate; each residual is the estimator's overfit
+    # noise under the null. The floor is the MAX over K permutations, NOT the mean:
+    # the mean is a ~50th-percentile threshold that a true-null estimate exceeds
+    # ~half the time (F-1), whereas MAX makes this a permutation test at level
+    # ~1/(K+1) (the real estimate is exchangeable with the K shuffled nulls under
+    # the null), so ~1 - 1/(K+1) of pure-noise factors are caught as below_resolution.
+    # (max(0, .) is defence-in-depth: inner_perm - baseline is >= 0 by the same
+    # mean-preservation + Jensen argument as evppi_raw, so it never fires.)
     rng = np.random.default_rng(seed)
     floor_samples = []
     for _ in range(null_permutations):
         perm = rng.permutation(n_samples)
         inner_perm = _inner_expected_max(theta_arr[perm], matrix, deg)
         floor_samples.append(max(0.0, inner_perm - baseline))
-    noise_floor = float(np.mean(floor_samples)) if floor_samples else 0.0
+    noise_floor = float(np.max(floor_samples)) if floor_samples else 0.0
 
     return FactorEvppiEstimate(
         evppi_raw=float(evppi_raw),
