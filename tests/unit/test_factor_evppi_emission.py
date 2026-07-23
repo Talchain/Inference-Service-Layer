@@ -200,9 +200,12 @@ class TestClampDisclosure:
         bound = _decision_evpi_bound(r)
         theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
         assert theta["clamped_high"] is True
-        # Emitted value is the bound rounded to 6 dp.
-        assert theta["evppi"] == round(bound, 6)
-        assert theta["evppi"] <= bound + 1e-6
+        # F-2 (B4): emitted value respects the RAW bound AFTER rounding
+        # (round-then-clamp). This fixture's bound sits in a round-UP window
+        # (round(bound,6) > bound), so the emitted value is the raw bound, NOT
+        # round(bound,6) — which pre-fix exceeded decision_evpi by ~5e-7.
+        assert theta["evppi"] == min(round(bound, 6), bound)
+        assert theta["evppi"] <= bound
 
 
 def _two_free_factor_request(n_samples=2000, seed=999):
@@ -272,6 +275,65 @@ class TestPerFactorEstimatorDegrade:
         surviving = r.factor_evppi[0]
         assert surviving["method"] == REGRESSION_EVPPI_METHOD
         assert surviving["status"] in ("resolved", "below_resolution")
+
+
+class TestClampRoundOrdering:
+    """Hunter F-2: clamp-then-round(.,6) can ship evppi > decision_evpi by <=5e-7
+    when clamped_high binds and the bound sits in a round-UP window. The emitted
+    value must respect the (raw) bound AFTER rounding."""
+
+    def test_emitted_evppi_never_exceeds_bound_in_rounding_window(self, monkeypatch):
+        # Force clamped_high: a raw far above the bound -> evppi clamped to the bound.
+        def fake(theta, option_outcomes, *, seed, **kw):
+            return FactorEvppiEstimate(
+                evppi_raw=0.99,
+                conditional_max_expected_utility=1.0,
+                baseline_max_expected_utility=0.01,
+                noise_floor=0.0,
+                degree_used=4,
+                n_samples=len(list(theta)),
+                degenerate=False,
+            )
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", fake)
+
+        # A bound whose round(.,6) rounds UP past itself: round(0.12345675, 6)=0.123457.
+        bound = 0.12345675
+        assert round(bound, 6) > bound  # the hunter's rounding-window precondition
+
+        n = 8
+        req = RobustnessRequestV2(
+            graph=GraphV2(
+                nodes=[
+                    NodeV2(id="f", kind="factor", label="F", observed_state=ObservedState(value=0.0)),
+                    NodeV2(id="m", kind="factor", label="M", observed_state=ObservedState(value=0.0)),
+                    NodeV2(id="out", kind="outcome", label="Out", observed_state=ObservedState(value=0.0)),
+                ],
+                edges=[
+                    EdgeV2(**{"from": "f"}, to="out", strength=StrengthDistribution(mean=1.0, std=0.01), exists_probability=1.0),
+                    EdgeV2(**{"from": "m"}, to="out", strength=StrengthDistribution(mean=1.0, std=0.01), exists_probability=1.0),
+                ],
+            ),
+            options=[
+                InterventionOption(id="o1", label="A", interventions={"m": 0.0}),
+                InterventionOption(id="o2", label="B", interventions={"m": 1.0}),
+            ],
+            goal_node_id="out",
+            seed=1,
+            n_samples=100,  # request min; the direct call below uses the array length
+            parameter_uncertainties=[ParameterUncertainty(node_id="f", distribution="normal", std=1.0)],
+            include_voi=True,
+        )
+        pre_noise = {"o1": [float(i) for i in range(n)], "o2": [float(i) + 0.5 for i in range(n)]}
+        factor_values = [{"f": float(i) * 0.1} for i in range(n)]
+
+        rows = RobustnessAnalyzerV2()._compute_factor_evppi(
+            req, pre_noise, factor_values, seed=1, decision_evpi_bound=bound, correlation_active=False
+        )
+        row = {r["factor_id"]: r for r in rows}["f"]
+        assert row["clamped_high"] is True
+        # RED pre-fix: emitted 0.123457 > bound 0.12345675 by 2.5e-7.
+        assert row["evppi"] <= bound, f"emitted evppi {row['evppi']} exceeds decision_evpi bound {bound}"
 
 
 class TestCorrelationEmission:

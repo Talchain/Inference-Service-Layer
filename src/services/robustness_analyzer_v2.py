@@ -4653,10 +4653,21 @@ class RobustnessAnalyzerV2:
 
             below_resolution = evppi <= est.noise_floor
 
+            # Clamp-vs-round ordering (hunter F-2): round(.,6) can nudge a clamped
+            # value UP past the raw decision_evpi bound by <=5e-7, breaking the
+            # documented evppi <= decision_evpi on the wire. Re-clamp AFTER rounding
+            # against the RAW bound (which is <= the wire decision_evpi, since the
+            # bound is min over ALL options and the wire minimises over the
+            # downside-bearing subset). Non-clamp-binding rows are unaffected —
+            # round(evppi,6) < bound there, so the min is a no-op and goldens hold.
+            evppi_emitted = round(evppi, 6)
+            if decision_evpi_bound is not None:
+                evppi_emitted = min(evppi_emitted, decision_evpi_bound)
+
             results.append(
                 {
                     "factor_id": fid,
-                    "evppi": round(evppi, 6),
+                    "evppi": evppi_emitted,
                     # Pre-clamp raw estimate + audit components (mirrors
                     # p_win_sensitivity's current_metric/perfect_metric auditability).
                     "evppi_raw": round(est.evppi_raw, 6),
