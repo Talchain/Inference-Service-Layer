@@ -208,6 +208,8 @@ class PreferenceElicitationResponse(BaseModel):
         default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
+    model_config = {"populate_by_name": True}
+
 
 class PreferenceChoice(str, Enum):
     """User's preference choice."""
@@ -266,6 +268,8 @@ class PreferenceUpdateResponse(BaseModel):
         default=None, description="Metadata for determinism verification", alias="_metadata"
     )
 
+    model_config = {"populate_by_name": True}
+
 
 # ============================================================================
 # Bayesian Teaching Models
@@ -319,6 +323,8 @@ class BayesianTeachingResponse(BaseModel):
     metadata: Optional[ResponseMetadata] = Field(
         default=None, description="Metadata for determinism verification", alias="_metadata"
     )
+
+    model_config = {"populate_by_name": True}
 
 
 # ============================================================================
@@ -464,3 +470,5 @@ class AdvancedValidationResponse(BaseModel):
     metadata: Optional[ResponseMetadata] = Field(
         default=None, description="Metadata for determinism verification", alias="_metadata"
     )
+
+    model_config = {"populate_by_name": True}
