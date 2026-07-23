@@ -71,6 +71,7 @@ from src.constants import (
     MAX_GRAPH_NODES,
     MAX_OPTIONS,
     MAX_PARAMETER_UNCERTAINTIES,
+    NON_INFERENCE_KINDS,
     ZERO_VARIANCE_TOLERANCE,
 )
 from src.models.critique import (
@@ -101,8 +102,10 @@ from src.config.stability_thresholds import (
 
 logger = logging.getLogger(__name__)
 
-# Safety net: nodes that must not participate in inference
-NON_INFERENCE_KINDS = {"decision", "option", "constraint"}
+# Safety net: nodes that must not participate in inference. Defined in src.constants
+# (single source of truth) so the request-model control_candidate validator and this
+# filter can never fork on which kinds are non-inference (derive, don't mirror).
+# Re-exported here for existing importers of the analyzer symbol.
 
 # Path-decomposition safety budget: maximum number of simple intervention-target-to-goal
 # paths to enumerate. A layered DAG valid under the 50-node/200-edge schema limits can have
