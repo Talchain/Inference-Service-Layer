@@ -987,6 +987,26 @@ async def _analyze_robustness_v2_enhanced(
                 )
             )
 
+        # S1 (A3 VOI honesty, D-23.8): decision-level EVPI in OUTCOME UNITS.
+        # decision_evpi = min_o expected_regret[o] = E[max_o U] − max_o E[U] on the
+        # JOINT pre-noise CRN population (exact identity: min of E[max]−E[o] over o
+        # is achieved at argmax_o E[o]). This is a one-line READ of the regret
+        # already emitted per option in downside.expected_regret — zero new
+        # sampling, no recompute. Every regret-bearing option has finite samples and
+        # therefore a downside block (auto-noise preserves finiteness), including the
+        # argmax-mean == argmin-regret option, so the minimum over the wire downside
+        # regrets equals the true EVPI and can never overstate. Present exactly when
+        # the regret population is present (>=1 downside); the ISLResponseV2 validator
+        # enforces this emission-iff and the value both ways.
+        decision_evpi_regrets = [
+            o.downside.expected_regret
+            for o in option_results
+            if o.downside is not None
+        ]
+        builder.set_decision_evpi(
+            min(decision_evpi_regrets) if decision_evpi_regrets else None
+        )
+
         # Check for degenerate outcomes
         degen_critique = detect_degenerate_outcomes(option_results)
         if degen_critique:

@@ -3023,6 +3023,19 @@
             "title": "Critiques",
             "type": "array"
           },
+          "decision_evpi": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected value of perfect information for the WHOLE decision, in the same OUTCOME UNITS as outcome.mean (not win-probability points). EXACT FORM: decision_evpi = E[max_o U] \u2212 max_o E[U], computed on the JOINT pre-noise Common-Random-Numbers sample population (the same population as win_probability and downside.expected_regret) as the MINIMUM per-option expected regret: min_o expected_regret[o]. The identity E[max]\u2212max_o E[o] = min_o (E[max]\u2212E[o]) is exact, so this is the value of resolving ALL uncertainty before choosing \u2014 it captures option-switching, unlike the per-factor win-probability sensitivity in factor_evpi. Zero new sampling: a read of the regret already emitted per option. >= 0 by construction (min of non-negative regrets). Present EXACTLY when the downside/regret population is present (>=1 option carries downside.expected_regret); omitted (never a JSON null) otherwise.",
+            "title": "Decision Evpi"
+          },
           "diagnostics": {
             "anyOf": [
               {

@@ -176,8 +176,9 @@ def normalize_v2_payload(payload: dict) -> dict:
 # Additive-only wire surfaces layered on top of the pre-bands base wire. The
 # base golden (golden_base_v2.json) predates ALL of them, so each must be
 # stripped before the modulo comparison. 'stability' = flip-stability bands;
-# 'downside' = B2 tail-risk view (cvar_10/p05/expected_regret).
-_ADDITIVE_WIRE_SURFACES = frozenset({"stability", "downside"})
+# 'downside' = B2 tail-risk view (cvar_10/p05/expected_regret);
+# 'decision_evpi' = S1 decision-level EVPI (A3 VOI, D-23.8; top-level scalar).
+_ADDITIVE_WIRE_SURFACES = frozenset({"stability", "downside", "decision_evpi"})
 
 
 def _strip_additive_surfaces(payload):
