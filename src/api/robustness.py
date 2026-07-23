@@ -22,6 +22,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
+from src.api.error_helpers import raise_invalid_input
 from src.constants import (
     DEFAULT_EXISTS_PROBABILITY_THRESHOLD,
     DEFAULT_RESPONSE_VERSION,
@@ -694,11 +695,7 @@ async def _analyze_robustness_v2_legacy(
         # node filtered out) are client errors, not internal failures.
         # Fail closed with 422 so cyclic graphs never surface as 500s or,
         # worse, as plausible-looking results on this legacy path.
-        logger.warning(
-            "robustness_v2_invalid_input",
-            extra={"request_id": request_id, "error": str(e)},
-        )
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise_invalid_input(logger, "robustness_v2_invalid_input", request_id, e)
     except Exception as e:
         logger.error("robustness_v2_analysis_error", exc_info=True)
         raise HTTPException(

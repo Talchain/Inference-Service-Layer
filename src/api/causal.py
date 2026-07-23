@@ -13,6 +13,7 @@ from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 from typing import Any, Optional, Union
 
+from src.api.error_helpers import raise_invalid_input
 from src.models.metadata import create_response_metadata
 from src.models.requests import (
     BatchCounterfactualRequest,
@@ -326,11 +327,7 @@ async def analyze_counterfactual(
         # input defects; the one internal-only ValueError source (unknown distribution
         # type) is unreachable — DistributionType is a Pydantic-validated enum, so an
         # unknown type is rejected with 422 before the engine runs.
-        logger.warning(
-            "counterfactual_invalid_input",
-            extra={"request_id": request_id, "error": str(e)},
-        )
-        raise HTTPException(status_code=422, detail=str(e)) from e
+        raise_invalid_input(logger, "counterfactual_invalid_input", request_id, e)
     except Exception as e:
         logger.error("counterfactual_error", exc_info=True)
         raise HTTPException(

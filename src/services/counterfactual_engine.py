@@ -9,6 +9,7 @@ import ast
 import logging
 import operator
 import re
+import threading
 from typing import Any, Dict, List, Tuple, Optional
 
 import numpy as np
@@ -68,6 +69,19 @@ class CounterfactualEngine:
         # _TOPO_SORT_CACHE_MAX): capped so it cannot grow unbounded on the live
         # request path.
         self._topo_sort_cache: Dict[str, List[Tuple[str, str]]] = {}
+        # Guards every read/insert/evict of the cache above. This engine is a
+        # module-level singleton (`counterfactual_engine` in causal.py) served on a
+        # concurrent request path, so the unlocked dict's evict step —
+        # `pop(next(iter(...)))` racing a concurrent `[key] = result` — can raise
+        # "dictionary changed size during iteration" or corrupt the FIFO ordering.
+        # A plain Lock preserves the EXACT FIFO-128 / no-TTL semantics from PR #89
+        # and keeps `_topo_sort_cache` a real dict (test_optimization_gains reads
+        # `len(engine._topo_sort_cache)`). The repo's thread-safe cache utilities —
+        # utils/cache.TTLCache and infrastructure/memory_cache.get_named_cache —
+        # were REJECTED: both are LRU + mandatory-TTL (MemoryCache also spawns a
+        # background cleanup thread and is a shared singleton), so neither can
+        # preserve FIFO/no-TTL, and TTLCache has no __len__ for the perf test.
+        self._topo_sort_cache_lock = threading.Lock()
 
     def analyze(self, request: CounterfactualRequest) -> CounterfactualResponse:
         """
@@ -151,6 +165,17 @@ class CounterfactualEngine:
                 explanation=explanation,
             )
 
+        except ValueError as e:
+            # Client-input defects — an undefined/dangling outcome, a malformed or
+            # circular structural equation, a non-finite outcome, or a numpy
+            # scale<0 — fail loud as ValueError, and the route's D-12(cf) handler
+            # maps them to a clean 422 (the only internal ValueError source,
+            # unknown distribution type, is unreachable behind the Pydantic enum).
+            # These are client errors, not server incidents: log at WARNING without
+            # a server-path traceback (the route also logs counterfactual_invalid_input
+            # at WARNING). Reserve ERROR + traceback for genuinely unexpected faults.
+            logger.warning("counterfactual_analysis_failed", extra={"error": str(e)})
+            raise
         except Exception as e:
             logger.error("counterfactual_analysis_failed", exc_info=True)
             raise
@@ -290,9 +315,12 @@ class CounterfactualEngine:
 
         cache_key = json.dumps(equations, sort_keys=True)
 
-        # Check cache first
-        if cache_key in self._topo_sort_cache:
-            return self._topo_sort_cache[cache_key]
+        # Check cache first (under the lock — see __init__). The topo sort itself
+        # is a pure function of `equations`, so it runs OUTSIDE the lock; only the
+        # dict read/insert/evict are guarded.
+        with self._topo_sort_cache_lock:
+            if cache_key in self._topo_sort_cache:
+                return self._topo_sort_cache[cache_key]
 
         # Build dependency graph
         dependencies: Dict[str, set] = {}
@@ -329,9 +357,10 @@ class CounterfactualEngine:
         # cache cannot grow unbounded on a client-controllable key (dict preserves
         # insertion order, Python 3.7+).
         result = [(var, equations[var]) for var in sorted_vars]
-        if len(self._topo_sort_cache) >= _TOPO_SORT_CACHE_MAX:
-            self._topo_sort_cache.pop(next(iter(self._topo_sort_cache)))
-        self._topo_sort_cache[cache_key] = result
+        with self._topo_sort_cache_lock:
+            if len(self._topo_sort_cache) >= _TOPO_SORT_CACHE_MAX:
+                self._topo_sort_cache.pop(next(iter(self._topo_sort_cache)))
+            self._topo_sort_cache[cache_key] = result
 
         return result
 
@@ -453,6 +482,23 @@ class CounterfactualEngine:
                 raise ValueError(
                     f"Exogenous distribution for variable '{var_name}' (type "
                     f"'{dist.type.value}') is missing required parameter '{missing}'."
+                ) from e
+            except ValueError as e:
+                # Input hardening (F3): a client-supplied distribution parameter
+                # outside its valid domain — most reachably a NEGATIVE `std` on a
+                # normal, since the Distribution model does not constrain std >= 0,
+                # which numpy rejects as a bare `ValueError: scale < 0` — reaches
+                # the RNG helper as an un-actionable message that does not name the
+                # variable. Re-raise it NAMING the offending variable and its
+                # distribution (route D-12(cf) -> 422), preserving the underlying
+                # domain reason. Scoped to this single sample call: `_sample_
+                # distribution` only invokes numpy RNG helpers on client params, so
+                # any ValueError here is a client parameter-domain defect, not an
+                # internal bug (its sole internal ValueError, an unknown distribution
+                # type, is unreachable behind the Pydantic-validated enum).
+                raise ValueError(
+                    f"Exogenous distribution for variable '{var_name}' (type "
+                    f"'{dist.type.value}') has an invalid parameter: {e}."
                 ) from e
 
         # Apply intervention (set intervened variables to fixed values)
