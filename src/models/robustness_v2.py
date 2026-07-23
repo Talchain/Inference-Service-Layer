@@ -35,6 +35,17 @@ from src.models.response_v2 import (
     ZeroSensitivityReason,
 )
 
+# Pure-numpy correlation helpers (no circular import — correlation.py imports nothing
+# from the model layer). Used to reject HARD-INVALID correlation matrices at request
+# validation, BEFORE any Higham projection reaches the sampler (F4, D-23.13).
+from src.utils.correlation import (
+    CORRELATION_ADMISSION_METHOD_VERSION,
+    CORRELATION_REJECT_MAX_ADJUSTMENT,
+    CORRELATION_REJECT_MIN_EIGENVALUE,
+    assemble_correlation_matrix,
+    evaluate_correlation_admissibility,
+)
+
 
 # Distribution families the Gaussian-copula marginal transform supports (B3-S1).
 # ALLOWLIST, not a blocklist: the correlation validator rejects any family not in
@@ -955,6 +966,29 @@ class RobustnessRequestV2(BaseModel):
                     )
         return self
 
+    def _correlation_matrix_inputs(self) -> Tuple[List[str], List[Tuple[str, str, float]]]:
+        """Canonical (factor_order, pairs) for the assembled correlation matrix.
+
+        SINGLE derivation shared by the request-validation admissibility gate and the
+        analyzer's ``_build_correlation_plan`` (derive-don't-mirror, CLAUDE.md #12):
+        factor order is first-appearance in ``parameter_uncertainties`` restricted to
+        the correlated set, exactly the order ``FactorSampler`` draws in. Returns empty
+        lists when no correlations are supplied.
+        """
+        correlations = self.factor_correlations or []
+        if not correlations:
+            return [], []
+        correlated_ids: set[str] = set()
+        for corr in correlations:
+            correlated_ids.add(corr.factor_a)
+            correlated_ids.add(corr.factor_b)
+        uncertainties = self.parameter_uncertainties or []
+        factor_order = [u.node_id for u in uncertainties if u.node_id in correlated_ids]
+        pairs: List[Tuple[str, str, float]] = [
+            (c.factor_a, c.factor_b, c.rho) for c in correlations
+        ]
+        return factor_order, pairs
+
     @model_validator(mode="after")
     def validate_factor_correlations(self) -> "RobustnessRequestV2":
         """Validate factor_correlations (B3-S1) → fail closed with a typed 422.
@@ -971,7 +1005,12 @@ class RobustnessRequestV2(BaseModel):
         - a self-pair (factor_a == factor_b), any rho (a factor is trivially
           correlated with itself; the pair declares no cross-factor dependence yet
           would activate the correlation regime — B3 P3-2),
-        - a duplicate unordered pair {a, b} (redundant or conflicting).
+        - a duplicate unordered pair {a, b} (redundant or conflicting),
+        - a MATRIX-LEVEL hard-invalid: the assembled matrix is indefinite beyond the
+          near-PSD repair band (mutually contradictory correlations, e.g. rho(a,b)=1,
+          rho(a,c)=1, rho(b,c)=-1 → spectrum [-1,2,2]). Rejected here (F4, D-23.13)
+          BEFORE any Higham projection reaches the sampler; genuinely near-PSD inputs
+          still project + disclose downstream.
 
         ``rho`` bounds are enforced by the FactorCorrelation field itself.
         """
@@ -1031,6 +1070,53 @@ class RobustnessRequestV2(BaseModel):
                         "at most once)"
                     )
                 seen_pairs.add(key)
+
+        # Matrix-level HARD-INVALID gate (F4, D-23.13). The per-pair guards above make
+        # the assembled matrix well-defined (every correlated factor has a position, no
+        # self-pairs, no duplicate/conflicting pairs). A matrix indefinite BEYOND the
+        # near-PSD repair band is not float noise — it encodes mutually contradictory
+        # correlations — so silently projecting it would analyse a different problem.
+        # Reject here (typed 422) BEFORE any Higham projection reaches the sampler.
+        factor_order, pairs = self._correlation_matrix_inputs()
+        matrix = assemble_correlation_matrix(factor_order, pairs)
+        verdict = evaluate_correlation_admissibility(matrix)
+        if not verdict.admissible:
+            idx = {f: i for i, f in enumerate(factor_order)}
+            # Name the pairs the projection would move the most (the ones driving the
+            # inadmissibility) — the correlation's OWN factor ids plus derived scalar
+            # metrics only; no raw rho or other request values are echoed.
+            offending = sorted(
+                (
+                    (a, b, abs(float(verdict.projected[idx[a], idx[b]]) - float(rho)))
+                    for a, b, rho in pairs
+                    if a != b
+                ),
+                key=lambda t: t[2],
+                reverse=True,
+            )
+            top = [f"('{a}', '{b}')" for a, b, adj in offending if adj > 0.0][:3]
+            criteria: List[str] = []
+            if "min_eigenvalue" in verdict.reasons:
+                criteria.append(
+                    f"smallest eigenvalue {verdict.min_eigenvalue:.4f} < "
+                    f"{CORRELATION_REJECT_MIN_EIGENVALUE}"
+                )
+            if "max_adjustment" in verdict.reasons:
+                criteria.append(
+                    "nearest-correlation projection would move a stated correlation by up "
+                    f"to {verdict.max_abs_off_diagonal_adjustment:.4f} > "
+                    f"{CORRELATION_REJECT_MAX_ADJUSTMENT}"
+                )
+            raise ValueError(
+                "factor_correlations: the supplied pairwise correlations are mutually "
+                "inconsistent — the assembled correlation matrix is not "
+                "positive-semidefinite beyond the near-PSD repair band ("
+                + "; ".join(criteria)
+                + "). This is a hard-invalid specification, not floating-point noise, so it "
+                "is rejected rather than silently projected. Reconcile the offending pairs: "
+                + ", ".join(top)
+                + f". (admission method {CORRELATION_ADMISSION_METHOD_VERSION})"
+            )
 
         return self
 

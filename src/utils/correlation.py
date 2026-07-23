@@ -47,6 +47,45 @@ HIGHAM_TOL = 1e-10
 # projected + disclosed.
 PSD_EIGEN_TOL = 1e-10
 
+# ---------------------------------------------------------------------------
+# Hard-invalid admissibility band (F4, D-23.13 — enforcing D-23.4 +
+# PARAMETER-RESEARCH-2026-07-23.md:49-59). The agreed doctrine is "reject
+# hard-invalid, ELSE Higham-project near-PSD with disclosure". Higham (2002) was
+# designed to REPAIR matrices that are *almost* valid (pairwise / partial-data
+# estimation, differing sample windows, rounding) — where the smallest eigenvalue
+# is only slightly negative. A matrix that is indefinite by a WIDE margin is not
+# noise: it encodes mutually contradictory correlations (e.g. rho(a,b)=1,
+# rho(a,c)=1, rho(b,c)=-1 has spectrum [-1,2,2] — a==b, a==c but rho(b,c)=-1), and
+# projecting it silently analyses a DIFFERENT problem under materially different
+# assumptions. Such inputs are rejected (typed 422) at request validation, BEFORE
+# any projection reaches the sampler; near-PSD inputs still project + disclose.
+#
+# NEIL-PARAMETERS (operational defaults, NOT research-calibrated) — like
+# CVAR_LEVEL / STABILITY_CONFIDENCE_MAP. A silent retune is caught by the
+# fingerprint guard in tests/unit/test_correlation_hard_invalid.py, which pins the
+# (constants fingerprint <-> version) pair and fails loud if a constant moves while
+# the version stays put. To change a bound: bump CORRELATION_ADMISSION_METHOD_VERSION
+# AND update the pinned fingerprint together.
+#
+# Rationale for the values (documented, defensible):
+# - min-eigenvalue floor -0.05: on a unit-diagonal correlation matrix the
+#   eigenvalues sum to n and are each in [0, n] when valid; a smallest eigenvalue
+#   below -0.05 is ~5% of a full unit variance "borrowed from nowhere" — a genuine
+#   spec inconsistency, orders of magnitude above the ~1e-10 float-noise scale and
+#   above the mild slop of partial/pairwise estimation.
+# - max-off-diagonal-adjustment 0.10: the interpretable materiality gate. If
+#   reaching validity requires the nearest-correlation projection to silently move
+#   any single STATED pairwise correlation by more than 0.10, the projected matrix
+#   embodies a materially different dependence assumption than the caller declared.
+# Reject iff EITHER fires (fail-closed OR). Both fire on the [-1,2,2] contradiction
+# (lambda_min=-1.0, adj=0.5); a near-PSD noise case (frustrated 0.51: lambda_min=-0.02,
+# adj=0.01) clears both and still projects. The verdict is PERMUTATION-INVARIANT
+# (eigenvalues + max|off-diagonal adjustment| are invariant under symmetric
+# relabeling), so it does not depend on factor draw order.
+CORRELATION_ADMISSION_METHOD_VERSION = "corr_admission_v1"
+CORRELATION_REJECT_MIN_EIGENVALUE = -0.05  # reject if lambda_min < this
+CORRELATION_REJECT_MAX_ADJUSTMENT = 0.10  # reject if max |off-diag Higham adjustment| > this
+
 # Eigenvalue floor used ONLY when a PSD-but-singular matrix (e.g. a perfect
 # rho=1 pair, or a Higham projection whose smallest eigenvalue is clamped to ~0)
 # trips Cholesky. The spectrum is lifted so its minimum reaches this floor, then
@@ -57,14 +96,101 @@ _CHOLESKY_EIGEN_FLOOR = 1e-8
 
 
 @dataclass(frozen=True)
+class EffectivePair:
+    """The EFFECTIVE (post-projection) correlation for one supplied pair (F4).
+
+    ``requested_rho`` is what the caller stated; ``effective_rho`` is the
+    off-diagonal that the Higham-projected matrix ACTUALLY used to drive the copula
+    draw; ``adjustment`` is ``effective_rho - requested_rho`` (how far, and which
+    way, the projection silently moved that correlation). Disclosed so a caller can
+    reconstruct which correlations really drove the numbers — not just the aggregate
+    Frobenius distance.
+    """
+
+    factor_a: str
+    factor_b: str
+    requested_rho: float
+    effective_rho: float
+    adjustment: float
+
+
+@dataclass(frozen=True)
+class AdmissibilityVerdict:
+    """Hard-invalid admissibility verdict for an assembled correlation matrix (F4).
+
+    ``admissible`` is False when the matrix is indefinite beyond the near-PSD repair
+    band (see ``CORRELATION_REJECT_*``); the request validator turns that into a
+    typed 422 BEFORE any projection. ``reasons`` names exactly which bound(s) fired
+    (``min_eigenvalue`` and/or ``max_adjustment``). ``projected`` is the
+    nearest-correlation matrix (equal to the input when it was already PSD) so the
+    caller can name the offending pairs without recomputing the projection.
+    """
+
+    admissible: bool
+    min_eigenvalue: float
+    max_abs_off_diagonal_adjustment: float
+    frobenius_distance: float
+    reasons: Tuple[str, ...]
+    projected: np.ndarray
+
+
+def evaluate_correlation_admissibility(matrix: np.ndarray) -> AdmissibilityVerdict:
+    """Decide whether an assembled correlation matrix is HARD-INVALID (F4, D-23.13).
+
+    Already-PSD (up to float noise) → trivially admissible, no projection. Otherwise
+    the Higham nearest-correlation projection is computed and the matrix is rejected
+    iff its smallest eigenvalue is below ``CORRELATION_REJECT_MIN_EIGENVALUE`` OR the
+    largest single off-diagonal adjustment exceeds ``CORRELATION_REJECT_MAX_ADJUSTMENT``
+    (fail-closed OR). Reasons are recorded so the caller can name the criteria that
+    fired. Permutation-invariant: the verdict does not depend on row/column order.
+    """
+    lam_min = min_eigenvalue(matrix)
+    if lam_min >= -PSD_EIGEN_TOL:
+        # Already PSD (or float-noise negative): admissible, no projection needed.
+        return AdmissibilityVerdict(
+            admissible=True,
+            min_eigenvalue=lam_min,
+            max_abs_off_diagonal_adjustment=0.0,
+            frobenius_distance=0.0,
+            reasons=(),
+            projected=np.array(matrix, dtype=float),
+        )
+    projected, _iterations = nearest_correlation_higham(matrix)
+    diff = projected - matrix
+    frobenius_distance = float(np.linalg.norm(diff, ord="fro"))
+    off = diff.copy()
+    np.fill_diagonal(off, 0.0)
+    max_off = float(np.max(np.abs(off))) if off.size else 0.0
+    reasons = []
+    if lam_min < CORRELATION_REJECT_MIN_EIGENVALUE:
+        reasons.append("min_eigenvalue")
+    if max_off > CORRELATION_REJECT_MAX_ADJUSTMENT:
+        reasons.append("max_adjustment")
+    return AdmissibilityVerdict(
+        admissible=not reasons,
+        min_eigenvalue=lam_min,
+        max_abs_off_diagonal_adjustment=max_off,
+        frobenius_distance=frobenius_distance,
+        reasons=tuple(reasons),
+        projected=projected,
+    )
+
+
+@dataclass(frozen=True)
 class ProjectionInfo:
-    """On-wire disclosure payload for a Higham nearest-correlation projection."""
+    """On-wire disclosure payload for a Higham nearest-correlation projection.
+
+    ``effective_pairs`` (F4) discloses the EFFECTIVE post-projection off-diagonal for
+    each supplied pair — the correlations that actually drove the copula — so the
+    caller sees more than the aggregate Frobenius distance.
+    """
 
     applied: bool
     method: str
     frobenius_distance: float
     max_abs_off_diagonal_adjustment: float
     iterations: int
+    effective_pairs: Tuple[EffectivePair, ...]
 
 
 @dataclass(frozen=True)
@@ -188,12 +314,27 @@ def build_correlation_plan(
         off = diff.copy()
         np.fill_diagonal(off, 0.0)
         max_off = float(np.max(np.abs(off))) if off.size else 0.0
+        # F4: per-pair EFFECTIVE off-diagonals — the correlations the copula actually
+        # used after projection, and how far each moved from what the caller stated.
+        idx = {f: i for i, f in enumerate(factor_order)}
+        effective_pairs = tuple(
+            EffectivePair(
+                factor_a=a,
+                factor_b=b,
+                requested_rho=float(rho),
+                effective_rho=float(projected[idx[a], idx[b]]),
+                adjustment=float(projected[idx[a], idx[b]]) - float(rho),
+            )
+            for a, b, rho in pairs
+            if a != b
+        )
         projection = ProjectionInfo(
             applied=True,
             method=HIGHAM_METHOD,
             frobenius_distance=frobenius_distance,
             max_abs_off_diagonal_adjustment=max_off,
             iterations=iterations,
+            effective_pairs=effective_pairs,
         )
         used = projected
     cholesky = _safe_cholesky(used)

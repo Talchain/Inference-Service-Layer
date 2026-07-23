@@ -475,15 +475,21 @@ class TestPSDProjection:
         assert resp.correlation_model.psd_projection is None
 
     def test_non_psd_triggers_higham_with_disclosure(self, analyzer):
-        # 0.9 / 0.9 / -0.9 over three factors is indefinite → Higham projection.
-        non_psd = [
-            FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.9),
-            FactorCorrelation(factor_a="fb", factor_b="fc", rho=0.9),
-            FactorCorrelation(factor_a="fa", factor_b="fc", rho=-0.9),
+        # A GENUINELY near-PSD matrix (frustrated 0.51/0.51/-0.51: smallest eigenvalue
+        # -0.02, max off-diagonal adjustment 0.01) is inside the near-PSD repair band →
+        # Higham projection with disclosure. (Historical note: this test used to feed
+        # 0.9/0.9/-0.9, whose smallest eigenvalue is -0.8 — a STRONGLY inconsistent spec,
+        # not float noise. Since F4/D-23.13 that input is correctly rejected with a typed
+        # 422; see test_correlation_hard_invalid.py. The test's intent — prove the
+        # Higham+disclosure path — is preserved with a genuinely near-PSD input.)
+        near_psd = [
+            FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.51),
+            FactorCorrelation(factor_a="fb", factor_b="fc", rho=0.51),
+            FactorCorrelation(factor_a="fa", factor_b="fc", rho=-0.51),
         ]
         resp = analyzer.analyze(
             _request(
-                non_psd,
+                near_psd,
                 unc=_UNC3,
                 graph=_three_factor_graph(),
                 options=[
@@ -498,6 +504,12 @@ class TestPSDProjection:
         assert proj.method == HIGHAM_METHOD
         assert proj.frobenius_distance > 0.0
         assert proj.iterations > 0
+        # F4: the EFFECTIVE adjusted correlations are disclosed (one per supplied pair),
+        # not only the aggregate distance.
+        assert proj.effective_correlations is not None
+        assert len(proj.effective_correlations) == 3
+        for e in proj.effective_correlations:
+            assert e.adjustment == pytest.approx(e.effective_rho - e.requested_rho, abs=1e-12)
 
 
 # =============================================================================

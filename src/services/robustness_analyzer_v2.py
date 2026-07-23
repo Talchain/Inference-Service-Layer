@@ -58,6 +58,7 @@ from src.models.response_v2 import (
     SUPPRESSED_ATTR_STABILITY_THRESHOLDS,
     CorrelationModelV2,
     CorrelationProjectionV2,
+    EffectiveCorrelationV2,
     ZeroSensitivityReason,
 )
 from src.constants import (
@@ -2100,20 +2101,18 @@ class RobustnessAnalyzerV2:
         the same order ``FactorSampler``'s independent loop draws in, so an
         all-normal request whose correlated set spans the full uncertainty list
         with rho=0 reproduces the independent draws bit-for-bit. Request
-        validation has already rejected every hard-invalid input, so the assembled
-        matrix is well-posed (PSD-checked + Higham-projected inside
-        ``build_correlation_plan``).
+        validation has already rejected every hard-invalid input (F4, D-23.13), so
+        the assembled matrix is at worst NEAR-PSD (PSD-checked + Higham-projected
+        inside ``build_correlation_plan``).
+
+        The (factor_order, pairs) derivation is the request model's OWN
+        ``_correlation_matrix_inputs`` — the SAME derivation the admissibility gate
+        validates against, so the two can never drift (derive-don't-mirror).
         """
         correlations = request.factor_correlations
         if not correlations:
             return None
-        correlated_ids: set = set()
-        for corr in correlations:
-            correlated_ids.add(corr.factor_a)
-            correlated_ids.add(corr.factor_b)
-        uncertainties = request.parameter_uncertainties or []
-        factor_order = [u.node_id for u in uncertainties if u.node_id in correlated_ids]
-        pairs = [(c.factor_a, c.factor_b, c.rho) for c in correlations]
+        factor_order, pairs = request._correlation_matrix_inputs()
         return build_correlation_plan(factor_order, pairs)
 
     @staticmethod
@@ -2148,6 +2147,18 @@ class RobustnessAnalyzerV2:
                 frobenius_distance=projection.frobenius_distance,
                 max_abs_off_diagonal_adjustment=projection.max_abs_off_diagonal_adjustment,
                 iterations=projection.iterations,
+                # F4: disclose the EFFECTIVE adjusted correlations, not only the
+                # aggregate distance, so a caller can reconstruct what drove the numbers.
+                effective_correlations=[
+                    EffectiveCorrelationV2(
+                        factor_a=ep.factor_a,
+                        factor_b=ep.factor_b,
+                        requested_rho=ep.requested_rho,
+                        effective_rho=ep.effective_rho,
+                        adjustment=ep.adjustment,
+                    )
+                    for ep in projection.effective_pairs
+                ],
             )
             if projection is not None
             else None
