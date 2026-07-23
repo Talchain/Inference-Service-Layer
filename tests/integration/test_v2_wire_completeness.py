@@ -192,10 +192,81 @@ class TestFactorEvpiLabellingOnWire:
             assert entry["noise_floor"] > 0
             assert entry["noise_floor_method"] == "z95_worst_case_bernoulli_diff"
             assert entry["labelling_doctrine"] == "provisional_doctrine_v0"
+            # S2 (D-23.8): the honest method tag is on the wire, and NO key says EVPI.
+            assert entry["method"] == "p_win_delta_at_mean_v1"
+            assert not [k for k in entry if "evpi" in k.lower()]
 
     def test_factor_evpi_absent_without_include_voi(self, client):
         body = post_v2(client, base_request())
         assert "p_win_sensitivity" not in body
+
+
+def _mediator_evppi_request(**overrides):
+    """theta -> m (+1); m -> revenue (+1); theta -> revenue (-0.5). opt_pin sets
+    m=0 (=> -0.5*theta); opt_free pins a negligible control c=0 and leaves m FREE
+    (=> +0.5*theta): the winner flips on theta, so theta (a NON-lever factor) has a
+    large positive EVPPI. m and c are levers; theta is not. (c gives opt_free a
+    non-empty intervention — the route rejects empty-intervention options — without
+    disturbing the flip: c's edge to revenue is negligible.)"""
+    request = {
+        "graph": {
+            "nodes": [
+                {"id": "theta", "kind": "factor", "label": "Theta", "observed_state": {"value": 0.0}},
+                {"id": "m", "kind": "factor", "label": "M", "observed_state": {"value": 0.0}},
+                {"id": "c", "kind": "factor", "label": "C", "observed_state": {"value": 0.0}},
+                {"id": "revenue", "kind": "outcome", "label": "Revenue"},
+            ],
+            "edges": [
+                {"from": "theta", "to": "m", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.002}},
+                {"from": "m", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.002}},
+                {"from": "theta", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": -0.5, "std": 0.002}},
+                {"from": "c", "to": "revenue", "exists_probability": 1.0, "strength": {"mean": 0.002, "std": 0.002}},
+            ],
+        },
+        "options": [
+            {"id": "opt_pin", "label": "Pin m", "interventions": {"m": 0.0}},
+            {"id": "opt_free", "label": "Free", "interventions": {"c": 0.0}},
+        ],
+        "goal_node_id": "revenue",
+        "n_samples": 4000,
+        "seed": 777,
+        "parameter_uncertainties": [{"node_id": "theta", "distribution": "normal", "std": 2.0}],
+        "include_voi": True,
+    }
+    request.update(overrides)
+    return request
+
+
+class TestFactorEvppiOnWire:
+    """S2 (D-23.8): the NEW per-factor EVPPI (outcome units) rides the V2 wire."""
+
+    def test_factor_evppi_present_shaped_and_bounded(self, client):
+        body = post_v2(client, _mediator_evppi_request())
+        factor_evppi = body.get("factor_evppi")
+        assert isinstance(factor_evppi, list) and factor_evppi
+        theta = {e["factor_id"]: e for e in factor_evppi}["theta"]
+        assert theta["units"] == "outcome"
+        assert theta["method"] == "regression_evppi_v1"
+        assert theta["evppi"] > 0.5  # analytic ~0.5*2*sqrt(2/pi) ~= 0.80
+        assert theta["status"] == "resolved"
+        assert theta["clamped_low"] is False
+        # Per-factor EVPPI <= whole-decision EVPI, checked against the ACTUAL
+        # emitted decision_evpi (S1) on the same wire.
+        assert "decision_evpi" in body
+        assert theta["evppi"] <= body["decision_evpi"] + 1e-6
+
+    def test_factor_evppi_absent_when_only_factor_is_lever(self, client):
+        """full_request's only uncertain factor (price) is intervened by both
+        options => a D-U lever => OMITTED, so factor_evppi is absent (missing !=
+        zero). decision_evpi and p_win_sensitivity still present."""
+        body = post_v2(client, full_request())
+        assert "factor_evppi" not in body
+        assert "decision_evpi" in body
+        assert isinstance(body.get("p_win_sensitivity"), list)
+
+    def test_factor_evppi_absent_without_include_voi(self, client):
+        body = post_v2(client, _mediator_evppi_request(include_voi=False))
+        assert "factor_evppi" not in body
 
 
 # ---------------------------------------------------------------------------

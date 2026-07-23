@@ -1555,6 +1555,17 @@ class RobustnessResponseV2(BaseModel):
         "both in outcome units.",
     )
 
+    # Per-factor EVPPI (S2 — A3 VOI, D-23.8). Regression EVPPI on the retained
+    # joint CRN samples (no new sampling); see ISLResponseV2.factor_evppi.
+    factor_evppi: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-factor Expected Value of Partial Perfect Information "
+        "(EVPPI) in OUTCOME units, via single-loop Strong-Oakley regression on the "
+        "retained joint CRN samples. Method 'regression_evppi_v1'. Option-controlled "
+        "levers are OMITTED (absent, not zero). Emitted under active correlation. "
+        "See ISLResponseV2.factor_evppi.",
+    )
+
     # Path decomposition (enhancement — optional, gated by include_path_decomposition flag)
     path_decomposition: Optional[PathDecomposition] = Field(
         None,

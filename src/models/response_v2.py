@@ -1250,6 +1250,32 @@ class ISLResponseV2(BaseModel):
         "downside.expected_regret); omitted (never a JSON null) otherwise.",
     )
 
+    # Per-factor EVPPI (S2 — A3 VOI honesty, D-23.8). Additive-optional; regression
+    # EVPPI on the retained joint CRN samples (no new sampling).
+    factor_evppi: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-factor Expected Value of Partial Perfect Information (EVPPI) "
+        "in the SAME OUTCOME UNITS as outcome.mean and decision_evpi: for each "
+        "uncertain factor, how much better the decision could be if that factor's "
+        "true value were learned before choosing. Computed by a single-loop "
+        "Strong-Oakley regression EVPPI = E[max_o E[U_o|theta_i]] − max_o E[U_o] on "
+        "the retained joint pre-noise CRN samples (NO nested Monte Carlo, NO new "
+        "sampling); the inner conditional expectation is a polynomial regression of "
+        "each option's outcome on the factor's sampled values. Fields: factor_id, "
+        "evppi (clamped to [0, decision_evpi]), evppi_raw (pre-clamp audit), "
+        "baseline_max_expected_utility, conditional_max_expected_utility, units "
+        "('outcome'), method ('regression_evppi_v1'), regression_degree, n_samples, "
+        "clamped_low (Howard non-negativity — negative estimates are finite-sample "
+        "noise, clamped to 0), clamped_high (per-factor EVPPI <= whole-decision EVPI "
+        "theorem — capped at decision_evpi), noise_floor (permutation-null overfit "
+        "floor), status (below_resolution when evppi <= noise_floor), "
+        "correlation_active. Unlike p_win_sensitivity, this captures option-switching "
+        "and is honest under correlation (the samples are joint draws, so the "
+        "regression conditions on the joint). Option-controlled levers (any option "
+        "intervenes on the factor — union across options) are OMITTED (absent, not "
+        "zero: their uncertainty is a choice, not information to buy).",
+    )
+
     # Path decomposition (T1-6 wire completeness — additive optional, request-gated
     # by include_path_decomposition so payload size is opt-in; matches the V1
     # response's top-level placement)

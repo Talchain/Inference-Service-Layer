@@ -1236,6 +1236,7 @@ async def _analyze_robustness_v2_enhanced(
             factor_sensitivity=factor_sensitivity,
             stability_thresholds=v1_response.stability_thresholds,  # 3C
             p_win_sensitivity=v1_response.p_win_sensitivity,  # S2 relabel (D-23.8)
+            factor_evppi=v1_response.factor_evppi,  # S2 regression EVPPI (D-23.8)
         )
 
         # B3: surface auto-noise disclosure on the V2 envelope so PLoT can read it

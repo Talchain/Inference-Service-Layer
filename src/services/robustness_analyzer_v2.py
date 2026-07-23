@@ -77,6 +77,7 @@ from src.models.critique import (
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import expected_regret_per_option
+from src.utils.evppi import REGRESSION_EVPPI_METHOD, factor_evppi_estimate
 from src.utils.correlation import CORRELATION_METHOD, CorrelationPlan, build_correlation_plan
 from src.validation.request_validator import detect_graph_cycle
 from src.__version__ import __version__
@@ -1498,6 +1499,17 @@ class RobustnessAnalyzerV2:
         # noised p10/p50/p90/mean).
         pre_noise_expected_regret = expected_regret_per_option(option_outcomes)
 
+        # S2 (D-23.8) factor_evppi needs the PRE-noise per-option outcomes — the
+        # same CRN-aligned joint population that produced pre_noise_expected_regret
+        # and win_probability. _apply_auto_scaled_noise below reassigns each option's
+        # list IN PLACE (independent per-option noise breaks CRN alignment), so snapshot
+        # the pre-noise lists here. Only taken when the VOI phase will run.
+        pre_noise_option_outcomes: Optional[Dict[str, List[float]]] = None
+        if request.include_voi and factor_sampler.has_uncertainties():
+            pre_noise_option_outcomes = {
+                oid: list(vals) for oid, vals in option_outcomes.items()
+            }
+
         # Disable epsilon noise for post-MC structural analyses
         # (sensitivity, counterfactual, robustness) — these compare structural
         # differences and should not include stochastic per-sample noise.
@@ -1839,6 +1851,53 @@ class RobustnessAnalyzerV2:
                         )
                     )
 
+        # S2 (D-23.8): per-factor EVPPI in OUTCOME units via single-loop
+        # Strong-Oakley regression on the RETAINED joint CRN samples — no nested
+        # MC, no new sampling. Unlike p_win_sensitivity above, factor_evppi is a
+        # conditional-expectation quantity that IS honest under correlation (the
+        # retained samples come from the joint copula), so it is EMITTED under
+        # active correlation (not gated by `not correlation_active`). Gated only by
+        # include_voi + at least one uncertainty. Degrade-with-disclosure on any
+        # unexpected estimator failure (never 500s the response).
+        factor_evppi = None
+        if (
+            request.include_voi
+            and factor_sampler.has_uncertainties()
+            and pre_noise_option_outcomes is not None
+        ):
+            # Per-factor EVPPI can never exceed the whole-decision EVPI (learning
+            # ONE factor cannot beat learning EVERYTHING). decision_evpi on the
+            # pre-noise CRN population = min_o expected_regret[o] = E[max]−max E;
+            # this is the exact cap the emission clamps to (with disclosure).
+            finite_regrets = [r for r in pre_noise_expected_regret.values() if math.isfinite(r)]
+            decision_evpi_bound = min(finite_regrets) if finite_regrets else None
+            try:
+                factor_evppi = self._compute_factor_evppi(
+                    request,
+                    pre_noise_option_outcomes,
+                    factor_values_per_sample,
+                    seed,
+                    decision_evpi_bound,
+                    correlation_active,
+                )
+            except Exception:  # pragma: no cover - defensive degrade-with-disclosure
+                self.logger.warning("factor_evppi_failed", exc_info=True)
+                factor_evppi = None
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="FACTOR_EVPPI_UNAVAILABLE",
+                        field="factor_evppi",
+                        severity="warning",
+                        detail={
+                            "reason": "estimator_error",
+                            "message": (
+                                "Per-factor EVPPI could not be computed and was "
+                                "omitted. Base analysis is unaffected."
+                            ),
+                        },
+                    )
+                )
+
         # Compute structural pathway decomposition for the recommended option if requested.
         # Pass evaluator.graph — the post-filter graph the SCM actually computed on
         # (filter_inference_graph was applied before the evaluator was constructed), so the
@@ -1938,6 +1997,7 @@ class RobustnessAnalyzerV2:
             stability_thresholds=stability_thresholds,
             edge_e_values=edge_e_values,
             p_win_sensitivity=p_win_sensitivity,
+            factor_evppi=factor_evppi,
             path_decomposition=path_decomposition,
             correlation_model=correlation_model,
         )
@@ -4467,6 +4527,129 @@ class RobustnessAnalyzerV2:
             return hi if direction == "increase" else lo
 
         return None
+
+    def _compute_factor_evppi(
+        self,
+        request: RobustnessRequestV2,
+        pre_noise_option_outcomes: Dict[str, List[float]],
+        factor_values_per_sample: List[Dict[str, float]],
+        seed: int,
+        decision_evpi_bound: Optional[float],
+        correlation_active: bool,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Per-factor EVPPI (Expected Value of Partial Perfect Information) in
+        OUTCOME units, via single-loop Strong-Oakley regression on the retained
+        joint CRN samples (S2, D-23.8). No nested MC, no new sampling.
+
+        For each uncertain factor that is NOT an option-controlled lever, regress
+        every option's per-sample PRE-noise outcome on that factor's per-sample
+        value and compute ``EVPPI_i = E[max_o E[U_o|theta_i]] − max_o E[U_o]``. The
+        raw estimate is clamped to ``[0, decision_evpi]`` with disclosure:
+
+        * ``clamped_low`` — a negative raw estimate is finite-sample noise (Howard
+          non-negativity); clamped to 0.
+        * ``clamped_high`` — a raw estimate above the whole-decision EVPI violates
+          the per-factor ≤ total theorem (estimator noise); capped at the bound.
+
+        D-U LEVER SUPPRESSION (binding): a factor ANY option intervenes on (union
+        across options — the SAME source of truth as _compute_factor_sensitivity)
+        is a CHOICE, not information to buy, so it is OMITTED entirely (absent, not
+        zero — missing ≠ zero). Non-lever uncertain factors always get an entry.
+
+        Returns a list of per-factor dicts (sorted by evppi descending), or None if
+        no non-lever uncertain factor exists.
+        """
+        if not request.parameter_uncertainties:
+            return None
+
+        # D-U lever identity: UNION of intervention targets across ALL options
+        # (reuse _compute_factor_sensitivity's exact derivation — derive, don't
+        # mirror). A factor in this set is a lever; its "uncertainty" is a choice.
+        intervention_factor_ids = {
+            factor_id
+            for option in request.options
+            for factor_id in (option.interventions or {})
+        }
+
+        # Deduplicate uncertainties by node_id (parse-time validation already
+        # rejects duplicates; defensive, first-seen order for determinism).
+        unique_uncertainties = list(
+            {u.node_id: u for u in request.parameter_uncertainties}.values()
+        )
+
+        n_samples = len(factor_values_per_sample)
+        results: List[Dict[str, Any]] = []
+        for uncertainty in unique_uncertainties:
+            fid = uncertainty.node_id
+            # LEVER SUPPRESSION: omit option-controlled levers (missing ≠ zero).
+            if fid in intervention_factor_ids:
+                continue
+
+            # Extract this factor's per-sample values from the retained joint
+            # population. Every uncertainty factor is present in every sample dict
+            # (FactorSampler always writes it), so a missing key is a defect → omit
+            # that factor with no fabricated value.
+            try:
+                theta = [factor_values_per_sample[s][fid] for s in range(n_samples)]
+            except (KeyError, IndexError):
+                continue
+
+            # Deterministic per-factor seed for the permutation-null floor (mirrors
+            # the _compute_evpi per-factor seeding pattern).
+            floor_seed = int(
+                hashlib.sha256(f"{seed}:evppi:{fid}".encode()).hexdigest()[:8], 16
+            )
+            est = factor_evppi_estimate(theta, pre_noise_option_outcomes, seed=floor_seed)
+
+            # Howard non-negativity clamp.
+            clamped_low = est.evppi_raw < 0.0
+            evppi = max(0.0, est.evppi_raw)
+
+            # Per-factor ≤ whole-decision EVPI theorem: cap at decision_evpi.
+            clamped_high = False
+            if decision_evpi_bound is not None and evppi > decision_evpi_bound:
+                clamped_high = True
+                evppi = decision_evpi_bound
+
+            below_resolution = evppi <= est.noise_floor
+
+            results.append(
+                {
+                    "factor_id": fid,
+                    "evppi": round(evppi, 6),
+                    # Pre-clamp raw estimate + audit components (mirrors
+                    # p_win_sensitivity's current_metric/perfect_metric auditability).
+                    "evppi_raw": round(est.evppi_raw, 6),
+                    "baseline_max_expected_utility": round(
+                        est.baseline_max_expected_utility, 6
+                    ),
+                    "conditional_max_expected_utility": round(
+                        est.conditional_max_expected_utility, 6
+                    ),
+                    "units": "outcome",
+                    "method": REGRESSION_EVPPI_METHOD,
+                    "regression_degree": est.degree_used,
+                    "n_samples": est.n_samples,
+                    # Howard non-negativity clamp fired (raw was negative noise).
+                    "clamped_low": clamped_low,
+                    # Per-factor ≤ total-EVPI clamp fired (raw exceeded decision_evpi).
+                    "clamped_high": clamped_high,
+                    # Permutation-null overfit floor; evppi ≤ floor = below_resolution.
+                    "noise_floor": round(est.noise_floor, 6),
+                    "status": "below_resolution" if below_resolution else "resolved",
+                    # Disclosure: under active correlation the samples are joint
+                    # copula draws, so this conditional-expectation EVPPI is honest
+                    # (it never assumes independence). True iff correlation active.
+                    "correlation_active": correlation_active,
+                }
+            )
+
+        if not results:
+            return None
+
+        # Sort by EVPPI descending (most valuable information first).
+        results.sort(key=lambda x: float(x["evppi"]), reverse=True)
+        return results
 
     def _compute_evpi(
         self,
