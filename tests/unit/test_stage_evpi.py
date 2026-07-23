@@ -335,10 +335,14 @@ def test_stage_evpi_single_chance_child_is_identified_no_coupling(engine):
     assert s0.coupling_assumption is None
 
 
-def test_stage_evpi_all_actions_share_one_chance_is_identified(engine):
-    """IDENTIFIED sub-case named in the ruling: when >=2 actions share ONE chance
-    node (a single distinct chance child), the realised state is shared, so it is
-    identified — NOT the independence-assumed regime. status None, no coupling."""
+def test_stage_evpi_two_actions_share_one_chance_is_disclosed_safe(engine):
+    """Adversarial-round correction (was ..._is_identified). When >=2 actions both
+    reach a chance node (here the SAME node C, both immediately), the F1 rule discloses:
+    per the adversarial's own exactness condition (ii) — the resolved cid must not be
+    reachable from any OTHER action's subtree — C IS reachable from both actions, so the
+    stage is NOT eligible for the exact label. The emitted value (0.0 here) happens to be
+    correct for the direct-immediate-shared case, so this is a SAFE over-disclosure (F-A2
+    direction), never an under-disclosure. status='assumed_independent_coupling'."""
     g = SequentialGraph(
         nodes=[
             SequentialGraphNode(id="D", type="decision", label="D"),
@@ -361,8 +365,174 @@ def test_stage_evpi_all_actions_share_one_chance_is_identified(engine):
     ]
     req = SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=1.0, risk_tolerance="neutral")
     s0 = _stage_map(engine.analyze(req))[0]
+    assert s0.stage_evpi_status == "assumed_independent_coupling"
+    assert s0.coupling_assumption == "independence_across_actions"
+
+
+# ---------------------------------------------------------------------------
+# F1 completeness — the cross-action joint can enter ONE LEVEL DEEPER, via an
+# action whose immediate child is a decision node (Fable adversarial FN-1/FN-2).
+# The detector must scan the WHOLE per-action subtree, not just the immediate child.
+# ---------------------------------------------------------------------------
+
+
+def _fn1_deeper_chance():
+    """FN-1: D--A-->CA(0/100); D--B-->D2(decision)--go-->CB(0/100). Action B's chance
+    (CB) sits one level below the decision D2 — invisible to an immediate-child scan,
+    but its cross-action joint with CA is exactly as unidentified as Codex's case."""
+    return SequentialAnalysisRequest(
+        graph=SequentialGraph(
+            nodes=[
+                SequentialGraphNode(id="D", type="decision", label="D"),
+                SequentialGraphNode(id="CA", type="chance", label="CA"),
+                SequentialGraphNode(id="D2", type="decision", label="D2"),
+                SequentialGraphNode(id="CB", type="chance", label="CB"),
+                SequentialGraphNode(id="a_lo", type="terminal", label="a_lo", payoff=0),
+                SequentialGraphNode(id="a_hi", type="terminal", label="a_hi", payoff=100),
+                SequentialGraphNode(id="b_lo", type="terminal", label="b_lo", payoff=0),
+                SequentialGraphNode(id="b_hi", type="terminal", label="b_hi", payoff=100),
+            ],
+            edges=[
+                SequentialGraphEdge(from_node="D", to_node="CA", action="A"),
+                SequentialGraphEdge(from_node="D", to_node="D2", action="B"),
+                SequentialGraphEdge(from_node="D2", to_node="CB", action="go"),
+                SequentialGraphEdge(from_node="CA", to_node="a_lo", outcome="a0", probability=0.5),
+                SequentialGraphEdge(from_node="CA", to_node="a_hi", outcome="a1", probability=0.5),
+                SequentialGraphEdge(from_node="CB", to_node="b_lo", outcome="b0", probability=0.5),
+                SequentialGraphEdge(from_node="CB", to_node="b_hi", outcome="b1", probability=0.5),
+            ],
+            stage_assignments={"D": 0, "CA": 1, "D2": 1, "CB": 2, "a_lo": 2, "a_hi": 2, "b_lo": 3, "b_hi": 3},
+        ),
+        stages=[
+            DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+            DecisionStage(stage_index=1, stage_label="s1", decision_nodes=["D2"], resolution_nodes=["CA"]),
+            DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[], resolution_nodes=["CB"]),
+            DecisionStage(stage_index=3, stage_label="s3", decision_nodes=[]),
+        ],
+        discount_factor=1.0,
+        risk_tolerance="neutral",
+    )
+
+
+def _fn2_same_node_deeper():
+    """FN-2: D--A-->C(0/100); D--B-->D2(decision)--go-->C (the SAME node C reused one
+    level down). The tree IDENTIFIES the joint as same-state -> true EVPI 0.0, yet the
+    leg emits the independence value 25.0. Safe containment = disclose (never exact);
+    the correct shared-state VALUE is the value-refinement flag for Paul/Neil."""
+    return SequentialAnalysisRequest(
+        graph=SequentialGraph(
+            nodes=[
+                SequentialGraphNode(id="D", type="decision", label="D"),
+                SequentialGraphNode(id="C", type="chance", label="C"),
+                SequentialGraphNode(id="D2", type="decision", label="D2"),
+                SequentialGraphNode(id="c_lo", type="terminal", label="c_lo", payoff=0),
+                SequentialGraphNode(id="c_hi", type="terminal", label="c_hi", payoff=100),
+            ],
+            edges=[
+                SequentialGraphEdge(from_node="D", to_node="C", action="A"),
+                SequentialGraphEdge(from_node="D", to_node="D2", action="B"),
+                SequentialGraphEdge(from_node="D2", to_node="C", action="go"),
+                SequentialGraphEdge(from_node="C", to_node="c_lo", outcome="c0", probability=0.5),
+                SequentialGraphEdge(from_node="C", to_node="c_hi", outcome="c1", probability=0.5),
+            ],
+            stage_assignments={"D": 0, "C": 1, "D2": 1, "c_lo": 2, "c_hi": 2},
+        ),
+        stages=[
+            DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+            DecisionStage(stage_index=1, stage_label="s1", decision_nodes=["D2"], resolution_nodes=["C"]),
+            DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[]),
+        ],
+        discount_factor=1.0,
+        risk_tolerance="neutral",
+    )
+
+
+def _fn0_deterministic_alt():
+    """FN-0 control: D--A-->CA(0/100); D--B-->t50(terminal 50). Only ONE action faces
+    chance; the alternative is deterministic under EVERY coupling, so E[Q_B|C]==Q_B and
+    the stage is genuinely IDENTIFIED — must stay EXACT (status None)."""
+    return SequentialAnalysisRequest(
+        graph=SequentialGraph(
+            nodes=[
+                SequentialGraphNode(id="D", type="decision", label="D"),
+                SequentialGraphNode(id="CA", type="chance", label="CA"),
+                SequentialGraphNode(id="t50", type="terminal", label="t50", payoff=50),
+                SequentialGraphNode(id="a_lo", type="terminal", label="a_lo", payoff=0),
+                SequentialGraphNode(id="a_hi", type="terminal", label="a_hi", payoff=100),
+            ],
+            edges=[
+                SequentialGraphEdge(from_node="D", to_node="CA", action="A"),
+                SequentialGraphEdge(from_node="D", to_node="t50", action="B"),
+                SequentialGraphEdge(from_node="CA", to_node="a_lo", outcome="a0", probability=0.5),
+                SequentialGraphEdge(from_node="CA", to_node="a_hi", outcome="a1", probability=0.5),
+            ],
+            stage_assignments={"D": 0, "CA": 1, "t50": 1, "a_lo": 2, "a_hi": 2},
+        ),
+        stages=[
+            DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+            DecisionStage(stage_index=1, stage_label="s1", decision_nodes=[], resolution_nodes=["CA"]),
+            DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[]),
+        ],
+        discount_factor=1.0,
+        risk_tolerance="neutral",
+    )
+
+
+def test_stage_evpi_fn1_deeper_chance_is_disclosed(engine):
+    """RED-first (adversarial FN-1). Deeper cross-action chance (via a decision node)
+    must be DISCLOSED, not labelled exact. Was: status None (immediate-child detector
+    blind to it). Same {0,25,50} unidentified spread as Codex; emitted value 25.0."""
+    s0 = _stage_map(engine.analyze(_fn1_deeper_chance()))[0]
+    assert s0.stage_evpi == pytest.approx(25.0, rel=1e-12)
+    assert s0.stage_evpi_status == "assumed_independent_coupling"
+    assert s0.coupling_assumption == "independence_across_actions"
+
+
+def test_stage_evpi_fn2_same_node_deeper_is_disclosed(engine):
+    """RED-first (adversarial FN-2). The SAME chance reused one level deeper: the tree
+    identifies same-state (true EVPI 0.0) but the leg emits 25.0. The fix SAFELY
+    contains this by disclosing (never claiming exact); the emitted value is NOT
+    recomputed this round (value-refinement flag). Was: 25.0/None labelled exact."""
+    s0 = _stage_map(engine.analyze(_fn2_same_node_deeper()))[0]
+    assert s0.stage_evpi_status == "assumed_independent_coupling"
+    assert s0.coupling_assumption == "independence_across_actions"
+    # value-refinement flag: still the independence value, disclosed (not the true 0.0)
+    assert s0.stage_evpi == pytest.approx(25.0, rel=1e-12)
+
+
+def test_stage_evpi_fn0_deterministic_alternative_stays_exact(engine):
+    """Control (adversarial FN-0): one action faces chance, the other is deterministic
+    -> genuinely IDENTIFIED. Must stay EXACT (status None, no coupling). Guards against
+    the broadened detector over-disclosing a real single-uncertainty stage."""
+    s0 = _stage_map(engine.analyze(_fn0_deterministic_alt()))[0]
+    assert s0.stage_evpi == pytest.approx(25.0, rel=1e-12)
     assert s0.stage_evpi_status is None
     assert s0.coupling_assumption is None
+
+
+def test_stage_evpi_shared_chance_not_falsely_skipped_by_cap(engine):
+    """F-A3: a chance node shared by 2 action edges must be counted ONCE against the
+    joint-cell cap (deduped by cid), not B^2. A 65-branch node shared by 2 actions is
+    65 cells (< 4096), not 65^2=4225 (> 4096) — so it COMPUTES, not skips. (It is also
+    unidentified -> disclosed, since 2 actions reach chance.)"""
+    B = 65
+    nodes = [SequentialGraphNode(id="D", type="decision", label="D"),
+             SequentialGraphNode(id="C", type="chance", label="C")]
+    edges = [SequentialGraphEdge(from_node="D", to_node="C", action="A"),
+             SequentialGraphEdge(from_node="D", to_node="C", action="B")]
+    sa = {"D": 0, "C": 1}
+    for j in range(B):
+        nodes.append(SequentialGraphNode(id=f"t{j}", type="terminal", label=f"t{j}", payoff=float(j)))
+        sa[f"t{j}"] = 2
+        edges.append(SequentialGraphEdge(from_node="C", to_node=f"t{j}", outcome=f"o{j}", probability=1.0 / B))
+    g = SequentialGraph(nodes=nodes, edges=edges, stage_assignments=sa)
+    stages = [DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+              DecisionStage(stage_index=1, stage_label="s1", decision_nodes=[]),
+              DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[])]
+    req = SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=1.0, risk_tolerance="neutral")
+    s0 = _stage_map(engine.analyze(req))[0]
+    assert s0.stage_evpi is not None  # COMPUTED — not a false skip (dedup: 65 < cap)
+    assert s0.stage_evpi_status != "skipped_joint_space_too_large"
 
 
 # ---------------------------------------------------------------------------

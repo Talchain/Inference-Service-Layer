@@ -885,6 +885,34 @@ class SequentialDecisionEngine:
         # sqrt of total variance = standard-deviation-scale dispersion magnitude
         return np.sqrt(total_variance) if total_variance > 0 else 0
 
+    def _subtree_reaches_chance(
+        self,
+        start_id: str,
+        nodes: Dict[str, Any],
+        edges: Dict[str, List[Dict[str, Any]]],
+    ) -> bool:
+        """Does the subtree rooted at ``start_id`` contain any reachable chance node
+        (including ``start_id`` itself)? Used by ``_compute_stage_evpi`` (F1) to decide
+        whether an action faces resolvable uncertainty at ANY depth — the immediate
+        child alone is insufficient (adversarial FN-1/FN-2: the cross-action joint can
+        enter one level deeper via a decision node). Iterative DFS with a visited set so
+        graph cycles terminate; cost is O(subtree) and the graph is capped at 100 nodes.
+        """
+        stack = [start_id]
+        seen: set = set()
+        while stack:
+            nid = stack.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            if nodes.get(nid, {}).get("type") == "chance":
+                return True
+            for e in edges.get(nid, []):
+                target = e.get("to")
+                if target is not None and target not in seen:
+                    stack.append(target)
+        return False
+
     def _compute_stage_evpi(
         self,
         decision_node_id: str,
@@ -927,27 +955,35 @@ class SequentialDecisionEngine:
         immediate chance node at all (nothing to resolve).
 
         IDENTIFIABILITY (F1, D-23.11 — the joint law across actions is NOT in the
-        tree). The tree supplies only the MARGINAL outcome distribution under each
-        action. Two regimes:
+        tree; detection broadened in the Fable adversarial round). The tree supplies
+        only the MARGINAL outcome distribution under each action. The classifier scans
+        each action's WHOLE subtree (``_subtree_reaches_chance``), not just its
+        immediate child. Two regimes:
 
-        * IDENTIFIED — the decision faces a SINGLE distinct chance node (one action
-          with a chance child, or all actions sharing one chance node). One shared
-          realised state C is resolved; the decide-after leg is an exact
-          ``E_C[max_a Q(a|C)]`` over that state. Returned with no status — EXACT.
-        * UNIDENTIFIED — >=2 mutually-exclusive actions each lead to their OWN
-          distinct chance node. The decide-after leg below takes ``itertools.product``
-          over those per-action marginals, i.e. it ASSUMES the potential outcome under
-          one action is INDEPENDENT of the potential outcome under another. The tree
-          does not identify that joint law — the same marginals also admit same-state
-          coupling (EVPI can be 0), opposite coupling (larger EVPI), etc. So the number
-          is one unrequested modelling choice, NOT exact for the supplied tree. Per
-          D-23.11 (disclose-and-status, NOT nullify — the value stays useful and the
-          endpoint stays live) it is returned WITH
+        * IDENTIFIED (EXACT, no status) — at most ONE action faces reachable chance
+          (every other action's subtree is chance-free). Resolving that single
+          uncertainty and re-maxing over actions — each deterministic action carrying
+          its exact ``Q`` — is an exact ``E_C[max_a Q(a|C)]``.
+        * UNIDENTIFIED — >=2 actions each have a chance node reachable somewhere in
+          their subtree (immediate OR deeper). The decide-after leg then mixes one
+          action's per-branch realised value against another action's AVERAGED value
+          (its ``unconditional_q`` = ``E[Q_b]`` substituted for ``E[Q_b | C]``), i.e. it
+          ASSUMES the resolved chance is INDEPENDENT of the other action's (possibly
+          deeper) uncertainty. The tree does not identify that joint law — the same
+          marginals also admit same-state coupling (EVPI can be 0), opposite coupling
+          (larger EVPI), etc. So the number is one unrequested modelling choice, NOT
+          exact for the supplied tree. Per D-23.11 (disclose-and-status, NOT nullify —
+          the value stays useful and the endpoint stays live) it is returned WITH
           ``status='assumed_independent_coupling'`` and
           ``coupling_assumption='independence_across_actions'`` so a consumer never
-          reads it as identified/exact. (Doctrine alternative — require a shared
-          scenario variable, or emit status-only with a null value — is a Paul/Neil
-          flag; this implements disclose+value+status.)
+          reads it as identified/exact. NOTE (value-refinement, flagged for Paul/Neil):
+          when the deeper node is the SAME chance node reused under another action, the
+          tree DOES identify the joint (same-state) and the exact EVPI differs from the
+          emitted independence value (e.g. 0 vs 25); this round SAFELY CONTAINS that by
+          disclosing (never claiming exact), not by recomputing the shared-state value.
+          (Doctrine alternative — require a shared scenario variable, or emit
+          status-only with a null value — is a Paul/Neil flag; this implements
+          disclose+value+status.)
 
         RISK POSTURE (documented choice; flagged for review): the legs use the
         engine's own risk-ADJUSTED ``node_values`` for every continuation, so each
@@ -1029,6 +1065,20 @@ class SequentialDecisionEngine:
                 branches.append((p / total_p, branch_value))
             resolved.append((cid, branches))
 
+        # F-A3 (Fable adversarial round): a chance node reached by k action edges lands
+        # in `resolved` k times, but it is ONE random variable — resolving it once fixes
+        # its branch for every action that reads it (`realised[cid]` is keyed by cid, so
+        # duplicate entries marginalise out exactly: Σ p_i = 1). Dedupe by cid BEFORE the
+        # cap count and the product so a shared node costs B cells, not B^k — otherwise a
+        # 65-branch node shared by 2 actions is counted 65^2 > cap and falsely skipped.
+        seen_cids: set = set()
+        deduped_resolved: List[Tuple[str, List[Tuple[float, float]]]] = []
+        for cid, branches in resolved:
+            if cid not in seen_cids:
+                seen_cids.add(cid)
+                deduped_resolved.append((cid, branches))
+        resolved = deduped_resolved
+
         # F-3 SAFETY GUARD: the decide-after leg enumerates ∏(branch counts) joint
         # cells = B^K for K chance-child actions. A legal request can drive K ~97
         # (2^97 cells) — an un-preemptable CPU freeze of the async event loop.
@@ -1042,26 +1092,39 @@ class SequentialDecisionEngine:
             if joint_cells > _STAGE_EVPI_JOINT_CELL_CAP:
                 return None, "skipped_joint_space_too_large", None
 
-        # F1 IDENTIFIABILITY (D-23.11). The tree gives only the per-action MARGINAL
-        # chance distribution. If the decide-after leg is a product over >=2 DISTINCT
-        # chance nodes (each under its own mutually-exclusive action), that product
-        # SILENTLY ASSUMES independence of the potential outcomes across actions — a
-        # joint law the tree does NOT identify (the same marginals also admit
-        # same-state or opposite coupling, with different EVPIs). A single distinct
-        # chance node (one action with a chance child, or all actions sharing one
-        # chance node) resolves ONE shared realised state and IS identified. Disclose
-        # the assumption on the emitted value rather than labelling it exact (ruling:
-        # disclose-and-status, not nullify).
-        distinct_chance_children = {cid for cid, _ in resolved}
-        assumes_independence = len(distinct_chance_children) >= 2
+        # F1 IDENTIFIABILITY (D-23.11; detection BROADENED in the Fable adversarial
+        # round — it must scan the WHOLE per-action subtree, not just the immediate
+        # child). The tree gives only the per-action MARGINAL chance distribution; it
+        # does NOT identify the JOINT law of outcomes across mutually-exclusive actions.
+        # The decide-after leg is EXACT only when at most ONE action faces any resolvable
+        # uncertainty — then resolving that single chance and re-maxing (every other
+        # action being deterministic, its Q is its exact value) is identified. When >=2
+        # actions each have a chance node ANYWHERE in their subtree, the leg mixes one
+        # action's per-branch realised value against another action's AVERAGED value
+        # (its `unconditional_q`, = E[Q_b] substituted for E[Q_b | C]) — i.e. it ASSUMES
+        # the resolved chance is independent of the other action's (possibly deeper)
+        # uncertainty. That is the SAME unidentified cross-action joint whether the
+        # second action's chance is immediate (Codex) or one level down (adversarial
+        # FN-1), and even when it is the SAME node reused deeper (FN-2, where the tree
+        # identifies EVPI 0 yet the leg emits the independence value — disclosed, not
+        # recomputed; see the FN-2 value-refinement flag). A prior version counted only
+        # DISTINCT IMMEDIATE chance children and labelled FN-1/FN-2 exact — a false
+        # negative. Disclose whenever >=2 actions face reachable chance.
+        actions_facing_chance = sum(
+            1
+            for e in action_edges
+            if self._subtree_reaches_chance(e["to"], nodes, edges)
+        )
+        assumes_independence = actions_facing_chance >= 2
 
-        # Enumerate the JOINT outcome space of the resolved chance nodes. When there
-        # are >=2 distinct chance nodes this product treats them as INDEPENDENT (the
-        # F1 assumption disclosed above, `assumes_independence`); with a single
-        # distinct chance node it is the exact E_C[max_a Q(a|C)] over one shared state.
-        # Under each joint outcome an action keeps its unconditional Q unless its child
-        # IS one of the resolved chance nodes, in which case it takes that node's
-        # realised branch value; then max over actions, average by joint prob.
+        # Enumerate the JOINT outcome space of the resolved chance nodes. When >=2
+        # actions face reachable chance this product treats the resolved marginals as
+        # INDEPENDENT of the other actions' uncertainty (the F1 assumption disclosed
+        # above, `assumes_independence`); when at most one action faces uncertainty it is
+        # the exact E_C[max_a Q(a|C)] over that single resolved state. Under each joint
+        # outcome an action keeps its unconditional Q unless its child IS one of the
+        # resolved chance nodes, in which case it takes that node's realised branch
+        # value; then max over actions, average by joint prob.
         e_after = 0.0
         for combo in itertools.product(*[branches for _, branches in resolved]):
             joint_p = 1.0
