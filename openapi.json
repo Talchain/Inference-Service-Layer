@@ -2030,6 +2030,75 @@
         "title": "FactorCorrelation",
         "type": "object"
       },
+      "FactorEvpcEntryV2": {
+        "description": "One per-lever EVPC entry (S4, D-23.8). Typed to match the FactorEvppiEntryV2\nhouse style (#104 C3): a producer typo, a dropped field, or a wrong-typed audit\nfield fails loud in Pydantic instead of serialising clean. best_candidate_value is\na REQUIRED float, so it is always present even when evpc == 0 (all candidates\nunderperform) \u2014 the missing-argmax mutation now fails at the type layer.\n\nField ORDER is load-bearing: it matches the emission dict in ``_compute_factor_evpc``\nexactly, so serialization is byte-identical to the prior ``Dict[str, Any]`` payload.\n\nThe CROSS-FIELD value-integrity guard below is the EVPC analogue of the lifted\ndecision_evpi / correlation_model emission-iff validators \u2014 it keeps the clamp\nidentity ON this block, NOT coupled into ISLResponseV2's own validators.",
+        "properties": {
+          "baseline_max_expected_utility": {
+            "title": "Baseline Max Expected Utility",
+            "type": "number"
+          },
+          "best_candidate_value": {
+            "title": "Best Candidate Value",
+            "type": "number"
+          },
+          "best_do_expected_utility": {
+            "title": "Best Do Expected Utility",
+            "type": "number"
+          },
+          "clamped_low": {
+            "title": "Clamped Low",
+            "type": "boolean"
+          },
+          "correlation_active": {
+            "title": "Correlation Active",
+            "type": "boolean"
+          },
+          "evpc": {
+            "title": "Evpc",
+            "type": "number"
+          },
+          "evpc_raw": {
+            "title": "Evpc Raw",
+            "type": "number"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "n_candidate_values": {
+            "title": "N Candidate Values",
+            "type": "integer"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "units": {
+            "title": "Units",
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor_id",
+          "evpc",
+          "evpc_raw",
+          "best_candidate_value",
+          "baseline_max_expected_utility",
+          "best_do_expected_utility",
+          "units",
+          "method",
+          "n_samples",
+          "n_candidate_values",
+          "clamped_low",
+          "correlation_active"
+        ],
+        "title": "FactorEvpcEntryV2",
+        "type": "object"
+      },
       "FactorEvppiEntryV2": {
         "description": "One per-factor EVPPI entry (S2, D-23.8). Altitude Q1: the more\nsafety-critical of the VOI blocks (it hosts the clamped_low DEAD-MAN'S-SWITCH and\ntwo clamp-audit booleans) was the LESS typed \u2014 a bare ``Dict[str, Any]`` \u2014 than its\nsibling ``FactorSensitivityV2``. Typed here so a producer typo, a dropped status,\nor a wrong-typed audit field fails loud in Pydantic instead of serialising clean.\n\nField ORDER is load-bearing: it matches the emission dict in\n``_compute_factor_evppi`` exactly, so serialization is byte-identical to the prior\n``Dict[str, Any]`` payload (verified pre/post on multiple shapes incl.\ncorrelation-active).",
         "properties": {
@@ -3174,7 +3243,7 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FactorEvpcEntryV2"
                 },
                 "type": "array"
               },

@@ -1179,6 +1179,81 @@ class FactorEvppiEntryV2(BaseModel):
     correlation_active: bool
 
 
+class FactorEvpcEntryV2(BaseModel):
+    """One per-lever EVPC entry (S4, D-23.8). Typed to match the FactorEvppiEntryV2
+    house style (#104 C3): a producer typo, a dropped field, or a wrong-typed audit
+    field fails loud in Pydantic instead of serialising clean. best_candidate_value is
+    a REQUIRED float, so it is always present even when evpc == 0 (all candidates
+    underperform) — the missing-argmax mutation now fails at the type layer.
+
+    Field ORDER is load-bearing: it matches the emission dict in ``_compute_factor_evpc``
+    exactly, so serialization is byte-identical to the prior ``Dict[str, Any]`` payload.
+
+    The CROSS-FIELD value-integrity guard below is the EVPC analogue of the lifted
+    decision_evpi / correlation_model emission-iff validators — it keeps the clamp
+    identity ON this block, NOT coupled into ISLResponseV2's own validators.
+    """
+
+    factor_id: str
+    evpc: float
+    evpc_raw: float
+    best_candidate_value: float
+    baseline_max_expected_utility: float
+    best_do_expected_utility: float
+    units: str
+    method: str
+    n_samples: int
+    n_candidate_values: int
+    clamped_low: bool
+    correlation_active: bool
+
+    @model_validator(mode="after")
+    def _value_integrity(self) -> "FactorEvpcEntryV2":
+        """Guard the EVPC value BOTH ways (fail loud on a compute/emission mutation):
+
+        (1) FINITE: evpc, evpc_raw, best_candidate_value and the audit EUs are finite
+            (a bare ``float`` still admits NaN/inf, which must never reach the wire).
+        (2) CLAMP IDENTITY (both directions): evpc == max(0, evpc_raw). Catches a
+            forgotten clamp (raw shipped as evpc) or a stray clamp on a positive raw.
+            EVPC is non-negative by construction (control cannot hurt).
+        (3) TAGS: units == 'outcome' and method == 'grid_do_v1' — the self-describing
+            tags a consumer relies on to read the number in the right units/method.
+        """
+        for name, val in (
+            ("evpc", self.evpc),
+            ("evpc_raw", self.evpc_raw),
+            ("best_candidate_value", self.best_candidate_value),
+            ("baseline_max_expected_utility", self.baseline_max_expected_utility),
+            ("best_do_expected_utility", self.best_do_expected_utility),
+        ):
+            if not math.isfinite(val):
+                raise ValueError(
+                    f"factor_evpc entry for '{self.factor_id}': {name} must be "
+                    f"finite; got {val!r}."
+                )
+
+        expected_evpc = max(0.0, self.evpc_raw)
+        tol = 1e-9 + 1e-9 * abs(expected_evpc)
+        if self.evpc < -tol or abs(self.evpc - expected_evpc) > tol:
+            raise ValueError(
+                f"factor_evpc entry for '{self.factor_id}': evpc must equal "
+                f"max(0, evpc_raw) = {expected_evpc!r} and be >= 0; got "
+                f"evpc={self.evpc!r}, evpc_raw={self.evpc_raw!r}. EVPC is the "
+                "clamped value of control."
+            )
+        if self.units != "outcome":
+            raise ValueError(
+                f"factor_evpc entry for '{self.factor_id}' must be in outcome units "
+                f"(units == 'outcome'); got {self.units!r}."
+            )
+        if self.method != GRID_DO_EVPC_METHOD:
+            raise ValueError(
+                f"factor_evpc entry for '{self.factor_id}' must be method-tagged "
+                f"'{GRID_DO_EVPC_METHOD}'; got {self.method!r}."
+            )
+        return self
+
+
 # =============================================================================
 # Main V2 Response
 # =============================================================================
@@ -1339,7 +1414,10 @@ class ISLResponseV2(BaseModel):
 
     # Per-lever EVPC (S4 — A3 value-of-control, D-23.8). Additive-optional; grid
     # do() on the retained joint CRN samples (no new sampling). Request-driven.
-    factor_evpc: Optional[List[Dict[str, Any]]] = Field(
+    # Typed (C3 house style, #104): FactorEvpcEntryV2 fails a producer typo / dropped
+    # field / wrong-typed audit field loud in Pydantic, and its own model_validator
+    # holds the clamp identity (not coupled into ISLResponseV2's validators).
+    factor_evpc: Optional[List[FactorEvpcEntryV2]] = Field(
         None,
         description="Per-lever Expected Value of CONTROL (EVPC) in the SAME OUTCOME "
         "UNITS as outcome.mean and decision_evpi: for each control candidate the "
@@ -1472,73 +1550,6 @@ class ISLResponseV2(BaseModel):
                     f">= 0; got {evpi!r}. It is E[max]−max E on the "
                     "joint pre-noise population = min_o expected_regret[o]."
                 )
-        return self
-
-    @model_validator(mode="after")
-    def _factor_evpc_entries_are_well_formed(self) -> "ISLResponseV2":
-        """S4 (A3 value-of-control, D-23.8): guard every factor_evpc entry BOTH ways.
-
-        factor_evpc is emitted request-driven (present iff control_candidates was
-        supplied — enforced structurally in the analyzer + covered by the absent/
-        present wire tests); this validator is the VALUE-integrity gate that fails
-        loud on a compute/emission mutation. For each entry:
-
-        (1) CLAMP IDENTITY (both directions): evpc == max(0, evpc_raw). Catches a
-            forgotten clamp (raw shipped as evpc) or a stray clamp on a positive raw.
-            EVPC is non-negative by construction (control cannot hurt).
-        (2) best_candidate_value is present and finite — ALWAYS reported, even when
-            evpc == 0 (all candidates underperform). Catches a drop of the argmax.
-        (3) evpc_raw / baseline / best_do EUs are finite (no NaN/inf on the wire).
-        (4) method == 'grid_do_v1' and units == 'outcome' (self-describing method +
-            units tags a consumer relies on to read the number correctly).
-        """
-        if self.factor_evpc is None:
-            return self
-
-        for entry in self.factor_evpc:
-            fid = entry.get("factor_id")
-            evpc = entry.get("evpc")
-            evpc_raw = entry.get("evpc_raw")
-            best_value = entry.get("best_candidate_value")
-
-            if not isinstance(evpc, (int, float)) or not isinstance(evpc_raw, (int, float)):
-                raise ValueError(
-                    f"factor_evpc entry for '{fid}' must carry numeric evpc and "
-                    f"evpc_raw; got evpc={evpc!r}, evpc_raw={evpc_raw!r}."
-                )
-            if not math.isfinite(evpc) or not math.isfinite(evpc_raw):
-                raise ValueError(
-                    f"factor_evpc entry for '{fid}' must be finite; got "
-                    f"evpc={evpc!r}, evpc_raw={evpc_raw!r}."
-                )
-
-            expected_evpc = max(0.0, float(evpc_raw))
-            tol = 1e-9 + 1e-9 * abs(expected_evpc)
-            if float(evpc) < -tol or abs(float(evpc) - expected_evpc) > tol:
-                raise ValueError(
-                    f"factor_evpc entry for '{fid}': evpc must equal max(0, evpc_raw) "
-                    f"= {expected_evpc!r} and be >= 0; got evpc={evpc!r}, "
-                    f"evpc_raw={evpc_raw!r}. EVPC is the clamped value of control."
-                )
-
-            if not isinstance(best_value, (int, float)) or not math.isfinite(best_value):
-                raise ValueError(
-                    f"factor_evpc entry for '{fid}' must always report a finite "
-                    f"best_candidate_value (the argmax over the grid, even when "
-                    f"evpc == 0); got {best_value!r}."
-                )
-
-            if entry.get("units") != "outcome":
-                raise ValueError(
-                    f"factor_evpc entry for '{fid}' must be in outcome units "
-                    f"(units == 'outcome'); got {entry.get('units')!r}."
-                )
-            if entry.get("method") != GRID_DO_EVPC_METHOD:
-                raise ValueError(
-                    f"factor_evpc entry for '{fid}' must be method-tagged "
-                    f"'{GRID_DO_EVPC_METHOD}'; got {entry.get('method')!r}."
-                )
-
         return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.

@@ -187,9 +187,10 @@ class TestEvpcGating:
 # ===========================================================================
 # 3. Correlation, determinism, monotonicity, sort
 # ===========================================================================
-def _corr_request(rho=0.7, seed=2024, n_samples=4000):
+def _corr_request(rho=0.7, seed=2024, n_samples=4000, include_voi=False):
     """factor_a & factor_b are correlated (Gaussian copula); both feed the goal.
-    Options pin factor_a ∈ {0.3, 0.6}; control candidate grids factor_a."""
+    Options pin factor_a ∈ {0.3, 0.6}; control candidate grids factor_a. factor_b is a
+    NON-lever uncertain factor, so with include_voi it yields a factor_evppi entry."""
     nodes = [
         NodeV2(id="factor_a", kind="factor", label="A", observed_state=ObservedState(value=0.5)),
         NodeV2(id="factor_b", kind="factor", label="B", observed_state=ObservedState(value=0.5)),
@@ -224,6 +225,7 @@ def _corr_request(rho=0.7, seed=2024, n_samples=4000):
         ],
         factor_correlations=[FactorCorrelation(factor_a="factor_a", factor_b="factor_b", rho=rho)],
         control_candidates=[ControlCandidate(factor_id="factor_a", values=[0.3, 0.6, 0.9])],
+        include_voi=include_voi,
     )
 
 
@@ -247,6 +249,31 @@ class TestEvpcCorrelationAndDeterminism:
         r1 = RobustnessAnalyzerV2().analyze(_corr_request())
         r2 = RobustnessAnalyzerV2().analyze(_corr_request())
         assert r1.factor_evpc == r2.factor_evpc
+
+    def test_composition_correlation_voi_control_suppression_record(self):
+        """Rebase composition onto #104 (record-at-skip suppression + typed VOI blocks):
+        correlation-active + control_candidates + include_voi ⇒ factor_evpc AND
+        factor_evppi are BOTH present (both are honest joint-copula-sample quantities,
+        EMITTED under correlation), and the correlation suppression RECORD
+        (correlation_model.suppressed_attributions) contains NEITHER — only the
+        independence-assuming attributions are recorded. Non-vacuous: the record IS
+        populated (positive control below), so 'not in' is a real absence."""
+        resp = RobustnessAnalyzerV2().analyze(_corr_request(include_voi=True))
+
+        # Both VOI-family blocks emit under active correlation.
+        assert resp.factor_evpc is not None
+        assert {e["factor_id"] for e in resp.factor_evpc} == {"factor_a"}
+        assert resp.factor_evppi is not None
+        assert {e["factor_id"] for e in resp.factor_evppi} == {"factor_b"}
+
+        # The suppression record is REAL (positive control), and captures ONLY the
+        # independence-assuming attributions — never EVPC or EVPPI.
+        assert resp.correlation_model is not None
+        suppressed = set(resp.correlation_model.suppressed_attributions)
+        assert "p_win_sensitivity" in suppressed  # positive control: record populated
+        assert "factor_sensitivity" in suppressed
+        assert "factor_evpc" not in suppressed
+        assert "factor_evppi" not in suppressed
 
     def test_grid_is_a_lower_bound_more_values_never_lower_evpc(self):
         """More candidate values can only find an equal-or-better do() point ⇒ the
@@ -454,8 +481,11 @@ class TestFactorEvpcValidator:
             ISLResponseV2(**_isl_response(bad))
 
     def test_missing_best_candidate_value_rejected(self):
+        # best_candidate_value is a REQUIRED float on FactorEvpcEntryV2 (C3 typed
+        # house style), so a dropped argmax now fails loud at the Pydantic type layer
+        # (the field name appears in the error), not a custom message.
         bad = {**_GOOD_ENTRY, "best_candidate_value": None}
-        with pytest.raises(ValidationError, match="must always report a finite"):
+        with pytest.raises(ValidationError, match="best_candidate_value"):
             ISLResponseV2(**_isl_response(bad))
 
     def test_non_finite_evpc_raw_rejected(self):
