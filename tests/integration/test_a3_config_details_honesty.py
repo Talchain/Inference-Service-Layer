@@ -1,39 +1,37 @@
-"""A3 honesty-residuals (2026-07-23): per-endpoint config_details honesty.
+"""A3 honesty-residuals: per-endpoint config_details honesty.
 
-`generate_config_details()` unconditionally emitted
+History: until 23 Jul 2026 `generate_config_details()` emitted
 `monte_carlo_samples: settings.MAX_MONTE_CARLO_ITERATIONS` (10000) into every
-response's `_metadata.config_details`, via `create_response_metadata`. That is
-honest for the robustness endpoint (real Monte Carlo) but was emitted verbatim
-on the sequential engine — which draws no samples at all — advertising a
-Monte-Carlo sample budget for a deterministic computation.
+response's `_metadata.config_details`. #96 briefly gated it behind a `sampling`
+flag (emitted only on "sampling" routes); C2 (F-3, 23 Jul) then removed it
+OUTRIGHT — both the key AND the `sampling` parameter are gone. NO live compute
+path uses that cap as its operative sample budget: the counterfactual engine runs
+ADAPTIVE Monte Carlo (convergence-driven n <= the cap), the sequential engine
+draws no samples, and robustness draws `request.min_samples`. The V1 robustness
+wire had served `monte_carlo_samples: 10000` beside its own `samples_tested: 200`
+— a self-contradiction. A config key no code path consults is a fabricated
+disclosure, so it was removed. `config_details` now emits exactly the four
+determinism-relevant keys {confidence_level, response_timeout, redis_enabled,
+deterministic_mode}. (`MAX_MONTE_CARLO_ITERATIONS` still feeds
+`config_fingerprint` via generate_config_fingerprint — the fingerprint is
+unchanged.)
 
-Fix: `create_response_metadata` / `generate_config_details` take an explicit
-`sampling: bool`. Each ENDPOINT declares its own nature (derive-don't-mirror: no
-route list in the helper). `monte_carlo_samples` is emitted ONLY where
-`sampling=True`. On the deterministic routes the key is ABSENT (absent-not-null).
+This suite asserts the ABSENCE of `monte_carlo_samples` across all three live
+routes AND the helper, with an exact-key-order/presence positive control (the four
+keys ARE emitted — trap #13; re-adding the key makes the order/absence assertions
+RED). Wire impact: the cf/sequential `config_details` were byte-unchanged by C2
+(they already omitted the key via the old sampling=False); only the robustness V1
+wire lost it.
 
-Hard constraint: the robustness `_metadata` wire is BYTE-UNCHANGED — with
-`sampling=True` the config_details dict keeps its exact keys AND order, so the
-serialized bytes are identical.
-
-RED-first (route level):
-* counterfactual and sequential config_details carry monte_carlo_samples at HEAD
-  -> the "absent" assertions FAIL at HEAD, pass after the fix.
-
-Positive control (trap #13 — the test can SEE the key when present): asserted at
-the HELPER level (`generate_config_details(sampling=True)` and the default both
-carry monte_carlo_samples) AND, since A3 Lane M (2026-07-23), at the WIRE level on
-the robustness V1 /analyze route.
-
-A3 Lane M (2026-07-23): the pre-existing alias-drop bug is now FIXED.
-RobustnessResponse.metadata is aliased `_metadata` with no populate_by_name, so the
-V1 /analyze route's `RobustnessResponse(metadata=create_response_metadata(...))`
-(passed by FIELD NAME) was silently dropped by Pydantic v2 and `_metadata` served
-None on the wire — isl_version / config_fingerprint / config_details never reached
-any V1 client. The route now attribute-assigns the metadata after construction
-(matching the counterfactual/sequential live routes' working pattern), so the wire
-carries a POPULATED `_metadata`. `test_robustness_wire_metadata_is_populated`
-asserts that (and doubles as the wire-level positive control).
+A3 Lane M / C3 (23 Jul): the pre-existing alias-drop bug is FIXED.
+RobustnessResponse.metadata is aliased `_metadata`; the V1 /analyze route's
+`RobustnessResponse(metadata=create_response_metadata(...))` (passed by FIELD
+NAME) was silently dropped by Pydantic v2 and `_metadata` served None on the wire
+— isl_version / config_fingerprint / config_details never reached any V1 client.
+The route now attribute-assigns the metadata after construction, and C3 added
+`populate_by_name: True` to the model, so the wire carries a POPULATED `_metadata`.
+`test_robustness_wire_metadata_is_populated` asserts that (and doubles as the
+wire-level positive control).
 """
 
 import pytest
