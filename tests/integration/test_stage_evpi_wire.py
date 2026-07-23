@@ -121,6 +121,61 @@ class TestStageEvpiWire:
         assert elapsed < 5.0, f"stage_evpi enumeration was not bounded: {elapsed:.2f}s"
 
     @pytest.mark.asyncio
+    async def test_stage_evpi_discloses_independence_on_wire(self, client):
+        """F1 (D-23.11) on the wire: a decision facing >=2 action-specific chance
+        nodes emits stage_evpi WITH stage_evpi_status='assumed_independent_coupling'
+        and coupling_assumption='independence_across_actions' — never a bare number
+        labelled exact. Codex's counterexample: D->{A->CA(0/100), B->CB(0/100)},
+        both action EVs 50 => stage_evpi 25.0 (the independence value), disclosed."""
+        req = {
+            "graph": {
+                "nodes": [
+                    {"id": "D", "type": "decision", "label": "D"},
+                    {"id": "CA", "type": "chance", "label": "CA"},
+                    {"id": "CB", "type": "chance", "label": "CB"},
+                    {"id": "a_lo", "type": "terminal", "label": "a_lo", "payoff": 0},
+                    {"id": "a_hi", "type": "terminal", "label": "a_hi", "payoff": 100},
+                    {"id": "b_lo", "type": "terminal", "label": "b_lo", "payoff": 0},
+                    {"id": "b_hi", "type": "terminal", "label": "b_hi", "payoff": 100},
+                ],
+                "edges": [
+                    {"from": "D", "to": "CA", "action": "A"},
+                    {"from": "D", "to": "CB", "action": "B"},
+                    {"from": "CA", "to": "a_lo", "outcome": "a0", "probability": 0.5},
+                    {"from": "CA", "to": "a_hi", "outcome": "a1", "probability": 0.5},
+                    {"from": "CB", "to": "b_lo", "outcome": "b0", "probability": 0.5},
+                    {"from": "CB", "to": "b_hi", "outcome": "b1", "probability": 0.5},
+                ],
+                "stage_assignments": {"D": 0, "CA": 1, "CB": 1, "a_lo": 2, "a_hi": 2, "b_lo": 2, "b_hi": 2},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "s0", "decision_nodes": ["D"]},
+                {"stage_index": 1, "stage_label": "s1", "decision_nodes": []},
+                {"stage_index": 2, "stage_label": "s2", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+            "risk_tolerance": "neutral",
+        }
+        resp = await client.post(URL, json=req)
+        assert resp.status_code == 200, resp.text
+        s0 = {sa["stage_index"]: sa for sa in resp.json()["stage_analyses"]}[0]
+        assert s0["stage_evpi"] == pytest.approx(25.0, rel=1e-12)
+        assert s0["stage_evpi_status"] == "assumed_independent_coupling"
+        assert s0["coupling_assumption"] == "independence_across_actions"
+
+    @pytest.mark.asyncio
+    async def test_identified_stage_carries_no_coupling_on_wire(self, client):
+        """The identified single-chance fixture stays EXACT on the wire: stage_evpi
+        11220.0, status None, and coupling_assumption absent/null (no false
+        disclosure on an exact value)."""
+        resp = await client.post(URL, json=_base_seq_request())
+        assert resp.status_code == 200, resp.text
+        s0 = {sa["stage_index"]: sa for sa in resp.json()["stage_analyses"]}[0]
+        assert s0["stage_evpi"] == pytest.approx(11220.0, rel=1e-12)
+        assert s0["stage_evpi_status"] is None
+        assert s0.get("coupling_assumption") is None
+
+    @pytest.mark.asyncio
     async def test_resolved_uncertainty_and_flexibility_untouched(self, client):
         """S3 leaves the honest neighbours in place: resolved_uncertainty (honestly
         labelled) and value_of_flexibility (a real decision-difference) still ride."""

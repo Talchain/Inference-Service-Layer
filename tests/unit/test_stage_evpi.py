@@ -211,11 +211,16 @@ def _fanout(K, B=2, df=1.0):
 
 
 def test_stage_evpi_computes_at_cap_boundary(engine):
-    """K=12 => 2^12 = 4096 = the cap => COMPUTED (status None). This is the boundary:
-    <= cap computes."""
+    """K=12 => 2^12 = 4096 = the cap => COMPUTED (value present). This is the boundary:
+    <= cap computes. Note: _fanout(12) gives 12 DISTINCT action-specific chance nodes,
+    so it is the UNIDENTIFIED shape (F1, D-23.11) — the value is disclosed with
+    stage_evpi_status='assumed_independent_coupling' + coupling_assumption, NOT the old
+    exact status None. The cap semantics (computes vs skips at the boundary) are what
+    this test pins; the identifiability disclosure is verified below."""
     sm = _stage_map(engine.analyze(_fanout(12)))
-    assert sm[0].stage_evpi is not None
-    assert sm[0].stage_evpi_status is None
+    assert sm[0].stage_evpi is not None  # <= cap => COMPUTED (not skipped)
+    assert sm[0].stage_evpi_status == "assumed_independent_coupling"
+    assert sm[0].coupling_assumption == "independence_across_actions"
 
 
 def test_stage_evpi_skips_just_over_cap(engine):
@@ -246,6 +251,121 @@ def test_stage_evpi_legal_max_fanout_returns_fast_not_hang(engine):
 
 
 # ---------------------------------------------------------------------------
+# F1 (A3 Codex-fix-C, D-23.11) — identifiability: the joint coupling of outcomes
+# across mutually-exclusive actions is NOT in the tree. Independence is ASSUMED
+# and must be DISCLOSED, not labelled exact.
+# ---------------------------------------------------------------------------
+
+
+def _two_action_two_chance(ca=(0, 100), cb=(0, 100), p=0.5, df=1.0):
+    """Codex's exact counterexample: decision D with two actions A, B; A -> CA
+    (chance, two branches ca[0]/ca[1] with prob p / 1-p), B -> CB (chance, two
+    branches cb[0]/cb[1]). TWO DISTINCT action-specific chance nodes => the
+    decide-after leg products their MARGINALS => independence is assumed."""
+    g = SequentialGraph(
+        nodes=[
+            SequentialGraphNode(id="D", type="decision", label="D"),
+            SequentialGraphNode(id="CA", type="chance", label="CA"),
+            SequentialGraphNode(id="CB", type="chance", label="CB"),
+            SequentialGraphNode(id="a_lo", type="terminal", label="a_lo", payoff=ca[0]),
+            SequentialGraphNode(id="a_hi", type="terminal", label="a_hi", payoff=ca[1]),
+            SequentialGraphNode(id="b_lo", type="terminal", label="b_lo", payoff=cb[0]),
+            SequentialGraphNode(id="b_hi", type="terminal", label="b_hi", payoff=cb[1]),
+        ],
+        edges=[
+            SequentialGraphEdge(from_node="D", to_node="CA", action="A"),
+            SequentialGraphEdge(from_node="D", to_node="CB", action="B"),
+            SequentialGraphEdge(from_node="CA", to_node="a_lo", outcome="a0", probability=p),
+            SequentialGraphEdge(from_node="CA", to_node="a_hi", outcome="a1", probability=round(1 - p, 10)),
+            SequentialGraphEdge(from_node="CB", to_node="b_lo", outcome="b0", probability=p),
+            SequentialGraphEdge(from_node="CB", to_node="b_hi", outcome="b1", probability=round(1 - p, 10)),
+        ],
+        stage_assignments={"D": 0, "CA": 1, "CB": 1, "a_lo": 2, "a_hi": 2, "b_lo": 2, "b_hi": 2},
+    )
+    stages = [
+        DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+        DecisionStage(stage_index=1, stage_label="s1", decision_nodes=[]),
+        DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[]),
+    ]
+    return SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=df, risk_tolerance="neutral")
+
+
+def test_stage_evpi_codex_counterexample_discloses_independence(engine):
+    """RED-first (Codex F1). D with A->CA(0/100,p=.5), B->CB(0/100,p=.5), both action
+    values 50. Hand-derivation (df=1.0): decide_now = max(E[A],E[B]) = max(50,50) = 50.
+    decide-after under the INDEPENDENCE product over (CA,CB): outcomes {(0,0):0,
+    (0,100):100,(100,0):100,(100,100):100}, each p=0.25 => e_after = 0.25*300 = 75.
+    stage_evpi = 75 - 50 = 25.0. The SAME marginals also admit EVPI 0 (same-state
+    coupling: 0.5*max(0,0)+0.5*max(100,100)-50 = 0) or 50 (opposite) — so 25 is ONE
+    unrequested modelling choice, NOT exact for the supplied tree. The fix must emit
+    25.0 WITH the disclosure, never as a bare exact number."""
+    sm = _stage_map(engine.analyze(_two_action_two_chance()))
+    s0 = sm[0]
+    assert s0.stage_evpi == pytest.approx(25.0, rel=1e-12)  # the independence value
+    assert s0.stage_evpi_status == "assumed_independent_coupling"
+    assert s0.coupling_assumption == "independence_across_actions"
+
+
+def test_stage_evpi_disclosed_value_is_the_independence_choice_not_forced(engine):
+    """Positive control (trap #13): the disclosed 25.0 is specifically the
+    INDEPENDENCE-product EVPI, and the identical marginals are consistent with a
+    same-state coupling whose EVPI is 0. Both computed by hand here so the pin can
+    SEE that 25 is a modelling CHOICE, not the tree's identified answer."""
+    s0 = _stage_map(engine.analyze(_two_action_two_chance()))[0]
+    # independence product (what the code computes): 25.0
+    e_after_indep = 0.25 * (max(0, 0) + max(0, 100) + max(100, 0) + max(100, 100))
+    evpi_indep = e_after_indep - 50.0
+    # same-state coupling of the IDENTICAL marginals: CA==CB always
+    e_after_same = 0.5 * max(0, 0) + 0.5 * max(100, 100)
+    evpi_same = e_after_same - 50.0
+    assert evpi_indep == pytest.approx(25.0)
+    assert evpi_same == pytest.approx(0.0)  # same marginals, different (identified-absent) EVPI
+    assert s0.stage_evpi == pytest.approx(evpi_indep, rel=1e-12)  # emitted = independence choice
+    assert s0.coupling_assumption == "independence_across_actions"  # disclosed as such
+
+
+def test_stage_evpi_single_chance_child_is_identified_no_coupling(engine):
+    """IDENTIFIED (the other regime): the two_stage decision faces ONE chance node
+    ('market') — only one action has a chance child — so a single shared realised
+    state is resolved and stage_evpi is EXACT. It carries NO coupling_assumption and
+    status None. The pinned 11220.0 must not move (disclosure, not recomputation)."""
+    s0 = _stage_map(engine.analyze(two_stage()))[0]
+    assert s0.stage_evpi == pytest.approx(11220.0, rel=1e-12)  # identified-path byte identity
+    assert s0.stage_evpi_status is None
+    assert s0.coupling_assumption is None
+
+
+def test_stage_evpi_all_actions_share_one_chance_is_identified(engine):
+    """IDENTIFIED sub-case named in the ruling: when >=2 actions share ONE chance
+    node (a single distinct chance child), the realised state is shared, so it is
+    identified — NOT the independence-assumed regime. status None, no coupling."""
+    g = SequentialGraph(
+        nodes=[
+            SequentialGraphNode(id="D", type="decision", label="D"),
+            SequentialGraphNode(id="C", type="chance", label="C"),
+            SequentialGraphNode(id="lo", type="terminal", label="lo", payoff=0),
+            SequentialGraphNode(id="hi", type="terminal", label="hi", payoff=100),
+        ],
+        edges=[
+            SequentialGraphEdge(from_node="D", to_node="C", action="A"),
+            SequentialGraphEdge(from_node="D", to_node="C", action="B"),
+            SequentialGraphEdge(from_node="C", to_node="lo", outcome="c0", probability=0.5),
+            SequentialGraphEdge(from_node="C", to_node="hi", outcome="c1", probability=0.5),
+        ],
+        stage_assignments={"D": 0, "C": 1, "lo": 2, "hi": 2},
+    )
+    stages = [
+        DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
+        DecisionStage(stage_index=1, stage_label="s1", decision_nodes=[]),
+        DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[]),
+    ]
+    req = SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=1.0, risk_tolerance="neutral")
+    s0 = _stage_map(engine.analyze(req))[0]
+    assert s0.stage_evpi_status is None
+    assert s0.coupling_assumption is None
+
+
+# ---------------------------------------------------------------------------
 # Independent identity cross-check (two implementations must agree)
 # ---------------------------------------------------------------------------
 
@@ -272,8 +392,11 @@ def test_stage_evpi_matches_independent_e_max_minus_max_e(engine):
     decide_now = nv["invest"]
     expected = max(0.0, e_after - decide_now)
 
-    got, status = engine._compute_stage_evpi("invest", graph_data, node_values, df)
-    assert status is None  # computed, under the joint-cell cap
+    got, status, coupling = engine._compute_stage_evpi(
+        "invest", graph_data, node_values, df
+    )
+    assert status is None  # computed, identified (single chance child), under cap
+    assert coupling is None  # identified -> no coupling assumption disclosed
     assert got == pytest.approx(expected, rel=1e-12)
     assert got >= 0.0
 
@@ -360,3 +483,46 @@ class TestStageEvpiStatusEmissionIff:
         # A null value must disclose WHY (no silent null).
         with pytest.raises(ValidationError):
             StageAnalysis(**self._base(stage_evpi=None, stage_evpi_status=None))
+
+    # F1 (D-23.11) — the assumption-laden status rides WITH a computed value.
+    def test_assumed_independent_coupling_with_value_and_coupling_ok(self):
+        StageAnalysis(
+            **self._base(
+                stage_evpi=25.0,
+                stage_evpi_status="assumed_independent_coupling",
+                coupling_assumption="independence_across_actions",
+            )
+        )
+
+    def test_assumed_independent_coupling_without_coupling_rejected(self):
+        # The disclosed assumption MUST name the coupling.
+        with pytest.raises(ValidationError):
+            StageAnalysis(
+                **self._base(
+                    stage_evpi=25.0,
+                    stage_evpi_status="assumed_independent_coupling",
+                    coupling_assumption=None,
+                )
+            )
+
+    def test_assumed_independent_coupling_with_null_value_rejected(self):
+        # An independence assumption is meaningless without a computed value to ride.
+        with pytest.raises(ValidationError):
+            StageAnalysis(
+                **self._base(
+                    stage_evpi=None,
+                    stage_evpi_status="assumed_independent_coupling",
+                    coupling_assumption="independence_across_actions",
+                )
+            )
+
+    def test_coupling_without_its_status_rejected(self):
+        # coupling_assumption may appear ONLY under 'assumed_independent_coupling'.
+        with pytest.raises(ValidationError):
+            StageAnalysis(
+                **self._base(
+                    stage_evpi=25.0,
+                    stage_evpi_status=None,
+                    coupling_assumption="independence_across_actions",
+                )
+            )
