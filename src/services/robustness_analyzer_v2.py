@@ -2999,6 +2999,22 @@ class RobustnessAnalyzerV2:
                 "consider narrowing uncertainty"
             )
 
+    @staticmethod
+    def _intervention_factor_union(request: RobustnessRequestV2) -> set:
+        """The D-U lever set: factor IDs that ANY option intervenes on (union across
+        all options). A factor in this set is a CHOICE, not information to buy — it is
+        the single source of truth for lever identity, consulted by BOTH
+        ``_compute_factor_sensitivity`` (INTERVENTION_OVERRIDE detection) and
+        ``_compute_factor_evppi`` (lever omission). Derive-don't-mirror (CLAUDE.md
+        #12): one definition, so the two sites cannot fork lever identity. Used for
+        membership tests only, so element order is irrelevant to determinism.
+        """
+        return {
+            factor_id
+            for option in request.options
+            for factor_id in (option.interventions or {})
+        }
+
     def _compute_factor_sensitivity(
         self,
         request: RobustnessRequestV2,
@@ -3068,17 +3084,11 @@ class RobustnessAnalyzerV2:
         ref_option = request.options[0]
         baseline_mean = float(np.mean(baseline_outcomes[ref_option.id]))
 
-        # Build set of intervention factor IDs for INTERVENTION_OVERRIDE detection.
-        # D-U ruling (union-across-options): a factor ANY option intervenes on is a
-        # lever — not just the reference (first) option's targets. Previously this
-        # set was built from options[0] only, so a factor pinned by a non-first
-        # option was published with a non-lever zero_reason while union-side
-        # consumers (CEE, PLoT coaching) suppressed it as a lever.
-        # The set is used for membership tests only, so ordering cannot affect
-        # determinism.
-        intervention_factor_ids = {
-            factor_id for option in request.options for factor_id in (option.interventions or {})
-        }
+        # Intervention factor IDs for INTERVENTION_OVERRIDE detection. D-U ruling
+        # (union-across-options): a factor ANY option intervenes on is a lever — not
+        # just the reference (first) option's targets. Shared source of truth with
+        # _compute_factor_evppi's lever omission (derive-don't-mirror).
+        intervention_factor_ids = self._intervention_factor_union(request)
 
         # Diagnostic: log baseline
         self.logger.info(
@@ -4586,14 +4596,12 @@ class RobustnessAnalyzerV2:
         if not request.parameter_uncertainties:
             return None
 
-        # D-U lever identity: UNION of intervention targets across ALL options
-        # (reuse _compute_factor_sensitivity's exact derivation — derive, don't
-        # mirror). A factor in this set is a lever; its "uncertainty" is a choice.
-        intervention_factor_ids = {
-            factor_id
-            for option in request.options
-            for factor_id in (option.interventions or {})
-        }
+        # D-U lever identity: UNION of intervention targets across ALL options —
+        # the SAME source of truth _compute_factor_sensitivity consults, via the
+        # shared _intervention_factor_union helper (derive, don't mirror: a called
+        # function cannot drift, a re-typed comprehension can). A factor in this set
+        # is a lever; its "uncertainty" is a choice.
+        intervention_factor_ids = self._intervention_factor_union(request)
 
         # Deduplicate uncertainties by node_id (parse-time validation already
         # rejects duplicates; defensive, first-seen order for determinism).

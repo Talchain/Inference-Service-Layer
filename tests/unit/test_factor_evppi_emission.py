@@ -168,6 +168,35 @@ class TestLeverOmission:
         assert r.factor_evppi is None
 
 
+class TestInterventionFactorUnion:
+    """C1: the D-U lever set is a single shared helper consulted by BOTH
+    _compute_factor_sensitivity and _compute_factor_evppi (derive-don't-mirror)."""
+
+    def test_union_across_all_options_not_just_first(self):
+        req = _lever_request()  # opt_high & opt_low each intervene on factor_a
+        # Add a factor intervened ONLY by the SECOND option -> still a lever (union).
+        req.options[1].interventions["factor_b"] = 0.2
+        union = RobustnessAnalyzerV2._intervention_factor_union(req)
+        assert union == {"factor_a", "factor_b"}
+
+    def test_empty_when_no_interventions(self):
+        req = _mediator_request(n_samples=200)
+        req.options = [
+            InterventionOption(id="a", label="A", interventions={}),
+            InterventionOption(id="b", label="B", interventions={}),
+        ]
+        assert RobustnessAnalyzerV2._intervention_factor_union(req) == set()
+
+    def test_factor_evppi_omits_union_lever_via_shared_helper(self):
+        # factor_a is a lever (both options intervene); factor_b is free. The
+        # shared helper drives factor_evppi's omission -> factor_a absent, factor_b
+        # present. (If a site stopped using the helper, this would break.)
+        r = RobustnessAnalyzerV2().analyze(_lever_request())
+        ids = {e["factor_id"] for e in (r.factor_evppi or [])}
+        assert "factor_a" not in ids
+        assert "factor_b" in ids
+
+
 class TestClampDisclosure:
     """The Howard (>=0) and per-factor<=total clamps are tested deterministically
     by monkeypatching the estimator to return out-of-range raw values."""
