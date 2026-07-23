@@ -232,6 +232,50 @@ class TestTopologicalSortDeterminism:
         assert o1 == o2 == ["A", "B", "C", "D"]
 
 
+class TestConstantEquation:
+    """Defect 2 (A3, 2026-07-23, HUNT-VALIDATION F-4): a constant structural
+    equation (e.g. "5") is legal client input. It used to evaluate to a 0-d array
+    whose `.tolist()` scalar hit `len()` in adaptive Monte Carlo -> TypeError -> 500.
+    A constant IS a valid structural equation; support it. Reverting the 0-d
+    broadcast makes these RED (500)."""
+
+    def test_constant_outcome_equation_returns_constant(self):
+        """RED at HEAD: `equations={"Y": "5"}` raised TypeError (500). Y=5 is a
+        constant in every sample -> point_estimate 5.0, CI exactly [5, 5]."""
+        engine = CounterfactualEngine()
+        model = StructuralModel(
+            variables=["Y", "D"], equations={"Y": "5"}, distributions={}
+        )
+        # do(D) is a disconnected no-op purely to satisfy the non-empty-intervention
+        # route guard; it does not feed Y.
+        request = CounterfactualRequest(
+            model=model, intervention={"D": 1.0}, outcome="Y", context={}
+        )
+        response = engine.analyze(request)
+        assert response.prediction.point_estimate == pytest.approx(5.0, abs=1e-9)
+        assert response.prediction.confidence_interval.lower == pytest.approx(5.0, abs=1e-9)
+        assert response.prediction.confidence_interval.upper == pytest.approx(5.0, abs=1e-9)
+
+    def test_constant_chain_to_outcome_supported(self):
+        """A chain of CONSTANT equations reaching the outcome keeps the outcome 0-d
+        (no operand carries the sample dimension): A=3, B=4, Y=A+B -> Y=7. RED at
+        HEAD (500). (A constant feeding an outcome that ALSO has a sampled/intervened
+        operand already broadcast to 1-d and never crashed — this all-constant chain
+        is the case the 0-d handling actually rescues.)"""
+        engine = CounterfactualEngine()
+        model = StructuralModel(
+            variables=["A", "B", "Y", "D"], equations={"A": "3", "B": "4", "Y": "A + B"},
+            distributions={},
+        )
+        request = CounterfactualRequest(
+            model=model, intervention={"D": 1.0}, outcome="Y", context={}
+        )
+        response = engine.analyze(request)
+        assert response.prediction.point_estimate == pytest.approx(7.0, abs=1e-9)
+        assert response.prediction.confidence_interval.lower == pytest.approx(7.0, abs=1e-9)
+        assert response.prediction.confidence_interval.upper == pytest.approx(7.0, abs=1e-9)
+
+
 class TestDistributionSampling:
     """Test sampling from different distributions."""
 

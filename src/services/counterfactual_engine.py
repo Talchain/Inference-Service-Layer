@@ -585,7 +585,19 @@ class CounterfactualEngine:
         sorted_equations = self._topological_sort_equations(request.model.equations)
         for var_name, equation in sorted_equations:
             if var_name not in samples:  # Skip if already set by intervention/context
-                samples[var_name] = self._evaluate_equation(equation, samples)
+                eq_value = self._evaluate_equation(equation, samples)
+                # Defect (A3, 2026-07-23, HUNT-VALIDATION F-4): a CONSTANT structural
+                # equation (e.g. "5") evaluates to a 0-d array — no operand carries the
+                # sample dimension. Broadcast it to `num_samples` so every equation
+                # variable is a proper length-`num_samples` array. A constant IS a valid
+                # structural equation: it takes that value in every Monte Carlo sample,
+                # so the broadcast is exact (std 0, point_estimate = the constant).
+                # Without it, a 0-d outcome reaches `_run_adaptive_monte_carlo`'s
+                # `.tolist()` as a Python scalar and the subsequent `len()` raises
+                # TypeError -> a mislabeled 500 on legal client input.
+                if np.ndim(eq_value) == 0:
+                    eq_value = np.full(num_samples, eq_value, dtype=float)
+                samples[var_name] = eq_value
 
         return samples
 
