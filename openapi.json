@@ -657,6 +657,118 @@
         "title": "ConstraintResultV2",
         "type": "object"
       },
+      "CorrelationModelV2": {
+        "description": "Disclosure block for the active factor-correlation model (B3-S1, D-23.4).\n\nPresent ONLY when the request supplied ``factor_correlations`` (independence\nstays the silent default). It discloses the copula method, the MANDATORY\ntail-independence caveat (load-bearing whenever the copula co-ships with the\ndownside/CVaR block), any PSD projection, and which independence-assuming\nper-factor attributions were suppressed and why.",
+        "properties": {
+          "active": {
+            "description": "Always true when this block is present.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "correlated_factors": {
+            "description": "Factor node IDs drawn jointly under the copula (canonical draw order).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Correlated Factors",
+            "type": "array"
+          },
+          "method": {
+            "description": "Correlation model \u2014 'gaussian_copula_v1' (Gaussian copula over the factors' existing marginals).",
+            "title": "Method",
+            "type": "string"
+          },
+          "n_pairs": {
+            "description": "Number of supplied pairwise correlations.",
+            "title": "N Pairs",
+            "type": "integer"
+          },
+          "psd_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrelationProjectionV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present only when the supplied matrix was not PSD and was projected to the nearest correlation matrix (Higham 2002). Null/absent when the input was already valid."
+          },
+          "suppressed_attributions": {
+            "description": "Independence-assuming per-factor attributions omitted under active correlation (e.g. factor_sensitivity, factor_evpi, conditional_winners). Absent from the response, not null \u2014 this list names what was withheld.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Suppressed Attributions",
+            "type": "array"
+          },
+          "suppression_reason": {
+            "default": "not_separable_under_correlation",
+            "description": "Why the listed attributions were suppressed: per-factor independence-assuming decompositions are not separable once factors are correlated.",
+            "title": "Suppression Reason",
+            "type": "string"
+          },
+          "tail_dependence": {
+            "default": "none",
+            "description": "Tail-dependence coefficient class of the copula \u2014 'none' for the Gaussian copula (zero upper/lower tail dependence).",
+            "title": "Tail Dependence",
+            "type": "string"
+          },
+          "tail_dependence_note": {
+            "description": "MANDATORY caveat: the Gaussian copula has zero tail dependence, so joint extreme co-movements may be understated and downside/CVaR can be optimistic when factors are strongly correlated.",
+            "title": "Tail Dependence Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "active",
+          "correlated_factors",
+          "n_pairs",
+          "tail_dependence_note"
+        ],
+        "title": "CorrelationModelV2",
+        "type": "object"
+      },
+      "CorrelationProjectionV2": {
+        "description": "PSD-repair disclosure for a client-supplied correlation matrix (B3-S1).\n\nPresent inside ``correlation_model.psd_projection`` ONLY when the assembled\ncorrelation matrix was not positive-semidefinite and was projected to the\nnearest correlation matrix (Higham 2002). Absent (null) when the input was\nalready PSD, so the presence of this block is itself the disclosure that the\nsupplied correlations were adjusted.",
+        "properties": {
+          "applied": {
+            "description": "Always true when this block is present (the matrix was projected).",
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "frobenius_distance": {
+            "description": "Frobenius norm of (projected - supplied) \u2014 how far the supplied matrix was moved to reach the nearest valid correlation matrix.",
+            "title": "Frobenius Distance",
+            "type": "number"
+          },
+          "iterations": {
+            "description": "Alternating-projection iterations used to converge.",
+            "title": "Iterations",
+            "type": "integer"
+          },
+          "max_abs_off_diagonal_adjustment": {
+            "description": "Largest absolute change to any single off-diagonal correlation entry during projection.",
+            "title": "Max Abs Off Diagonal Adjustment",
+            "type": "number"
+          },
+          "method": {
+            "description": "Projection method \u2014 'higham_2002_nearest_correlation' (true nearest-correlation via alternating eigenvalue projections).",
+            "title": "Method",
+            "type": "string"
+          }
+        },
+        "required": [
+          "applied",
+          "method",
+          "frobenius_distance",
+          "max_abs_off_diagonal_adjustment",
+          "iterations"
+        ],
+        "title": "CorrelationProjectionV2",
+        "type": "object"
+      },
       "CounterfactualRequest": {
         "description": "Request model for counterfactual analysis endpoint.",
         "example": {
@@ -1848,6 +1960,42 @@
         "title": "FACETRobustnessAnalysis",
         "type": "object"
       },
+      "FactorCorrelation": {
+        "description": "A single pairwise correlation between two factor uncertainties (B3-S1).\n\nCorrelated factors are sampled JOINTLY via a Gaussian copula over their\nexisting marginals (D-23.4). Independence remains the default: correlation\nis inert-when-absent and activates ONLY when at least one of these is\nsupplied. No default correlations are ever invented.\n\nSemantic cross-checks (both factors exist, both carry a sampled\n``parameter_uncertainty``, distribution supported, no duplicate/conflicting\nor invalid self-pairs) are enforced by\n``RobustnessRequestV2.validate_factor_correlations`` so the messages can name\nthe offending factor ids without echoing any other request values.",
+        "example": {
+          "factor_a": "marketing_spend",
+          "factor_b": "demand",
+          "rho": 0.6
+        },
+        "properties": {
+          "factor_a": {
+            "description": "ID of the first factor node in the correlated pair",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor A",
+            "type": "string"
+          },
+          "factor_b": {
+            "description": "ID of the second factor node in the correlated pair",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor B",
+            "type": "string"
+          },
+          "rho": {
+            "description": "Pearson correlation coefficient in [-1, 1] applied to the two factors' marginals via a Gaussian copula",
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Rho",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor_a",
+          "factor_b",
+          "rho"
+        ],
+        "title": "FactorCorrelation",
+        "type": "object"
+      },
       "FactorSensitivityResult": {
         "description": "Sensitivity to a factor node's value (Phase 2A Part 2).",
         "example": {
@@ -2855,6 +3003,17 @@
             ],
             "description": "Factors where the winning option flips depending on factor value range.",
             "title": "Conditional Winners"
+          },
+          "correlation_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrelationModelV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Disclosure of the active factor-correlation model (Gaussian copula): method, mandatory tail-independence caveat, any PSD projection, and which independence-assuming per-factor attributions were suppressed. Absent when correlation is inactive (the independent-factor default)."
           },
           "critiques": {
             "description": "Structured critiques",
@@ -4719,6 +4878,22 @@
             "title": "Confidence Level",
             "type": "number"
           },
+          "factor_correlations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FactorCorrelation"
+                },
+                "maxItems": 1225,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pairwise correlations between factor uncertainties. Independence is the default; supplying any pair activates a Gaussian copula over the named factors' marginals. Each referenced factor must have a parameter_uncertainty with a supported distribution (normal or uniform; point_mass factors have zero variance and cannot be correlated). Under active correlation, independence-assuming per-factor attributions (factor_sensitivity, factor_evpi, conditional_winners) are omitted with a disclosure marker; joint quantities (win_probability, downside, percentiles) remain valid.",
+            "title": "Factor Correlations"
+          },
           "goal_constraints": {
             "anyOf": [
               {
@@ -4952,6 +5127,17 @@
             ],
             "description": "Factors where the winning option flips depending on factor value range. Only present when at least one factor causes a winner flip.",
             "title": "Conditional Winners"
+          },
+          "correlation_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrelationModelV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Disclosure of the active factor-correlation (Gaussian copula) model. Absent when correlation is inactive (independent-factor default)."
           },
           "critiques": {
             "description": "Analysis critiques and warnings",
