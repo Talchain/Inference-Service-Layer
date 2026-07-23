@@ -70,11 +70,15 @@ class CounterfactualEngine:
         # _TOPO_SORT_CACHE_MAX): capped so it cannot grow unbounded on the live
         # request path.
         self._topo_sort_cache: Dict[str, List[Tuple[str, str]]] = {}
-        # Guards every read/insert/evict of the cache above. This engine is a
-        # module-level singleton (`counterfactual_engine` in causal.py) served on a
-        # concurrent request path, so the unlocked dict's evict step —
-        # `pop(next(iter(...)))` racing a concurrent `[key] = result` — can raise
-        # "dictionary changed size during iteration" or corrupt the FIFO ordering.
+        # Guards every read/insert/evict of the cache above. On the LIVE path this
+        # lock is inert-but-correct: the async `/counterfactual` route calls this
+        # sync engine DIRECTLY (no thread offload), so every live execution
+        # serializes on the event-loop thread and the cache is never touched
+        # concurrently. It becomes load-bearing under the DARK batch path (batch.py's
+        # own engine instance driven via `asyncio.to_thread`) or any future executor
+        # offload, where the unlocked dict's evict step — `pop(next(iter(...)))`
+        # racing a concurrent `[key] = result` — can raise "dictionary changed size
+        # during iteration" or corrupt the FIFO ordering.
         # A plain Lock preserves the EXACT FIFO-128 / no-TTL semantics from PR #89
         # and keeps `_topo_sort_cache` a real dict (test_optimization_gains reads
         # `len(engine._topo_sort_cache)`). The repo's thread-safe cache utilities —
@@ -228,6 +232,13 @@ class CounterfactualEngine:
         # channel has the identical hole (same unread np.full write). Validate here,
         # the single validation home that already carries the do/observe collision
         # guard above, so there is ONE place a key is checked against the model.
+        #
+        # WHY the engine, not a Pydantic field validator on the request model: a
+        # validator failure surfaces as FastAPI's RequestValidationError -> the
+        # `invalid_schema` reason code, whereas this engine-raised ValueError maps
+        # (route D-12(cf)) to a 422 with the `validation_failed` reason. Both are
+        # malformed-model client errors; keeping the check here keeps them under ONE
+        # reason code instead of splitting semantically-identical errors across two.
         #
         # Redaction (F11 discipline): the message names the unknown KEYS and the
         # known-variable-set SIZE only — never the request VALUES (a client's
