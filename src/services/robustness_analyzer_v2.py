@@ -4872,9 +4872,15 @@ class RobustnessAnalyzerV2:
                     best_value = x
 
             if best_value is None:
-                # Every grid point was non-finite (never on a 200 response — a single
-                # non-finite outcome also poisons option means / the JSON serializer,
-                # which 500s first). Omit rather than fabricate; no disclosure needed.
+                # Every grid point was non-finite (e.g. a candidate value large
+                # enough that the mean over samples overflows to +/-inf). This CAN
+                # happen on a 200: the options use their OWN finite interventions, so
+                # option means and the JSON serializer stay finite and the response
+                # ships 200 — but THIS candidate is dropped, so factor_evpc can be
+                # absent (or short a lever) despite control_candidates being present.
+                # We omit rather than fabricate a value. Surfacing a disclosure warning
+                # for a dropped candidate is a tracked follow-up (rowed as behavior),
+                # intentionally NOT implemented here.
                 continue
 
             evpc_raw = best_do_eu - baseline_max_eu
