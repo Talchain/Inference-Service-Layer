@@ -691,7 +691,80 @@
         "title": "ControlCandidate",
         "type": "object"
       },
-      "CorrelationModelV2": {
+      "CorrelationModelV2-Input": {
+        "description": "Disclosure block for the active factor-correlation model (B3-S1, D-23.4).\n\nPresent ONLY when the request supplied ``factor_correlations`` (independence\nstays the silent default). It discloses the copula method, the MANDATORY\ntail-independence caveat (load-bearing whenever the copula co-ships with the\ndownside/CVaR block), any PSD projection, and which independence-assuming\nper-factor attributions were suppressed and why.",
+        "properties": {
+          "active": {
+            "description": "Always true when this block is present.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "correlated_factors": {
+            "description": "Factor node IDs drawn jointly under the copula (canonical draw order).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Correlated Factors",
+            "type": "array"
+          },
+          "method": {
+            "description": "Correlation model \u2014 'gaussian_copula_v1' (Gaussian copula over the factors' existing marginals).",
+            "title": "Method",
+            "type": "string"
+          },
+          "n_pairs": {
+            "description": "Number of supplied pairwise correlations.",
+            "title": "N Pairs",
+            "type": "integer"
+          },
+          "psd_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorrelationProjectionV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present only when the supplied matrix was not PSD and was projected to the nearest correlation matrix (Higham 2002). Null/absent when the input was already valid."
+          },
+          "suppressed_attributions": {
+            "description": "Independence-assuming per-factor attributions omitted under active correlation (e.g. factor_sensitivity, p_win_sensitivity, conditional_winners). factor_evppi is NOT listed \u2014 it is a conditional-expectation quantity on the joint copula samples and remains emitted. Absent from the response, not null \u2014 this list names what was withheld.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Suppressed Attributions",
+            "type": "array"
+          },
+          "suppression_reason": {
+            "default": "not_separable_under_correlation",
+            "description": "Why the listed attributions were suppressed: per-factor independence-assuming decompositions are not separable once factors are correlated.",
+            "title": "Suppression Reason",
+            "type": "string"
+          },
+          "tail_dependence": {
+            "default": "none",
+            "description": "Tail-dependence coefficient class of the copula \u2014 'none' for the Gaussian copula (zero upper/lower tail dependence).",
+            "title": "Tail Dependence",
+            "type": "string"
+          },
+          "tail_dependence_note": {
+            "description": "MANDATORY caveat: the Gaussian copula has zero tail dependence, so joint extreme co-movements may be understated and downside/CVaR can be optimistic when factors are strongly correlated.",
+            "title": "Tail Dependence Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "method",
+          "active",
+          "correlated_factors",
+          "n_pairs",
+          "tail_dependence_note"
+        ],
+        "title": "CorrelationModelV2",
+        "type": "object"
+      },
+      "CorrelationModelV2-Output": {
         "description": "Disclosure block for the active factor-correlation model (B3-S1, D-23.4).\n\nPresent ONLY when the request supplied ``factor_correlations`` (independence\nstays the silent default). It discloses the copula method, the MANDATORY\ntail-independence caveat (load-bearing whenever the copula co-ships with the\ndownside/CVaR block), any PSD projection, and which independence-assuming\nper-factor attributions were suppressed and why.",
         "properties": {
           "active": {
@@ -765,12 +838,27 @@
         "type": "object"
       },
       "CorrelationProjectionV2": {
-        "description": "PSD-repair disclosure for a client-supplied correlation matrix (B3-S1).\n\nPresent inside ``correlation_model.psd_projection`` ONLY when the assembled\ncorrelation matrix was not positive-semidefinite and was projected to the\nnearest correlation matrix (Higham 2002). Absent (null) when the input was\nalready PSD, so the presence of this block is itself the disclosure that the\nsupplied correlations were adjusted.",
+        "description": "PSD-repair disclosure for a client-supplied correlation matrix (B3-S1).\n\nPresent inside ``correlation_model.psd_projection`` ONLY when the assembled\ncorrelation matrix was not positive-semidefinite and was projected to the\nnearest correlation matrix (Higham 2002). Absent (null) when the input was\nalready PSD, so the presence of this block is itself the disclosure that the\nsupplied correlations were adjusted.\n\nHard-invalid matrices (indefinite beyond the near-PSD repair band) are rejected\nat request validation with a typed 422 BEFORE any projection (F4, D-23.13), so\nthis block is only ever emitted for genuinely near-PSD inputs.",
         "properties": {
           "applied": {
             "description": "Always true when this block is present (the matrix was projected).",
             "title": "Applied",
             "type": "boolean"
+          },
+          "effective_correlations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EffectiveCorrelationV2"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "F4: the EFFECTIVE post-projection correlation per supplied pair (requested_rho, effective_rho, adjustment). With the unit diagonal these reconstruct the effective correlation matrix that actually drove the copula, so a caller sees more than the aggregate Frobenius distance. Additive-optional.",
+            "title": "Effective Correlations"
           },
           "frobenius_distance": {
             "description": "Frobenius norm of (projected - supplied) \u2014 how far the supplied matrix was moved to reach the nearest valid correlation matrix.",
@@ -1562,6 +1650,51 @@
           "strength"
         ],
         "title": "EdgeV2",
+        "type": "object"
+      },
+      "EffectiveCorrelationV2": {
+        "description": "The EFFECTIVE (post-projection) correlation for one supplied pair (F4).\n\nPresent inside ``CorrelationProjectionV2.effective_correlations`` when the\nsupplied matrix was Higham-projected. ``effective_rho`` is the off-diagonal the\ncopula ACTUALLY used; ``adjustment`` = ``effective_rho - requested_rho`` is the\nsilent change the projection made. Together with the unit diagonal these entries\nreconstruct the effective correlation matrix, so a caller sees which correlations\nreally drove the numbers \u2014 not only the aggregate Frobenius distance.\n\n``stated`` distinguishes a pair the caller supplied (True) from an UNSTATED pair\nthat defaulted to correlation 0 (assumed-independent) and was MOVED off 0 by the\nprojection (False, ``requested_rho == 0.0``) \u2014 those moved zero-fill pairs are\ndisclosed too so the effective matrix is complete (F-2).",
+        "properties": {
+          "adjustment": {
+            "description": "effective_rho - requested_rho: the signed change the projection silently applied to this correlation.",
+            "title": "Adjustment",
+            "type": "number"
+          },
+          "effective_rho": {
+            "description": "The off-diagonal actually used after nearest-correlation projection (what drove the copula draw).",
+            "title": "Effective Rho",
+            "type": "number"
+          },
+          "factor_a": {
+            "description": "ID of the first factor node in the pair.",
+            "title": "Factor A",
+            "type": "string"
+          },
+          "factor_b": {
+            "description": "ID of the second factor node in the pair.",
+            "title": "Factor B",
+            "type": "string"
+          },
+          "requested_rho": {
+            "description": "The correlation the caller supplied for this pair, or 0.0 for an unstated (assumed-independent) pair.",
+            "title": "Requested Rho",
+            "type": "number"
+          },
+          "stated": {
+            "description": "True if the caller supplied this pair; False if it was an unstated (assumed-zero) pair the projection moved off 0.",
+            "title": "Stated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "factor_a",
+          "factor_b",
+          "requested_rho",
+          "effective_rho",
+          "adjustment",
+          "stated"
+        ],
+        "title": "EffectiveCorrelationV2",
         "type": "object"
       },
       "ErrorResponse": {
@@ -3189,7 +3322,7 @@
           "correlation_model": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CorrelationModelV2"
+                "$ref": "#/components/schemas/CorrelationModelV2-Input"
               },
               {
                 "type": "null"
@@ -5374,7 +5507,7 @@
           "correlation_model": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CorrelationModelV2"
+                "$ref": "#/components/schemas/CorrelationModelV2-Output"
               },
               {
                 "type": "null"
