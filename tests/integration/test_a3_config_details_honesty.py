@@ -37,17 +37,12 @@ asserts that (and doubles as the wire-level positive control).
 """
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 
-from src.api.main import app
 from src.models.metadata import create_response_metadata, generate_config_details
 
-
-@pytest_asyncio.fixture
-async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
+# `client` (async httpx) is the shared fixture in tests/conftest.py; the
+# sequential decision-tree payload is the shared `sequential_analysis_request`
+# fixture in tests/integration/conftest.py (C4 dedup).
 
 
 def _config_details(response_json: dict) -> dict:
@@ -55,7 +50,8 @@ def _config_details(response_json: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Valid payloads for the three LIVE routes.
+# Valid payloads. The sequential route uses the shared `sequential_analysis_request`
+# fixture (tests/integration/conftest.py); robustness/counterfactual are local.
 # ---------------------------------------------------------------------------
 def _robustness_payload() -> dict:
     return {
@@ -80,45 +76,6 @@ def _counterfactual_payload() -> dict:
         },
         "intervention": {"X": 10.0},
         "outcome": "Y",
-    }
-
-
-def _sequential_payload() -> dict:
-    return {
-        "graph": {
-            "nodes": [
-                {"id": "invest", "type": "decision", "label": "Invest"},
-                {"id": "market", "type": "chance", "label": "Market"},
-                {"id": "success", "type": "terminal", "label": "Success", "payoff": 100000},
-                {"id": "failure", "type": "terminal", "label": "Failure", "payoff": -20000},
-                {"id": "no_invest", "type": "terminal", "label": "No Investment", "payoff": 0},
-            ],
-            "edges": [
-                {"from": "invest", "to": "market", "action": "invest", "immediate_payoff": -10000},
-                {"from": "invest", "to": "no_invest", "action": "wait"},
-                {"from": "market", "to": "success", "outcome": "favorable", "probability": 0.6},
-                {"from": "market", "to": "failure", "outcome": "unfavorable", "probability": 0.4},
-            ],
-            "stage_assignments": {
-                "invest": 0,
-                "market": 1,
-                "success": 2,
-                "failure": 2,
-                "no_invest": 1,
-            },
-        },
-        "stages": [
-            {"stage_index": 0, "stage_label": "Investment", "decision_nodes": ["invest"]},
-            {
-                "stage_index": 1,
-                "stage_label": "Market",
-                "decision_nodes": [],
-                "resolution_nodes": ["market"],
-            },
-            {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
-        ],
-        "discount_factor": 0.95,
-        "risk_tolerance": "neutral",
     }
 
 
@@ -175,11 +132,11 @@ class TestConfigDetailsPerRouteHonesty:
         assert "deterministic_mode" in cd
 
     @pytest.mark.asyncio
-    async def test_sequential_omits_monte_carlo_samples(self, client):
+    async def test_sequential_omits_monte_carlo_samples(self, client, sequential_analysis_request):
         """RED at HEAD: the sequential config_details carries
         monte_carlo_samples: 10000 despite the sequential engine drawing NO
         samples. The route declares sampling=False, so the key is ABSENT."""
-        resp = await client.post("/api/v1/analysis/sequential", json=_sequential_payload())
+        resp = await client.post("/api/v1/analysis/sequential", json=sequential_analysis_request)
         assert resp.status_code == 200, resp.text
         cd = _config_details(resp.json())
         assert "monte_carlo_samples" not in cd

@@ -9,6 +9,7 @@ Provides:
 """
 
 import pytest
+import pytest_asyncio
 from typing import Dict, List, Any
 from datetime import datetime
 import json
@@ -314,3 +315,116 @@ def two_factor_request():
         return request
 
     return _build
+
+
+# ==================== A3 COUNTERFACTUAL ROUTE CLIENT ====================
+# Shared by the counterfactual-honesty (F11 log redaction) suite and the
+# intervention/context input-validation suite. Mounts the LIVE counterfactual
+# route AND the (prod-dark) conformal route on the full causal router, both with
+# the production exception handlers, so the ValueError->422 mapping (D-12(cf)) and
+# the conformal 400 envelope are exercised at the router level. Named distinctly
+# (cf_client, not `client`) so it does not shadow the async httpx `client` fixture
+# in tests/conftest.py.
+
+
+@pytest_asyncio.fixture
+async def cf_client():
+    from fastapi import FastAPI, HTTPException
+    from httpx import ASGITransport, AsyncClient
+
+    from src.api import main as isl_main
+    from src.api.causal import counterfactual_router, router as causal_full_router
+
+    test_app = FastAPI()
+    test_app.include_router(counterfactual_router, prefix="/api/v1/causal")
+    # conformal lives on the full causal router (dark in prod); mount it here so
+    # the F11 site-3 redaction is exercised through the real handler.
+    test_app.include_router(causal_full_router, prefix="/api/v1/causal")
+    test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
+    test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
+
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as ac:
+        yield ac
+
+
+# ==================== SEQUENTIAL-DECISION PAYLOAD ====================
+# One canonical sequential decision-tree request, consumed by the phase4 endpoint
+# suite (test_phase4_endpoints) and the config_details honesty suite. Function
+# scope returns a fresh dict per test, so callers may mutate it in place.
+
+
+@pytest.fixture
+def sequential_analysis_request():
+    """Sample sequential analysis request."""
+    return {
+        "graph": {
+            "nodes": [
+                {"id": "invest", "type": "decision", "label": "Investment Decision"},
+                {"id": "market", "type": "chance", "label": "Market Outcome"},
+                {"id": "success", "type": "terminal", "label": "Success", "payoff": 100000},
+                {"id": "failure", "type": "terminal", "label": "Failure", "payoff": -20000},
+                {"id": "no_invest", "type": "terminal", "label": "No Investment", "payoff": 0},
+            ],
+            "edges": [
+                {"from": "invest", "to": "market", "action": "invest", "immediate_payoff": -10000},
+                {"from": "invest", "to": "no_invest", "action": "wait"},
+                {"from": "market", "to": "success", "outcome": "favorable", "probability": 0.6},
+                {"from": "market", "to": "failure", "outcome": "unfavorable", "probability": 0.4},
+            ],
+            "stage_assignments": {
+                "invest": 0,
+                "market": 1,
+                "success": 2,
+                "failure": 2,
+                "no_invest": 1,
+            },
+        },
+        "stages": [
+            {"stage_index": 0, "stage_label": "Investment", "decision_nodes": ["invest"]},
+            {
+                "stage_index": 1,
+                "stage_label": "Market",
+                "decision_nodes": [],
+                "resolution_nodes": ["market"],
+            },
+            {"stage_index": 2, "stage_label": "Terminal", "decision_nodes": []},
+        ],
+        "discount_factor": 0.95,
+        "risk_tolerance": "neutral",
+    }
+
+
+# ==================== A3 F11 REDACTION POSITIVE-CONTROL ====================
+# One shared redaction sentinel + the trap-#13 positive-control helper, consumed
+# by the counterfactual log-redaction suite (test_a3_cf_honesty) and the
+# intervention/context value-validation suite (test_a3_intervention_key_validation).
+# A value that cannot arise from a hash / seed / percentile, so its appearance in a
+# log or error message is unambiguous leakage of a client-private input.
+REDACTION_SENTINEL = 987654.321
+
+
+@pytest.fixture
+def redaction_sentinel() -> float:
+    """The shared F11 redaction sentinel value."""
+    return REDACTION_SENTINEL
+
+
+@pytest.fixture
+def assert_harness_can_see_value():
+    """Trap #13 positive control: prove the capture harness is NOT blind to the
+    sentinel by emitting it through the same logger and confirming it is seen, so a
+    following absence assertion is not vacuous. Returns a callable
+    ``(caplog_records, logger_name)``."""
+    import logging
+
+    def _assert(caplog_records, logger_name):
+        log = logging.getLogger(logger_name)
+        log.info("a3_f11_probe_control", extra={"intervention": {"Probe": REDACTION_SENTINEL}})
+        seen = [r for r in caplog_records if getattr(r, "msg", None) == "a3_f11_probe_control"]
+        assert seen, "positive control failed: caplog did not capture the probe log at all"
+        assert any(str(REDACTION_SENTINEL) in repr(r.__dict__) for r in seen), (
+            "positive control failed: the harness cannot SEE the raw value even when "
+            "it is deliberately logged — an absence assertion here would be vacuous"
+        )
+
+    return _assert

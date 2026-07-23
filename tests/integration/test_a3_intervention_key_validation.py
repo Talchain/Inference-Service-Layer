@@ -34,32 +34,11 @@ baseline); the `TestNonFiniteInterventionValues` tests FAIL at HEAD with 500
 """
 
 import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 
-
-# A distinctive value that cannot arise from a hash/seed/percentile, used to
-# prove the 422 message never leaks a request VALUE (keys are fine, values are
-# not — the message is also logged).
-_SENTINEL_VALUE = 424242.4242
-
-
-@pytest_asyncio.fixture
-async def cf_client():
-    """LIVE counterfactual route mounted with the production exception handlers,
-    so the ValueError->422 mapping (D-12(cf)) is exercised at the router level."""
-    from fastapi import FastAPI, HTTPException
-
-    from src.api import main as isl_main
-    from src.api.causal import counterfactual_router
-
-    test_app = FastAPI()
-    test_app.include_router(counterfactual_router, prefix="/api/v1/causal")
-    test_app.add_exception_handler(HTTPException, isl_main.http_exception_handler)
-    test_app.add_exception_handler(Exception, isl_main.global_exception_handler)
-
-    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as ac:
-        yield ac
+# The `cf_client` fixture and the F11 `redaction_sentinel` value (a distinctive
+# value that cannot arise from a hash/seed/percentile, used to prove the 422
+# message never leaks a request VALUE) are shared fixtures in
+# tests/integration/conftest.py (C4 dedup).
 
 
 # Model of X, Z, Y with Y = 2*X + Z. X and Z are exogenous (distributions), so
@@ -114,13 +93,15 @@ class TestUnknownInterventionKey:
         assert "Q" in body["message"]
 
     @pytest.mark.asyncio
-    async def test_message_names_unknown_keys_and_set_size_not_values(self, cf_client):
+    async def test_message_names_unknown_keys_and_set_size_not_values(
+        self, cf_client, redaction_sentinel
+    ):
         """The 422 message must NAME the unknown key(s) and the known-variable
         set SIZE, and must NOT echo the request VALUE (redaction: the message is
         also written to the counterfactual_invalid_input warning log)."""
         request = {
             "model": _model_xzy_with_distributions(),
-            "intervention": {"Qtypo": _SENTINEL_VALUE},
+            "intervention": {"Qtypo": redaction_sentinel},
             "outcome": "Y",
         }
         resp = await cf_client.post("/api/v1/causal/counterfactual", json=request)
@@ -131,8 +112,8 @@ class TestUnknownInterventionKey:
         # names the known-variable set SIZE (X, Z, Y -> 3)
         assert "3" in message
         # NEVER leaks the raw value
-        assert str(_SENTINEL_VALUE) not in message
-        assert "424242" not in message
+        assert str(redaction_sentinel) not in message
+        assert str(int(redaction_sentinel)) not in message
 
 
 class TestKnownKeyPositiveControls:
@@ -291,7 +272,7 @@ class TestNonFiniteInterventionValues:
         assert "non-finite" in body["message"]
 
     @pytest.mark.asyncio
-    async def test_nonfinite_message_names_key_not_covalues(self, cf_client):
+    async def test_nonfinite_message_names_key_not_covalues(self, cf_client, redaction_sentinel):
         """Redaction (F11): only the offending KEY is named. A finite sentinel
         VALUE co-submitted on another known key must NOT appear in the message
         (proves the guard names keys, not the intervention dict)."""
@@ -302,7 +283,7 @@ class TestNonFiniteInterventionValues:
         }
         request = {
             "model": model,
-            "intervention": {"D": float("nan"), "W": _SENTINEL_VALUE},
+            "intervention": {"D": float("nan"), "W": redaction_sentinel},
             "context": {"X": 5.0},
             "outcome": "Y",
         }
@@ -312,8 +293,8 @@ class TestNonFiniteInterventionValues:
         assert "D" in message
         assert "non-finite" in message
         # The finite co-value on W is never echoed.
-        assert str(_SENTINEL_VALUE) not in message
-        assert "424242" not in message
+        assert str(redaction_sentinel) not in message
+        assert str(int(redaction_sentinel)) not in message
 
     @pytest.mark.asyncio
     async def test_finite_disconnected_value_still_200(self, cf_client):
