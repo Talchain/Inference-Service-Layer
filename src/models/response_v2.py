@@ -1154,8 +1154,16 @@ class ISLResponseV2(BaseModel):
     robustness_status: Literal["computed", "skipped", "unavailable", "error"] = Field(
         ..., description="Robustness analysis status"
     )
-    factor_sensitivity_status: Literal["computed", "skipped", "unavailable", "error"] = Field(
-        ..., description="Factor sensitivity status"
+    factor_sensitivity_status: Literal[
+        "computed", "skipped", "suppressed", "unavailable", "error"
+    ] = Field(
+        ...,
+        description=(
+            "Factor sensitivity status. 'suppressed' means active factor "
+            "correlation deliberately withheld the per-factor attributions "
+            "(non-separable under correlation) — see correlation_model; distinct "
+            "from 'skipped' (not requested / nothing to compute)."
+        ),
     )
 
     # Reason for non-computed status (sanitised, no internal details)

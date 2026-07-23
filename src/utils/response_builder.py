@@ -241,6 +241,16 @@ class ResponseBuilder:
             factor_sensitivity_status = "computed"
         elif has_blockers:
             factor_sensitivity_status = "unavailable"
+        elif (
+            self.correlation_model is not None
+            and "factor_sensitivity" in self.correlation_model.suppressed_attributions
+        ):
+            # B3-S1: active correlation deliberately WITHHELD factor_sensitivity
+            # because per-factor OAT attributions are non-separable when factors
+            # co-move. This is a principled suppression, not a skip — the
+            # correlation_model block names the reason. (Previously reported
+            # "skipped", which under-explained and read as "nothing to compute".)
+            factor_sensitivity_status = "suppressed"
         else:
             factor_sensitivity_status = "skipped"
 

@@ -3088,10 +3088,11 @@
             "title": "Factor Sensitivity"
           },
           "factor_sensitivity_status": {
-            "description": "Factor sensitivity status",
+            "description": "Factor sensitivity status. 'suppressed' means active factor correlation deliberately withheld the per-factor attributions (non-separable under correlation) \u2014 see correlation_model; distinct from 'skipped' (not requested / nothing to compute).",
             "enum": [
               "computed",
               "skipped",
+              "suppressed",
               "unavailable",
               "error"
             ],

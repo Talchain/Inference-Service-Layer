@@ -31,6 +31,7 @@ from src.models.critique import (
     get_critique,
 )
 from src.models.response_v2 import (
+    CorrelationModelV2,
     CritiqueV2,
     DiagnosticsV2,
     FactorSensitivityV2,
@@ -1021,6 +1022,55 @@ class TestResponseBuilder:
         response = builder.build_error_response(ValueError("Test error"))
 
         assert response.auto_noise_applied is None
+
+    def _correlation_model(self, suppressed):
+        return CorrelationModelV2(
+            method="gaussian_copula_v1",
+            active=True,
+            correlated_factors=["fa", "fb"],
+            n_pairs=1,
+            tail_dependence_note="Gaussian copula has zero tail dependence.",
+            suppressed_attributions=suppressed,
+        )
+
+    def test_factor_sensitivity_status_suppressed_under_correlation(self, request_echo):
+        """B3-S1: when active correlation withheld factor_sensitivity, the status is
+        'suppressed' (a principled non-separability decision), not 'skipped' (which
+        under-explains and reads as 'nothing to compute')."""
+        builder = ResponseBuilder("req_123", request_echo)
+        builder.set_correlation_model(
+            self._correlation_model(["factor_sensitivity", "factor_evpi"])
+        )
+        # factor_sensitivity is None on the suppression path (analyzer emits [] →
+        # API maps the empty list to None).
+
+        response = builder.build()
+
+        assert response.factor_sensitivity_status == "suppressed"
+        assert response.factor_sensitivity is None
+
+    def test_factor_sensitivity_status_skipped_without_correlation(self, request_echo):
+        """Positive control: with no correlation_model, an absent factor_sensitivity
+        stays 'skipped' — 'suppressed' is not over-applied."""
+        builder = ResponseBuilder("req_123", request_echo)
+
+        response = builder.build()
+
+        assert response.correlation_model is None
+        assert response.factor_sensitivity_status == "skipped"
+
+    def test_factor_sensitivity_status_skipped_when_correlation_did_not_suppress_it(
+        self, request_echo
+    ):
+        """Control: a correlation_model whose suppressed list does NOT include
+        factor_sensitivity (e.g. sensitivity was not requested) leaves the status
+        'skipped', not 'suppressed'."""
+        builder = ResponseBuilder("req_123", request_echo)
+        builder.set_correlation_model(self._correlation_model(["factor_evpi"]))
+
+        response = builder.build()
+
+        assert response.factor_sensitivity_status == "skipped"
 
 
 class TestBuildRequestEcho:
