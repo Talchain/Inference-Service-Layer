@@ -306,6 +306,65 @@ class TestPerFactorEstimatorDegrade:
         assert surviving["status"] in ("resolved", "below_resolution")
 
 
+class TestFactorEvppiEntryTyped:
+    """C3 (altitude Q1): factor_evppi is a typed FactorEvppiEntryV2 model, not a bare
+    Dict[str, Any] — a producer typo / dropped status / wrong-typed audit field now
+    fails loud in Pydantic instead of serialising clean. Wire byte-identity to the
+    prior dict payload was verified pre/post on 4 shapes incl. correlation-active."""
+
+    def _valid(self, **over):
+        d = dict(
+            factor_id="fa",
+            evppi=0.1,
+            evppi_raw=0.11,
+            baseline_max_expected_utility=1.0,
+            conditional_max_expected_utility=1.1,
+            units="outcome",
+            method=REGRESSION_EVPPI_METHOD,
+            regression_degree=4,
+            n_samples=2000,
+            clamped_low=False,
+            clamped_high=False,
+            noise_floor=0.01,
+            status="resolved",
+            correlation_active=False,
+        )
+        d.update(over)
+        return d
+
+    def test_wire_model_types_factor_evppi(self):
+        # The V2 WIRE model (ISLResponseV2) types factor_evppi as the model, so a
+        # bad entry fails loud at the consumer boundary + openapi documents the shape.
+        # (The analyzer/V1 model keeps Dict[str, Any] by design — see C3 scope note.)
+        from typing import get_args
+
+        from src.models.response_v2 import FactorEvppiEntryV2, ISLResponseV2
+
+        ann = ISLResponseV2.model_fields["factor_evppi"].annotation
+        # Optional[List[FactorEvppiEntryV2]] -> FactorEvppiEntryV2 appears in the args.
+        flat = str(ann)
+        assert "FactorEvppiEntryV2" in flat, flat
+
+    def test_valid_dict_coerces(self):
+        from src.models.response_v2 import FactorEvppiEntryV2
+
+        FactorEvppiEntryV2(**self._valid())
+
+    def test_missing_field_rejected(self):
+        from src.models.response_v2 import FactorEvppiEntryV2
+
+        bad = self._valid()
+        del bad["status"]
+        with pytest.raises(Exception):
+            FactorEvppiEntryV2(**bad)
+
+    def test_wrong_typed_field_rejected(self):
+        from src.models.response_v2 import FactorEvppiEntryV2
+
+        with pytest.raises(Exception):
+            FactorEvppiEntryV2(**self._valid(clamped_low="nope"))
+
+
 class TestClampRoundOrdering:
     """Hunter F-2: clamp-then-round(.,6) can ship evppi > decision_evpi by <=5e-7
     when clamped_high binds and the bound sits in a round-UP window. The emitted

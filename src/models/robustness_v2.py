@@ -1557,6 +1557,11 @@ class RobustnessResponseV2(BaseModel):
 
     # Per-factor EVPPI (S2 — A3 VOI, D-23.8). Regression EVPPI on the retained
     # joint CRN samples (no new sampling); see ISLResponseV2.factor_evppi.
+    # NOTE (C3 scope): the V2 WIRE model ISLResponseV2.factor_evppi is typed as
+    # List[FactorEvppiEntryV2] (fail-loud at the consumer boundary + openapi). This
+    # analyzer/V1 model keeps Dict[str, Any] deliberately: its rows are built and
+    # consumed internally as dicts, and typing it would force broad churn on
+    # analyzer-level tests for no consumer benefit. Wire serialization is identical.
     factor_evppi: Optional[List[Dict[str, Any]]] = Field(
         None,
         description="Per-factor Expected Value of Partial Perfect Information "

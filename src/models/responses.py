@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .isl_metadata import ISLResponseMetadata
 from .metadata import ResponseMetadata
@@ -3148,6 +3148,26 @@ class StageAnalysis(BaseModel):
             }
         }
     }
+
+    @model_validator(mode="after")
+    def _status_present_iff_evpi_absent(self) -> "StageAnalysis":
+        """Sibling-presence emission-iff (altitude Q1, F-3): stage_evpi_status
+        discloses WHY stage_evpi is null and is present EXACTLY when stage_evpi is
+        None (no_decision_node / skipped_joint_space_too_large); a COMPUTED stage_evpi
+        — including a genuine 0.0 — carries no status. Fail loud in Pydantic if the
+        (value, status) pair ever desyncs (e.g. a fabricated status on a real value,
+        or a null value with no reason), matching the fail-loud altitude of
+        decision_evpi rather than relying on the tuple-return convention alone."""
+        value_absent = self.stage_evpi is None
+        status_present = self.stage_evpi_status is not None
+        if value_absent != status_present:
+            raise ValueError(
+                "stage_evpi/stage_evpi_status emission-iff violated: stage_evpi="
+                f"{self.stage_evpi!r} with stage_evpi_status={self.stage_evpi_status!r}. "
+                "A status is present exactly when stage_evpi is null (a skip reason); "
+                "a computed value (including 0.0) carries no status."
+            )
+        return self
 
 
 class SequentialAnalysisResponse(BaseModel):

@@ -25,6 +25,7 @@ from src.models.robustness_v2 import (
     RobustnessRequestV2,
     StrengthDistribution,
 )
+from src.models.response_v2 import CorrelationModelV2
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 from src.utils.correlation import (
     HIGHAM_METHOD,
@@ -33,6 +34,29 @@ from src.utils.correlation import (
     is_positive_semidefinite,
     nearest_correlation_higham,
 )
+
+
+class TestCorrelationModelPresentIffActive:
+    """Altitude Q1 (C3): sibling-presence emission-iff on CorrelationModelV2 — the
+    block is emitted only when correlation is active, so active must be True."""
+
+    def _kw(self, **over):
+        kw = dict(
+            method="gaussian_copula_v1",
+            active=True,
+            correlated_factors=["fa", "fb"],
+            n_pairs=1,
+            tail_dependence_note="Gaussian copula has zero tail dependence.",
+        )
+        kw.update(over)
+        return kw
+
+    def test_active_true_ok(self):
+        assert CorrelationModelV2(**self._kw()).active is True
+
+    def test_active_false_rejected(self):
+        with pytest.raises(ValidationError):
+            CorrelationModelV2(**self._kw(active=False))
 
 
 # =============================================================================

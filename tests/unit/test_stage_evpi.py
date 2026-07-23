@@ -20,6 +20,8 @@ from src.models.requests import (
     SequentialGraphEdge,
     SequentialGraphNode,
 )
+from pydantic import ValidationError
+
 from src.models.responses import SequentialAnalysisResponse, StageAnalysis
 from src.services.sequential_decision import SequentialDecisionEngine
 
@@ -322,3 +324,39 @@ def test_optimal_waiting_value_absent_stage_evpi_present_on_response(engine):
         assert "optimal_waiting_value" not in sa
     # at least the decision stage carries stage_evpi
     assert any("stage_evpi" in sa for sa in dumped["stage_analyses"])
+
+
+class TestStageEvpiStatusEmissionIff:
+    """Altitude Q1 (C3): sibling-presence emission-iff on StageAnalysis, fail-loud."""
+
+    def _base(self, **over):
+        kw = dict(
+            stage_index=0,
+            stage_label="S",
+            options_at_stage=[],
+            resolved_uncertainty=0.0,
+            stage_evpi=11220.0,
+            stage_evpi_status=None,
+        )
+        kw.update(over)
+        return kw
+
+    def test_computed_value_no_status_ok(self):
+        StageAnalysis(**self._base(stage_evpi=0.0, stage_evpi_status=None))  # incl 0.0
+        StageAnalysis(**self._base(stage_evpi=11220.0, stage_evpi_status=None))
+
+    def test_null_value_with_status_ok(self):
+        StageAnalysis(**self._base(stage_evpi=None, stage_evpi_status="no_decision_node"))
+        StageAnalysis(
+            **self._base(stage_evpi=None, stage_evpi_status="skipped_joint_space_too_large")
+        )
+
+    def test_value_with_status_rejected(self):
+        # A real value must NOT carry a skip reason (fabricated status).
+        with pytest.raises(ValidationError):
+            StageAnalysis(**self._base(stage_evpi=5.0, stage_evpi_status="no_decision_node"))
+
+    def test_null_value_without_status_rejected(self):
+        # A null value must disclose WHY (no silent null).
+        with pytest.raises(ValidationError):
+            StageAnalysis(**self._base(stage_evpi=None, stage_evpi_status=None))
