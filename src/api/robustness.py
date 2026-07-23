@@ -455,15 +455,23 @@ async def analyze_robustness(
             regions_found=analysis.region_count,
         )
 
-        # Create response with metadata. sampling=True (A3, 2026-07-23): robustness
-        # runs real Monte Carlo, so config_details honestly advertises
-        # monte_carlo_samples. This is the default, so the wire is byte-unchanged;
-        # it is stated explicitly so every live route declares its own sampling
-        # nature at the call site (derive-don't-mirror; no route list in the helper).
-        response = RobustnessResponse(
-            analysis=analysis,
-            metadata=create_response_metadata(request_id, sampling=True),
-        )
+        # Create the response, then attribute-assign the metadata.
+        #
+        # A3 Lane M (2026-07-23): RobustnessResponse.metadata is aliased `_metadata`
+        # with no populate_by_name, so populating it as a constructor kwarg BY FIELD
+        # NAME (`metadata=...`) was silently dropped by Pydantic v2 and the V1 wire
+        # served `_metadata: null` — isl_version / config_fingerprint /
+        # config_details never reached any V1 client. Attribute assignment sets the
+        # field by its Python name regardless of alias, so `_metadata` is now
+        # populated on the wire. This matches the working pattern the counterfactual
+        # (causal.py) and sequential (phase4.py) live routes already use.
+        #
+        # sampling=True: robustness runs real Monte Carlo, so config_details honestly
+        # advertises monte_carlo_samples (see generate_config_details). Each live
+        # route declares its own sampling nature at the call site (derive-don't-mirror;
+        # no route list in the helper).
+        response = RobustnessResponse(analysis=analysis)
+        response.metadata = create_response_metadata(request_id, sampling=True)
 
         logger.info(
             "robustness_analysis_completed",

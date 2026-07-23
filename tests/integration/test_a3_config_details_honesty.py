@@ -22,13 +22,18 @@ RED-first (route level):
 
 Positive control (trap #13 — the test can SEE the key when present): asserted at
 the HELPER level (`generate_config_details(sampling=True)` and the default both
-carry monte_carlo_samples). NOTE: a WIRE-level "present on robustness" control is
-impossible — RobustnessResponse.metadata is aliased `_metadata` with no
-populate_by_name, so the V1 /analyze route's `metadata=create_response_metadata(...)`
-(passed by field name) is silently dropped and `_metadata` is None on the wire
-(pre-existing alias-drop bug, out of scope). `test_robustness_wire_metadata_is_none`
-locks that byte-unchanged invariant so this change never accidentally starts
-populating it.
+carry monte_carlo_samples) AND, since A3 Lane M (2026-07-23), at the WIRE level on
+the robustness V1 /analyze route.
+
+A3 Lane M (2026-07-23): the pre-existing alias-drop bug is now FIXED.
+RobustnessResponse.metadata is aliased `_metadata` with no populate_by_name, so the
+V1 /analyze route's `RobustnessResponse(metadata=create_response_metadata(...))`
+(passed by FIELD NAME) was silently dropped by Pydantic v2 and `_metadata` served
+None on the wire — isl_version / config_fingerprint / config_details never reached
+any V1 client. The route now attribute-assigns the metadata after construction
+(matching the counterfactual/sequential live routes' working pattern), so the wire
+carries a POPULATED `_metadata`. `test_robustness_wire_metadata_is_populated`
+asserts that (and doubles as the wire-level positive control).
 """
 
 import pytest
@@ -123,16 +128,35 @@ def _sequential_payload() -> dict:
 # ===========================================================================
 class TestConfigDetailsPerRouteHonesty:
     @pytest.mark.asyncio
-    async def test_robustness_wire_metadata_is_none(self, client):
-        """Byte-unchanged invariant: the robustness V1 /analyze wire carries
-        `_metadata: None` (pre-existing alias-drop — the route constructs
-        RobustnessResponse(metadata=...) by field name against the `_metadata`
-        alias with no populate_by_name, so it is silently dropped). This change
-        must NOT alter that; if the alias bug is later fixed, this tripwire flips
-        and the robustness golden must be re-reviewed."""
+    async def test_robustness_wire_metadata_is_populated(self, client):
+        """A3 Lane M (2026-07-23): the robustness V1 /analyze wire emits a
+        POPULATED `_metadata`.
+
+        Previously the route constructed
+        `RobustnessResponse(metadata=create_response_metadata(...))` by FIELD NAME
+        against the `_metadata` alias with no populate_by_name, so Pydantic v2
+        silently dropped it and the wire served `_metadata: null` —
+        isl_version / config_fingerprint / config_details never reached any V1
+        client. The route now attribute-assigns the metadata after construction
+        (the counterfactual/sequential live routes' working pattern).
+
+        robustness draws real Monte Carlo (sampling=True), so config_details
+        honestly carries monte_carlo_samples. Doubles as the WIRE-level positive
+        control (trap #13): the suite can SEE a populated `_metadata` on a live
+        route."""
         resp = await client.post("/api/v1/robustness/analyze", json=_robustness_payload())
         assert resp.status_code == 200, resp.text
-        assert resp.json()["_metadata"] is None
+        meta = resp.json()["_metadata"]
+        assert meta is not None, "V1 _metadata dropped — alias-drop regression"
+        assert isinstance(meta["isl_version"], str) and meta["isl_version"]
+        assert isinstance(meta["config_fingerprint"], str) and meta["config_fingerprint"]
+        assert meta["request_id"]
+        cd = meta["config_details"]
+        assert "monte_carlo_samples" in cd
+        assert cd["monte_carlo_samples"] == get_settings().MAX_MONTE_CARLO_ITERATIONS
+        # honest sampling-route config_details: the other transparency keys remain
+        assert "confidence_level" in cd
+        assert "deterministic_mode" in cd
 
     @pytest.mark.asyncio
     async def test_counterfactual_omits_monte_carlo_samples(self, client):
