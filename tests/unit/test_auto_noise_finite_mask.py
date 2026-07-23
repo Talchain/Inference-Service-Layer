@@ -90,3 +90,33 @@ class TestAutoNoiseFiniteMask:
         )
         assert applied is False
         assert len(out["o1"]) == 3
+
+    def test_finite_samples_with_overflow_std_not_destroyed(self):
+        # VOI F-3 (hunter): the finite-mask protects against non-finite SAMPLES
+        # but NOT against variance OVERFLOW of finite samples. np.std squares the
+        # values, so all-finite draws of magnitude >= ~1.4e154 give
+        # outcome_std = inf, and rng.normal(0, inf) = nan noise then DESTROYS every
+        # finite sample the mask was built to protect.
+        analyzer = RobustnessAnalyzerV2()
+        # 100 ALL-FINITE samples of magnitude ~1e160 (max |x| < 1.8e308, so every
+        # entry is finite) — but np.std over them overflows to inf.
+        samples = list(np.random.default_rng(0).normal(0, 1e160, 100))
+        arr_in = np.array(samples)
+        assert np.isfinite(arr_in).all(), "precondition: pre-noise all-finite"
+        assert not np.isfinite(np.std(arr_in)), "precondition: np.std overflows to inf"
+
+        out, applied = analyzer._apply_auto_scaled_noise(
+            {"o1": list(samples)}, "rev", _outcome_nodes(), SeededRNG(0)
+        )
+        result = np.array(out["o1"])
+
+        # Pre-fix: noise = rng.normal(0, inf) = all-nan → noised[mask] = finite + nan
+        # → 0/100 finite (the finite majority the mask exists to protect is wiped).
+        # Post-fix: the option is skipped (non-finite std, like the no-finite-sample
+        # case), so all 100 finite samples survive unchanged.
+        assert int(np.sum(np.isfinite(result))) == 100
+        assert int(np.sum(np.isnan(result))) == 0
+        # Noise was NOT applied to this option (no representable std to scale from).
+        assert applied is False
+        # Honest degrade: samples pass through untouched (no fabricated noise).
+        assert out["o1"] == list(samples)

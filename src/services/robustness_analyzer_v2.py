@@ -2515,6 +2515,18 @@ class RobustnessAnalyzerV2:
                 continue  # no finite sample to scale noise from
             outcome_std = float(np.std(finite_samples))
 
+            # Variance OVERFLOW of finite samples (hunter F-3): np.std squares the
+            # values, so an all-FINITE population of magnitude >= ~1.4e154 makes
+            # outcome_std inf (or nan). rng.normal(0, inf) is then nan and would
+            # DESTROY every finite sample the mask exists to protect — mean nan →
+            # serializer 500 on a legal, otherwise-200 request. There is no
+            # representable noise scale here, so treat it exactly like the
+            # no-finite-sample case: skip noise for this option (honest degrade,
+            # finite samples pass through). The all-finite normal path has a finite
+            # std, so this guard is a no-op there → goldens are byte-identical.
+            if not math.isfinite(outcome_std):
+                continue
+
             # If std ≈ 0, skip noise (no model uncertainty to match).
             # Tolerance handles floating-point noise from identical intervention values.
             if outcome_std <= 1e-12:
