@@ -135,6 +135,29 @@ class TestFactorCorrelationValidation:
         with pytest.raises(ValidationError, match="no parameter_uncertainty"):
             _request([FactorCorrelation(factor_a="fa", factor_b="rev", rho=0.5)])
 
+    def test_unsupported_distribution_family_rejected_allowlist(self):
+        # B3 INFO-2: the correlation marginal check ALLOWLISTS supported families
+        # {normal, uniform}. A future distribution family that slips past
+        # ParameterUncertainty's own family validator must still be rejected by the
+        # correlation validator — not silently accepted (which would reach
+        # _copula_transform's fail-closed branch and, on the enhanced handler, a
+        # 500). A point_mass-only blocklist would let a new family through.
+        #
+        # Inject the fake family by mutating .distribution AFTER construction:
+        # ParameterUncertainty has no validate_assignment, so this bypasses its own
+        # family validator and simulates a family the request layer would accept.
+        unc = [
+            ParameterUncertainty(node_id="fa", distribution="normal", std=0.5),
+            ParameterUncertainty(node_id="fb", distribution="normal", std=0.5),
+        ]
+        req = _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.6)], unc=unc)
+        req.parameter_uncertainties[0].distribution = "lognormal"  # fresh obj, no shared state
+        with pytest.raises(ValueError) as exc:
+            req.validate_factor_correlations()
+        msg = str(exc.value)
+        assert "'fa'" in msg  # names the offending factor
+        assert "lognormal" in msg  # names the unsupported family, no other request value
+
     def test_point_mass_factor_rejected(self):
         unc = _UNC_NORMAL + [ParameterUncertainty(node_id="rev", distribution="point_mass")]
         # 'rev' is the goal/outcome; give it a point_mass uncertainty and correlate.
