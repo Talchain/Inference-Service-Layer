@@ -17,6 +17,7 @@ import re
 
 from src.constants import (
     DEFAULT_EXISTS_PROBABILITY,
+    MAX_FACTOR_CORRELATIONS,
     MAX_GRAPH_EDGES,
     MAX_GRAPH_NODES,
     MAX_OPTIONS,
@@ -274,6 +275,48 @@ class ParameterUncertainty(BaseModel):
         "extra": "ignore",
         "json_schema_extra": {
             "example": {"node_id": "marketing_spend", "distribution": "normal", "std": 2.5}
+        },
+    }
+
+
+class FactorCorrelation(BaseModel):
+    """A single pairwise correlation between two factor uncertainties (B3-S1).
+
+    Correlated factors are sampled JOINTLY via a Gaussian copula over their
+    existing marginals (D-23.4). Independence remains the default: correlation
+    is inert-when-absent and activates ONLY when at least one of these is
+    supplied. No default correlations are ever invented.
+
+    Semantic cross-checks (both factors exist, both carry a sampled
+    ``parameter_uncertainty``, distribution supported, no duplicate/conflicting
+    or invalid self-pairs) are enforced by
+    ``RobustnessRequestV2.validate_factor_correlations`` so the messages can name
+    the offending factor ids without echoing any other request values.
+    """
+
+    factor_a: str = Field(
+        ...,
+        pattern=r"^[a-z0-9_:-]+$",
+        description="ID of the first factor node in the correlated pair",
+    )
+    factor_b: str = Field(
+        ...,
+        pattern=r"^[a-z0-9_:-]+$",
+        description="ID of the second factor node in the correlated pair",
+    )
+    rho: float = Field(
+        ...,
+        ge=-1.0,
+        le=1.0,
+        description="Pearson correlation coefficient in [-1, 1] applied to the two "
+        "factors' marginals via a Gaussian copula",
+    )
+
+    # CIL 0.2: accept unknown fields per cross-service contract
+    model_config = {
+        "extra": "ignore",
+        "json_schema_extra": {
+            "example": {"factor_a": "marketing_spend", "factor_b": "demand", "rho": 0.6}
         },
     }
 
@@ -691,6 +734,23 @@ class RobustnessRequestV2(BaseModel):
         "repeated node_id produces byte-identical rows).",
     )
 
+    # B3-S1 correlated factors (D-23.4). Additive + optional. When absent the
+    # analysis is BYTE-IDENTICAL to the independent-factor path (inert-when-absent);
+    # when supplied, the named factors are sampled JOINTLY via a Gaussian copula
+    # over their marginals. No default correlations are ever invented.
+    factor_correlations: Optional[List[FactorCorrelation]] = Field(
+        None,
+        max_length=MAX_FACTOR_CORRELATIONS,
+        description="Pairwise correlations between factor uncertainties. Independence "
+        "is the default; supplying any pair activates a Gaussian copula over the named "
+        "factors' marginals. Each referenced factor must have a parameter_uncertainty "
+        "with a supported distribution (normal or uniform; point_mass factors have zero "
+        "variance and cannot be correlated). Under active correlation, independence-"
+        "assuming per-factor attributions (factor_sensitivity, factor_evpi, "
+        "conditional_winners) are omitted with a disclosure marker; joint quantities "
+        "(win_probability, downside, percentiles) remain valid.",
+    )
+
     # Goal threshold configuration (single constraint, legacy)
     goal_threshold: Optional[float] = Field(
         None,
@@ -809,6 +869,78 @@ class RobustnessRequestV2(BaseModel):
                     raise ValueError(
                         f"GoalConstraint references non-existent node: {constraint.node_id}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def validate_factor_correlations(self) -> "RobustnessRequestV2":
+        """Validate factor_correlations (B3-S1) → fail closed with a typed 422.
+
+        Hard-invalid inputs (D-23.4) are rejected here so a malformed correlation
+        never reaches the copula sampler. Messages name the offending factor
+        id(s) only — never any other request value:
+
+        - a referenced factor is not a graph node (unknown factor id),
+        - a referenced factor has no parameter_uncertainty (nothing to correlate),
+        - a referenced factor's distribution is point_mass (zero variance — a
+          correlation is ill-defined; STOP-gate rather than approximate),
+        - a self-pair (factor_a == factor_b) with rho != 1.0 (a factor is
+          perfectly correlated with itself by definition),
+        - a duplicate unordered pair {a, b} (redundant or conflicting).
+
+        ``rho`` bounds are enforced by the FactorCorrelation field itself.
+        """
+        if not self.factor_correlations:
+            return self
+
+        node_ids = {node.id for node in self.graph.nodes}
+        # Distribution per factor that actually has a sampled uncertainty.
+        dist_by_factor = {
+            u.node_id: u.distribution for u in (self.parameter_uncertainties or [])
+        }
+
+        seen_pairs: set[tuple[str, str]] = set()
+        for corr in self.factor_correlations:
+            a, b = corr.factor_a, corr.factor_b
+
+            # Self-pair: only a redundant rho==1.0 is tolerated (diagonal no-op).
+            if a == b:
+                if corr.rho != 1.0:
+                    raise ValueError(
+                        "factor_correlations: self-correlation for factor "
+                        f"'{a}' must have rho=1.0 (a factor is perfectly "
+                        "correlated with itself)"
+                    )
+                # rho == 1.0 self-pair is a no-op; still range/existence-checked below.
+
+            for factor_id in (a, b):
+                if factor_id not in node_ids:
+                    raise ValueError(
+                        "factor_correlations references non-existent factor node: "
+                        f"{factor_id}"
+                    )
+                if factor_id not in dist_by_factor:
+                    raise ValueError(
+                        f"factor_correlations references factor '{factor_id}' which "
+                        "has no parameter_uncertainty; correlation requires both "
+                        "factors to carry a sampled uncertainty"
+                    )
+                if dist_by_factor[factor_id] == "point_mass":
+                    raise ValueError(
+                        "factor_correlations: correlation not supported for "
+                        f"distribution type 'point_mass' (factor '{factor_id}' has "
+                        "zero variance)"
+                    )
+
+            if a != b:
+                key = (a, b) if a <= b else (b, a)
+                if key in seen_pairs:
+                    raise ValueError(
+                        "factor_correlations contains a duplicate pair for factors "
+                        f"'{key[0]}' and '{key[1]}' (each unordered pair may appear "
+                        "at most once)"
+                    )
+                seen_pairs.add(key)
+
         return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
