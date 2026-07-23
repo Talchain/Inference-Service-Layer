@@ -52,6 +52,10 @@ from src.models.robustness_v2 import (
     StabilityThresholdsResponse,
 )
 from src.models.response_v2 import (
+    SUPPRESSED_ATTR_CONDITIONAL_WINNERS,
+    SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
+    SUPPRESSED_ATTR_P_WIN_SENSITIVITY,
+    SUPPRESSED_ATTR_STABILITY_THRESHOLDS,
     CorrelationModelV2,
     CorrelationProjectionV2,
     ZeroSensitivityReason,
@@ -1610,6 +1614,13 @@ class RobustnessAnalyzerV2:
                 request, option_outcomes, sampler, rng_edge, evaluator
             )
 
+        # B3-S1 (D-23.4) suppression RECORD (not PREDICT): each compute-gate below
+        # that skips its block BECAUSE of active correlation appends to this list at
+        # the skip site; `_build_correlation_disclosure` emits exactly this record, so
+        # the manifest cannot drift from what the run actually withheld (altitude Q2,
+        # CLAUDE.md #12). Order follows code (gate) order.
+        suppressed_attributions: List[str] = []
+
         # Compute factor sensitivity if factor uncertainties are specified.
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor OAT
         # elasticity perturbs one factor holding the others at their mean, an
@@ -1617,14 +1628,20 @@ class RobustnessAnalyzerV2:
         # correlated factors. Omitted (absent, not fabricated) with the
         # correlation_model disclosure marker naming the reason.
         factor_sensitivity: List[FactorSensitivityResult] = []
-        if (
-            factor_sampler.has_uncertainties()
-            and "sensitivity" in request.analysis_types
-            and not correlation_active
-        ):
-            factor_sensitivity = self._compute_factor_sensitivity(
-                request, option_outcomes, rng_factor, evaluator
-            )
+        if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
+            if correlation_active:
+                suppressed_attributions.append(SUPPRESSED_ATTR_FACTOR_SENSITIVITY)
+                # stability_thresholds is a CHILD of factor_sensitivity's bootstrap
+                # (which runs unconditionally whenever there are uncertainties, so it
+                # is emitted iff factor_sensitivity ran). It therefore vanishes with
+                # factor_sensitivity under correlation — record it at the SAME skip
+                # site so the manifest names it too (hunter F-1: it previously
+                # vanished silently, unnamed).
+                suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
+            else:
+                factor_sensitivity = self._compute_factor_sensitivity(
+                    request, option_outcomes, rng_factor, evaluator
+                )
 
         # Compute conditional winners (factor-partitioned win probabilities).
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — a single-factor
@@ -1633,18 +1650,17 @@ class RobustnessAnalyzerV2:
         # partners, so the per-factor attribution is confounded. Omitted with the
         # disclosure marker (joint win_probability itself stays valid).
         conditional_winners = None
-        if (
-            factor_sampler.has_uncertainties()
-            and len(request.options) > 1
-            and not correlation_active
-        ):
-            conditional_winners = self._compute_conditional_winners(
-                factor_values_per_sample,
-                winner_per_sample,
-                option_outcomes,
-                factor_sampler,
-                request,
-            )
+        if factor_sampler.has_uncertainties() and len(request.options) > 1:
+            if correlation_active:
+                suppressed_attributions.append(SUPPRESSED_ATTR_CONDITIONAL_WINNERS)
+            else:
+                conditional_winners = self._compute_conditional_winners(
+                    factor_values_per_sample,
+                    winner_per_sample,
+                    option_outcomes,
+                    factor_sampler,
+                    request,
+                )
 
         # Compute robustness assessment (with alternative winner analysis)
         robustness = self._compute_robustness(
@@ -1798,7 +1814,10 @@ class RobustnessAnalyzerV2:
         # code (see _optional_phase_unavailable_warning) — but its ``field`` now
         # points at the renamed wire field ``p_win_sensitivity``.
         p_win_sensitivity = None
-        if request.include_voi and factor_sampler.has_uncertainties() and not correlation_active:
+        if request.include_voi and factor_sampler.has_uncertainties() and correlation_active:
+            # SUPPRESSED under active correlation — record at the skip site.
+            suppressed_attributions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
+        elif request.include_voi and factor_sampler.has_uncertainties():
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.EVPI_MIN_BUDGET_MS:
                 elapsed_ms = _elapsed_ms()
@@ -1871,6 +1890,10 @@ class RobustnessAnalyzerV2:
             # this is the exact cap the emission clamps to (with disclosure).
             finite_regrets = [r for r in pre_noise_expected_regret.values() if math.isfinite(r)]
             decision_evpi_bound = min(finite_regrets) if finite_regrets else None
+            # Per-factor estimator failures degrade IN-LOOP (that factor omitted,
+            # computable rows kept — hunter F-4). This outer guard is a last-resort
+            # for an unexpected WHOLE-call failure (not a per-factor estimator raise),
+            # preserving the never-500 contract; on legal input it is not reached.
             try:
                 factor_evppi = self._compute_factor_evppi(
                     request,
@@ -1880,7 +1903,7 @@ class RobustnessAnalyzerV2:
                     decision_evpi_bound,
                     correlation_active,
                 )
-            except Exception:  # pragma: no cover - defensive degrade-with-disclosure
+            except Exception:
                 self.logger.warning("factor_evppi_failed", exc_info=True)
                 factor_evppi = None
                 inference_warnings.append(
@@ -1952,7 +1975,7 @@ class RobustnessAnalyzerV2:
         # Carries the tail-independence caveat, any Higham PSD projection, and the
         # manifest of suppressed independence-assuming per-factor attributions.
         correlation_model = self._build_correlation_disclosure(
-            request, correlation_plan, factor_sampler.has_uncertainties()
+            request, correlation_plan, suppressed_attributions
         )
 
         # Include stability thresholds when bootstrap stability was computed
@@ -2047,17 +2070,22 @@ class RobustnessAnalyzerV2:
     def _build_correlation_disclosure(
         request: RobustnessRequestV2,
         correlation_plan: Optional[CorrelationPlan],
-        has_uncertainties: bool,
+        suppressed_attributions: List[str],
     ) -> Optional[CorrelationModelV2]:
         """Assemble the ``correlation_model`` disclosure block (B3-S1, D-23.4).
 
         Returns None when correlation is inactive. When active it carries the
         method tag, the MANDATORY tail-independence caveat, any Higham PSD
         projection, and the manifest of suppressed independence-assuming per-
-        factor attributions. Only attributions that WOULD have been computed
-        (their enabling preconditions hold) are listed as suppressed — a field
-        that was never going to be emitted is absent for a different reason and is
-        not claimed as correlation-suppressed.
+        factor attributions.
+
+        RECORD, not PREDICT (altitude Q2): ``suppressed_attributions`` is the list
+        the compute path APPENDED to at each skip site where a block was withheld
+        because of active correlation — it is the ground truth of what the run
+        actually skipped, not a second precondition-forecast that could drift from
+        the gates (CLAUDE.md #12). This includes ``stability_thresholds`` (hunter
+        F-1), which rides on factor_sensitivity's bootstrap and previously vanished
+        unnamed.
         """
         if correlation_plan is None:
             return None
@@ -2075,18 +2103,6 @@ class RobustnessAnalyzerV2:
             else None
         )
 
-        suppressed: List[str] = []
-        if has_uncertainties and "sensitivity" in request.analysis_types:
-            suppressed.append("factor_sensitivity")
-        if has_uncertainties and len(request.options) > 1:
-            suppressed.append("conditional_winners")
-        if has_uncertainties and request.include_voi:
-            # S2 (D-23.8): the win-probability sensitivity block (renamed from
-            # factor_evpi) stays suppressed under correlation (off-manifold OAT).
-            # The NEW factor_evppi is NOT listed here — it is a conditional-
-            # expectation quantity on the joint copula samples and IS emitted.
-            suppressed.append("p_win_sensitivity")
-
         return CorrelationModelV2(
             method=CORRELATION_METHOD,
             active=True,
@@ -2095,7 +2111,7 @@ class RobustnessAnalyzerV2:
             tail_dependence="none",
             tail_dependence_note=_CORRELATION_TAIL_NOTE,
             psd_projection=psd_projection,
-            suppressed_attributions=suppressed,
+            suppressed_attributions=list(suppressed_attributions),
             suppression_reason=_CORRELATION_SUPPRESSION_REASON,
         )
 
@@ -2514,6 +2530,18 @@ class RobustnessAnalyzerV2:
             if finite_samples.size == 0:
                 continue  # no finite sample to scale noise from
             outcome_std = float(np.std(finite_samples))
+
+            # Variance OVERFLOW of finite samples (hunter F-3): np.std squares the
+            # values, so an all-FINITE population of magnitude >= ~1.4e154 makes
+            # outcome_std inf (or nan). rng.normal(0, inf) is then nan and would
+            # DESTROY every finite sample the mask exists to protect — mean nan →
+            # serializer 500 on a legal, otherwise-200 request. There is no
+            # representable noise scale here, so treat it exactly like the
+            # no-finite-sample case: skip noise for this option (honest degrade,
+            # finite samples pass through). The all-finite normal path has a finite
+            # std, so this guard is a no-op there → goldens are byte-identical.
+            if not math.isfinite(outcome_std):
+                continue
 
             # If std ≈ 0, skip noise (no model uncertainty to match).
             # Tolerance handles floating-point noise from identical intervention values.
@@ -2975,6 +3003,38 @@ class RobustnessAnalyzerV2:
                 "consider narrowing uncertainty"
             )
 
+    @staticmethod
+    def _intervention_factor_union(request: RobustnessRequestV2) -> set:
+        """The D-U lever set: factor IDs that ANY option intervenes on (union across
+        all options). A factor in this set is a CHOICE, not information to buy — it is
+        the single source of truth for lever identity, consulted by BOTH
+        ``_compute_factor_sensitivity`` (INTERVENTION_OVERRIDE detection) and
+        ``_compute_factor_evppi`` (lever omission). Derive-don't-mirror (CLAUDE.md
+        #12): one definition, so the two sites cannot fork lever identity. Used for
+        membership tests only, so element order is irrelevant to determinism.
+        """
+        return {
+            factor_id
+            for option in request.options
+            for factor_id in (option.interventions or {})
+        }
+
+    @staticmethod
+    def _dedup_uncertainties(request: RobustnessRequestV2) -> List:
+        """Deduplicate parameter_uncertainties by node_id, first-seen order (dict
+        preserves insertion order → deterministic). Parse-time validation rejects
+        duplicate node_ids with a 422, but a direct internal caller could bypass it,
+        so a repeated node_id can never double-count in the per-factor VOI loops."""
+        return list({u.node_id: u for u in (request.parameter_uncertainties or [])}.values())
+
+    @staticmethod
+    def _per_factor_seed(seed: int, phase: str, node_id: str) -> int:
+        """Deterministic per-factor sub-seed for the VOI estimators. The ``phase``
+        tag ('evpi' / 'evppi') INTENTIONALLY forks the RNG stream so the two
+        estimators never share permutation/redraw randomness (drift-tolerant by
+        design — the tag is the only per-site variation)."""
+        return int(hashlib.sha256(f"{seed}:{phase}:{node_id}".encode()).hexdigest()[:8], 16)
+
     def _compute_factor_sensitivity(
         self,
         request: RobustnessRequestV2,
@@ -3044,17 +3104,11 @@ class RobustnessAnalyzerV2:
         ref_option = request.options[0]
         baseline_mean = float(np.mean(baseline_outcomes[ref_option.id]))
 
-        # Build set of intervention factor IDs for INTERVENTION_OVERRIDE detection.
-        # D-U ruling (union-across-options): a factor ANY option intervenes on is a
-        # lever — not just the reference (first) option's targets. Previously this
-        # set was built from options[0] only, so a factor pinned by a non-first
-        # option was published with a non-lever zero_reason while union-side
-        # consumers (CEE, PLoT coaching) suppressed it as a lever.
-        # The set is used for membership tests only, so ordering cannot affect
-        # determinism.
-        intervention_factor_ids = {
-            factor_id for option in request.options for factor_id in (option.interventions or {})
-        }
+        # Intervention factor IDs for INTERVENTION_OVERRIDE detection. D-U ruling
+        # (union-across-options): a factor ANY option intervenes on is a lever — not
+        # just the reference (first) option's targets. Shared source of truth with
+        # _compute_factor_evppi's lever omission (derive-don't-mirror).
+        intervention_factor_ids = self._intervention_factor_union(request)
 
         # Diagnostic: log baseline
         self.logger.info(
@@ -4562,20 +4616,16 @@ class RobustnessAnalyzerV2:
         if not request.parameter_uncertainties:
             return None
 
-        # D-U lever identity: UNION of intervention targets across ALL options
-        # (reuse _compute_factor_sensitivity's exact derivation — derive, don't
-        # mirror). A factor in this set is a lever; its "uncertainty" is a choice.
-        intervention_factor_ids = {
-            factor_id
-            for option in request.options
-            for factor_id in (option.interventions or {})
-        }
+        # D-U lever identity: UNION of intervention targets across ALL options —
+        # the SAME source of truth _compute_factor_sensitivity consults, via the
+        # shared _intervention_factor_union helper (derive, don't mirror: a called
+        # function cannot drift, a re-typed comprehension can). A factor in this set
+        # is a lever; its "uncertainty" is a choice.
+        intervention_factor_ids = self._intervention_factor_union(request)
 
         # Deduplicate uncertainties by node_id (parse-time validation already
         # rejects duplicates; defensive, first-seen order for determinism).
-        unique_uncertainties = list(
-            {u.node_id: u for u in request.parameter_uncertainties}.values()
-        )
+        unique_uncertainties = self._dedup_uncertainties(request)
 
         n_samples = len(factor_values_per_sample)
         results: List[Dict[str, Any]] = []
@@ -4594,18 +4644,36 @@ class RobustnessAnalyzerV2:
             except (KeyError, IndexError):
                 continue
 
-            # Deterministic per-factor seed for the permutation-null floor (mirrors
-            # the _compute_evpi per-factor seeding pattern).
-            floor_seed = int(
-                hashlib.sha256(f"{seed}:evppi:{fid}".encode()).hexdigest()[:8], 16
-            )
-            est = factor_evppi_estimate(theta, pre_noise_option_outcomes, seed=floor_seed)
+            # Deterministic per-factor seed for the permutation-null floor.
+            floor_seed = self._per_factor_seed(seed, "evppi", fid)
+            # Per-factor degrade (hunter F-4): a single factor whose estimator raises
+            # (e.g. a poisoned ±inf theta on a goal-disconnected factor makes
+            # Polynomial.fit raise LinAlgError) must NOT drop the WHOLE factor_evppi
+            # block. Omit THIS factor (missing != zero — no fabricated value) and keep
+            # every other factor's perfectly-computable row.
+            try:
+                est = factor_evppi_estimate(theta, pre_noise_option_outcomes, seed=floor_seed)
+            except Exception:
+                self.logger.warning(
+                    "factor_evppi_estimator_error",
+                    extra={"factor_id": fid},
+                    exc_info=True,
+                )
+                continue
 
             # Howard non-negativity clamp — DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by
             # construction for the regression estimator (LS mean-preservation +
             # Jensen), so this never fires on the live path; a clamped_low=True in
             # telemetry would mean the estimator changed. Kept as defence-in-depth.
             clamped_low = est.evppi_raw < 0.0
+            if clamped_low:
+                # Altitude Q5: fire the switch the instant it trips instead of relying
+                # on a human spotting the bool on the wire. A negative raw means the
+                # estimator lost its Howard >= 0 guarantee (e.g. a lost intercept).
+                self.logger.warning(
+                    "evppi_estimator_regressed",
+                    extra={"factor_id": fid, "evppi_raw": est.evppi_raw},
+                )
             evppi = max(0.0, est.evppi_raw)
 
             # Per-factor ≤ whole-decision EVPI theorem: cap at decision_evpi.
@@ -4616,10 +4684,21 @@ class RobustnessAnalyzerV2:
 
             below_resolution = evppi <= est.noise_floor
 
+            # Clamp-vs-round ordering (hunter F-2): round(.,6) can nudge a clamped
+            # value UP past the raw decision_evpi bound by <=5e-7, breaking the
+            # documented evppi <= decision_evpi on the wire. Re-clamp AFTER rounding
+            # against the RAW bound (which is <= the wire decision_evpi, since the
+            # bound is min over ALL options and the wire minimises over the
+            # downside-bearing subset). Non-clamp-binding rows are unaffected —
+            # round(evppi,6) < bound there, so the min is a no-op and goldens hold.
+            evppi_emitted = round(evppi, 6)
+            if decision_evpi_bound is not None:
+                evppi_emitted = min(evppi_emitted, decision_evpi_bound)
+
             results.append(
                 {
                     "factor_id": fid,
-                    "evppi": round(evppi, 6),
+                    "evppi": evppi_emitted,
                     # Pre-clamp raw estimate + audit components (mirrors
                     # p_win_sensitivity's current_metric/perfect_metric auditability).
                     "evppi_raw": round(est.evppi_raw, 6),
@@ -4703,9 +4782,7 @@ class RobustnessAnalyzerV2:
         # time, but a direct internal caller could bypass it. Dedup by node_id,
         # keeping first-seen order (dict preserves insertion order → deterministic)
         # so a repeated node_id can never re-trigger the EVPI multiplier here.
-        unique_uncertainties = list(
-            {u.node_id: u for u in request.parameter_uncertainties}.values()
-        )
+        unique_uncertainties = self._dedup_uncertainties(request)
 
         # F7: internal wall-clock deadline (was entry-gated only). deadline anchors
         # t0 at the EVPI phase; budget_ms is the remaining governing request budget
@@ -4779,9 +4856,8 @@ class RobustnessAnalyzerV2:
                 u for u in unique_uncertainties if u.node_id != uncertainty.node_id
             ]
 
-            # Deterministic seed per factor
-            factor_seed_str = f"{seed}:evpi:{uncertainty.node_id}"
-            factor_seed = int(hashlib.sha256(factor_seed_str.encode()).hexdigest()[:8], 16)
+            # Deterministic seed per factor.
+            factor_seed = self._per_factor_seed(seed, "evpi", uncertainty.node_id)
 
             perfect_rng_edge = SeededRNG(factor_seed)
             perfect_rng_factor = SeededRNG(factor_seed + 1)

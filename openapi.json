@@ -1996,6 +1996,85 @@
         "title": "FactorCorrelation",
         "type": "object"
       },
+      "FactorEvppiEntryV2": {
+        "description": "One per-factor EVPPI entry (S2, D-23.8). Altitude Q1: the more\nsafety-critical of the VOI blocks (it hosts the clamped_low DEAD-MAN'S-SWITCH and\ntwo clamp-audit booleans) was the LESS typed \u2014 a bare ``Dict[str, Any]`` \u2014 than its\nsibling ``FactorSensitivityV2``. Typed here so a producer typo, a dropped status,\nor a wrong-typed audit field fails loud in Pydantic instead of serialising clean.\n\nField ORDER is load-bearing: it matches the emission dict in\n``_compute_factor_evppi`` exactly, so serialization is byte-identical to the prior\n``Dict[str, Any]`` payload (verified pre/post on multiple shapes incl.\ncorrelation-active).",
+        "properties": {
+          "baseline_max_expected_utility": {
+            "title": "Baseline Max Expected Utility",
+            "type": "number"
+          },
+          "clamped_high": {
+            "title": "Clamped High",
+            "type": "boolean"
+          },
+          "clamped_low": {
+            "title": "Clamped Low",
+            "type": "boolean"
+          },
+          "conditional_max_expected_utility": {
+            "title": "Conditional Max Expected Utility",
+            "type": "number"
+          },
+          "correlation_active": {
+            "title": "Correlation Active",
+            "type": "boolean"
+          },
+          "evppi": {
+            "title": "Evppi",
+            "type": "number"
+          },
+          "evppi_raw": {
+            "title": "Evppi Raw",
+            "type": "number"
+          },
+          "factor_id": {
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "n_samples": {
+            "title": "N Samples",
+            "type": "integer"
+          },
+          "noise_floor": {
+            "title": "Noise Floor",
+            "type": "number"
+          },
+          "regression_degree": {
+            "title": "Regression Degree",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "units": {
+            "title": "Units",
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor_id",
+          "evppi",
+          "evppi_raw",
+          "baseline_max_expected_utility",
+          "conditional_max_expected_utility",
+          "units",
+          "method",
+          "regression_degree",
+          "n_samples",
+          "clamped_low",
+          "clamped_high",
+          "noise_floor",
+          "status",
+          "correlation_active"
+        ],
+        "title": "FactorEvppiEntryV2",
+        "type": "object"
+      },
       "FactorSensitivityResult": {
         "description": "Sensitivity to a factor node's value (Phase 2A Part 2).",
         "example": {
@@ -3061,7 +3140,7 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/FactorEvppiEntryV2"
                 },
                 "type": "array"
               },

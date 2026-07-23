@@ -25,6 +25,7 @@ from src.models.robustness_v2 import (
     RobustnessRequestV2,
     StrengthDistribution,
 )
+from src.models.response_v2 import CorrelationModelV2
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 from src.utils.correlation import (
     HIGHAM_METHOD,
@@ -33,6 +34,29 @@ from src.utils.correlation import (
     is_positive_semidefinite,
     nearest_correlation_higham,
 )
+
+
+class TestCorrelationModelPresentIffActive:
+    """Altitude Q1 (C3): sibling-presence emission-iff on CorrelationModelV2 — the
+    block is emitted only when correlation is active, so active must be True."""
+
+    def _kw(self, **over):
+        kw = dict(
+            method="gaussian_copula_v1",
+            active=True,
+            correlated_factors=["fa", "fb"],
+            n_pairs=1,
+            tail_dependence_note="Gaussian copula has zero tail dependence.",
+        )
+        kw.update(over)
+        return kw
+
+    def test_active_true_ok(self):
+        assert CorrelationModelV2(**self._kw()).active is True
+
+    def test_active_false_rejected(self):
+        with pytest.raises(ValidationError):
+            CorrelationModelV2(**self._kw(active=False))
 
 
 # =============================================================================
@@ -369,6 +393,41 @@ class TestCorrelationSuppression:
         cm = resp.correlation_model
         assert "p_win_sensitivity" not in cm.suppressed_attributions
         assert "factor_sensitivity" in cm.suppressed_attributions
+
+    def test_stability_thresholds_named_in_manifest_and_actually_vanishes(self, analyzer):
+        # Hunter F-1: stability_thresholds rides on factor_sensitivity's bootstrap,
+        # so under active correlation it silently vanishes. RECORD-not-PREDICT now
+        # names it in the manifest at the factor_sensitivity skip site.
+        corr = [FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)]
+
+        # Positive control: WITHOUT correlation, stability_thresholds IS emitted
+        # (otherwise "it was suppressed" would be a vacuous claim).
+        baseline = analyzer.analyze(_request([]))
+        assert baseline.correlation_model is None
+        assert baseline.stability_thresholds is not None, (
+            "positive control: stability_thresholds must emit when correlation is off"
+        )
+
+        # Under active correlation it vanishes from the response...
+        resp = analyzer.analyze(_request(corr))
+        assert resp.stability_thresholds is None
+        # ...and is NAMED as suppressed (RED pre-fix: absent from the manifest).
+        assert "stability_thresholds" in resp.correlation_model.suppressed_attributions
+        # co-recorded with its parent factor_sensitivity.
+        assert "factor_sensitivity" in resp.correlation_model.suppressed_attributions
+
+    def test_manifest_is_recorded_not_predicted_exact_set(self, analyzer):
+        # The full F-1 shape (sensitivity + 2 options + voi + factors, correlation
+        # active) records exactly the four blocks it actually skipped, in gate order.
+        resp = analyzer.analyze(
+            _request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.8)])
+        )
+        assert resp.correlation_model.suppressed_attributions == [
+            "factor_sensitivity",
+            "stability_thresholds",
+            "conditional_winners",
+            "p_win_sensitivity",
+        ]
 
     def test_joint_quantities_preserved(self, analyzer):
         # win_probability + downside stay present under correlation (joint-valid).

@@ -115,7 +115,8 @@ MAX_GRAPH_EDGES = 200
 MAX_OPTIONS = 10
 MAX_PARAMETER_UNCERTAINTIES = 50
 # B3-S1 correlated factors: pairwise correlation list cap. Bounded by the number
-# of distinct unordered pairs over the factor-uncertainty cap
-# (50*49/2 = 1225) — a request cannot express more without duplicates, which the
-# validator rejects anyway.
-MAX_FACTOR_CORRELATIONS = 1225
+# of distinct unordered pairs over the factor-uncertainty cap — a request cannot
+# express more without duplicates, which the validator rejects anyway. DERIVED from
+# MAX_PARAMETER_UNCERTAINTIES (not a hand-computed literal) so the cap tracks its own
+# stated derivation if MAX_PARAMETER_UNCERTAINTIES ever changes (CLAUDE.md #12).
+MAX_FACTOR_CORRELATIONS = MAX_PARAMETER_UNCERTAINTIES * (MAX_PARAMETER_UNCERTAINTIES - 1) // 2

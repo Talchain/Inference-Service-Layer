@@ -2,7 +2,7 @@
 intervention/context INPUTS on the LIVE /api/v1/causal/counterfactual route.
 
 Two residual classes, both closed in the single validation home
-(`CounterfactualEngine._require_resolvable_outcome`, which already carries the
+(`CounterfactualEngine._validate_counterfactual_inputs`, which already carries the
 PR#93 do/observe collision guard):
 
 1. The F3d residual (unknown KEY): an intervention (or context) key naming a

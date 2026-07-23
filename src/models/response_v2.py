@@ -1067,6 +1067,17 @@ class CorrelationProjectionV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+# Suppressed-attribution manifest tokens (B3-S1). Single source of truth shared by
+# the PRODUCER (the analyzer's correlation skip-site appends) and the CONSUMER
+# (response_builder's factor_sensitivity_status derivation), so the token cannot drift
+# across files (CLAUDE.md #12: a bare-string literal duplicated producer↔consumer is a
+# silent-drift seam — if the two spellings diverge the status quietly under-discloses).
+SUPPRESSED_ATTR_FACTOR_SENSITIVITY = "factor_sensitivity"
+SUPPRESSED_ATTR_STABILITY_THRESHOLDS = "stability_thresholds"
+SUPPRESSED_ATTR_CONDITIONAL_WINNERS = "conditional_winners"
+SUPPRESSED_ATTR_P_WIN_SENSITIVITY = "p_win_sensitivity"
+
+
 class CorrelationModelV2(BaseModel):
     """Disclosure block for the active factor-correlation model (B3-S1, D-23.4).
 
@@ -1121,6 +1132,50 @@ class CorrelationModelV2(BaseModel):
     )
 
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _present_iff_active(self) -> "CorrelationModelV2":
+        """Sibling-presence emission-iff (altitude Q1): this disclosure block is
+        emitted EXACTLY when correlation is active, so whenever it exists ``active``
+        must be True. Fail loud in Pydantic if a code path ever constructs it
+        inactive — the same fail-loud altitude as decision_evpi /
+        confidence_provenance, converging the enforcement depth."""
+        if self.active is not True:
+            raise ValueError(
+                "correlation_model emission-iff violated: the block is present "
+                f"but active={self.active!r} (it is emitted only when correlation "
+                "is active, so active must be True)."
+            )
+        return self
+
+
+class FactorEvppiEntryV2(BaseModel):
+    """One per-factor EVPPI entry (S2, D-23.8). Altitude Q1: the more
+    safety-critical of the VOI blocks (it hosts the clamped_low DEAD-MAN'S-SWITCH and
+    two clamp-audit booleans) was the LESS typed — a bare ``Dict[str, Any]`` — than its
+    sibling ``FactorSensitivityV2``. Typed here so a producer typo, a dropped status,
+    or a wrong-typed audit field fails loud in Pydantic instead of serialising clean.
+
+    Field ORDER is load-bearing: it matches the emission dict in
+    ``_compute_factor_evppi`` exactly, so serialization is byte-identical to the prior
+    ``Dict[str, Any]`` payload (verified pre/post on multiple shapes incl.
+    correlation-active).
+    """
+
+    factor_id: str
+    evppi: float
+    evppi_raw: float
+    baseline_max_expected_utility: float
+    conditional_max_expected_utility: float
+    units: str
+    method: str
+    regression_degree: int
+    n_samples: int
+    clamped_low: bool
+    clamped_high: bool
+    noise_floor: float
+    status: str
+    correlation_active: bool
 
 
 # =============================================================================
@@ -1252,7 +1307,7 @@ class ISLResponseV2(BaseModel):
 
     # Per-factor EVPPI (S2 — A3 VOI honesty, D-23.8). Additive-optional; regression
     # EVPPI on the retained joint CRN samples (no new sampling).
-    factor_evppi: Optional[List[Dict[str, Any]]] = Field(
+    factor_evppi: Optional[List[FactorEvppiEntryV2]] = Field(
         None,
         description="Per-factor Expected Value of Partial Perfect Information (EVPPI) "
         "in the SAME OUTCOME UNITS as outcome.mean and decision_evpi: for each "

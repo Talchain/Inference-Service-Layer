@@ -30,7 +30,7 @@ from src.models.robustness_v2 import (
     StrengthDistribution,
 )
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
-from src.utils.evppi import FactorEvppiEstimate
+from src.utils.evppi import REGRESSION_EVPPI_METHOD, FactorEvppiEstimate
 
 SQRT_2_OVER_PI = math.sqrt(2.0 / math.pi)
 
@@ -168,6 +168,35 @@ class TestLeverOmission:
         assert r.factor_evppi is None
 
 
+class TestInterventionFactorUnion:
+    """C1: the D-U lever set is a single shared helper consulted by BOTH
+    _compute_factor_sensitivity and _compute_factor_evppi (derive-don't-mirror)."""
+
+    def test_union_across_all_options_not_just_first(self):
+        req = _lever_request()  # opt_high & opt_low each intervene on factor_a
+        # Add a factor intervened ONLY by the SECOND option -> still a lever (union).
+        req.options[1].interventions["factor_b"] = 0.2
+        union = RobustnessAnalyzerV2._intervention_factor_union(req)
+        assert union == {"factor_a", "factor_b"}
+
+    def test_empty_when_no_interventions(self):
+        req = _mediator_request(n_samples=200)
+        req.options = [
+            InterventionOption(id="a", label="A", interventions={}),
+            InterventionOption(id="b", label="B", interventions={}),
+        ]
+        assert RobustnessAnalyzerV2._intervention_factor_union(req) == set()
+
+    def test_factor_evppi_omits_union_lever_via_shared_helper(self):
+        # factor_a is a lever (both options intervene); factor_b is free. The
+        # shared helper drives factor_evppi's omission -> factor_a absent, factor_b
+        # present. (If a site stopped using the helper, this would break.)
+        r = RobustnessAnalyzerV2().analyze(_lever_request())
+        ids = {e["factor_id"] for e in (r.factor_evppi or [])}
+        assert "factor_a" not in ids
+        assert "factor_b" in ids
+
+
 class TestClampDisclosure:
     """The Howard (>=0) and per-factor<=total clamps are tested deterministically
     by monkeypatching the estimator to return out-of-range raw values."""
@@ -200,9 +229,199 @@ class TestClampDisclosure:
         bound = _decision_evpi_bound(r)
         theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
         assert theta["clamped_high"] is True
-        # Emitted value is the bound rounded to 6 dp.
-        assert theta["evppi"] == round(bound, 6)
-        assert theta["evppi"] <= bound + 1e-6
+        # F-2 (B4): emitted value respects the RAW bound AFTER rounding
+        # (round-then-clamp). This fixture's bound sits in a round-UP window
+        # (round(bound,6) > bound), so the emitted value is the raw bound, NOT
+        # round(bound,6) — which pre-fix exceeded decision_evpi by ~5e-7.
+        assert theta["evppi"] == min(round(bound, 6), bound)
+        assert theta["evppi"] <= bound
+
+
+def _two_free_factor_request(n_samples=2000, seed=999):
+    """m is the lever (both options intervene); theta1 and theta2 are two FREE
+    uncertain factors, each with signal to the outcome. Both get factor_evppi rows.
+    Used to prove per-factor degradation: if one factor's estimator raises, the
+    OTHER factor's computable row must survive (hunter F-4)."""
+    nodes = [
+        NodeV2(id="theta1", kind="factor", label="T1", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="theta2", kind="factor", label="T2", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="m", kind="factor", label="M", observed_state=ObservedState(value=0.0)),
+        NodeV2(id="outcome", kind="outcome", label="Out", observed_state=ObservedState(value=0.0)),
+    ]
+    edges = [
+        EdgeV2(**{"from": "theta1"}, to="m", strength=StrengthDistribution(mean=1.0, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "m"}, to="outcome", strength=StrengthDistribution(mean=1.0, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "theta1"}, to="outcome", strength=StrengthDistribution(mean=-0.5, std=0.002), exists_probability=1.0),
+        EdgeV2(**{"from": "theta2"}, to="outcome", strength=StrengthDistribution(mean=0.7, std=0.002), exists_probability=1.0),
+    ]
+    return RobustnessRequestV2(
+        graph=GraphV2(nodes=nodes, edges=edges),
+        options=[
+            InterventionOption(id="opt_pin", label="Pin m", interventions={"m": 0.0}),
+            InterventionOption(id="opt_free", label="Free", interventions={}),
+        ],
+        goal_node_id="outcome",
+        seed=seed,
+        n_samples=n_samples,
+        parameter_uncertainties=[
+            ParameterUncertainty(node_id="theta1", distribution="normal", std=2.0),
+            ParameterUncertainty(node_id="theta2", distribution="normal", std=2.0),
+        ],
+        include_voi=True,
+    )
+
+
+class TestPerFactorEstimatorDegrade:
+    """Hunter F-4: one factor whose estimator raises (e.g. poisoned ±inf theta ->
+    Polynomial.fit LinAlgError) must NOT drop the ENTIRE factor_evppi block — the
+    other factors' computable rows are kept, the failing factor is omitted."""
+
+    def test_one_factor_estimator_error_keeps_other_rows(self, monkeypatch):
+        real = analyzer_mod.factor_evppi_estimate
+        state = {"n": 0}
+
+        def flaky(theta, option_outcomes, *, seed, **kw):
+            # First non-lever factor processed raises like Polynomial.fit on inf
+            # theta; the rest compute normally via the real estimator.
+            state["n"] += 1
+            if state["n"] == 1:
+                raise __import__("numpy").linalg.LinAlgError(
+                    "SVD did not converge in Linear Least Squares"
+                )
+            return real(theta, option_outcomes, seed=seed, **kw)
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", flaky)
+        r = RobustnessAnalyzerV2().analyze(_two_free_factor_request())
+
+        # Pre-fix: the raise propagates out of _compute_factor_evppi, the outer
+        # except drops the WHOLE block -> factor_evppi is None (RED here).
+        # Post-fix: the failing factor is omitted, the computable factor's row is kept.
+        assert r.factor_evppi is not None, "whole factor_evppi block was dropped"
+        ids = {e["factor_id"] for e in r.factor_evppi}
+        # Exactly one of the two free factors failed; the other survives.
+        assert len(r.factor_evppi) == 1, f"expected 1 surviving row, got {ids}"
+        # The surviving row is a real, honest computation (has a method + status).
+        surviving = r.factor_evppi[0]
+        assert surviving["method"] == REGRESSION_EVPPI_METHOD
+        assert surviving["status"] in ("resolved", "below_resolution")
+
+
+class TestFactorEvppiEntryTyped:
+    """C3 (altitude Q1): factor_evppi is a typed FactorEvppiEntryV2 model, not a bare
+    Dict[str, Any] — a producer typo / dropped status / wrong-typed audit field now
+    fails loud in Pydantic instead of serialising clean. Wire byte-identity to the
+    prior dict payload was verified pre/post on 4 shapes incl. correlation-active."""
+
+    def _valid(self, **over):
+        d = dict(
+            factor_id="fa",
+            evppi=0.1,
+            evppi_raw=0.11,
+            baseline_max_expected_utility=1.0,
+            conditional_max_expected_utility=1.1,
+            units="outcome",
+            method=REGRESSION_EVPPI_METHOD,
+            regression_degree=4,
+            n_samples=2000,
+            clamped_low=False,
+            clamped_high=False,
+            noise_floor=0.01,
+            status="resolved",
+            correlation_active=False,
+        )
+        d.update(over)
+        return d
+
+    def test_wire_model_types_factor_evppi(self):
+        # The V2 WIRE model (ISLResponseV2) types factor_evppi as the model, so a
+        # bad entry fails loud at the consumer boundary + openapi documents the shape.
+        # (The analyzer/V1 model keeps Dict[str, Any] by design — see C3 scope note.)
+        from typing import get_args
+
+        from src.models.response_v2 import FactorEvppiEntryV2, ISLResponseV2
+
+        ann = ISLResponseV2.model_fields["factor_evppi"].annotation
+        # Optional[List[FactorEvppiEntryV2]] -> FactorEvppiEntryV2 appears in the args.
+        flat = str(ann)
+        assert "FactorEvppiEntryV2" in flat, flat
+
+    def test_valid_dict_coerces(self):
+        from src.models.response_v2 import FactorEvppiEntryV2
+
+        FactorEvppiEntryV2(**self._valid())
+
+    def test_missing_field_rejected(self):
+        from src.models.response_v2 import FactorEvppiEntryV2
+
+        bad = self._valid()
+        del bad["status"]
+        with pytest.raises(Exception):
+            FactorEvppiEntryV2(**bad)
+
+    def test_wrong_typed_field_rejected(self):
+        from src.models.response_v2 import FactorEvppiEntryV2
+
+        with pytest.raises(Exception):
+            FactorEvppiEntryV2(**self._valid(clamped_low="nope"))
+
+
+class TestClampRoundOrdering:
+    """Hunter F-2: clamp-then-round(.,6) can ship evppi > decision_evpi by <=5e-7
+    when clamped_high binds and the bound sits in a round-UP window. The emitted
+    value must respect the (raw) bound AFTER rounding."""
+
+    def test_emitted_evppi_never_exceeds_bound_in_rounding_window(self, monkeypatch):
+        # Force clamped_high: a raw far above the bound -> evppi clamped to the bound.
+        def fake(theta, option_outcomes, *, seed, **kw):
+            return FactorEvppiEstimate(
+                evppi_raw=0.99,
+                conditional_max_expected_utility=1.0,
+                baseline_max_expected_utility=0.01,
+                noise_floor=0.0,
+                degree_used=4,
+                n_samples=len(list(theta)),
+                degenerate=False,
+            )
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", fake)
+
+        # A bound whose round(.,6) rounds UP past itself: round(0.12345675, 6)=0.123457.
+        bound = 0.12345675
+        assert round(bound, 6) > bound  # the hunter's rounding-window precondition
+
+        n = 8
+        req = RobustnessRequestV2(
+            graph=GraphV2(
+                nodes=[
+                    NodeV2(id="f", kind="factor", label="F", observed_state=ObservedState(value=0.0)),
+                    NodeV2(id="m", kind="factor", label="M", observed_state=ObservedState(value=0.0)),
+                    NodeV2(id="out", kind="outcome", label="Out", observed_state=ObservedState(value=0.0)),
+                ],
+                edges=[
+                    EdgeV2(**{"from": "f"}, to="out", strength=StrengthDistribution(mean=1.0, std=0.01), exists_probability=1.0),
+                    EdgeV2(**{"from": "m"}, to="out", strength=StrengthDistribution(mean=1.0, std=0.01), exists_probability=1.0),
+                ],
+            ),
+            options=[
+                InterventionOption(id="o1", label="A", interventions={"m": 0.0}),
+                InterventionOption(id="o2", label="B", interventions={"m": 1.0}),
+            ],
+            goal_node_id="out",
+            seed=1,
+            n_samples=100,  # request min; the direct call below uses the array length
+            parameter_uncertainties=[ParameterUncertainty(node_id="f", distribution="normal", std=1.0)],
+            include_voi=True,
+        )
+        pre_noise = {"o1": [float(i) for i in range(n)], "o2": [float(i) + 0.5 for i in range(n)]}
+        factor_values = [{"f": float(i) * 0.1} for i in range(n)]
+
+        rows = RobustnessAnalyzerV2()._compute_factor_evppi(
+            req, pre_noise, factor_values, seed=1, decision_evpi_bound=bound, correlation_active=False
+        )
+        row = {r["factor_id"]: r for r in rows}["f"]
+        assert row["clamped_high"] is True
+        # RED pre-fix: emitted 0.123457 > bound 0.12345675 by 2.5e-7.
+        assert row["evppi"] <= bound, f"emitted evppi {row['evppi']} exceeds decision_evpi bound {bound}"
 
 
 class TestCorrelationEmission:
