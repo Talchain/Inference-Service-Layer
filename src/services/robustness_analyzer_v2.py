@@ -89,7 +89,6 @@ from src.utils.downside import expected_regret_per_option
 from src.utils.evppi import (
     REGRESSION_EVPPI_METHOD,
     REGRESSION_EVPPI_NULL_PERMUTATIONS,
-    REGRESSION_EVPPI_POLY_DEGREE,
     factor_evppi_estimate,
 )
 from src.utils.correlation import CORRELATION_METHOD, CorrelationPlan, build_correlation_plan
@@ -248,7 +247,15 @@ FLIP_STABILITY_N_SEEDS = 10
 # population EVPPI (S2 regression) terms — both were UNPRICED, so a request with
 # max control_candidates was admitted charging ~90M actual work units against the
 # 24M ceiling. The formula SHAPE changed, so the version bumps.
-COMPLEXITY_FORMULA_VERSION = "v3-evpc-evppi-2026-07-24"
+# v4 (OC-1, D-23.17): recalibrated the EVPPI term against MEASURED phase wall-time
+# (benchmarks/oc1_evppi_recal.py, 27-cell S x U x O grid). The v3 term
+# (deg+1)*U*(1+K)*O*S over-charged 42-192x: the estimator solves every option in
+# ONE multi-RHS lstsq SVD (src/utils/evppi.py _inner_expected_max), so the phase
+# is near-O-flat (measured O=2 -> O=10 wall ratio ~1.6-1.9x, not 5x), and the
+# (deg+1) factor is second-order inside the SVD, not a multiplier. New term:
+# W_EVPPI_COEF*U*(1+K)*S — still conservative (>=1.9x margin at the worst measured
+# cell on loaded local hardware; more on typical shapes). Shape changed -> bump.
+COMPLEXITY_FORMULA_VERSION = "v4-evppi-recal-2026-07-25"
 
 # Per-phase structural weights (provisional; the calibration harness is the
 # source of truth for refining them — do not hand-tune without re-running it).
@@ -270,14 +277,23 @@ W_EVPC_COEF = BASE_COST_COEF  # 1 unit per (grid-point x sample x struct)
 # Full-population EVPPI (S2 regression) cost coefficient. _compute_factor_evppi runs,
 # per non-lever uncertain factor, (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) polynomial
 # regressions (1 real + K permutation-null fits) over the FULL retained population S —
-# NOT the min(S, EVPI_SAMPLE_CAP) subsample the p_win 'evpi' term prices. Each regression
-# evaluates the degree-(REGRESSION_EVPPI_POLY_DEGREE) fitted mean for all O options over
-# all S samples, i.e. (deg+1) work per (option, sample). Priced O-linearly per the D-23.12
-# formula n_factors*(1+K)*n_options*degree-work with degree-work = (deg+1)*S. This is the
-# conservative (over-charging) reading the ruling asked for: the estimator's E1-SAFE design
-# actually SHARES one multi-RHS SVD across options, so the true cost is sub-O-linear and this
-# term over-bounds it. PROVISIONAL — staging recalibration owed (mirrors the ceiling posture).
-W_EVPPI_DEGREE_COEF = REGRESSION_EVPPI_POLY_DEGREE + 1  # 5: per-(option,sample) degree work
+# NOT the min(S, EVPI_SAMPLE_CAP) subsample the p_win 'evpi' term prices.
+#
+# v4 RECALIBRATED (OC-1, D-23.17) against measured phase wall-time
+# (benchmarks/oc1_evppi_recal.py). What the measurement showed:
+#   * wall ~ linear in U*(1+K)*S (ms/(U*17*S) stable at ~110-280ns across the grid);
+#   * near-FLAT in O — each fit is ONE multi-RHS lstsq SVD shared across all options
+#     (src/utils/evppi.py _inner_expected_max; per-option work is only the cheap
+#     back-substitution), measured O=2 -> O=10 ratio ~1.6-1.9x vs the 5x the old *O
+#     factor charged;
+#   * the old (deg+1)=5 multiplier double-counted work already inside the SVD.
+# Net: the v3 term (deg+1)*U*(1+K)*O*S over-charged 42-192x, 422-ing legal requests
+# (e.g. S=10000/U=20/O=2 charged 34M against the 24M ceiling; measured wall ~0.4s).
+# At W_EVPPI_COEF=1 the charge still over-bounds the worst measured cell by >=1.9x
+# on loaded local hardware (ceiling-anchored units), more on typical shapes —
+# conservative direction preserved, margin lands in the 1.5-3x band on slower
+# staging hardware.
+W_EVPPI_COEF = 1  # unit per (factor-fit x permutation x sample); O-flat by design
 
 # PROVISIONAL admission ceiling in cost units.
 #
@@ -345,7 +361,7 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
 
         cost = S*O*W                                       (base MC, always)
              + (U+1)*min(S, EVPI_SAMPLE_CAP)*O*W           (EVPI/p_win, if include_voi & U>0)
-             + W_EVPPI_DEGREE_COEF*U*(1+K)*O*S             (full-pop EVPPI, if include_voi & U>0)
+             + W_EVPPI_COEF*U*(1+K)*S                      (full-pop EVPPI, if include_voi & U>0)
              + W_EVPC_COEF*S*W*Sum_c(len(c.values))        (EVPC, if control_candidates)
              + W_SENS_COEF*E*min(100, S//10)*W             (edge sensitivity)
              + W_EVAL_COEF*E*O                             (e-values, if include_e_values)
@@ -388,11 +404,13 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
             terms["evpi"] = (u + 1) * min(S, EVPI_SAMPLE_CAP) * O * W
             # Full-population EVPPI (S2 regression) — SEPARATE term because the
             # regression runs on the FULL retained population S (never the
-            # EVPI_SAMPLE_CAP subsample). (1+K) fits per factor, O options, S samples,
-            # (deg+1) work each. Uses the same defensive unique factor count u (an
-            # over-count vs the analyzer's lever-suppressed set — conservative).
+            # EVPI_SAMPLE_CAP subsample). (1+K) fits per factor over S samples;
+            # deliberately NO O factor — the estimator shares one multi-RHS SVD
+            # across options (v4 recalibration, see W_EVPPI_COEF). Uses the same
+            # defensive unique factor count u (an over-count vs the analyzer's
+            # lever-suppressed set — conservative).
             terms["evppi_full"] = (
-                W_EVPPI_DEGREE_COEF * u * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * O * S
+                W_EVPPI_COEF * u * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * S
             )
 
     # EVPC (S4 value-of-control) — grid do() over every (candidate, value) pair on
@@ -435,7 +453,7 @@ def build_compute_admission() -> Dict[str, Any]:
             "base_per_sample_per_option_per_struct": BASE_COST_COEF,
             "evpi_sample_cap": EVPI_SAMPLE_CAP,
             "evpc_coef": W_EVPC_COEF,
-            "evppi_full_degree_coef": W_EVPPI_DEGREE_COEF,
+            "evppi_full_coef": W_EVPPI_COEF,
             "evppi_null_permutations": REGRESSION_EVPPI_NULL_PERMUTATIONS,
             "sensitivity_coef": W_SENS_COEF,
             "evalue_coef": W_EVAL_COEF,
