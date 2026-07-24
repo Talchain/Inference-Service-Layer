@@ -139,13 +139,20 @@ class TestF11EngineLogRedaction:
         recs = [r for r in caplog.records if r.msg == "counterfactual_analysis_started"]
         assert recs, "expected the counterfactual_analysis_started log"
         rec = recs[0]
-        # redacted structured fields present (reads REAL data, not vacuous)
-        assert getattr(rec, "intervention_keys", None) == ["SecretPrice"]
+        # redacted structured fields present (reads REAL data, not vacuous).
+        # D-23.15 (Codex re-confirm F6, 25 Jul) tightened F11: identifier NAMES
+        # are client-model content too — the record now carries DIGESTS + count.
+        import hashlib as _h
+        assert getattr(rec, "intervention_keys", None) is None, "raw key names still logged"
+        assert getattr(rec, "intervention_keys_hash", None) == _h.sha256(
+            b"SecretPrice"
+        ).hexdigest()[:12]
         assert getattr(rec, "intervention_count", None) == 1
         # RED at HEAD: the raw dict field is gone and the value appears nowhere
         assert not hasattr(rec, "intervention"), "raw intervention dict still logged"
         assert str(redaction_sentinel) not in repr(rec.__dict__)
         assert str(int(redaction_sentinel)) not in repr(rec.__dict__)
+        assert "SecretPrice" not in repr(rec.__dict__), "raw identifier in record"
 
 
 class TestF11RouteLogRedaction:
@@ -172,11 +179,17 @@ class TestF11RouteLogRedaction:
         recs = [r for r in caplog.records if r.msg == "counterfactual_request"]
         assert recs, "expected the counterfactual_request log"
         rec = recs[0]
-        assert getattr(rec, "intervention_keys", None) == ["SecretPrice"]
+        # D-23.15 (Codex re-confirm F6, 25 Jul): digests + count, never raw names.
+        import hashlib as _h
+        assert getattr(rec, "intervention_keys", None) is None, "raw key names still logged"
+        assert getattr(rec, "intervention_keys_hash", None) == _h.sha256(
+            b"SecretPrice"
+        ).hexdigest()[:12]
         assert getattr(rec, "intervention_count", None) == 1
         assert not hasattr(rec, "intervention"), "raw intervention dict still logged"
         assert str(redaction_sentinel) not in repr(rec.__dict__)
         assert str(int(redaction_sentinel)) not in repr(rec.__dict__)
+        assert "SecretPrice" not in repr(rec.__dict__), "raw identifier in record"
 
 
 class TestF11ConformalLogRedaction:

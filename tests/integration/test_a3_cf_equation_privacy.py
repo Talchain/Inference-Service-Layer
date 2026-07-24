@@ -116,9 +116,15 @@ class TestF6EquationTextPrivacy:
         assert owner, "expected the route's counterfactual_invalid_input owner log"
         rec = owner[0]
         assert getattr(rec, "code", None) == "cf_equation_syntax_invalid"
-        assert getattr(rec, "variable", None) == "Y"
+        # D-23.15 tightened (Codex re-confirm F6): the log carries the variable
+        # DIGEST, never the raw identifier (an id like SECRET_PRICING_MARGIN_MODEL
+        # is itself client-model content). Raw name stays on the client 422 only.
+        assert getattr(rec, "variable", None) is None, "raw variable id in the owner log"
+        assert getattr(rec, "variable_hash", None) == hashlib.sha256(b"Y").hexdigest()[:12]
         assert getattr(rec, "equation_hash", None) == EQUATION_HASH
         assert getattr(rec, "category", None) == "equation_syntax_invalid"
+        # the logged error field is the stable code, not the variable-naming message
+        assert getattr(rec, "error", None) == "cf_equation_syntax_invalid"
         assert rec.levelname == "WARNING", "a client input defect must not page as ERROR"
 
     @pytest.mark.asyncio
@@ -252,3 +258,89 @@ class TestF6EquationTextPrivacy:
         assert not _records_leaking(
             caplog.records, secret_eq
         ), "internal-fault ERROR log leaked client equation text"
+
+
+# ---------------------------------------------------------------------------
+# D-23.15 identifier minimisation (Codex re-confirm F6, 25 Jul) — raw model
+# IDENTIFIERS (variable ids, outcome names, intervention keys) are client-model
+# content too. Logs carry code + request_id + digests + category ONLY; the raw
+# name survives only on the client-facing 422 wire (the client's own data).
+# ---------------------------------------------------------------------------
+
+VARIABLE_SENTINEL = "SECRET_PRICING_MARGIN_MODEL"  # Codex's exact repro sentinel
+
+
+class TestD2315IdentifierMinimisation:
+    @pytest.mark.asyncio
+    async def test_sentinel_variable_id_absent_from_all_logs(self, cf_client, caplog):
+        """Codex F6 repro: the sentinel in the VARIABLE ID appeared raw in the
+        owner + engine start records. Now: absent from every rendered record;
+        its digest present in the owner record (positive-control presence);
+        still named on the client 422 (wire contract unchanged)."""
+        caplog.set_level(logging.DEBUG)
+
+        # positive control: harness can see this sentinel
+        logging.getLogger(_LEAK_LOGGERS[0]).warning(
+            "d2315_probe_control", extra={"error": f"leaked: {VARIABLE_SENTINEL}"}
+        )
+        assert _records_leaking(caplog.records, VARIABLE_SENTINEL), "vacuous harness"
+        caplog.clear()
+
+        body = {
+            "model": {
+                "variables": ["X", VARIABLE_SENTINEL],
+                "equations": {VARIABLE_SENTINEL: "X +* 1"},  # syntax error
+                "distributions": {},
+            },
+            "intervention": {"X": 1.0},
+            "outcome": VARIABLE_SENTINEL,
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=body)
+        assert resp.status_code == 422, resp.text
+        # client wire: their own variable name comes back (useful, theirs)
+        assert VARIABLE_SENTINEL in resp.json()["message"]
+
+        # logs: the raw identifier appears in NO record
+        leaks = _records_leaking(caplog.records, VARIABLE_SENTINEL)
+        assert not leaks, (
+            f"raw variable id leaked to {len(leaks)} record(s): "
+            + "; ".join(f"{r.name}:{r.msg!r}" for r in leaks)
+        )
+        # presence proof: the digest IS in the owner record
+        var_hash = hashlib.sha256(VARIABLE_SENTINEL.encode()).hexdigest()[:12]
+        owner = [r for r in caplog.records if r.msg == "counterfactual_invalid_input"]
+        assert owner and getattr(owner[0], "variable_hash", None) == var_hash
+
+    @pytest.mark.asyncio
+    async def test_start_record_carries_digests_not_names(self, cf_client, caplog):
+        """The analysis start record hashed its identifiers (outcome +
+        intervention keys) — a VALID request whose outcome name carries the
+        sentinel must produce a clean log stream with digests present."""
+        caplog.set_level(logging.DEBUG)
+        body = {
+            "model": {
+                "variables": ["X", VARIABLE_SENTINEL],
+                "equations": {VARIABLE_SENTINEL: "2 * X"},
+                "distributions": {},
+            },
+            "intervention": {"X": 1.0},
+            "outcome": VARIABLE_SENTINEL,
+        }
+        resp = await cf_client.post("/api/v1/causal/counterfactual", json=body)
+        assert resp.status_code == 200, resp.text
+
+        leaks = _records_leaking(caplog.records, VARIABLE_SENTINEL)
+        assert not leaks, (
+            f"raw outcome/intervention identifier leaked to {len(leaks)} record(s): "
+            + "; ".join(f"{r.name}:{r.msg!r}" for r in leaks)
+        )
+        started = [r for r in caplog.records if r.msg == "counterfactual_analysis_started"]
+        assert started, "start record missing"
+        rec = started[0]
+        assert getattr(rec, "outcome", None) is None, "raw outcome name in start record"
+        assert getattr(rec, "intervention_keys", None) is None, "raw keys in start record"
+        assert getattr(rec, "outcome_hash", None) == hashlib.sha256(
+            VARIABLE_SENTINEL.encode()
+        ).hexdigest()[:12]
+        assert getattr(rec, "intervention_keys_hash", None) is not None
+        assert getattr(rec, "intervention_count", None) == 1
