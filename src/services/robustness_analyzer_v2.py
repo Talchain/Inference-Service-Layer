@@ -316,6 +316,66 @@ DEFAULT_MAX_COST_UNITS = 24_000_000
 # Wall-clock target the ceiling is calibrated against (see harness).
 TARGET_WALL_MS = 25000
 
+# ---------------------------------------------------------------------------
+# Phase-cost attribution registry (Codex F2 CLASS-closer, 25 Jul 2026).
+#
+# ROOT CAUSE of F2: `_compute_factor_evpc` shipped a new candidate x value x
+# sample evaluator loop and NOBODY extended compute_weighted_cost — nothing
+# failed. This registry makes that failure LOUD: a guard test
+# (tests/unit/test_admission_calibration.py::TestPhasePricingInventory)
+# asserts every `_compute_*` method on RobustnessAnalyzerV2 appears here, so
+# adding a phase without answering the pricing question breaks CI with an
+# instruction, not a silent free ride. (Trap #12: where you cannot derive,
+# the mirror must FAIL LOUD on drift.)
+#
+# Value grammar:
+#   "priced:<term>"     — charged by that compute_weighted_cost term (the guard
+#                         also asserts the term really exists in the formula).
+#   "subsumed:<method>" — runs inside another registered phase's priced loop /
+#                         post-processes its outputs without new evaluate()s.
+#   "bounded:<reason>"  — deliberately unpriced; the stated bound justifies it.
+#                         An honest annotation of a KNOWN residual belongs here
+#                         too — never launder an under-charge into "bounded"
+#                         without naming it.
+PHASE_COST_ATTRIBUTION: Dict[str, str] = {
+    "_compute_option_results": "priced:base_mc",
+    "_compute_confidence_interval": "subsumed:_compute_option_results",
+    "_compute_constraint_analysis": "subsumed:_compute_option_results",
+    "_compute_constraint_probabilities": "subsumed:_compute_constraint_analysis",
+    "_compute_conditional_probabilities": "subsumed:_compute_constraint_analysis",
+    "_compute_near_miss_diagnostics": "subsumed:_compute_constraint_analysis",
+    "_compute_sensitivity": "priced:sensitivity",
+    "_compute_existence_sensitivity": "subsumed:_compute_sensitivity",
+    "_compute_magnitude_sensitivity": "subsumed:_compute_sensitivity",
+    "_compute_factor_sensitivity": (
+        "bounded: 2 deterministic evaluates per uncertain factor (2*U*W <= ~25k "
+        "units at caps) — EXCEPT _compute_structural_influence, see its entry"
+    ),
+    "_compute_conditional_winners": "bounded: partitions existing MC samples, no new evaluates",
+    "_compute_bucket_result": "subsumed:_compute_conditional_winners",
+    "_compute_bootstrap_stability": "bounded: adaptive 10-20 iterations, wall-clock-capped ~100ms",
+    "_compute_structural_influence": (
+        "bounded: FALSE — KNOWN-UNCAPPED path enumeration (no MAX_DECOMPOSITION_PATHS "
+        "twin), exponential worst case on dense DAGs, unpriced; ROWED as UC-2 "
+        "(A3-DECISIONS-2026-07-23.md) for a dedicated capped-enumeration fix. "
+        "Contained: consumers gated, authed callers only"
+    ),
+    "_compute_path_decomposition": "priced:path_decomposition",
+    "_compute_robustness": "bounded: post-processing of existing samples; heavy child is _compute_alternative_winners",
+    "_compute_edge_e_values": "priced:e_values",
+    "_compute_factor_evppi": "priced:evppi_full",
+    "_compute_factor_evpc": "priced:evpc",
+    "_compute_evpi": "priced:evpi",
+    "_compute_evpi_metric": "subsumed:_compute_evpi",
+    "_compute_alternative_winners": (
+        "bounded: KNOWN-UNDERCHARGE — ~100*O*W new evaluates per fragile edge, "
+        "fragile set threshold-gated but not count-capped; only reachable when the "
+        "priced sensitivity phase ran, net under-charge ~1.5-2x on admissible "
+        "shapes; folded into the ceiling-recalibration docket (D-23.17 residual)"
+    ),
+    "_compute_marginal_switch_probability": "subsumed:_compute_alternative_winners",
+}
+
 
 def get_max_cost_units() -> int:
     """Return the admission ceiling in cost units (env-resolved).

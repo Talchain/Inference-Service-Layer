@@ -341,6 +341,86 @@ class TestFullPopulationEvppiTerm:
 
 
 # ---------------------------------------------------------------------------
+# F2 CLASS-closer — no analyzer phase may ship unpriced-and-unregistered
+# ---------------------------------------------------------------------------
+class TestPhasePricingInventory:
+    """Codex F2's ROOT CAUSE was not the missing EVPC term — it was that a new
+    compute phase could ship with NOBODY forced to answer 'who prices this?'.
+    This guard makes that question fail loud (trap #12: a mirror must FAIL
+    LOUD on drift). See PHASE_COST_ATTRIBUTION in robustness_analyzer_v2."""
+
+    def test_every_compute_phase_is_registered(self):
+        from src.services.robustness_analyzer_v2 import (
+            PHASE_COST_ATTRIBUTION,
+            RobustnessAnalyzerV2,
+        )
+
+        methods = {m for m in dir(RobustnessAnalyzerV2) if m.startswith("_compute_")}
+        unregistered = methods - set(PHASE_COST_ATTRIBUTION)
+        stale = set(PHASE_COST_ATTRIBUTION) - methods
+        assert not unregistered, (
+            f"New analyzer phase(s) {sorted(unregistered)} are not in "
+            "PHASE_COST_ATTRIBUTION. Before merging: either add a pricing term to "
+            "compute_weighted_cost and register 'priced:<term>', or register an "
+            "honest 'subsumed:'/'bounded:' entry with the justification. A phase "
+            "that ships unpriced is the Codex-F2 defect (EVPC ran 87.5M units of "
+            "work charged at 0)."
+        )
+        assert not stale, (
+            f"PHASE_COST_ATTRIBUTION entries {sorted(stale)} no longer exist on "
+            "RobustnessAnalyzerV2 — remove them so the registry stays derived-true."
+        )
+
+    def test_priced_terms_exist_and_formula_terms_are_claimed(self):
+        """Bidirectional: every 'priced:<term>' names a real formula term, and
+        every term the formula can emit is claimed by at least one phase."""
+        from src.services.robustness_analyzer_v2 import PHASE_COST_ATTRIBUTION
+
+        # Derive the full term set from the formula itself: a request with every
+        # optional phase enabled (VOI + controls + sensitivity + e-values + paths).
+        body = _request_dict(20, 40, 5000, 3, evpi_factors=4)
+        body["include_e_values"] = True
+        body["include_path_decomposition"] = True
+        body["control_candidates"] = [{"factor_id": "n5", "values": [0.1, 0.2]}]
+        formula_terms = set(
+            compute_weighted_cost(RobustnessRequestV2(**body)).terms
+        ) | {"bands"}  # bands ride e_values; both emitted together
+
+        priced_terms = {
+            v.split(":", 1)[1]
+            for v in PHASE_COST_ATTRIBUTION.values()
+            if v.startswith("priced:")
+        }
+        unknown = priced_terms - formula_terms
+        assert not unknown, (
+            f"Registry prices phase(s) against non-existent formula term(s) {sorted(unknown)}"
+        )
+        # bands ride the e_values sweep; every OTHER term needs a claiming phase.
+        unclaimed = formula_terms - priced_terms - {"bands"}
+        assert not unclaimed, (
+            f"Formula term(s) {sorted(unclaimed)} are claimed by no registered phase — "
+            "either dead pricing or an unregistered phase."
+        )
+
+    def test_subsumed_targets_are_registered_and_bounded_reasons_nonempty(self):
+        from src.services.robustness_analyzer_v2 import PHASE_COST_ATTRIBUTION
+
+        for phase, disposition in PHASE_COST_ATTRIBUTION.items():
+            kind, _, rest = disposition.partition(":")
+            assert kind in ("priced", "subsumed", "bounded"), (
+                f"{phase}: unknown disposition kind {kind!r}"
+            )
+            if kind == "subsumed":
+                assert rest in PHASE_COST_ATTRIBUTION, (
+                    f"{phase} is subsumed by unregistered {rest!r}"
+                )
+            if kind == "bounded":
+                assert len(rest.strip()) >= 10, (
+                    f"{phase}: 'bounded' needs a real justification, not {rest!r}"
+                )
+
+
+# ---------------------------------------------------------------------------
 # OC-1 (D-23.17) — the v3 over-charge must stop 422-ing legal requests
 # ---------------------------------------------------------------------------
 class TestOC1RecalAdmission:
