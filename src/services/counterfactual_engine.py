@@ -37,19 +37,24 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-def _hash_equation(equation: str) -> str:
-    """A short, one-way correlation id for a client structural equation.
+def _hash_client_text(text: str) -> str:
+    """One-way 12-hex digest for ANY client-model identifier or text (D-23.15).
 
-    F6 / D-23.15: a structural equation is client-private (it can encode
-    proprietary model structure, factor labels, and constants), so it must never
-    be written in clear to a log or an error message. This hash lets an operator
-    correlate a redacted 422 with the client's own copy of the equation WITHOUT
-    the platform ever persisting the text. SHA-256 truncated to 12 hex chars: a
-    one-way digest (the equation cannot be recovered from it), stable across the
-    request's layers so the single owner log and the client both key on the same
-    id.
+    F6 / D-23.15 minimisation: client model content — structural equations AND
+    the identifiers that name model parts (variable ids like
+    'SECRET_PRICING_MARGIN_MODEL', outcome names, intervention keys) — can
+    encode proprietary structure, so none of it is written in clear to logs.
+    Logs carry code + request_id + digests + category only (the Codex
+    re-confirmation found raw identifiers still landing in three records —
+    this digest is what they carry now). SHA-256 truncated to 12 hex chars:
+    one-way, stable across layers, so operator and client correlate on the
+    same id without the platform persisting the text.
     """
-    return hashlib.sha256(equation.encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+# Equation-specific alias kept for call-site readability.
+_hash_equation = _hash_client_text
 
 
 class CounterfactualClientInputError(ValueError):
@@ -92,13 +97,16 @@ class CounterfactualClientInputError(ValueError):
         self.equation_hash = equation_hash
 
     def safe_log_extra(self) -> Dict[str, Any]:
-        """Redacted structured fields for the single owner log — no equation text."""
+        """Redacted structured fields for the single owner log — no equation text,
+        no raw identifiers (D-23.15: the VARIABLE id is itself client-model
+        content — Codex's sentinel 'SECRET_PRICING_MARGIN_MODEL' appeared raw in
+        the owner record; now only its digest does)."""
         extra: Dict[str, Any] = {
             "code": self.code,
             "category": self.category,
         }
         if self.variable is not None:
-            extra["variable"] = self.variable
+            extra["variable_hash"] = _hash_client_text(self.variable)
         if self.equation_hash is not None:
             extra["equation_hash"] = self.equation_hash
         return extra
@@ -179,17 +187,20 @@ class CounterfactualEngine:
         # Create per-request RNG for thread-safe determinism
         rng = make_deterministic(request.model_dump())
 
-        # F11 (A3, 2026-07-22): NEVER log raw intervention values — they are the
-        # client's private scenario inputs. Log only the sorted intervention
-        # variable NAMES + a count; the R-004 correlation key is the
-        # request_hash (canonical_hash) already logged one line above, which is a
-        # digest, not a recoverable value.
+        # F11 (A3, 2026-07-22) logged NAMES-not-values; D-23.15 (Codex re-confirm
+        # F6, 25 Jul) tightened further: identifier NAMES are themselves
+        # client-model content (an outcome called 'SECRET_PRICING_MARGIN_MODEL'
+        # leaks structure), so the start record now carries DIGESTS + a count
+        # only. Correlation keys: request_hash (already a digest) + the
+        # per-identifier digests, matching safe_log_extra()'s variable_hash.
         logger.info(
             "counterfactual_analysis_started",
             extra={
                 "request_hash": canonical_hash(request.model_dump()),
-                "outcome": request.outcome,
-                "intervention_keys": sorted(request.intervention),
+                "outcome_hash": _hash_client_text(request.outcome),
+                "intervention_keys_hash": _hash_client_text(
+                    ",".join(sorted(request.intervention))
+                ),
                 "intervention_count": len(request.intervention),
                 "seed": rng.seed,
             },

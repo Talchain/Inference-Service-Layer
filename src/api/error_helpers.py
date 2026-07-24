@@ -34,22 +34,32 @@ def raise_invalid_input(
     re-logging and this is the sole record for a client-input 422. When the
     exception is a redaction-aware typed error (it exposes ``safe_log_extra()``,
     e.g. ``CounterfactualClientInputError``), its REDACTED structured fields
-    (``code`` / ``variable`` / ``equation_hash`` / ``category`` — never the raw
-    client text) are merged into the record, and ``str(exc)`` is the exception's
-    own SAFE public message. For a plain ``ValueError`` the behaviour is
-    byte-identical to before (``extra={request_id, error}``, ``detail=str(exc)``),
-    so the sequential/robustness callers and every already-safe counterfactual
-    422 (unknown key, non-finite, complex, ...) are unchanged.
+    (``code`` / ``variable_hash`` / ``equation_hash`` / ``category`` — never raw
+    client text or identifiers) are merged into the record, and the LOGGED
+    ``error`` field is the stable ``code`` — NOT ``str(exc)``: the public
+    message deliberately names the client's variable (their own data, useful on
+    the 422 wire), but that same name must not ride into the log via the
+    message (Codex re-confirm F6: the raw sentinel appeared in the owner record
+    exactly this way). The client-facing 422 ``detail`` keeps the full public
+    message — wire behaviour unchanged. For a plain ``ValueError`` the
+    behaviour is byte-identical to before (``extra={request_id, error:
+    str(exc)}``, ``detail=str(exc)``), so the sequential/robustness callers
+    (whose ValueErrors carry no client model text — swept, D-23.18) and every
+    already-safe counterfactual 422 are unchanged.
 
     Deliberately NOT a global ``add_exception_handler``: route-local visibility
     of which inputs map to 422 is intentional (adjudicated).
     """
-    extra: Dict[str, Any] = {"request_id": request_id, "error": str(exc)}
     safe_log_extra = getattr(exc, "safe_log_extra", None)
     if callable(safe_log_extra):
-        # Redaction-aware typed error: attach its safe structured fields. These are
-        # the offending variable id + a one-way equation hash + a stable code —
-        # never the client's equation text (which is not present on the exception).
+        # Redaction-aware typed error: the log carries the stable code + the
+        # safe structured digests, never the message (which names the variable).
+        extra: Dict[str, Any] = {
+            "request_id": request_id,
+            "error": getattr(exc, "code", type(exc).__name__),
+        }
         extra.update(safe_log_extra())
+    else:
+        extra = {"request_id": request_id, "error": str(exc)}
     logger.warning(event, extra=extra)
     raise HTTPException(status_code=422, detail=str(exc)) from exc

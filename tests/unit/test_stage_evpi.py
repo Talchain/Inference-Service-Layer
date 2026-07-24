@@ -335,14 +335,13 @@ def test_stage_evpi_single_chance_child_is_identified_no_coupling(engine):
     assert s0.coupling_assumption is None
 
 
-def test_stage_evpi_two_actions_share_one_chance_is_disclosed_safe(engine):
-    """Adversarial-round correction (was ..._is_identified). When >=2 actions both
-    reach a chance node (here the SAME node C, both immediately), the F1 rule discloses:
-    per the adversarial's own exactness condition (ii) — the resolved cid must not be
-    reachable from any OTHER action's subtree — C IS reachable from both actions, so the
-    stage is NOT eligible for the exact label. The emitted value (0.0 here) happens to be
-    correct for the direct-immediate-shared case, so this is a SAFE over-disclosure (F-A2
-    direction), never an under-disclosure. status='assumed_independent_coupling'."""
+def test_stage_evpi_two_actions_share_one_chance_is_skipped_identified(engine):
+    """D-23.19 (Codex re-confirm) SUPERSEDED the disclose-shared posture this test
+    used to pin: when the SAME chance node id is reachable from >=2 actions, the
+    graph IDENTIFIES the coupling (same id = same random variable), so emitting a
+    number labelled 'assumed independent' CONTRADICTS the submitted graph. New
+    contract: null + 'skipped_shared_chance_nodes_unsupported' until conditional
+    subtree re-valuation ships (rowed refinement)."""
     g = SequentialGraph(
         nodes=[
             SequentialGraphNode(id="D", type="decision", label="D"),
@@ -365,8 +364,9 @@ def test_stage_evpi_two_actions_share_one_chance_is_disclosed_safe(engine):
     ]
     req = SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=1.0, risk_tolerance="neutral")
     s0 = _stage_map(engine.analyze(req))[0]
-    assert s0.stage_evpi_status == "assumed_independent_coupling"
-    assert s0.coupling_assumption == "independence_across_actions"
+    assert s0.stage_evpi is None
+    assert s0.stage_evpi_status == "skipped_shared_chance_nodes_unsupported"
+    assert s0.coupling_assumption is None
 
 
 # ---------------------------------------------------------------------------
@@ -415,10 +415,12 @@ def _fn1_deeper_chance():
 
 
 def _fn2_same_node_deeper():
-    """FN-2: D--A-->C(0/100); D--B-->D2(decision)--go-->C (the SAME node C reused one
-    level down). The tree IDENTIFIES the joint as same-state -> true EVPI 0.0, yet the
-    leg emits the independence value 25.0. Safe containment = disclose (never exact);
-    the correct shared-state VALUE is the value-refinement flag for Paul/Neil."""
+    """FN-2 == Codex re-confirm F1 repro: D--A-->C(0/100); D--B-->D2(decision)--go-->C
+    (the SAME node C reused one level down). The tree IDENTIFIES the joint as
+    same-state -> true EVPI 0.0; the old leg emitted the independence value 25.0.
+    D-23.19: skipped (null + shared status) — the disclose-with-wrong-value posture
+    contradicted the submitted graph. Exact-0 emission = the rowed conditional
+    re-valuation refinement."""
     return SequentialAnalysisRequest(
         graph=SequentialGraph(
             nodes=[
@@ -488,16 +490,19 @@ def test_stage_evpi_fn1_deeper_chance_is_disclosed(engine):
     assert s0.coupling_assumption == "independence_across_actions"
 
 
-def test_stage_evpi_fn2_same_node_deeper_is_disclosed(engine):
-    """RED-first (adversarial FN-2). The SAME chance reused one level deeper: the tree
-    identifies same-state (true EVPI 0.0) but the leg emits 25.0. The fix SAFELY
-    contains this by disclosing (never claiming exact); the emitted value is NOT
-    recomputed this round (value-refinement flag). Was: 25.0/None labelled exact."""
+def test_stage_evpi_fn2_same_node_deeper_is_skipped_identified(engine):
+    """FN-2 CLOSED at D-23.19 (was disclose-with-wrong-value, the 'value-refinement
+    flag'). The SAME chance reused one level deeper: the tree identifies same-state
+    (true EVPI 0.0); the old leg emitted 25.0 labelled 'assumed independent' — a
+    label the graph contradicts (Codex re-confirm F1 PARTIAL). New contract: null +
+    'skipped_shared_chance_nodes_unsupported'. Was pre-D-23.11: 25.0/None labelled
+    exact; was pre-D-23.19: 25.0 disclosed.
+
+    MUTATION ANCHOR: removing the shared_chance guard re-emits 25.0+disclosed."""
     s0 = _stage_map(engine.analyze(_fn2_same_node_deeper()))[0]
-    assert s0.stage_evpi_status == "assumed_independent_coupling"
-    assert s0.coupling_assumption == "independence_across_actions"
-    # value-refinement flag: still the independence value, disclosed (not the true 0.0)
-    assert s0.stage_evpi == pytest.approx(25.0, rel=1e-12)
+    assert s0.stage_evpi is None
+    assert s0.stage_evpi_status == "skipped_shared_chance_nodes_unsupported"
+    assert s0.coupling_assumption is None
 
 
 def test_stage_evpi_fn0_deterministic_alternative_stays_exact(engine):
@@ -513,8 +518,10 @@ def test_stage_evpi_fn0_deterministic_alternative_stays_exact(engine):
 def test_stage_evpi_shared_chance_not_falsely_skipped_by_cap(engine):
     """F-A3: a chance node shared by 2 action edges must be counted ONCE against the
     joint-cell cap (deduped by cid), not B^2. A 65-branch node shared by 2 actions is
-    65 cells (< 4096), not 65^2=4225 (> 4096) — so it COMPUTES, not skips. (It is also
-    unidentified -> disclosed, since 2 actions reach chance.)"""
+    65 cells (< 4096), not 65^2=4225 (> 4096) — so the CAP must not fire. D-23.19:
+    the shared-identity guard then fires INSTEAD (null + shared status) — the pin
+    here is that the skip reason is the IDENTIFIED-coupling one, never the cap
+    (a cap-skip would mean the dedupe regressed to B^k counting)."""
     B = 65
     nodes = [SequentialGraphNode(id="D", type="decision", label="D"),
              SequentialGraphNode(id="C", type="chance", label="C")]
@@ -531,7 +538,10 @@ def test_stage_evpi_shared_chance_not_falsely_skipped_by_cap(engine):
               DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[])]
     req = SequentialAnalysisRequest(graph=g, stages=stages, discount_factor=1.0, risk_tolerance="neutral")
     s0 = _stage_map(engine.analyze(req))[0]
-    assert s0.stage_evpi is not None  # COMPUTED — not a false skip (dedup: 65 < cap)
+    # D-23.19: shared-identity guard fires (C read by both actions) — but NEVER the
+    # cap: the dedupe keeps the joint count at 65 < 4096, so a cap-skip here would
+    # mean the F-A3 dedupe regressed.
+    assert s0.stage_evpi_status == "skipped_shared_chance_nodes_unsupported"
     assert s0.stage_evpi_status != "skipped_joint_space_too_large"
 
 

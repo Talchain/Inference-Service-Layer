@@ -3127,6 +3127,7 @@ class StageAnalysis(BaseModel):
         Literal[
             "no_decision_node",
             "skipped_joint_space_too_large",
+            "skipped_shared_chance_nodes_unsupported",
             "assumed_independent_coupling",
         ]
     ] = Field(
@@ -3136,17 +3137,23 @@ class StageAnalysis(BaseModel):
         "faces NO immediate chance (EVPI 0; deeper chance is a later stage's EVPI, not "
         "this one's), or the decision faces immediate chance but at most ONE action "
         "faces any reachable chance, so resolving that single uncertainty is exact "
-        "(includes a genuine EVPI of 0.0). Two null-value skip reasons: "
+        "(includes a genuine EVPI of 0.0). Three null-value skip reasons: "
         "'no_decision_node' — the stage has no "
         "decision node, so there is no choice for information to inform; "
         "'skipped_joint_space_too_large' — the decide-after leg's joint enumeration "
         "(∏ of the decision's chance-child branch counts) exceeds the safety cap "
         "(4096 cells), so this AUXILIARY metric is honestly skipped rather than "
         "pinning the event loop (the exact analysis — optimal_policy, "
-        "value_of_flexibility, resolved_uncertainty, options — is unaffected). One "
+        "value_of_flexibility, resolved_uncertainty, options — is unaffected); "
+        "'skipped_shared_chance_nodes_unsupported' (D-23.19) — the SAME chance-node "
+        "id is reachable from >=2 actions' subtrees, so the graph IDENTIFIES their "
+        "coupling (same id = same random variable) and the independence enumeration "
+        "would contradict it (it mixes one action's realised copy against another's "
+        "averaged copy of the same variable); skipped until conditional subtree "
+        "re-valuation ships. One "
         "value-present disclosure: 'assumed_independent_coupling' (F1, D-23.11) — the "
-        "stage faces immediate chance AND >=2 actions face reachable chance (one "
-        "immediate, another immediate or one level deeper), so stage_evpi is COMPUTED "
+        "stage faces immediate chance AND >=2 actions face DISJOINT reachable chance "
+        "(one immediate, another immediate or deeper), so stage_evpi is COMPUTED "
         "but under an ASSUMED independence coupling the tree does not identify (see "
         "coupling_assumption); the value is present but is NOT exact. Lets a consumer "
         "distinguish a real 0, a null skip, and an assumption-laden value.",
@@ -3203,7 +3210,8 @@ class StageAnalysis(BaseModel):
         desyncs, matching decision_evpi's fail-loud altitude rather than relying on
         the tuple-return convention alone. Three disjoint, exhaustive shapes:
 
-        * skip reason ('no_decision_node' | 'skipped_joint_space_too_large'):
+        * skip reason ('no_decision_node' | 'skipped_joint_space_too_large' |
+          'skipped_shared_chance_nodes_unsupported' [D-23.19]):
           stage_evpi is NULL (there is no value), coupling_assumption absent;
         * 'assumed_independent_coupling' (F1, D-23.11): stage_evpi is COMPUTED but
           under an unidentified independence assumption, so it rides WITH a value AND
@@ -3217,7 +3225,11 @@ class StageAnalysis(BaseModel):
         value = self.stage_evpi
         status = self.stage_evpi_status
         coupling = self.coupling_assumption
-        _SKIP_STATUSES = {"no_decision_node", "skipped_joint_space_too_large"}
+        _SKIP_STATUSES = {
+            "no_decision_node",
+            "skipped_joint_space_too_large",
+            "skipped_shared_chance_nodes_unsupported",
+        }
 
         if status in _SKIP_STATUSES:
             ok = value is None and coupling is None

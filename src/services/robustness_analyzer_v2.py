@@ -115,15 +115,21 @@ logger = logging.getLogger(__name__)
 # — the same graph always truncates identically, preserving the determinism guarantee.
 MAX_DECOMPOSITION_PATHS = 20000
 
-# UC-2 (D-23.18): walk-call budget for the structural-influence path enumerator —
-# the previously UNCAPPED twin of the decomposition walker above. A call budget
-# (not a completed-path budget) is deliberate: on an adversarial dense subgraph
-# that never reaches the goal, completed paths stay at zero while exploration
-# explodes, so only bounding recursion CALLS bounds the work absolutely. Calls
-# >= completed paths, so this also caps the path products accumulated. Count-
-# based (not wall-clock) => truncation is deterministic per graph. Per-factor
-# budget; worst total = 50 factors x 200k calls, ~tens of ms.
-MAX_INFLUENCE_WALK_CALLS_PER_FACTOR = 200_000
+# UC-2 (D-23.18) → re-fixed per Codex re-confirm N2 (D-23.19): walk-call budget
+# for the structural-influence path enumerator — the previously UNCAPPED twin of
+# the decomposition walker above. A call budget (not a completed-path budget) is
+# deliberate: on an adversarial dense subgraph that never reaches the goal,
+# completed paths stay at zero while exploration explodes, so only bounding
+# recursion CALLS bounds the work absolutely. Count-based (not wall-clock) =>
+# truncation is deterministic per graph.
+#
+# N2: the pool is REQUEST-WIDE (shared across all factors, consumed in factor
+# order), NOT per-factor — a per-factor reset multiplied the worst case by U
+# (13 factors x 200k measured ~2s; 50 x 200k would be ~8s of unpriced CPU, the
+# original F2 class in a new phase). Measured cost ~0.77µs/call ≈ 1 admission
+# unit/call at the ceiling anchor, so the pool ceiling is charged 1:1 as the
+# `structural_influence` term whenever the phase can run. Worst wall ≈ 0.3-0.5s.
+MAX_INFLUENCE_WALK_CALLS_TOTAL = 400_000
 
 # Edge strength bounds from schema v2.6
 EDGE_STRENGTH_MIN = -1.0
@@ -262,7 +268,8 @@ FLIP_STABILITY_N_SEEDS = 10
 # (benchmarks/oc1_evppi_recal.py, 27-cell S x U x O grid). The v3 term
 # (deg+1)*U*(1+K)*O*S over-charged 42-192x: the estimator solves every option in
 # ONE multi-RHS lstsq SVD (src/utils/evppi.py _inner_expected_max), so the phase
-# is near-O-flat (measured O=2 -> O=10 wall ratio ~1.6-1.9x, not 5x), and the
+# is O-SUBLINEAR (measured O=2 -> O=10 wall ratio 1.6-2.8x across machines/
+# shapes — Codex re-measured 2.8x; NOT flat, but far under the 5x charged), and the
 # (deg+1) factor is second-order inside the SVD, not a multiplier. New term:
 # W_EVPPI_COEF*U*(1+K)*S — still conservative (>=1.9x margin at the worst measured
 # cell on loaded local hardware; more on typical shapes). Shape changed -> bump.
@@ -293,7 +300,7 @@ W_EVPC_COEF = BASE_COST_COEF  # 1 unit per (grid-point x sample x struct)
 # v4 RECALIBRATED (OC-1, D-23.17) against measured phase wall-time
 # (benchmarks/oc1_evppi_recal.py). What the measurement showed:
 #   * wall ~ linear in U*(1+K)*S (ms/(U*17*S) stable at ~110-280ns across the grid);
-#   * near-FLAT in O — each fit is ONE multi-RHS lstsq SVD shared across all options
+#   * O-SUBLINEAR — each fit is ONE multi-RHS lstsq SVD shared across all options
 #     (src/utils/evppi.py _inner_expected_max; per-option work is only the cheap
 #     back-substitution), measured O=2 -> O=10 ratio ~1.6-1.9x vs the 5x the old *O
 #     factor charged;
@@ -304,7 +311,8 @@ W_EVPC_COEF = BASE_COST_COEF  # 1 unit per (grid-point x sample x struct)
 # on loaded local hardware (ceiling-anchored units), more on typical shapes —
 # conservative direction preserved, margin lands in the 1.5-3x band on slower
 # staging hardware.
-W_EVPPI_COEF = 1  # unit per (factor-fit x permutation x sample); O-flat by design
+W_EVPPI_COEF = 1  # unit per (factor-fit x permutation x sample); charge is O-flat,
+# wall is O-sublinear (1.6-2.8x measured O=2->10) — the ~3x margin absorbs it
 
 # PROVISIONAL admission ceiling in cost units.
 #
@@ -334,10 +342,17 @@ TARGET_WALL_MS = 25000
 # sample evaluator loop and NOBODY extended compute_weighted_cost — nothing
 # failed. This registry makes that failure LOUD: a guard test
 # (tests/unit/test_admission_calibration.py::TestPhasePricingInventory)
-# asserts every `_compute_*` method on RobustnessAnalyzerV2 appears here, so
-# adding a phase without answering the pricing question breaks CI with an
-# instruction, not a silent free ride. (Trap #12: where you cannot derive,
-# the mirror must FAIL LOUD on drift.)
+# asserts every `_compute_*` / `_run_*` method on RobustnessAnalyzerV2 appears
+# here, so adding a phase without answering the pricing question breaks CI
+# with an instruction, not a silent free ride. (Trap #12: where you cannot
+# derive, the mirror must FAIL LOUD on drift.)
+#
+# ⚠ HONEST SCOPE (Codex re-confirm N3, D-23.19): this is a NAME-PREFIX
+# TRIPWIRE, not a proof. A phase named outside the registered prefixes evades
+# it, and `bounded:` entries are prose claims — each one needs its own
+# enforcing test to be more than an assertion. Do not describe this registry
+# as a class-wide guarantee; it raises the cost of the F2 mistake, it does
+# not make it impossible.
 #
 # Value grammar:
 #   "priced:<term>"     — charged by that compute_weighted_cost term (the guard
@@ -349,7 +364,11 @@ TARGET_WALL_MS = 25000
 #                         too — never launder an under-charge into "bounded"
 #                         without naming it.
 PHASE_COST_ATTRIBUTION: Dict[str, str] = {
-    "_compute_option_results": "priced:base_mc",
+    # N3 widening (_run_ prefix) immediately surfaced _run_monte_carlo — the
+    # ACTUAL S*O*W evaluate() loop; option_results post-processes its outputs
+    # (the earlier priced attribution on option_results was imprecise).
+    "_run_monte_carlo": "priced:base_mc",
+    "_compute_option_results": "subsumed:_run_monte_carlo",
     "_compute_confidence_interval": "subsumed:_compute_option_results",
     "_compute_constraint_analysis": "subsumed:_compute_option_results",
     "_compute_constraint_probabilities": "subsumed:_compute_constraint_analysis",
@@ -361,17 +380,20 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     "_compute_factor_sensitivity": (
         "bounded: 2 deterministic evaluates per uncertain factor (2*U*W <= ~25k "
         "units at caps); its _compute_structural_influence child is separately "
-        "call-budgeted, see its entry"
+        "priced, see its entry"
     ),
     "_compute_conditional_winners": "bounded: partitions existing MC samples, no new evaluates",
     "_compute_bucket_result": "subsumed:_compute_conditional_winners",
-    "_compute_bootstrap_stability": "bounded: adaptive 10-20 iterations, wall-clock-capped ~100ms",
-    "_compute_structural_influence": (
-        "bounded: UC-2 FIXED — walk-call budget MAX_INFLUENCE_WALK_CALLS_PER_FACTOR "
-        "(200k calls/factor, deterministic truncation, disclosed via "
-        "STRUCTURAL_INFLUENCE_TRUNCATED critique); worst total ~50 factors x 200k "
-        "calls, tens of ms"
+    "_compute_bootstrap_stability": (
+        "bounded: ADAPTIVE-COUNT, not a wall-clock cap (N3 correction — the first "
+        "10 iterations always run, THEN elapsed time may admit 10 more; measured "
+        "~257ms with a slow batch); iteration count is hard-capped at 20"
     ),
+    "_run_bootstrap_iterations": "subsumed:_compute_bootstrap_stability",
+    # Request-wide walk pool MAX_INFLUENCE_WALK_CALLS_TOTAL charged 1:1
+    # (~0.77µs/call measured ≈ 1 unit/call); exact-or-null scores (N1),
+    # truncation disclosed via STRUCTURAL_INFLUENCE_TRUNCATED.
+    "_compute_structural_influence": "priced:structural_influence",
     "_compute_path_decomposition": "priced:path_decomposition",
     "_compute_robustness": "bounded: post-processing of existing samples; heavy child is _compute_alternative_winners",
     "_compute_edge_e_values": "priced:e_values",
@@ -436,6 +458,7 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
              + W_EVPPI_COEF*U*(1+K)*S                      (full-pop EVPPI, if include_voi & U>0)
              + W_EVPC_COEF*S*W*Sum_c(len(c.values))        (EVPC, if control_candidates)
              + W_SENS_COEF*E*min(100, S//10)*W             (edge sensitivity)
+             + MAX_INFLUENCE_WALK_CALLS_TOTAL              (structural influence, if sensitivity & U>0)
              + W_EVAL_COEF*E*O                             (e-values, if include_e_values)
              + W_BANDS_COEF*E*O                            (bands, ride on e-values)
              + W_PATH_COEF*min(MAX_DECOMPOSITION_PATHS, E*E) (path decomp)
@@ -497,6 +520,13 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
     # Edge sensitivity — reference option only (not multiplied by O).
     if "sensitivity" in request.analysis_types:
         terms["sensitivity"] = W_SENS_COEF * E * min(100, S // 10) * W
+        # Structural influence (factor-sensitivity child; N2, D-23.19): charged at
+        # the request-wide walk-pool ceiling (1 walk call ≈ 1 unit at the ceiling
+        # anchor, measured ~0.77µs/call). Gate mirrors the phase gate
+        # (uncertainties AND sensitivity requested); deliberately over-charges
+        # the correlation-suppressed case — conservative, and the term is small.
+        if request.parameter_uncertainties:
+            terms["structural_influence"] = MAX_INFLUENCE_WALK_CALLS_TOTAL
 
     # E-values and the stability bands that ride on them (bands default-on).
     if request.include_e_values:
@@ -527,6 +557,7 @@ def build_compute_admission() -> Dict[str, Any]:
             "evpc_coef": W_EVPC_COEF,
             "evppi_full_coef": W_EVPPI_COEF,
             "evppi_null_permutations": REGRESSION_EVPPI_NULL_PERMUTATIONS,
+            "influence_walk_pool": MAX_INFLUENCE_WALK_CALLS_TOTAL,
             "sensitivity_coef": W_SENS_COEF,
             "evalue_coef": W_EVAL_COEF,
             "bands_coef": W_BANDS_COEF,
@@ -3490,31 +3521,44 @@ class RobustnessAnalyzerV2:
         influence_scores, influence_truncated = self._compute_structural_influence(
             request.graph, factor_node_ids, request.goal_node_id
         )
-        # UC-2 (D-23.18): disclose truncated enumeration — the affected factors'
-        # influence is a lower bound and influence_rank may be affected. One
-        # critique naming all affected factors (deterministic order).
+        # N1 (Codex re-confirm, D-23.19): EXACT-OR-NULL. Normalized scores of a
+        # truncated cohort are NOT lower bounds (the data-dependent max
+        # denominator can shrink faster than a numerator — their repro inflated
+        # exact 0.1 to bounded 1.0 and inverted ranks). When ANY factor
+        # truncates, withhold ALL scores and ranks for the cohort and say why.
+        influence_exact = not influence_truncated
         if influence_truncated and critiques is not None:
             critiques.append(
                 STRUCTURAL_INFLUENCE_TRUNCATED.build(
                     factor_ids=", ".join(sorted(influence_truncated)),
-                    budget=MAX_INFLUENCE_WALK_CALLS_PER_FACTOR,
+                    budget=MAX_INFLUENCE_WALK_CALLS_TOTAL,
                     affected_node_ids=sorted(influence_truncated),
                     seed=rng.seed,  # resolved int (request.seed may be a str alias)
                 )
             )
 
-        # Add influence scores to sensitivities
+        # Add influence scores to sensitivities (None when the cohort truncated —
+        # a normalized score is only ever published when it is exact).
         for s in sensitivities:
-            s["influence_score"] = influence_scores.get(str(s["node_id"]), 0.0)
+            s["influence_score"] = (
+                influence_scores.get(str(s["node_id"]), 0.0) if influence_exact else None
+            )
 
         # Sort by absolute elasticity for importance_rank
         sensitivities.sort(key=lambda x: abs(float(x["elasticity"])), reverse=True)
 
-        # Compute influence_rank (sort by influence_score descending)
-        sorted_by_influence = sorted(
-            sensitivities, key=lambda x: float(x["influence_score"]), reverse=True
-        )
-        influence_rank_map = {s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)}
+        # Compute influence_rank (sort by influence_score descending) — withheld
+        # entirely when the cohort truncated (rank on withheld scores would just
+        # re-publish the unsound ordering).
+        if influence_exact:
+            sorted_by_influence = sorted(
+                sensitivities, key=lambda x: float(x["influence_score"]), reverse=True
+            )
+            influence_rank_map: Dict[str, Optional[int]] = {
+                s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
+            }
+        else:
+            influence_rank_map = {s["node_id"]: None for s in sensitivities}
 
         # --- Bootstrap stability analysis (3C) ---
         # Measures stability of attribution under model and sampling uncertainty:
@@ -3542,9 +3586,17 @@ class RobustnessAnalyzerV2:
         # Convert to results with ranks
         results = []
         for i, s in enumerate(sensitivities):
-            # Update zero_reason: DISCONNECTED takes priority if factor has no causal path
+            # Update zero_reason: DISCONNECTED takes priority if factor has no causal path.
+            # N1 corollary: under a truncated cohort the influence score is withheld
+            # (None) AND unreliable — a factor whose productive path was beyond the
+            # budget would read as "no path" here, so the DISCONNECTED inference is
+            # only sound when the enumeration was exact.
             zero_reason = s.get("zero_reason")  # type: ignore[assignment]
-            if abs(float(s["elasticity"])) < 1e-10 and float(s["influence_score"]) < 1e-10:
+            if (
+                influence_exact
+                and abs(float(s["elasticity"])) < 1e-10
+                and float(s["influence_score"]) < 1e-10
+            ):
                 # Factor is disconnected (no causal path to goal)
                 # This overrides ZERO_OUTCOME_DIFF since disconnection is the root cause
                 zero_reason = ZeroSensitivityReason.DISCONNECTED
@@ -3563,8 +3615,8 @@ class RobustnessAnalyzerV2:
                     interpretation=s["interpretation"],
                     zero_reason=zero_reason,
                     baseline_near_zero=s.get("baseline_near_zero"),
-                    influence_score=s["influence_score"],
-                    influence_rank=influence_rank_map[s["node_id"]],
+                    influence_score=s["influence_score"],  # None when cohort truncated (N1)
+                    influence_rank=influence_rank_map[s["node_id"]],  # None when cohort truncated
                     elasticity_std=bs.get("elasticity_std"),
                     attribution_stability=bs.get("attribution_stability"),
                     rank_flip_rate=bs.get("rank_flip_rate"),
@@ -3995,7 +4047,7 @@ class RobustnessAnalyzerV2:
         graph: GraphV2,
         factor_node_ids: List[str],
         goal_node_id: str,
-        max_walk_calls_per_factor: Optional[int] = None,
+        max_walk_calls_total: Optional[int] = None,
     ) -> Tuple[Dict[str, float], List[str]]:
         """
         Compute structural influence score for each factor based on causal path strengths.
@@ -4006,31 +4058,37 @@ class RobustnessAnalyzerV2:
         3. Factor influence = sum of absolute path strengths (multiple paths add)
         4. Normalize to 0-1 scale across all factors
 
-        UC-2 (D-23.18): enumeration is bounded by a per-factor walk-CALL budget
-        (``max_walk_calls_per_factor``) — this walker was the uncapped twin of the
-        ``_compute_path_decomposition`` walker (which has had MAX_DECOMPOSITION_PATHS
-        + a deadline since it shipped) and admitted exponential work on dense DAGs
-        at zero admission charge. A truncated factor's raw influence is a LOWER
-        BOUND (paths beyond the budget are dropped, every counted path is real);
-        truncation is deterministic per graph (call order follows edge insertion
-        order) and is DISCLOSED per factor via the returned list, which the caller
-        surfaces as a STRUCTURAL_INFLUENCE_TRUNCATED critique.
+        UC-2 (D-23.18, re-fixed per Codex N1/N2, D-23.19): enumeration is bounded
+        by a REQUEST-WIDE walk-CALL pool (``max_walk_calls_total``) shared across
+        all factors in factor order — a per-factor reset multiplied worst-case
+        work by U (the original F2 class). The pool ceiling is priced 1:1 in
+        compute_weighted_cost (`structural_influence` term).
+
+        ⚠ N1 (P0, Codex): a truncated factor's RAW path sum is a lower bound, but
+        the NORMALIZED score is NOT — the data-dependent max-denominator can
+        shrink faster than a numerator, inflating other factors' normalized
+        scores and inverting ranks (their repro: exact 0.1 → bounded 1.0). The
+        CALLER must therefore treat any non-empty ``truncated_factor_ids`` as
+        exact-or-null: withhold ALL influence scores/ranks for the cohort and
+        disclose via STRUCTURAL_INFLUENCE_TRUNCATED. Never publish the
+        normalized values of a truncated cohort as bounds of anything.
 
         Args:
             graph: Causal graph with edges
             factor_node_ids: List of factor node IDs to compute influence for
             goal_node_id: Target goal node ID
-            max_walk_calls_per_factor: recursion-call budget per factor (bounds
+            max_walk_calls_total: request-wide recursion-call pool (bounds
                 dead-branch exploration as well as completed paths)
 
         Returns:
             (influences, truncated_factor_ids): node_id -> influence_score (0-1,
-            normalized), plus the factors whose enumeration hit the budget.
+            normalized; only meaningful when truncated_factor_ids is empty),
+            plus the factors whose enumeration exhausted the shared pool.
         """
         # Late-bind the module constant (a def-time default would freeze it,
         # silently no-opping test overrides and any future env tuning).
-        if max_walk_calls_per_factor is None:
-            max_walk_calls_per_factor = MAX_INFLUENCE_WALK_CALLS_PER_FACTOR
+        if max_walk_calls_total is None:
+            max_walk_calls_total = MAX_INFLUENCE_WALK_CALLS_TOTAL
 
         # Build adjacency list for path finding
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
@@ -4043,8 +4101,9 @@ class RobustnessAnalyzerV2:
                 adjacency[from_node] = []
             adjacency[from_node].append((to_node, effective_strength))
 
-        # Per-factor walk budget state (reset before each factor's enumeration).
-        calls_left = 0
+        # REQUEST-WIDE walk pool (N2): consumed across all factors in factor
+        # order, never reset — the per-factor reset was the unpriced U-multiplier.
+        calls_left = max_walk_calls_total
         budget_hit = False
 
         def find_all_paths_strengths(
@@ -4082,15 +4141,18 @@ class RobustnessAnalyzerV2:
 
             return path_strengths
 
-        # Compute raw influence for each factor
+        # Compute raw influence for each factor, draining the SHARED pool.
+        # A factor that starts (or continues) after exhaustion is truncated too —
+        # its enumeration is incomplete by construction.
         raw_influences: Dict[str, float] = {}
         truncated_factors: List[str] = []
         for node_id in factor_node_ids:
-            calls_left = max_walk_calls_per_factor
             budget_hit = False
             path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
             # Sum of absolute path strengths (multiple paths add)
             raw_influences[node_id] = sum(abs(s) for s in path_strengths)
+            # An exhausted pool trips budget_hit on the factor's first walk call,
+            # so factors that start after exhaustion are truncated too.
             if budget_hit:
                 truncated_factors.append(str(node_id))
 

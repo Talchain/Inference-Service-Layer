@@ -355,7 +355,15 @@ class TestPhasePricingInventory:
             RobustnessAnalyzerV2,
         )
 
-        methods = {m for m in dir(RobustnessAnalyzerV2) if m.startswith("_compute_")}
+        # N3 (D-23.19): the inventory is a NAME-PREFIX tripwire, not a proof —
+        # widened to _run_ after Codex showed a `_run_unpriced_probe` evaded the
+        # _compute_-only sweep. A phase named outside these prefixes still
+        # evades it; the registry header says so honestly.
+        methods = {
+            m
+            for m in dir(RobustnessAnalyzerV2)
+            if m.startswith("_compute_") or m.startswith("_run_")
+        }
         unregistered = methods - set(PHASE_COST_ATTRIBUTION)
         stale = set(PHASE_COST_ATTRIBUTION) - methods
         assert not unregistered, (

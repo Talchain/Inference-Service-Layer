@@ -49,7 +49,7 @@ from src.services.causal_discovery_engine import CausalDiscoveryEngine
 from src.services.causal_transporter import CausalTransporter
 from src.services.causal_validator import CausalValidator
 from src.services.conformal_predictor import ConformalPredictor
-from src.services.counterfactual_engine import CounterfactualEngine
+from src.services.counterfactual_engine import CounterfactualEngine, _hash_client_text
 from src.services.parameter_recommender import generate_parameter_recommendations
 from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
@@ -281,14 +281,18 @@ async def analyze_counterfactual(
                 'on (do()), e.g. {"Price": 15}.'
             )
 
-        # F11 (A3, 2026-07-22): log intervention NAMES + count only, never the raw
-        # client-supplied values (their private scenario inputs).
+        # F11 (A3, 2026-07-22) logged NAMES-not-values; D-23.15 (Codex re-confirm
+        # F6, 25 Jul) tightened: identifier NAMES are client-model content too, so
+        # this record carries DIGESTS + counts only (found as a FOURTH leak site by
+        # the identifier-minimisation test — Codex cited three).
         logger.info(
             "counterfactual_request",
             extra={
                 "request_id": request_id,
-                "outcome": request.outcome,
-                "intervention_keys": sorted(request.intervention),
+                "outcome_hash": _hash_client_text(request.outcome),
+                "intervention_keys_hash": _hash_client_text(
+                    ",".join(sorted(request.intervention))
+                ),
                 "intervention_count": len(request.intervention),
                 "num_variables": len(request.model.variables),
             },
