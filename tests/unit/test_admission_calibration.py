@@ -25,7 +25,7 @@ from src.services.robustness_analyzer_v2 import (
     W_BANDS_COEF,
     W_EVAL_COEF,
     W_EVPC_COEF,
-    W_EVPPI_DEGREE_COEF,
+    W_EVPPI_COEF,
     W_PATH_COEF,
     W_SENS_COEF,
     compute_weighted_cost,
@@ -136,14 +136,15 @@ class TestWeightedCostShape:
         # (U+1) * min(S, cap) * O * W = 6 * 2000 * 10 * 160 (p_win term, sample-capped).
         assert wc.terms["evpi"] == 6 * min(5000, EVPI_SAMPLE_CAP) * 10 * 160
         # D-23.12: the S2 EVPPI regression is a SEPARATE term on the FULL S (not the
-        # 2000 cap): (deg+1) * U * (1+K) * O * S = 5 * 5 * 17 * 10 * 5000 = 21.25M.
+        # 2000 cap). v4 (OC-1, D-23.17): recalibrated to U * (1+K) * S — no O factor
+        # (one multi-RHS SVD shared across options), no (deg+1): 1 * 5 * 17 * 5000 = 425k.
         assert wc.terms["evppi_full"] == (
-            W_EVPPI_DEGREE_COEF * 5 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 10 * 5000
+            W_EVPPI_COEF * 5 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 5000
         )
-        # Because the full-S EVPPI term (21.25M) exceeds the sample-capped p_win term
-        # (19.2M) at 5000 samples, evppi_full is now the dominant term for VOI-heavy
-        # requests (GOLDEN CHANGED by D-23.12; previously "evpi").
-        assert wc.dominant_term == "evppi_full"
+        # v4 GOLDEN CHANGED (OC-1): the recalibrated evppi_full (425k) no longer
+        # dwarfs the sample-capped p_win term (19.2M) — 'evpi' is dominant again
+        # (as it was pre-D-23.12).
+        assert wc.dominant_term == "evpi"
 
     def test_evalues_add_evalue_and_bands_terms(self):
         base = _request_dict(12, 40, 3000, 3, sensitivity=False)
@@ -175,8 +176,8 @@ class TestPC2OptionRepricing:
         assert resp.status_code == 422
         data = resp.json()
         assert data["cost_units"] > data["limit"]
-        # D-23.12: full-S EVPPI term now dominates over the sample-capped p_win term.
-        assert data["dominant_term"] == "evppi_full"
+        # v4 (OC-1): the recalibrated evppi_full no longer dominates; 'evpi' does.
+        assert data["dominant_term"] == "evpi"
         assert data["complexity_formula_version"] == COMPLEXITY_FORMULA_VERSION
 
     def test_ten_option_evpi_legacy_endpoint_returns_422(self):
@@ -199,8 +200,8 @@ class TestPC2OptionRepricing:
         # stringified-into-message form, so this discriminates the normalisation.
         assert data["detail"] == "Request compute cost exceeds limit"
         assert data["cost_units"] > data["limit"]
-        # D-23.12: full-S EVPPI term now dominates over the sample-capped p_win term.
-        assert data["dominant_term"] == "evppi_full"
+        # v4 (OC-1): the recalibrated evppi_full no longer dominates; 'evpi' does.
+        assert data["dominant_term"] == "evpi"
 
     def test_admission_422_preserves_x_request_id_both_handlers(self):
         """Both v2 handlers' compute-cost 422 echo X-Request-Id + serve the flat
@@ -316,12 +317,56 @@ class TestFullPopulationEvppiTerm:
         wc = compute_weighted_cost(
             RobustnessRequestV2(**_request_dict(20, 40, 10000, 3, evpi_factors=4))
         )
-        expected = W_EVPPI_DEGREE_COEF * 4 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 3 * 10000
+        # v4 (OC-1): U * (1+K) * S — no O factor (shared multi-RHS SVD), no (deg+1).
+        expected = W_EVPPI_COEF * 4 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 10000
         assert wc.terms["evppi_full"] == expected
+
+    def test_evppi_full_is_O_flat(self):
+        """v4 invariant (OC-1): the EVPPI term must NOT scale with option count —
+        the estimator solves all options in one multi-RHS SVD (evppi.py
+        _inner_expected_max), so charging *O was measured 42-192x over.
+
+        MUTATION ANCHOR: restoring the v3 `* O` factor makes these differ 5x."""
+        o2 = compute_weighted_cost(
+            RobustnessRequestV2(**_request_dict(20, 40, 10000, 2, evpi_factors=4))
+        ).terms["evppi_full"]
+        o10 = compute_weighted_cost(
+            RobustnessRequestV2(**_request_dict(20, 40, 10000, 10, evpi_factors=4))
+        ).terms["evppi_full"]
+        assert o2 == o10
 
     def test_evppi_full_absent_without_voi(self):
         wc = compute_weighted_cost(RobustnessRequestV2(**_request_dict(20, 40, 5000, 3)))
         assert "evppi_full" not in wc.terms
+
+
+# ---------------------------------------------------------------------------
+# OC-1 (D-23.17) — the v3 over-charge must stop 422-ing legal requests
+# ---------------------------------------------------------------------------
+class TestOC1RecalAdmission:
+    """OC-1 repro: S=10000/U=20/O=2 (a legal, ~2s request) charged 34M EVPPI units
+    under v3 (5*20*17*2*10000) against the 24M ceiling -> 422. Under the measured
+    v4 term (1*20*17*10000 = 3.4M) it must ADMIT, while the F2 free-ride stays
+    closed (TestEvpcAdmission pins that side, unchanged)."""
+
+    def test_oc1_shape_now_admits(self):
+        """MUTATION ANCHOR: restoring the v3 term ((deg+1)*U*(1+K)*O*S) charges
+        this request 34M for EVPPI alone -> total > 24M -> this assert flips RED."""
+        body = _request_dict(22, 40, 10000, 2, evpi_factors=20)
+        wc = compute_weighted_cost(RobustnessRequestV2(**body))
+        # v4 charge: base 1.24M + evpi 5.208M + evppi_full 3.4M + sensitivity 992k
+        assert wc.terms["evppi_full"] == 20 * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * 10000
+        assert wc.total <= get_max_cost_units(), (
+            f"OC-1 shape must admit under v4 (cost={wc.total:,})"
+        )
+
+    def test_oc1_shape_endpoint_200(self):
+        """End-to-end: the exact OC-1 shape passes admission AND completes.
+        (sensitivity omitted — not part of the OC-1 claim; keeps the test fast)"""
+        client = TestClient(app)
+        body = _request_dict(22, 40, 10000, 2, evpi_factors=20, sensitivity=False)
+        resp = client.post(ENDPOINT, json=body, headers={"X-ISL-Response-Version": "2"})
+        assert resp.status_code == 200, f"OC-1 shape must run (got {resp.status_code})"
 
 
 # ---------------------------------------------------------------------------
@@ -361,11 +406,13 @@ class TestCalibrationPins:
         assert EVPI_SAMPLE_CAP == 2000
         # D-23.12 EVPC + full-pop EVPPI coefficients (silent-revert guard).
         assert W_EVPC_COEF == 1
-        assert W_EVPPI_DEGREE_COEF == 5  # REGRESSION_EVPPI_POLY_DEGREE (4) + 1
+        # v4 (OC-1, D-23.17): measurement-recalibrated from (deg+1)=5 with *O to a
+        # flat 1 per (factor-fit x permutation x sample) — see W_EVPPI_COEF comment.
+        assert W_EVPPI_COEF == 1
         assert REGRESSION_EVPPI_NULL_PERMUTATIONS == 16
 
     def test_formula_version_pinned(self):
-        assert COMPLEXITY_FORMULA_VERSION == "v3-evpc-evppi-2026-07-24"
+        assert COMPLEXITY_FORMULA_VERSION == "v4-evppi-recal-2026-07-25"
 
     def test_env_override_resolves_new_var_only(self, monkeypatch):
         """ISL_MAX_COST_UNITS overrides; the OLD ISL_MAX_COMPUTE_COMPLEXITY does NOT."""
