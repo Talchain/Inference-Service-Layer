@@ -337,15 +337,20 @@ STRUCTURAL_INFLUENCE_TRUNCATED = CritiqueDefinition(
     code="STRUCTURAL_INFLUENCE_TRUNCATED",
     severity="warning",
     source="analysis",
+    # N1 (D-23.19): normalized influence of a truncated cohort is NOT a lower
+    # bound (the data-dependent max denominator can inflate other factors'
+    # scores and invert ranks), so scores/ranks are WITHHELD, never published
+    # as bounds.
     message_template=(
-        "Structural influence for factor(s) {factor_ids} was computed from a "
-        "truncated path enumeration ({budget} walk budget exhausted) — reported "
-        "influence for these factors is a lower bound and influence_rank may be "
-        "affected"
+        "Structural influence could not be computed exactly — the path-"
+        "enumeration budget ({budget} walk calls) was exhausted at factor(s) "
+        "{factor_ids}. influence_score and influence_rank are withheld for all "
+        "factors in this analysis (a truncated normalized score is not a valid "
+        "bound)"
     ),
     default_suggestion=(
-        "Dense graphs exceed the exact path-enumeration budget; consider reducing "
-        "edge density if exact structural influence ranking matters"
+        "Dense graphs exceed the exact path-enumeration budget; reduce edge "
+        "density if structural influence ranking matters"
     ),
 )
 
