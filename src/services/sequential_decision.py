@@ -885,6 +885,38 @@ class SequentialDecisionEngine:
         # sqrt of total variance = standard-deviation-scale dispersion magnitude
         return np.sqrt(total_variance) if total_variance > 0 else 0
 
+    def _subtree_chance_nodes(
+        self,
+        start_id: str,
+        nodes: Dict[str, Any],
+        edges: Dict[str, List[Dict[str, Any]]],
+    ) -> set:
+        """All chance-node ids reachable from ``start_id`` (including itself).
+
+        Primitive for the F1 identifiability logic in ``_compute_stage_evpi``:
+        the SETS (not just a boolean) are needed because a chance node shared
+        between two actions' subtrees means the tree IDENTIFIES their coupling
+        (same id = same random variable) — emitting the independence value there
+        contradicts the submitted graph (Codex re-confirm, D-23.19). Iterative
+        DFS with a visited set so graph cycles terminate; cost is O(subtree)
+        and the graph is capped at 100 nodes.
+        """
+        stack = [start_id]
+        seen: set = set()
+        chance: set = set()
+        while stack:
+            nid = stack.pop()
+            if nid in seen:
+                continue
+            seen.add(nid)
+            if nodes.get(nid, {}).get("type") == "chance":
+                chance.add(nid)
+            for e in edges.get(nid, []):
+                target = e.get("to")
+                if target is not None and target not in seen:
+                    stack.append(target)
+        return chance
+
     def _subtree_reaches_chance(
         self,
         start_id: str,
@@ -892,26 +924,10 @@ class SequentialDecisionEngine:
         edges: Dict[str, List[Dict[str, Any]]],
     ) -> bool:
         """Does the subtree rooted at ``start_id`` contain any reachable chance node
-        (including ``start_id`` itself)? Used by ``_compute_stage_evpi`` (F1) to decide
-        whether an action faces resolvable uncertainty at ANY depth — the immediate
-        child alone is insufficient (adversarial FN-1/FN-2: the cross-action joint can
-        enter one level deeper via a decision node). Iterative DFS with a visited set so
-        graph cycles terminate; cost is O(subtree) and the graph is capped at 100 nodes.
+        (including ``start_id`` itself)? Derived from ``_subtree_chance_nodes`` —
+        one traversal, one truth (see that docstring for why the sets exist).
         """
-        stack = [start_id]
-        seen: set = set()
-        while stack:
-            nid = stack.pop()
-            if nid in seen:
-                continue
-            seen.add(nid)
-            if nodes.get(nid, {}).get("type") == "chance":
-                return True
-            for e in edges.get(nid, []):
-                target = e.get("to")
-                if target is not None and target not in seen:
-                    stack.append(target)
-        return False
+        return bool(self._subtree_chance_nodes(start_id, nodes, edges))
 
     def _compute_stage_evpi(
         self,
@@ -937,6 +953,11 @@ class SequentialDecisionEngine:
           F-3 honest skip of this auxiliary metric (the exact O(nodes) analysis is
           untouched). The join size is measured multiplicatively with an
           overflow-safe early exit — the ∏ is NEVER materialised.
+        * ``(None, "skipped_shared_chance_nodes_unsupported", None)`` — the SAME
+          chance-node id is reachable from >=2 actions' subtrees, so the graph
+          IDENTIFIES their coupling and the independence enumeration would
+          contradict it (Codex re-confirm, D-23.19); skipped until conditional
+          subtree re-valuation ships (rowed refinement).
 
         This REPLACES the deleted ``optimal_waiting_value`` (a discount × sqrt(Σvar)
         dispersion heuristic dressed as an option value) with a real value of
@@ -1117,16 +1138,36 @@ class SequentialDecisionEngine:
         # the resolved chance is independent of the other action's (possibly deeper)
         # uncertainty. That is the SAME unidentified cross-action joint whether the
         # second action's chance is immediate (Codex) or one level down (adversarial
-        # FN-1), and even when it is the SAME node reused deeper (FN-2, where the tree
-        # identifies EVPI 0 yet the leg emits the independence value — disclosed, not
-        # recomputed; see the FN-2 value-refinement flag). A prior version counted only
-        # DISTINCT IMMEDIATE chance children and labelled FN-1/FN-2 exact — a false
-        # negative. Disclose whenever >=2 actions face reachable chance.
-        actions_facing_chance = sum(
-            1
-            for e in action_edges
-            if self._subtree_reaches_chance(e["to"], nodes, edges)
-        )
+        # FN-1). A prior version counted only DISTINCT IMMEDIATE chance children and
+        # labelled FN-1/FN-2 exact — a false negative. Disclose whenever >=2 actions
+        # face DISJOINT reachable chance; when the SAME chance id is reachable from
+        # >=2 actions the coupling is IDENTIFIED by the graph and the value is
+        # SKIPPED instead (see the shared_chance guard below — Codex re-confirm
+        # D-23.19 superseded the earlier disclose-not-recompute posture for FN-2).
+        per_action_chance = [
+            self._subtree_chance_nodes(e["to"], nodes, edges) for e in action_edges
+        ]
+
+        # F1 SHARPENED (Codex re-confirm, D-23.19): if the SAME chance-node id is
+        # reachable from >=2 actions' subtrees, the tree IDENTIFIES the coupling
+        # (same id = same random variable — the dedupe above already treats it as
+        # one variable for probability mass). The independence label would then
+        # CONTRADICT the submitted graph, and the enumeration below would mix one
+        # action's REALISED copy against another action's AVERAGED copy of the
+        # same variable (their repro: two routes to one 0/100 coin — identified
+        # EVPI 0, we emitted 25). Until conditional subtree re-valuation ships
+        # (rowed refinement: pin realised nodes and re-derive each action's Q per
+        # joint cell), honestly SKIP: null + a dedicated status. Codex-blessed
+        # containment ("if that refinement cannot ship immediately, emit null
+        # with a shared-state unsupported status").
+        shared_chance: set = set()
+        for i in range(len(per_action_chance)):
+            for j in range(i + 1, len(per_action_chance)):
+                shared_chance |= per_action_chance[i] & per_action_chance[j]
+        if shared_chance:
+            return None, "skipped_shared_chance_nodes_unsupported", None
+
+        actions_facing_chance = sum(1 for s in per_action_chance if s)
         assumes_independence = actions_facing_chance >= 2
 
         # Enumerate the JOINT outcome space of the resolved chance nodes. When >=2
