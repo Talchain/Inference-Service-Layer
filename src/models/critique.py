@@ -333,6 +333,22 @@ DEGENERATE_OPTION_ZERO_VARIANCE = CritiqueDefinition(
     ),
 )
 
+STRUCTURAL_INFLUENCE_TRUNCATED = CritiqueDefinition(
+    code="STRUCTURAL_INFLUENCE_TRUNCATED",
+    severity="warning",
+    source="analysis",
+    message_template=(
+        "Structural influence for factor(s) {factor_ids} was computed from a "
+        "truncated path enumeration ({budget} walk budget exhausted) — reported "
+        "influence for these factors is a lower bound and influence_rank may be "
+        "affected"
+    ),
+    default_suggestion=(
+        "Dense graphs exceed the exact path-enumeration budget; consider reducing "
+        "edge density if exact structural influence ranking matters"
+    ),
+)
+
 HIGH_TIE_RATE = CritiqueDefinition(
     code="HIGH_TIE_RATE",
     severity="warning",
