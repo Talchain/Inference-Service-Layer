@@ -82,6 +82,7 @@ from src.models.critique import (
     GOAL_ANCESTOR_DATA_GAP,
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
+    STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
@@ -113,6 +114,16 @@ logger = logging.getLogger(__name__)
 # sub-500ms budget. The bound is a path COUNT (not wall-clock) so truncation is deterministic
 # — the same graph always truncates identically, preserving the determinism guarantee.
 MAX_DECOMPOSITION_PATHS = 20000
+
+# UC-2 (D-23.18): walk-call budget for the structural-influence path enumerator —
+# the previously UNCAPPED twin of the decomposition walker above. A call budget
+# (not a completed-path budget) is deliberate: on an adversarial dense subgraph
+# that never reaches the goal, completed paths stay at zero while exploration
+# explodes, so only bounding recursion CALLS bounds the work absolutely. Calls
+# >= completed paths, so this also caps the path products accumulated. Count-
+# based (not wall-clock) => truncation is deterministic per graph. Per-factor
+# budget; worst total = 50 factors x 200k calls, ~tens of ms.
+MAX_INFLUENCE_WALK_CALLS_PER_FACTOR = 200_000
 
 # Edge strength bounds from schema v2.6
 EDGE_STRENGTH_MIN = -1.0
@@ -349,16 +360,17 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     "_compute_magnitude_sensitivity": "subsumed:_compute_sensitivity",
     "_compute_factor_sensitivity": (
         "bounded: 2 deterministic evaluates per uncertain factor (2*U*W <= ~25k "
-        "units at caps) — EXCEPT _compute_structural_influence, see its entry"
+        "units at caps); its _compute_structural_influence child is separately "
+        "call-budgeted, see its entry"
     ),
     "_compute_conditional_winners": "bounded: partitions existing MC samples, no new evaluates",
     "_compute_bucket_result": "subsumed:_compute_conditional_winners",
     "_compute_bootstrap_stability": "bounded: adaptive 10-20 iterations, wall-clock-capped ~100ms",
     "_compute_structural_influence": (
-        "bounded: FALSE — KNOWN-UNCAPPED path enumeration (no MAX_DECOMPOSITION_PATHS "
-        "twin), exponential worst case on dense DAGs, unpriced; ROWED as UC-2 "
-        "(A3-DECISIONS-2026-07-23.md) for a dedicated capped-enumeration fix. "
-        "Contained: consumers gated, authed callers only"
+        "bounded: UC-2 FIXED — walk-call budget MAX_INFLUENCE_WALK_CALLS_PER_FACTOR "
+        "(200k calls/factor, deterministic truncation, disclosed via "
+        "STRUCTURAL_INFLUENCE_TRUNCATED critique); worst total ~50 factors x 200k "
+        "calls, tens of ms"
     ),
     "_compute_path_decomposition": "priced:path_decomposition",
     "_compute_robustness": "bounded: post-processing of existing samples; heavy child is _compute_alternative_winners",
@@ -1801,7 +1813,7 @@ class RobustnessAnalyzerV2:
                 suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
                 factor_sensitivity = self._compute_factor_sensitivity(
-                    request, option_outcomes, rng_factor, evaluator
+                    request, option_outcomes, rng_factor, evaluator, critiques=critiques
                 )
 
         # Compute conditional winners (factor-partitioned win probabilities).
@@ -3251,6 +3263,7 @@ class RobustnessAnalyzerV2:
         baseline_outcomes: Dict[str, List[float]],
         rng: SeededRNG,
         evaluator: SCMEvaluatorV2,
+        critiques: Optional[List[CritiqueV2]] = None,
     ) -> List[FactorSensitivityResult]:
         """
         Compute sensitivity to factor node values.
@@ -3474,9 +3487,21 @@ class RobustnessAnalyzerV2:
 
         # Compute structural influence for all factors
         factor_node_ids: List[str] = [s["node_id"] for s in sensitivities]
-        influence_scores = self._compute_structural_influence(
+        influence_scores, influence_truncated = self._compute_structural_influence(
             request.graph, factor_node_ids, request.goal_node_id
         )
+        # UC-2 (D-23.18): disclose truncated enumeration — the affected factors'
+        # influence is a lower bound and influence_rank may be affected. One
+        # critique naming all affected factors (deterministic order).
+        if influence_truncated and critiques is not None:
+            critiques.append(
+                STRUCTURAL_INFLUENCE_TRUNCATED.build(
+                    factor_ids=", ".join(sorted(influence_truncated)),
+                    budget=MAX_INFLUENCE_WALK_CALLS_PER_FACTOR,
+                    affected_node_ids=sorted(influence_truncated),
+                    seed=rng.seed,  # resolved int (request.seed may be a str alias)
+                )
+            )
 
         # Add influence scores to sensitivities
         for s in sensitivities:
@@ -3970,7 +3995,8 @@ class RobustnessAnalyzerV2:
         graph: GraphV2,
         factor_node_ids: List[str],
         goal_node_id: str,
-    ) -> Dict[str, float]:
+        max_walk_calls_per_factor: Optional[int] = None,
+    ) -> Tuple[Dict[str, float], List[str]]:
         """
         Compute structural influence score for each factor based on causal path strengths.
 
@@ -3980,14 +4006,32 @@ class RobustnessAnalyzerV2:
         3. Factor influence = sum of absolute path strengths (multiple paths add)
         4. Normalize to 0-1 scale across all factors
 
+        UC-2 (D-23.18): enumeration is bounded by a per-factor walk-CALL budget
+        (``max_walk_calls_per_factor``) — this walker was the uncapped twin of the
+        ``_compute_path_decomposition`` walker (which has had MAX_DECOMPOSITION_PATHS
+        + a deadline since it shipped) and admitted exponential work on dense DAGs
+        at zero admission charge. A truncated factor's raw influence is a LOWER
+        BOUND (paths beyond the budget are dropped, every counted path is real);
+        truncation is deterministic per graph (call order follows edge insertion
+        order) and is DISCLOSED per factor via the returned list, which the caller
+        surfaces as a STRUCTURAL_INFLUENCE_TRUNCATED critique.
+
         Args:
             graph: Causal graph with edges
             factor_node_ids: List of factor node IDs to compute influence for
             goal_node_id: Target goal node ID
+            max_walk_calls_per_factor: recursion-call budget per factor (bounds
+                dead-branch exploration as well as completed paths)
 
         Returns:
-            Dict mapping node_id -> influence_score (0-1, normalized)
+            (influences, truncated_factor_ids): node_id -> influence_score (0-1,
+            normalized), plus the factors whose enumeration hit the budget.
         """
+        # Late-bind the module constant (a def-time default would freeze it,
+        # silently no-opping test overrides and any future env tuning).
+        if max_walk_calls_per_factor is None:
+            max_walk_calls_per_factor = MAX_INFLUENCE_WALK_CALLS_PER_FACTOR
+
         # Build adjacency list for path finding
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
         for edge in graph.edges:
@@ -3999,6 +4043,10 @@ class RobustnessAnalyzerV2:
                 adjacency[from_node] = []
             adjacency[from_node].append((to_node, effective_strength))
 
+        # Per-factor walk budget state (reset before each factor's enumeration).
+        calls_left = 0
+        budget_hit = False
+
         def find_all_paths_strengths(
             start: str,
             end: str,
@@ -4007,7 +4055,14 @@ class RobustnessAnalyzerV2:
             """
             Find all paths from start to end and return list of path strengths.
             Each path strength is the product of edge strengths along the path.
+            Stops (returning what it has) once the walk-call budget is exhausted.
             """
+            nonlocal calls_left, budget_hit
+            if calls_left <= 0:
+                budget_hit = True
+                return []
+            calls_left -= 1
+
             if start == end:
                 return [1.0]  # Base case: path of strength 1
 
@@ -4029,18 +4084,25 @@ class RobustnessAnalyzerV2:
 
         # Compute raw influence for each factor
         raw_influences: Dict[str, float] = {}
+        truncated_factors: List[str] = []
         for node_id in factor_node_ids:
+            calls_left = max_walk_calls_per_factor
+            budget_hit = False
             path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
             # Sum of absolute path strengths (multiple paths add)
             raw_influences[node_id] = sum(abs(s) for s in path_strengths)
+            if budget_hit:
+                truncated_factors.append(str(node_id))
 
         # Normalize to 0-1 scale
         max_influence = max(raw_influences.values()) if raw_influences else 0.0
         if max_influence < 1e-10:
             # All factors have zero influence
-            return {node_id: 0.0 for node_id in factor_node_ids}
+            return {node_id: 0.0 for node_id in factor_node_ids}, truncated_factors
 
-        return {node_id: raw_influences[node_id] / max_influence for node_id in factor_node_ids}
+        return {
+            node_id: raw_influences[node_id] / max_influence for node_id in factor_node_ids
+        }, truncated_factors
 
     @staticmethod
     def _format_path_mechanism(
