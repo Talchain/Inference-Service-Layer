@@ -169,10 +169,12 @@ def _admission_suggestion(request: RobustnessRequestV2, cost: WeightedCost) -> s
             f"(currently {n_uncertainties}); or set include_voi=false."
         )
     if dominant == "evppi_full":
+        # v4 (OC-1): the term is O-flat (one shared multi-RHS SVD across options),
+        # so reducing options would NOT reduce this term — don't suggest it.
         return (
             f"Per-factor EVPPI regression dominates: reduce n_samples (currently "
-            f"{request.n_samples}), options (currently {len(request.options)}), or "
-            f"parameter_uncertainties (currently {n_uncertainties}); or set include_voi=false."
+            f"{request.n_samples}) or parameter_uncertainties (currently "
+            f"{n_uncertainties}); or set include_voi=false."
         )
     if dominant == "evpc":
         n_candidates = len(request.control_candidates or [])
