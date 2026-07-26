@@ -6870,7 +6870,7 @@
         "type": "object"
       },
       "StagePolicy": {
-        "description": "Optimal decision policy for a single stage.",
+        "description": "Optimal decision policy for a single stage.\n\nExactly ONE `decision_rule`, and that is now the whole truth rather than\nhalf of it. The request previously accepted up to 20 `decision_nodes` per\nstage while backward induction solved the first and dropped the rest \u2014 and\nthis model has no field in which the drop could have been disclosed, so a\nconsumer received what read as the complete policy for the stage. Arch step\n1 (2026-07-26) closes the gap at the request boundary instead: >1 decision\nnode per stage is rejected (`MULTI_DECISION_STAGE_UNSUPPORTED`), so the\nsingle rule below is now provably the whole policy for the stage.\n\nA stage with several genuinely distinct decisions needs a policy shape that\ncan carry several rules. That is a modelling roadmap item; until it ships,\nthe service declines such requests rather than answering them partially.",
         "example": {
           "contingent_on": [
             "market_outcome"
@@ -6903,7 +6903,7 @@
                 "$ref": "#/components/schemas/DecisionRule"
               }
             ],
-            "description": "Decision rule for this stage"
+            "description": "The decision rule for this stage \u2014 the complete policy for it. A stage declares at most one decision node (enforced at the request boundary), so this is never a truncation of several rules."
           },
           "stage_index": {
             "description": "Stage index",

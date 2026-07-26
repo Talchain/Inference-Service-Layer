@@ -2974,11 +2974,30 @@ class DecisionRule(BaseModel):
 
 
 class StagePolicy(BaseModel):
-    """Optimal decision policy for a single stage."""
+    """Optimal decision policy for a single stage.
+
+    Exactly ONE `decision_rule`, and that is now the whole truth rather than
+    half of it. The request previously accepted up to 20 `decision_nodes` per
+    stage while backward induction solved the first and dropped the rest — and
+    this model has no field in which the drop could have been disclosed, so a
+    consumer received what read as the complete policy for the stage. Arch step
+    1 (2026-07-26) closes the gap at the request boundary instead: >1 decision
+    node per stage is rejected (`MULTI_DECISION_STAGE_UNSUPPORTED`), so the
+    single rule below is now provably the whole policy for the stage.
+
+    A stage with several genuinely distinct decisions needs a policy shape that
+    can carry several rules. That is a modelling roadmap item; until it ships,
+    the service declines such requests rather than answering them partially.
+    """
 
     stage_index: int = Field(..., description="Stage index", ge=0)
     stage_label: str = Field(..., description="Human-readable stage label")
-    decision_rule: DecisionRule = Field(..., description="Decision rule for this stage")
+    decision_rule: DecisionRule = Field(
+        ...,
+        description="The decision rule for this stage — the complete policy for it. "
+        "A stage declares at most one decision node (enforced at the request "
+        "boundary), so this is never a truncation of several rules.",
+    )
     contingent_on: List[str] = Field(
         default_factory=list, description="What must be observed before this stage"
     )
