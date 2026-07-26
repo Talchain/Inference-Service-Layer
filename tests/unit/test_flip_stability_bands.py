@@ -178,7 +178,29 @@ def normalize_v2_payload(payload: dict) -> dict:
 # stripped before the modulo comparison. 'stability' = flip-stability bands;
 # 'downside' = B2 tail-risk view (cvar_10/p05/expected_regret);
 # 'decision_evpi' = S1 decision-level EVPI (A3 VOI, D-23.8; top-level scalar).
-_ADDITIVE_WIRE_SURFACES = frozenset({"stability", "downside", "decision_evpi"})
+# Arch step 1 (2026-07-26) additions: 'confidence_basis' = machine-readable
+# semantics marker beside robustness.confidence; 'sample_population_provenance' =
+# per-metric noise provenance on the envelope. Both are purely ADDITIVE
+# disclosure surfaces, which is exactly what this set is for.
+_ADDITIVE_WIRE_SURFACES = frozenset(
+    {
+        "stability",
+        "downside",
+        "decision_evpi",
+        "confidence_basis",
+        "sample_population_provenance",
+    }
+)
+
+# Arch step 1 (2026-07-26): robustness.confidence is NOT additive — its VALUE
+# changed, so it cannot be silently stripped. The golden holds the base value
+# min(0.99, stability*(1 - 1/sqrt(n_samples))); the wire now carries the
+# stability fraction itself, because the shrinkage term was a function of sample
+# COUNT alone and moved the published number with how long the run took rather
+# than with anything about the recommendation. The change is asserted explicitly
+# in test_confidence_is_now_the_bare_stability_fraction below, so it is pinned
+# rather than waved through, and only then excluded from the modulo comparison.
+_CHANGED_WIRE_VALUES = ("robustness", "confidence")
 
 
 def _strip_additive_surfaces(payload):
@@ -272,7 +294,9 @@ class TestDefaultOn:
 
 
 class TestAdditiveVsBase:
-    def test_v2_wire_modulo_stability_matches_base_golden(self, no_env, client):
+    def test_v2_wire_modulo_stability_matches_base_golden(
+        self, no_env, client, auto_noise_enabled
+    ):
         """Pin: the ONLY wire deltas vs origin/staging base are the additive
         surfaces ``stability`` (flip bands) and ``downside`` (B2 tail-risk).
 
@@ -287,7 +311,26 @@ class TestAdditiveVsBase:
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
         golden = json.loads(GOLDEN_PATH.read_text())
-        assert _strip_additive_surfaces(normalize_v2_payload(resp.json())) == golden
+        current = _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+        # See _CHANGED_WIRE_VALUES: one value deliberately moved; drop it from BOTH
+        # sides so this pin keeps guarding everything else byte-for-byte.
+        section, key = _CHANGED_WIRE_VALUES
+        current.get(section, {}).pop(key, None)
+        golden.get(section, {}).pop(key, None)
+        assert current == golden
+
+    def test_confidence_is_now_the_bare_stability_fraction(self, no_env, client):
+        """Pin the one value the golden comparison above excludes.
+
+        Base wire: min(0.99, recommendation_stability * (1 - 1/sqrt(n_samples))).
+        Now: recommendation_stability, unmodified — see
+        RobustnessAnalyzerV2._stability_confidence_figure. Without this the
+        exclusion above would be a hole in the pin."""
+        resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
+        assert resp.status_code == 200, resp.text
+        robustness = resp.json()["robustness"]
+        assert robustness["confidence"] == robustness["recommendation_stability"]
+        assert robustness["confidence_basis"] == "recommendation_stability_uncalibrated"
 
     def test_stability_present_before_stripping(self, no_env, client):
         """Positive control for the golden pin: the strip in the test above

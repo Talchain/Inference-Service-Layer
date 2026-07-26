@@ -133,7 +133,10 @@ class CounterfactualEngine:
     Performs counterfactual analysis using structural causal models.
 
     Uses Monte Carlo simulation to propagate uncertainty and generate
-    robust predictions with confidence intervals.
+    predictions with percentile-based PREDICTION intervals (the wire field is
+    named `confidence_interval` for legacy contract reasons; the bounds are the
+    2.5th/97.5th percentiles of the simulated outcomes and carry no frequentist
+    coverage guarantee — arch step 1, 2026-07-26).
     """
 
     def __init__(self, enable_adaptive_sampling: bool = True) -> None:
@@ -605,8 +608,26 @@ class CounterfactualEngine:
             # Increase batch size for next iteration
             batch_size = min(batch_size * 2, self.num_iterations)
 
-        # Run one final simulation with the determined sample count
-        # (we only tracked outcome for convergence, need all variables)
+        # KNOWN DEFECT — NOT FIXED HERE (arch step 1, 2026-07-26).
+        # Deliberately recorded rather than repaired: the repair changes served
+        # numbers on a live path and needs its own careful change.
+        #
+        # Every sample accumulated by the loop above is DISCARDED. Only the
+        # COUNT survives into the final draw, and because the same stateful
+        # `rng` was threaded through each discarded batch, that draw comes from
+        # an ADVANCED RNG state. Two consequences:
+        #   1. the `cv < 0.1` convergence test above was evaluated on a
+        #      population that no longer exists — the samples actually returned
+        #      (and percentiled into the served prediction interval) were never
+        #      tested for convergence at all;
+        #   2. `adaptive_sampling_converged` is logged about data the engine
+        #      then throws away.
+        # Adaptive sampling is ON by default (`enable_adaptive_sampling=True`),
+        # so this is the default path.
+        #
+        # Evidence: CODEX-SCIENCE-CLAIMS-VERIFY-2026-07-26.md claim 6.
+        # Fix direction: accumulate ALL variables across batches and return the
+        # tested population, instead of re-drawing its size.
         final_count = len(all_samples[request.outcome])
         return self._run_fixed_monte_carlo(request, final_count, rng)
 
@@ -933,9 +954,15 @@ class CounterfactualEngine:
         # Point estimate (median for robustness to outliers)
         point_estimate = float(np.median(outcome_samples))
 
-        # Prediction interval (95% by default)
-        # Note: Named "confidence_interval" in API for legacy reasons, but these are
-        # percentile-based bounds from Monte Carlo simulation (see ConfidenceInterval docstring)
+        # Prediction interval (95% by default).
+        # Named "confidence_interval" on the wire for legacy contract reasons —
+        # these are the 2.5th/97.5th PERCENTILES of the Monte-Carlo outcome
+        # samples, so they describe the spread of the model's own simulated
+        # outcomes and carry no frequentist coverage guarantee over the
+        # estimand. The "95%" is a fixed level, not one derived from a coverage
+        # study. Arch step 1 (2026-07-26) removed the "95% confidence interval"
+        # prose from the user-facing explanation; the field NAME is kept because
+        # it is a published contract slot (see ConfidenceInterval's docstring).
         ci_lower = float(np.percentile(outcome_samples, 2.5))
         ci_upper = float(np.percentile(outcome_samples, 97.5))
 

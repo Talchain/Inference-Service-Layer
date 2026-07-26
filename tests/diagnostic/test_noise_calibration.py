@@ -299,7 +299,14 @@ def test_noise_calibration_comparison() -> None:
         # Apply noise with the specific multiplier
         rng_noise = SeededRNG(seed + 2)
         noised_outcomes, _ = analyzer._apply_auto_scaled_noise(
-            option_outcomes, "revenue", graph.nodes, rng_noise, noise_multiplier=mult
+            option_outcomes,
+            "revenue",
+            graph.nodes,
+            rng_noise,
+            noise_multiplier=mult,
+            # Arch step 1 (2026-07-26): noise is DEFAULT OFF. This is the
+            # calibration diagnostic FOR the heuristic, so it opts in.
+            enabled=True,
         )
 
         # Compute stats per option

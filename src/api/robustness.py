@@ -1261,7 +1261,22 @@ async def _analyze_robustness_v2_enhanced(
         # RobustnessResponseV2, so this is always a concrete bool here; the
         # Optional on the V2 envelope covers error paths where build() runs
         # without metadata having been populated.
-        builder.set_auto_noise_applied(v1_response.metadata.auto_noise_applied)
+        #
+        # Arch step 1 (2026-07-26): the same call derives
+        # `sample_population_provenance`, which says WHICH metrics each
+        # population produced — the boolean alone cannot, and one envelope
+        # carries both pre-noise CRN metrics and post-noise marginal ones. The
+        # constraint-node mix already disclosed by CONSTRAINT_SAMPLES_UNNOISED is
+        # threaded in so the two disclosures agree by construction.
+        unnoised_constraint_nodes = [
+            node_id
+            for warning in (v1_response.inference_warnings or [])
+            if warning.code == "CONSTRAINT_SAMPLES_UNNOISED"
+            for node_id in (warning.detail or {}).get("node_ids", [])
+        ]
+        builder.set_auto_noise_applied(
+            v1_response.metadata.auto_noise_applied, unnoised_constraint_nodes
+        )
 
         # B3-S1: surface the correlated-factors disclosure (Gaussian copula method,
         # mandatory tail-independence caveat, any Higham PSD projection, suppressed-

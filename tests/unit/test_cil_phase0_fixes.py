@@ -259,7 +259,9 @@ class TestPercentileSemanticDrift:
             assert samples is not None, "Samples must be stored for V2 percentile computation"
             assert len(samples) == 500
 
-    def test_actual_percentiles_differ_from_ci_bounds(self, simple_graph, simple_options, analyzer):
+    def test_actual_percentiles_differ_from_ci_bounds(
+        self, simple_graph, simple_options, analyzer, auto_noise_enabled
+    ):
         """
         Regression test: actual p10/p90 from samples must differ from ci_lower/ci_upper
         (2.5th/97.5th). This test will FAIL if someone reverts to the old mapping.

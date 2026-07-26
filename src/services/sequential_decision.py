@@ -150,21 +150,22 @@ class SequentialDecisionEngine:
             graph_data, request.stages, node_values, optimal_actions, request.discount_factor
         )
 
-        # Calculate value of flexibility
-        value_of_flexibility = self._compute_value_of_flexibility(
-            graph_data, request.stages, node_values, request.discount_factor
-        )
-
-        # Determine sensitivity to timing
-        sensitivity_to_timing = self._assess_timing_sensitivity(
-            stage_analyses, value_of_flexibility
-        )
-
+        # Arch step 1 (2026-07-26): `value_of_flexibility` and the
+        # `sensitivity_to_timing` label derived from it are OMITTED, and the
+        # estimators behind them (_compute_value_of_flexibility,
+        # _calculate_committed_value, _calculate_average_continuation,
+        # _assess_timing_sensitivity) are removed rather than left unmounted.
+        # The committed leg took np.mean over a chance node's branches while the
+        # flexible leg used _edge_probability, so the difference between the two
+        # was an estimator gap reported as economic value (40.0 where the true
+        # value is 0 — see SequentialAnalysisResponse's docstring and
+        # CODEX-SCIENCE-CLAIMS-VERIFY-2026-07-26.md claim 1). A correct
+        # committed value needs information sets this request schema cannot
+        # express; without them it collapses onto backward induction and the
+        # field is identically 0. Nothing else in this response depends on it.
         return SequentialAnalysisResponse(
             optimal_policy=policy,
             stage_analyses=stage_analyses,
-            value_of_flexibility=value_of_flexibility,
-            sensitivity_to_timing=sensitivity_to_timing,
         )
 
     def get_policy_tree(self, request: SequentialAnalysisRequest) -> PolicyTreeResponse:
@@ -600,8 +601,13 @@ class SequentialDecisionEngine:
             if not decision_nodes:
                 continue
 
-            # Build decision rule for first decision node at stage
-            # (simplified - in practice might need multiple rules)
+            # Build the decision rule for this stage's decision node.
+            # Arch step 1 (2026-07-26): `DecisionStage.decision_nodes` is now
+            # capped at ONE node and >1 is rejected at the request boundary
+            # (MULTI_DECISION_STAGE_UNSUPPORTED), so the `break` below can no
+            # longer silently discard decisions the client supplied. The loop
+            # remains because a declared node may be absent from the graph or
+            # not typed `decision`, in which case this stage yields no policy.
             for node_id in decision_nodes:
                 if node_id not in nodes:
                     continue
@@ -670,7 +676,10 @@ class SequentialDecisionEngine:
                     )
                 )
 
-                break  # One policy per stage for simplicity
+                # One policy per stage. Not "for simplicity" any more: the
+                # request boundary rejects >1 decision node per stage, so at
+                # most one iteration can ever reach here and nothing is dropped.
+                break
 
         # Calculate expected total value
         root_value = self._get_root_value(graph_data, node_values)
@@ -1207,129 +1216,20 @@ class SequentialDecisionEngine:
             )
         return stage_evpi_value, None, None
 
-    def _compute_value_of_flexibility(
-        self,
-        graph_data: Dict[str, Any],
-        stages: List[DecisionStage],
-        node_values: Dict[str, float],
-        discount_factor: float,
-    ) -> float:
-        """
-        Compute value of flexibility (waiting vs committing now).
-
-        Compares:
-        - V_flexible: Value of optimal policy (decide at each stage)
-        - V_committed: Value of committing to stage-0 decision for all stages
-        """
-        # Get flexible value (optimal policy)
-        v_flexible = self._get_root_value(graph_data, node_values)
-
-        # Calculate committed value (ignore future information)
-        v_committed = self._calculate_committed_value(graph_data, stages, discount_factor)
-
-        value_of_flexibility = max(0, v_flexible - v_committed)
-
-        return round(value_of_flexibility, 2)
-
-    def _calculate_committed_value(
-        self, graph_data: Dict[str, Any], stages: List[DecisionStage], discount_factor: float
-    ) -> float:
-        """Calculate value when committing upfront (ignoring future information)."""
-        nodes = graph_data["nodes"]
-        edges = graph_data["edges"]
-        stage_assignments = graph_data["stage_assignments"]
-
-        # Find first decision node
-        first_decision = None
-        for node_id, stage in stage_assignments.items():
-            if stage == 0 and nodes[node_id]["type"] == "decision":
-                first_decision = node_id
-                break
-
-        if first_decision is None:
-            return 0
-
-        # Calculate expected value of each action without conditioning on information
-        outgoing = edges.get(first_decision, [])
-        best_committed_value = float("-inf")
-
-        for edge in outgoing:
-            immediate = _edge_immediate_payoff(edge)
-
-            # Calculate expected continuation without optimal future decisions
-            # (use average outcomes instead of max)
-            continuation = self._calculate_average_continuation(
-                edge["to"], graph_data, discount_factor, visited=set()
-            )
-
-            total = _discounted_edge_value(immediate, discount_factor, continuation)
-
-            if total > best_committed_value:
-                best_committed_value = total
-
-        return best_committed_value if best_committed_value > float("-inf") else 0
-
-    def _calculate_average_continuation(
-        self, node_id: str, graph_data: Dict[str, Any], discount_factor: float, visited: Set[str]
-    ) -> float:
-        """Calculate average continuation value (non-optimal)."""
-        if node_id in visited:
-            return 0
-        visited.add(node_id)
-
-        nodes = graph_data["nodes"]
-        edges = graph_data["edges"]
-
-        if node_id not in nodes:
-            return 0
-
-        node = nodes[node_id]
-
-        if node["type"] == "terminal":
-            return node.get("payoff", 0) or 0
-
-        outgoing = edges.get(node_id, [])
-        if not outgoing:
-            return 0
-
-        # For both decision and chance nodes, take average (not max or expected)
-        values = []
-        for edge in outgoing:
-            immediate = _edge_immediate_payoff(edge)
-            continuation = self._calculate_average_continuation(
-                edge["to"], graph_data, discount_factor, visited.copy()
-            )
-            values.append(_discounted_edge_value(immediate, discount_factor, continuation))
-
-        return float(np.mean(values)) if values else 0
-
-    def _assess_timing_sensitivity(
-        self, stage_analyses: List[StageAnalysis], value_of_flexibility: float
-    ) -> str:
-        """Assess how sensitive results are to timing."""
-        if not stage_analyses:
-            return "low"
-
-        # Get total value from first stage
-        first_stage_options = stage_analyses[0].options_at_stage if stage_analyses else []
-
-        if not first_stage_options:
-            return "low"
-
-        # Calculate relative flexibility value
-        best_value = max(opt.total_value for opt in first_stage_options)
-
-        if best_value != 0:
-            relative_flexibility = value_of_flexibility / abs(best_value)
-        else:
-            relative_flexibility = 0
-
-        if relative_flexibility > 0.3:
-            return "high"
-        elif relative_flexibility > 0.1:
-            return "medium"
-        else:
-            return "low"
+    # Arch step 1 (2026-07-26): _compute_value_of_flexibility,
+    # _calculate_committed_value, _calculate_average_continuation and
+    # _assess_timing_sensitivity were REMOVED here. They produced
+    # `value_of_flexibility` and the `sensitivity_to_timing` bucket derived
+    # from it, both omitted from SequentialAnalysisResponse. The committed
+    # leg walked the tree with np.mean over a chance node's outgoing edges
+    # while the flexible leg used _edge_probability (:53), so the field
+    # published the gap between two estimators of one quantity as the value
+    # of waiting. See SequentialAnalysisResponse's docstring for why the
+    # repair is a modelling item (information sets) and not a one-liner, and
+    # CODEX-SCIENCE-CLAIMS-VERIFY-2026-07-26.md claim 1 for the reproduction.
+    # The normative invariant is pinned, xfailed, at
+    # tests/unit/test_arch_step1_claims.py::
+    # TestValueOfFlexibilityOmitted::test_no_future_choice_implies_zero_flexibility
 
     def _build_tree_node(
         self,

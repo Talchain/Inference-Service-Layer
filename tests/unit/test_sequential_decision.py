@@ -303,11 +303,23 @@ class TestBackwardInduction:
             assert first_stage.decision_rule.default_action is not None
 
 
-class TestValueOfFlexibility:
-    """Tests for value of flexibility calculation."""
+class TestValueOfFlexibilityOmitted:
+    """`value_of_flexibility` is OMITTED (arch step 1, 2026-07-26).
 
-    def test_value_of_flexibility_non_negative(self, engine, two_stage_simple_graph):
-        """Value of flexibility should be non-negative."""
+    The two tests that stood here asserted only `>= 0`, which was UNFALSIFIABLE:
+    `_compute_value_of_flexibility` returned `max(0, v_flexible - v_committed)`,
+    so `>= 0` could not fail whatever the arithmetic did. One of them was even
+    named `test_value_of_flexibility_positive` while asserting `>= 0` — its own
+    name recorded an intent its body abandoned. Neither could detect that the
+    committed leg averaged a chance node's branches (np.mean) while the flexible
+    leg probability-weighted them, which is what made the field report 40.0 on a
+    graph whose true flexibility value is 0.
+
+    The normative invariant that WOULD have caught it lives, xfailed, at
+    tests/unit/test_arch_step1_claims.py::TestValueOfFlexibilityOmitted.
+    """
+
+    def test_field_is_not_served(self, engine, two_stage_simple_graph):
         graph, stages = two_stage_simple_graph
 
         request = SequentialAnalysisRequest(
@@ -319,11 +331,11 @@ class TestValueOfFlexibility:
 
         result = engine.analyze(request)
 
-        # Flexibility can never hurt - it should be >= 0
-        assert result.value_of_flexibility >= 0
+        assert not hasattr(result, "value_of_flexibility")
+        assert "value_of_flexibility" not in result.model_dump()
 
-    def test_value_of_flexibility_positive(self, engine, three_stage_graph):
-        """Multi-stage problems should have positive flexibility value."""
+    def test_the_rest_of_the_analysis_still_computes(self, engine, three_stage_graph):
+        """Positive control: the omission removed a field, not the analysis."""
         graph, stages = three_stage_graph
 
         request = SequentialAnalysisRequest(
@@ -335,8 +347,8 @@ class TestValueOfFlexibility:
 
         result = engine.analyze(request)
 
-        # With information revelation, flexibility should be valuable
-        assert result.value_of_flexibility >= 0
+        assert result.optimal_policy.stages
+        assert result.stage_analyses
 
 
 class TestDiscountFactor:
@@ -452,11 +464,17 @@ class TestStageAnalyses:
                 assert option.total_value is not None
 
 
-class TestTimingSensitivity:
-    """Tests for timing sensitivity classification."""
+class TestTimingSensitivityOmitted:
+    """`sensitivity_to_timing` is OMITTED (arch step 1, 2026-07-26).
 
-    def test_timing_sensitivity_classification(self, engine, two_stage_simple_graph):
-        """Timing sensitivity should be classified correctly."""
+    It bucketed `value_of_flexibility / |best stage-0 value|` at 0.3 / 0.1, so it
+    was a relabelling of the omitted number and inherits its defect. The test
+    that stood here asserted only that the value was one of the three literals
+    its own `pattern` already guaranteed — it could not have failed for any
+    arithmetic reason.
+    """
+
+    def test_field_is_not_served(self, engine, two_stage_simple_graph):
         graph, stages = two_stage_simple_graph
 
         request = SequentialAnalysisRequest(
@@ -468,8 +486,8 @@ class TestTimingSensitivity:
 
         result = engine.analyze(request)
 
-        # Should have a valid sensitivity classification
-        assert result.sensitivity_to_timing in ["high", "medium", "low"]
+        assert not hasattr(result, "sensitivity_to_timing")
+        assert "sensitivity_to_timing" not in result.model_dump()
 
 
 class TestRiskTolerance:

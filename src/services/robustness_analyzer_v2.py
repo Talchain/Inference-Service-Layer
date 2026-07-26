@@ -96,6 +96,7 @@ from src.utils.correlation import CORRELATION_METHOD, CorrelationPlan, build_cor
 from src.validation.request_validator import detect_graph_cycle
 from src.__version__ import __version__
 from src.models.metadata import generate_config_fingerprint
+from src.config import get_settings
 from src.config.stability_thresholds import (
     STABILITY_THRESHOLDS,
     classify_attribution_stability,
@@ -2696,6 +2697,86 @@ class RobustnessAnalyzerV2:
             )
         return warnings, critiques
 
+    @staticmethod
+    def _stability_confidence_figure(recommendation_stability: float, n_samples: int) -> float:
+        """The figure served in the ``confidence`` slot.
+
+        Arch step 1 (2026-07-26). It was::
+
+            confidence = min(0.99, recommendation_stability * (1 - 1 / np.sqrt(n_samples)))
+
+        and it was rendered to the user as "ROBUST with {confidence:.0%}
+        confidence". Nothing calibrated it — no coverage study, no Brier score,
+        no validation against realised outcomes. (Positive control that this
+        codebase does document calibration when it has it: the admission ceiling
+        at the top of this module cites ``benchmarks/admission_calibration.py``,
+        and ``FactorSensitivityV2.confidence`` ships a mandatory
+        ``ConfidenceProvenance`` marker with a ``calibrated`` boolean. Filtering
+        this file's calibration references for any that touch THIS formula
+        returns one hit, and it only warns that changing the noise constant
+        would need re-validation.)
+
+        The ``(1 - 1/sqrt(n))`` term made it worse than merely uncalibrated: it
+        is a monotone function of sample COUNT alone, so the number moved with
+        how long the simulation ran rather than with the estimator's actual
+        sampling error, or with whether the recommendation was right. At n=1000
+        it contributed a fixed 0.968 factor to every response.
+
+        So the shrinkage and the 0.99 cap are withdrawn and the slot carries the
+        stability fraction itself: the share of sampled scenarios in which the
+        recommended option won. That is a real, measured quantity. The field
+        NAME is kept because it is a published contract slot on two live
+        response shapes (``RobustnessResult.confidence`` on the
+        response_version=1 body and ``RobustnessResultV2.confidence`` on the
+        ISLResponseV2 envelope); ``confidence_basis`` rides beside it so a
+        consumer can branch on the semantics rather than infer them, and the
+        field descriptions now deny the confidence reading outright.
+
+        ``n_samples`` is retained in the signature: it is what a genuine
+        confidence figure would need, and keeping it marks the place a
+        calibrated estimator would plug in.
+        """
+        del n_samples  # deliberately unused — see docstring
+        return recommendation_stability
+
+    @staticmethod
+    def _build_robustness_interpretation(
+        is_robust: bool,
+        recommendation_stability: float,
+        most_frequent_winner: str,
+        fragile_edges: List[str],
+    ) -> str:
+        """Human-readable robustness summary.
+
+        Arch step 1 (2026-07-26): the ROBUST branches no longer open with
+        "ROBUST with {confidence:.0%} confidence". They state the measured
+        scenario-win share, which is what the analysis actually established.
+        The three verdict bands are unchanged.
+        """
+        if is_robust:
+            base = (
+                f"Recommendation is ROBUST. {most_frequent_winner} wins in "
+                f"{recommendation_stability:.0%} of sampled scenarios."
+            )
+            if fragile_edges:
+                plural = "s" if len(fragile_edges) > 1 else ""
+                return (
+                    f"{base} ({len(fragile_edges)} sensitive edge{plural} identified: "
+                    f"{', '.join(fragile_edges[:3])})"
+                )
+            return base
+        if recommendation_stability >= 0.5:
+            return (
+                f"Recommendation is MODERATELY ROBUST. {most_frequent_winner} wins in "
+                f"{recommendation_stability:.0%} of sampled scenarios, "
+                f"but is sensitive to: {', '.join(fragile_edges[:3])}"
+            )
+        return (
+            f"Recommendation is FRAGILE. No clear winner - best option wins in only "
+            f"{recommendation_stability:.0%} of sampled scenarios. "
+            f"High sensitivity to: {', '.join(fragile_edges[:3])}"
+        )
+
     def _apply_auto_scaled_noise(
         self,
         option_outcomes: Dict[str, List[float]],
@@ -2703,9 +2784,12 @@ class RobustnessAnalyzerV2:
         graph_nodes: List,
         rng: "SeededRNG",
         noise_multiplier: float = 1.0,
+        enabled: Optional[bool] = None,
     ) -> Tuple[Dict[str, List[float]], bool]:
         """
         Apply auto-scaled noise to outcome/risk node samples.
+
+        DEFAULT OFF since arch step 1 (2026-07-26) — see ``enabled`` below.
 
         What: Adds independent noise ~ N(0, outcome_std) to each MC sample for
         outcome and risk nodes, where outcome_std is the standard deviation of
@@ -2739,10 +2823,22 @@ class RobustnessAnalyzerV2:
             noise_multiplier: Scale factor for noise std (default 1.0).
                 0.0 disables noise entirely.  Used by calibration diagnostics
                 to compare different noise levels without changing the API.
+            enabled: Master switch. ``None`` (the default) reads
+                ``settings.ENABLE_AUTO_SCALED_NOISE``, which is ``False``.
+                Arch step 1 (2026-07-26): this heuristic is uncalibrated by its
+                own admission and had no request-side switch, so every client
+                received ~√2-wider intervals it could not decline. Pass
+                ``enabled=True`` explicitly for calibration diagnostics.
 
         Returns:
             Tuple of (modified option_outcomes, noise_applied flag)
         """
+        # Master switch (arch step 1): default-off unless the deployment opts in.
+        if enabled is None:
+            enabled = get_settings().ENABLE_AUTO_SCALED_NOISE
+        if not enabled:
+            return option_outcomes, False
+
         # Find the goal node and check its kind
         goal_node = None
         for node in graph_nodes:
@@ -4482,38 +4578,22 @@ class RobustnessAnalyzerV2:
         # fragile_edges is a separate indicator of edge-level sensitivity
         is_robust = recommendation_stability >= self.ROBUST_THRESHOLD
 
-        # Confidence based on sample size and stability
-        confidence = min(0.99, recommendation_stability * (1 - 1 / np.sqrt(n_samples)))
+        # Arch step 1 (2026-07-26): the `confidence` slot now carries the
+        # recommendation-stability fraction, unmodified. See
+        # _stability_confidence_figure for why the old formula was withdrawn.
+        confidence = self._stability_confidence_figure(recommendation_stability, n_samples)
 
-        # Interpretation
-        if is_robust:
-            if fragile_edges:
-                interpretation = (
-                    f"Recommendation is ROBUST with {confidence:.0%} confidence. "
-                    f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios. "
-                    f"({len(fragile_edges)} sensitive edge{'s' if len(fragile_edges) > 1 else ''} identified)"
-                )
-            else:
-                interpretation = (
-                    f"Recommendation is ROBUST with {confidence:.0%} confidence. "
-                    f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios."
-                )
-        elif recommendation_stability >= 0.5:
-            interpretation = (
-                f"Recommendation is MODERATELY ROBUST. "
-                f"{most_frequent_winner} wins in {recommendation_stability:.0%} of scenarios, "
-                f"but is sensitive to: {', '.join(fragile_edges[:3])}"
-            )
-        else:
-            interpretation = (
-                f"Recommendation is FRAGILE. No clear winner - "
-                f"best option wins in only {recommendation_stability:.0%} of scenarios. "
-                f"High sensitivity to: {', '.join(fragile_edges[:3])}"
-            )
+        interpretation = self._build_robustness_interpretation(
+            is_robust=is_robust,
+            recommendation_stability=recommendation_stability,
+            most_frequent_winner=most_frequent_winner,
+            fragile_edges=fragile_edges,
+        )
 
         return RobustnessResult(
             is_robust=is_robust,
             confidence=confidence,
+            confidence_basis="recommendation_stability_uncalibrated",
             fragile_edges=fragile_edges,
             fragile_edges_enhanced=fragile_edges_enhanced,
             robust_edges=robust_edges,

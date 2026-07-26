@@ -225,13 +225,18 @@ def test_stage_evpi_computes_at_cap_boundary(engine):
 
 def test_stage_evpi_skips_just_over_cap(engine):
     """K=13 => 2^13 = 8192 > 4096 => honest SKIP: stage_evpi null + status. The
-    exact analysis still succeeds (optimal_policy / value_of_flexibility present)."""
+    exact analysis still succeeds (optimal_policy present).
+
+    Arch step 1 (2026-07-26): the "exact analysis untouched" witness was
+    value_of_flexibility, which is now omitted (it compared two different
+    estimators of one quantity). optimal_policy — backward induction, which IS
+    exact — carries the same proof."""
     resp = engine.analyze(_fanout(13))
     sm = {s.stage_index: s for s in resp.stage_analyses}
     assert sm[0].stage_evpi is None
     assert sm[0].stage_evpi_status == "skipped_joint_space_too_large"
     assert resp.optimal_policy is not None
-    assert resp.value_of_flexibility is not None  # exact analysis untouched
+    assert resp.optimal_policy.expected_total_value is not None  # exact analysis untouched
 
 
 def test_stage_evpi_legal_max_fanout_returns_fast_not_hang(engine):
@@ -581,7 +586,18 @@ def test_stage_evpi_zero_immediate_chance_but_deeper_is_exact_immediate_scope(en
     )
     stages = [
         DecisionStage(stage_index=0, stage_label="s0", decision_nodes=["D"]),
-        DecisionStage(stage_index=1, stage_label="s1", decision_nodes=["D_a", "D_b"], resolution_nodes=[]),
+        # Arch step 1 (2026-07-26): this stage declared BOTH D_a and D_b, which the
+        # request boundary now rejects (MULTI_DECISION_STAGE_UNSUPPORTED). Note what
+        # that costs: D_a and D_b are MUTUALLY EXCLUSIVE successors of D (only one is
+        # ever reached), so declaring both was a legitimate model — and one the engine
+        # nevertheless mis-answered, since _build_policy `break`s after D_a and the
+        # returned StagePolicy for s1 covered only the A branch while reading as
+        # complete. The cap makes that silent partial answer impossible; carrying
+        # BOTH rules needs a StagePolicy that can hold several, which is the real fix.
+        # `stage_assignments` is untouched, so backward induction still drives and
+        # values D_b — this test's subject (stage-0 EVPI immediate-scope) is
+        # graph-determined and unaffected.
+        DecisionStage(stage_index=1, stage_label="s1", decision_nodes=["D_a"], resolution_nodes=[]),
         DecisionStage(stage_index=2, stage_label="s2", decision_nodes=[], resolution_nodes=["CA", "CB"]),
         DecisionStage(stage_index=3, stage_label="s3", decision_nodes=[]),
     ]

@@ -1976,12 +1976,31 @@ class SequentialGraph(BaseModel):
 
 
 class DecisionStage(BaseModel):
-    """A stage in a sequential decision problem."""
+    """A stage in a sequential decision problem.
+
+    Arch step 1 (2026-07-26): ``decision_nodes`` is capped at ONE node per stage
+    and >1 is REJECTED at the boundary. It previously accepted up to 20 while
+    ``SequentialDecisionEngine._build_policy`` ``break``-ed after the first
+    decision node it resolved ("One policy per stage for simplicity"), so nodes
+    2..20 were discarded with no warning, no ``InferenceWarning`` and no status
+    field — and ``StagePolicy`` is structurally incapable of carrying more than
+    one ``decision_rule``, so there was no shape in which the truncation could
+    have been disclosed. A consumer received what read as the complete policy
+    for the stage. Accepting input the service cannot solve, and answering 200,
+    is the false claim; the cap makes the published contract equal what the
+    engine actually does. Multi-decision stages need a policy shape that can
+    hold several rules — a modelling roadmap item, not a validation relaxation.
+    """
 
     stage_index: int = Field(..., description="Zero-based stage index", ge=0)
     stage_label: str = Field(..., description="Human-readable label for the stage", max_length=200)
     decision_nodes: List[str] = Field(
-        ..., description="Node IDs that are decisions at this stage", max_length=20
+        ...,
+        description="Node IDs that are decisions at this stage. AT MOST ONE: the "
+        "engine builds exactly one decision rule per stage, and the response has "
+        "no field in which a dropped second decision could be disclosed. Supply "
+        "an empty list for a stage with no decision (e.g. a terminal stage).",
+        max_length=1,
     )
     resolution_nodes: List[str] = Field(
         default_factory=list, description="Uncertainty nodes resolved by this stage", max_length=20
@@ -1991,6 +2010,32 @@ class DecisionStage(BaseModel):
         description="Time horizon: 'immediate', 'short_term', 'long_term'",
         pattern="^(immediate|short_term|long_term)$",
     )
+
+    @field_validator("decision_nodes", mode="before")
+    @classmethod
+    def reject_multi_decision_stage(cls, v: Any) -> Any:
+        """Reject >1 decision node per stage with a stable, typed reason.
+
+        Runs ``mode='before'`` so this message wins over the bare
+        ``max_length=1`` constraint error. ``max_length`` stays on the field
+        because it is what surfaces as ``maxItems`` in ``openapi.json`` — the
+        published contract a client reads — and it previously said 20.
+
+        The code ``MULTI_DECISION_STAGE_UNSUPPORTED`` is stable and
+        machine-readable so a client can tell an unsupported-capability
+        rejection apart from a generic length violation.
+        """
+        if isinstance(v, (list, tuple)) and len(v) > 1:
+            raise ValueError(
+                "MULTI_DECISION_STAGE_UNSUPPORTED: a stage may declare at most one "
+                f"decision node, got {len(v)}. Backward induction here builds exactly "
+                "one decision rule per stage, and the response has no field in which "
+                "a dropped decision could be disclosed — so accepting several and "
+                "solving the first would return a partial policy that reads as "
+                "complete. Split the decisions across stages, or model them as one "
+                "decision node over the joint action space."
+            )
+        return v
 
     model_config = {
         "json_schema_extra": {
