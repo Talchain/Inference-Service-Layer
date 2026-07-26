@@ -283,8 +283,14 @@ class TestRootNodeDefaultWarning:
 class TestAutoScaledNoiseMetadata:
     """Verify auto_noise_applied flag in metadata."""
 
-    def test_noise_applied_for_outcome_node(self):
-        """Outcome goal node gets noise → metadata flag True."""
+    def test_noise_applied_for_outcome_node(self, auto_noise_enabled):
+        """Outcome goal node gets noise → metadata flag True.
+
+        Arch step 1 (2026-07-26): auto-scaled noise is DEFAULT OFF
+        (ENABLE_AUTO_SCALED_NOISE). This test's subject IS the noise-on path, so
+        it opts in via the `auto_noise_enabled` fixture; the pinned expectations
+        below are unchanged.
+        """
         graph = _make_graph()
         request = _make_request(graph)
         analyzer = RobustnessAnalyzerV2()

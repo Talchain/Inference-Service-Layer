@@ -272,7 +272,7 @@ class TestCorrelationActivation:
         assert correlated.std > independent.std
         assert correlated.std / independent.std > 1.3  # direction pinned
 
-    def test_positive_correlation_exact_seeded_value(self, analyzer):
+    def test_positive_correlation_exact_seeded_value(self, analyzer, auto_noise_enabled):
         # Exact seeded pin (numpy 1.26.x / PCG64, seed=42, n=2000, this fixture).
         # Stable across 3 runs; reverting the copula draw moves this value (mutation
         # check M2 in NOTES.md).

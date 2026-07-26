@@ -1204,8 +1204,14 @@ class TestAutoNoiseAppliedEnvelope:
     catches regressions in the route → builder → JSON serialisation chain.
     """
 
-    def test_auto_noise_applied_true_for_outcome_goal(self, client):
-        """outcome goal → auto-noise applied → response carries auto_noise_applied: true."""
+    def test_auto_noise_applied_true_for_outcome_goal(self, client, auto_noise_enabled):
+        """outcome goal → auto-noise applied → response carries auto_noise_applied: true.
+
+        Arch step 1 (2026-07-26): auto-scaled noise is DEFAULT OFF
+        (ENABLE_AUTO_SCALED_NOISE). This test's subject IS the noise-on path, so
+        it opts in via the `auto_noise_enabled` fixture; the pinned expectations
+        below are unchanged.
+        """
         request = {
             "graph": {
                 "nodes": [

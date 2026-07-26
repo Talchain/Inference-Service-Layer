@@ -18,6 +18,12 @@ np.mean/np.std over the post-noise samples and remain non-finite for such an
 option, which the JSONResponse serializer rejects (allow_nan=False). Masking the
 mean is a separate tracked row. Here we pin the mechanism + the finite-mask
 downside consumer.
+
+Arch step 1 (2026-07-26): auto-scaled noise is DEFAULT OFF
+(``ENABLE_AUTO_SCALED_NOISE``), so every call below passes ``enabled=True``.
+The subject of this file IS the noise path, and its pinned expectations are
+unchanged — the opt-in restores the behaviour under test, it does not
+re-baseline it.
 """
 
 import numpy as np
@@ -40,7 +46,7 @@ class TestAutoNoiseFiniteMask:
         option_outcomes = {"o1": list(samples)}
 
         out, applied = analyzer._apply_auto_scaled_noise(
-            option_outcomes, "rev", _outcome_nodes(), SeededRNG(42)
+            option_outcomes, "rev", _outcome_nodes(), SeededRNG(42), enabled=True
         )
         result = np.array(out["o1"])
 
@@ -70,7 +76,7 @@ class TestAutoNoiseFiniteMask:
         samples = [float(i) for i in range(50)]
 
         out, applied = analyzer._apply_auto_scaled_noise(
-            {"o1": list(samples)}, "rev", _outcome_nodes(), SeededRNG(7)
+            {"o1": list(samples)}, "rev", _outcome_nodes(), SeededRNG(7), enabled=True
         )
 
         arr = np.array(samples)
@@ -86,7 +92,7 @@ class TestAutoNoiseFiniteMask:
         analyzer = RobustnessAnalyzerV2()
         option_outcomes = {"o1": [np.inf, np.nan, -np.inf]}
         out, applied = analyzer._apply_auto_scaled_noise(
-            option_outcomes, "rev", _outcome_nodes(), SeededRNG(1)
+            option_outcomes, "rev", _outcome_nodes(), SeededRNG(1), enabled=True
         )
         assert applied is False
         assert len(out["o1"]) == 3
@@ -106,7 +112,7 @@ class TestAutoNoiseFiniteMask:
         assert not np.isfinite(np.std(arr_in)), "precondition: np.std overflows to inf"
 
         out, applied = analyzer._apply_auto_scaled_noise(
-            {"o1": list(samples)}, "rev", _outcome_nodes(), SeededRNG(0)
+            {"o1": list(samples)}, "rev", _outcome_nodes(), SeededRNG(0), enabled=True
         )
         result = np.array(out["o1"])
 

@@ -155,9 +155,17 @@ class TestGoalConstraintConsistency:
             **overrides,
         )
 
-    def test_identical_threshold_and_constraint_agree_with_auto_noise(self, client):
+    def test_identical_threshold_and_constraint_agree_with_auto_noise(
+        self, client, auto_noise_enabled
+    ):
         """Outcome-kind goal (auto-noise active): P(goal >= t) must equal the
-        prob_satisfied of a constraint '>= t' on the same node, exactly."""
+        prob_satisfied of a constraint '>= t' on the same node, exactly.
+
+        Arch step 1 (2026-07-26): auto-scaled noise is DEFAULT OFF
+        (ENABLE_AUTO_SCALED_NOISE). This test's subject IS the noise-on path, so
+        it opts in via the `auto_noise_enabled` fixture; the pinned expectations
+        below are unchanged.
+        """
         response = client.post(
             f"{V2_URL}?response_version=2", json=self._request_with_goal_constraint()
         )
@@ -191,9 +199,17 @@ class TestGoalConstraintConsistency:
                 constraint["prob_satisfied"], abs=0.0
             )
 
-    def test_multi_constraint_behaviour_preserved_and_mix_disclosed(self, client):
+    def test_multi_constraint_behaviour_preserved_and_mix_disclosed(
+        self, client, auto_noise_enabled
+    ):
         """A second (non-goal) constraint keeps per/joint/conditional outputs,
-        and the noised-goal/un-noised-sibling mix is disclosed, not silent."""
+        and the noised-goal/un-noised-sibling mix is disclosed, not silent.
+
+        Arch step 1 (2026-07-26): auto-scaled noise is DEFAULT OFF
+        (ENABLE_AUTO_SCALED_NOISE). This test's subject IS the noise-on path, so
+        it opts in via the `auto_noise_enabled` fixture; the pinned expectations
+        below are unchanged.
+        """
         request = self._request_with_goal_constraint()
         request["goal_constraints"].append({"node_id": "demand", "operator": "<=", "value": 5.0})
         response = client.post(f"{V2_URL}?response_version=2", json=request)

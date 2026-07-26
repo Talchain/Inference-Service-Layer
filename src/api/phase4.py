@@ -158,9 +158,16 @@ async def generate_conditional_recommendations(
     3. Move backward, computing optimal action given immediate payoff + continuation value
     4. Repeat until stage 0
 
-    **Value of Flexibility:**
-    Compares optimal policy (deciding at each stage with information) vs
-    committing upfront (ignoring future information).
+    **One decision per stage:** each stage may declare at most one decision node.
+    The engine builds exactly one decision rule per stage and the response has no
+    field in which a dropped decision could be disclosed, so more than one is
+    rejected (422, `MULTI_DECISION_STAGE_UNSUPPORTED`) rather than truncated.
+
+    **Not returned:** `value_of_flexibility` and `sensitivity_to_timing` are
+    omitted (arch step 1, 2026-07-26) — the committed leg averaged a chance
+    node's branches while the flexible leg probability-weighted them, so the
+    difference measured an estimator gap, not the value of waiting. See
+    `SequentialAnalysisResponse`.
 
     **Use when:** Planning multi-stage strategies with uncertainty resolution.
     """,
@@ -208,8 +215,7 @@ async def analyze_sequential_decision(
             extra={
                 "request_id": request_id,
                 "expected_value": result.optimal_policy.expected_total_value,
-                "value_of_flexibility": result.value_of_flexibility,
-                "timing_sensitivity": result.sensitivity_to_timing,
+                "num_policy_stages": len(result.optimal_policy.stages),
             },
         )
 

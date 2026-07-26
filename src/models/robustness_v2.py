@@ -1522,7 +1522,30 @@ class RobustnessResult(BaseModel):
     """Overall robustness assessment."""
 
     is_robust: bool = Field(..., description="Whether recommendation is robust")
-    confidence: float = Field(..., ge=0, le=1, description="Confidence in robustness assessment")
+    confidence: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="NOT A CONFIDENCE LEVEL. This is the UNCALIBRATED "
+        "recommendation-stability fraction — the share of sampled scenarios in "
+        "which the recommended option won — served under a legacy field name. It "
+        "carries no coverage guarantee and no calibration study; it does not say "
+        "how likely the recommendation is to be right. Read `recommendation_stability` "
+        "(the same quantity, honestly named) and branch on `confidence_basis`. "
+        "Arch step 1 (2026-07-26): the previous value, "
+        "min(0.99, stability*(1-1/sqrt(n_samples))), additionally moved with the "
+        "sample COUNT rather than with the estimator's sampling error, so the same "
+        "recommendation reported different 'confidence' purely for running longer.",
+    )
+    confidence_basis: Literal["recommendation_stability_uncalibrated"] = Field(
+        default="recommendation_stability_uncalibrated",
+        description="Machine-readable semantics of the `confidence` field, so a "
+        "consumer does not have to infer them from prose. "
+        "'recommendation_stability_uncalibrated': `confidence` is the "
+        "recommendation-stability fraction with no calibration behind it. Mirrors "
+        "the ConfidenceProvenance marker that rides beside "
+        "FactorSensitivityV2.confidence.",
+    )
     fragile_edges: List[str] = Field(
         default_factory=list, description="Edges that could flip the decision (format: 'from->to')"
     )

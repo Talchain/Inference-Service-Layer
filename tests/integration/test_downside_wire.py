@@ -116,7 +116,7 @@ class TestDownsideOnWire:
                 opt["id"], d, o["p10"], o["p50"])
             assert d["p05"] <= o["p10"], (opt["id"], d, o["p10"])
 
-    def test_p05_wire_value_pin(self, client):
+    def test_p05_wire_value_pin(self, client, auto_noise_enabled):
         """Wire-exact p05 VALUE pin (adversarial O2): the emission constant has
         no other wire-exact guard — a 5→4 typo in the np.percentile call would
         pass every other test. The wire does not emit raw samples, so an

@@ -71,6 +71,39 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(skip_marker)
 
 
+# ---------------------------------------------------------------------------
+# Auto-scaled noise opt-in (arch step 1, 2026-07-26)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def auto_noise_enabled(monkeypatch):
+    """Turn the auto-scaled noise heuristic ON for tests that pin its behaviour.
+
+    `ENABLE_AUTO_SCALED_NOISE` defaults to False: the ~sqrt(2) spread inflation is
+    an uncalibrated PoC heuristic by its own docstring's admission, and a client
+    had no way to decline it, so it is opt-in until calibrated.
+
+    Tests that pin NOISED numbers (wire value pins, seeded goldens, byte-identity
+    checks) use this fixture rather than having their baselines re-derived. Two
+    reasons: the pinned values stay exactly as they were, so this change cannot
+    hide a regression behind a re-baselining; and the fixture makes each such
+    test SAY that its subject is the noise-on path, which the tests could not say
+    before because there was no other path.
+
+    Tests whose subject is the DEFAULT served behaviour must not use it.
+    """
+    from src.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("ENABLE_AUTO_SCALED_NOISE", "true")
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
+
+
 @pytest_asyncio.fixture
 async def client():
     """

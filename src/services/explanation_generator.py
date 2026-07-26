@@ -442,13 +442,30 @@ class ExplanationGenerator:
         (a constant score + flat perturbation that implemented none of its
         label), so the explanation no longer makes robustness claims.
 
+        Arch step 1 (2026-07-26): the prose no longer says "confidence
+        interval" or "high confidence". The bounds are the 2.5th and 97.5th
+        PERCENTILES of the Monte-Carlo outcome samples
+        (`counterfactual_engine._compute_prediction`), so they describe the
+        spread of the model's own simulated outcomes. They are a prediction
+        interval: they carry no frequentist coverage guarantee over the
+        estimand, and "95%" is a hardcoded string, not a computed level.
+        Likewise `uncertainty_level` is a bucketed coefficient of variation
+        (`std/|mean|` thresholded at 0.1/0.3) — a dispersion measure of the
+        simulated outcome, which is not evidence that the prediction is right,
+        so it cannot license the phrase "high confidence".
+
         Args:
             outcome: The outcome variable name
             intervention: Dict of intervention variable names to values
             point_estimate: Point estimate of the counterfactual outcome
-            ci_lower: Lower bound of confidence interval
-            ci_upper: Upper bound of confidence interval
-            uncertainty_level: Level of uncertainty (e.g., "low", "medium", "high")
+            ci_lower: Lower bound of the 95% PREDICTION interval (2.5th
+                percentile of the simulated outcomes). Named `ci_*` because the
+                wire field is `confidence_interval` for legacy contract reasons
+                — see `src.models.shared.ConfidenceInterval`.
+            ci_upper: Upper bound of the 95% prediction interval (97.5th
+                percentile of the simulated outcomes)
+            uncertainty_level: Bucketed coefficient of variation of the outcome
+                samples ("low", "medium", "high")
 
         Returns:
             ExplanationMetadata object with structured explanation
@@ -464,16 +481,20 @@ class ExplanationGenerator:
         # Build reasoning
         reasoning_parts = [
             f"Setting {intervention_str} yields a predicted {outcome} of {point_estimate:.2f}.",
-            f"The 95% confidence interval is [{ci_lower:.2f}, {ci_upper:.2f}].",
+            f"The 95% prediction interval is [{ci_lower:.2f}, {ci_upper:.2f}] — "
+            "95% of simulated outcomes fall in this range under the model's own "
+            "assumptions; it is not a coverage guarantee for the true value.",
         ]
 
         if uncertainty_level == "low":
             reasoning_parts.append(
-                "The prediction has low uncertainty, indicating high confidence."
+                "The simulated outcomes are tightly clustered (low simulated "
+                "dispersion); this measures the model's internal spread, not "
+                "whether the model is right."
             )
         elif uncertainty_level == "high":
             reasoning_parts.append(
-                "Note: This prediction has high uncertainty; interpret with caution."
+                "Note: the simulated outcomes are widely dispersed; interpret with caution."
             )
 
         reasoning = " ".join(reasoning_parts)
@@ -481,8 +502,10 @@ class ExplanationGenerator:
         # Build technical basis
         technical_basis = (
             f"Monte Carlo simulation with intervention do({intervention_str}). "
-            f"Point estimate: {point_estimate:.4f}, CI: [{ci_lower:.4f}, {ci_upper:.4f}]. "
-            f"Uncertainty level: {uncertainty_level}."
+            f"Point estimate: {point_estimate:.4f}, "
+            f"95% PI: [{ci_lower:.4f}, {ci_upper:.4f}] "
+            f"(2.5th/97.5th percentile of the simulated outcomes). "
+            f"Outcome dispersion (bucketed coefficient of variation): {uncertainty_level}."
         )
 
         # Key assumptions

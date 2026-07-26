@@ -34,10 +34,44 @@ from src.models.response_v2 import (
     PathDecompositionV2,
     RequestEchoV2,
     RobustnessResultV2,
+    SamplePopulationProvenanceV2,
     StabilityThresholdsResponse,
 )
 
 logger = logging.getLogger(__name__)
+
+
+# Arch step 1 (2026-07-26) — per-metric noise provenance.
+#
+# One ISLResponseV2 envelope carries metrics from TWO sample populations. The
+# split is deliberate and documented at its source (the B2 CRN-fix comment in
+# `RobustnessAnalyzerV2.analyze`), but before this it was disclosed only by the
+# `auto_noise_applied` boolean, which tells a consumer that noise ran and not
+# which of the numbers in front of it the noise reached.
+#
+# PRE-noise: joint Common-Random-Numbers metrics. The auto-noise draw is
+# INDEPENDENT per option, so computing these on noised samples breaks CRN
+# alignment (it adds a max-over-independent-noise premium and makes regret
+# disagree with win_probability).
+PRE_NOISE_METRICS: tuple = (
+    "expected_regret",
+    "win_probability",
+    "factor_evppi",
+    "factor_evpc",
+    "decision_evpi",
+)
+
+# POST-noise: marginal distribution metrics, kept on the noised samples so they
+# stay mutually consistent.
+POST_NOISE_METRICS: tuple = (
+    "p05",
+    "p10",
+    "p50",
+    "p90",
+    "mean",
+    "cvar_10",
+    "probability_of_goal",
+)
 
 
 def hash_node_id(node_id: str) -> str:
@@ -123,6 +157,9 @@ class ResponseBuilder:
         # Auto-noise disclosure (B3): None until explicitly set from V1 metadata.
         # Preserves False as False; never coerced to None on the path through the route.
         self.auto_noise_applied: Optional[bool] = None
+        # Arch step 1: per-metric population provenance, derived alongside the
+        # boolean above by set_auto_noise_applied so the two cannot desync.
+        self.sample_population_provenance: Optional[SamplePopulationProvenanceV2] = None
         # T1-6: path decomposition passthrough (request-gated; additive)
         self.path_decomposition: Optional[PathDecompositionV2] = None
         # T1-5: reference-option disclosure for sensitivity analyses (additive)
@@ -179,9 +216,34 @@ class ResponseBuilder:
         """
         self.decision_evpi = decision_evpi
 
-    def set_auto_noise_applied(self, flag: Optional[bool]) -> None:
-        """Set the auto-noise disclosure flag for the V2 envelope (B3)."""
+    def set_auto_noise_applied(
+        self, flag: Optional[bool], unnoised_constraint_node_ids: Optional[List[str]] = None
+    ) -> None:
+        """Set the auto-noise disclosure flag for the V2 envelope (B3).
+
+        Arch step 1 (2026-07-26): also derives the per-metric
+        `sample_population_provenance` block, so the two disclosures can never
+        desync — there is one setter and one source of truth for both.
+        """
         self.auto_noise_applied = flag
+        if flag is None:
+            self.sample_population_provenance = None
+            return
+
+        populations: dict = {metric: "model_only" for metric in PRE_NOISE_METRICS}
+        populations.update(
+            {metric: ("noise_inflated" if flag else "model_only") for metric in POST_NOISE_METRICS}
+        )
+        self.sample_population_provenance = SamplePopulationProvenanceV2(
+            auto_scaled_noise_applied=flag,
+            noise_scale=(
+                "1.0x model std added per outcome/risk sample (~sqrt(2) spread inflation)"
+                if flag
+                else None
+            ),
+            metric_populations=populations,
+            unnoised_constraint_node_ids=list(unnoised_constraint_node_ids or []),
+        )
 
     def set_path_decomposition(self, path_decomposition: Optional[PathDecompositionV2]) -> None:
         """Set the path decomposition passthrough (T1-6 wire completeness)."""
@@ -300,6 +362,7 @@ class ResponseBuilder:
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
             correlation_model=self.correlation_model,  # B3-S1
             auto_noise_applied=self.auto_noise_applied,
+            sample_population_provenance=self.sample_population_provenance,
             request_id=self.request_id,
             processing_time_ms=processing_time,
             seed_used=self.seed_used,

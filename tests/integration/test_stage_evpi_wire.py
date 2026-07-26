@@ -176,11 +176,18 @@ class TestStageEvpiWire:
         assert s0.get("coupling_assumption") is None
 
     @pytest.mark.asyncio
-    async def test_resolved_uncertainty_and_flexibility_untouched(self, client):
-        """S3 leaves the honest neighbours in place: resolved_uncertainty (honestly
-        labelled) and value_of_flexibility (a real decision-difference) still ride."""
+    async def test_resolved_uncertainty_untouched(self, client):
+        """S3 leaves the honest neighbour in place: resolved_uncertainty (honestly
+        labelled) still rides.
+
+        Arch step 1 (2026-07-26): `value_of_flexibility` was ALSO asserted here as
+        "a real decision-difference". It was not — the committed leg averaged a
+        chance node's branches with np.mean while the flexible leg
+        probability-weighted them, so the field reported an estimator gap. It is
+        omitted, and its absence is pinned here so S3 cannot quietly reinstate it.
+        """
         resp = await client.post(URL, json=_base_seq_request())
         body = resp.json()
-        assert "value_of_flexibility" in body
+        assert "value_of_flexibility" not in body
         for sa in body["stage_analyses"]:
             assert "resolved_uncertainty" in sa and sa["resolved_uncertainty"] >= 0.0

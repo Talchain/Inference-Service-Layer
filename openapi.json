@@ -1212,7 +1212,7 @@
         "type": "object"
       },
       "DecisionStage": {
-        "description": "A stage in a sequential decision problem.",
+        "description": "A stage in a sequential decision problem.\n\nArch step 1 (2026-07-26): ``decision_nodes`` is capped at ONE node per stage\nand >1 is REJECTED at the boundary. It previously accepted up to 20 while\n``SequentialDecisionEngine._build_policy`` ``break``-ed after the first\ndecision node it resolved (\"One policy per stage for simplicity\"), so nodes\n2..20 were discarded with no warning, no ``InferenceWarning`` and no status\nfield \u2014 and ``StagePolicy`` is structurally incapable of carrying more than\none ``decision_rule``, so there was no shape in which the truncation could\nhave been disclosed. A consumer received what read as the complete policy\nfor the stage. Accepting input the service cannot solve, and answering 200,\nis the false claim; the cap makes the published contract equal what the\nengine actually does. Multi-decision stages need a policy shape that can\nhold several rules \u2014 a modelling roadmap item, not a validation relaxation.",
         "example": {
           "decision_nodes": [
             "invest_decision"
@@ -1224,11 +1224,11 @@
         },
         "properties": {
           "decision_nodes": {
-            "description": "Node IDs that are decisions at this stage",
+            "description": "Node IDs that are decisions at this stage. AT MOST ONE: the engine builds exactly one decision rule per stage, and the response has no field in which a dropped second decision could be disclosed. Supply an empty list for a stage with no decision (e.g. a terminal stage).",
             "items": {
               "type": "string"
             },
-            "maxItems": 20,
+            "maxItems": 1,
             "title": "Decision Nodes",
             "type": "array"
           },
@@ -3289,7 +3289,7 @@
                 "type": "null"
               }
             ],
-            "description": "Whether auto-scaled noise (\u221a2 variance inflation) was applied to outcome distributions. Mirrors V1 _metadata.auto_noise_applied. None when the analyser cannot determine the flag.",
+            "description": "Whether auto-scaled noise (\u221a2 variance inflation) was applied to outcome distributions. Mirrors V1 _metadata.auto_noise_applied. None when the analyser cannot determine the flag. Since arch step 1 (2026-07-26) the heuristic is DEFAULT OFF (ENABLE_AUTO_SCALED_NOISE), so this is normally false. For WHICH metrics each population produced, read sample_population_provenance \u2014 this boolean cannot say.",
             "title": "Auto Noise Applied"
           },
           "build": {
@@ -3517,6 +3517,17 @@
             ],
             "title": "Robustness Status",
             "type": "string"
+          },
+          "sample_population_provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SamplePopulationProvenanceV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which sample population each served metric was computed from. One response mixes both: expected_regret / win_probability / factor_evppi / factor_evpc are computed on the PRE-noise Common-Random-Numbers population (noise draws independent per option, which breaks CRN alignment), while p10/p50/p90/mean/cvar_10/p05 are computed on the POST-noise one. None on error/blocked paths where the analyser did not report it."
           },
           "seed_source": {
             "anyOf": [
@@ -5690,11 +5701,17 @@
         },
         "properties": {
           "confidence": {
-            "description": "Confidence in robustness assessment",
+            "description": "NOT A CONFIDENCE LEVEL. This is the UNCALIBRATED recommendation-stability fraction \u2014 the share of sampled scenarios in which the recommended option won \u2014 served under a legacy field name. It carries no coverage guarantee and no calibration study; it does not say how likely the recommendation is to be right. Read `recommendation_stability` (the same quantity, honestly named) and branch on `confidence_basis`. Arch step 1 (2026-07-26): the previous value, min(0.99, stability*(1-1/sqrt(n_samples))), additionally moved with the sample COUNT rather than with the estimator's sampling error, so the same recommendation reported different 'confidence' purely for running longer.",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Confidence",
             "type": "number"
+          },
+          "confidence_basis": {
+            "const": "recommendation_stability_uncalibrated",
+            "default": "recommendation_stability_uncalibrated",
+            "description": "Machine-readable semantics of the `confidence` field, so a consumer does not have to infer them from prose. 'recommendation_stability_uncalibrated': `confidence` is the recommendation-stability fraction with no calibration behind it. Mirrors the ConfidenceProvenance marker that rides beside FactorSensitivityV2.confidence.",
+            "title": "Confidence Basis"
           },
           "defaulted_root_node_ids": {
             "anyOf": [
@@ -5785,11 +5802,17 @@
         "description": "Robustness analysis result.",
         "properties": {
           "confidence": {
-            "description": "Confidence [0, 1]",
+            "description": "NOT A CONFIDENCE LEVEL. This is the UNCALIBRATED recommendation-stability fraction \u2014 the share of sampled scenarios in which the recommended option won \u2014 served under a legacy field name. It carries no coverage guarantee and no calibration study; it does not say how likely the recommendation is to be right. Read `recommendation_stability` (the same quantity, honestly named) and branch on `confidence_basis`. Arch step 1 (2026-07-26): the previous value, min(0.99, stability*(1-1/sqrt(n_samples))), additionally moved with the sample COUNT rather than with the estimator's sampling error. The description this replaces read, in full, 'Confidence [0, 1]'.",
             "maximum": 1.0,
             "minimum": 0.0,
             "title": "Confidence",
             "type": "number"
+          },
+          "confidence_basis": {
+            "const": "recommendation_stability_uncalibrated",
+            "default": "recommendation_stability_uncalibrated",
+            "description": "Machine-readable semantics of the `confidence` field, so a consumer does not have to infer them from prose. 'recommendation_stability_uncalibrated': `confidence` is the recommendation-stability fraction with no calibration behind it. Mirrors the ConfidenceProvenance marker that rides beside FactorSensitivityV2.confidence.",
+            "title": "Confidence Basis"
           },
           "defaulted_root_node_ids": {
             "anyOf": [
@@ -5951,6 +5974,60 @@
           "confidence"
         ],
         "title": "RobustnessResultV2",
+        "type": "object"
+      },
+      "SamplePopulationProvenanceV2": {
+        "description": "Which sample population produced each served metric (arch step 1, 2026-07-26).\n\n``auto_noise_applied`` is a single boolean for a whole envelope that mixes two\npopulations. The B2 CRN-fix comment in ``RobustnessAnalyzerV2.analyze``\nrecords why they are mixed: ``expected_regret`` is a JOINT\nCommon-Random-Numbers metric and must come from the PRE-noise samples (the\nauto-noise draw is independent per option, which breaks CRN alignment and\ninflates regret by a max-over-independent-noise premium), while the marginal\ntail metrics stay on the noised samples for consistency with the noised\npercentiles. That is a defensible choice \u2014 but a consumer reading a response\ncould not tell which of the numbers in front of it the noise had reached.\nThis block says so per metric.",
+        "properties": {
+          "auto_scaled_noise_applied": {
+            "description": "Whether the auto-scaled noise heuristic actually modified any samples in this response. Default-off since 2026-07-26 (ENABLE_AUTO_SCALED_NOISE); when false, every metric below is model-only.",
+            "title": "Auto Scaled Noise Applied",
+            "type": "boolean"
+          },
+          "calibration_status": {
+            "default": "uncalibrated_poc_heuristic",
+            "description": "Calibration standing of the noise heuristic. It is a PoC heuristic pending formal review and calibration against pilot outcome data \u2014 it has no coverage study behind it.",
+            "title": "Calibration Status",
+            "type": "string"
+          },
+          "metric_populations": {
+            "additionalProperties": {
+              "enum": [
+                "model_only",
+                "noise_inflated"
+              ],
+              "type": "string"
+            },
+            "description": "Per-metric population label. 'model_only' = computed from the structural model's own samples; 'noise_inflated' = computed from samples with the auto-scaled noise term added.",
+            "title": "Metric Populations",
+            "type": "object"
+          },
+          "noise_scale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable noise scale when applied, e.g. '1.0x model std per outcome/risk sample (~sqrt(2) spread inflation)'. Null when not applied.",
+            "title": "Noise Scale"
+          },
+          "unnoised_constraint_node_ids": {
+            "description": "Constraint node IDs whose probabilities were computed on model-only samples while the goal node's were noised (the same mix disclosed by the CONSTRAINT_SAMPLES_UNNOISED inference warning). Empty when there is no mix.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unnoised Constraint Node Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "auto_scaled_noise_applied",
+          "metric_populations"
+        ],
+        "title": "SamplePopulationProvenanceV2",
         "type": "object"
       },
       "ScenarioDescription": {
@@ -6266,7 +6343,7 @@
         "type": "object"
       },
       "SequentialAnalysisResponse": {
-        "description": "Response model for sequential decision analysis.",
+        "description": "Response model for sequential decision analysis.\n\nArch step 1 (2026-07-26): `value_of_flexibility` and `sensitivity_to_timing`\nare OMITTED.\n\n`value_of_flexibility` reported `max(0, V_flexible - V_committed)`. The two\nlegs were different ESTIMATORS of the same quantity, not two different\nquantities: `V_flexible` came from backward induction, which weights a\nchance node's branches by `_edge_probability`, while `V_committed` came from\n`_calculate_average_continuation`, which took `np.mean` over the same\nbranches \u2014 the module's own probability reader was never called on that\nwalk. On the adjudication's reproduction graph (one decision node, so\nnothing is ever chosen after the chance node resolves and the true value is\ndefinitionally 0) it reported 40.0: `mean(100, 0) = 50` against\n`0.9*100 + 0.1*0 = 90`. The error is deterministic, does not shrink with\nsample size, and scales with branch asymmetry.\n\nIt is omitted rather than repaired because the repair is not a one-line\nchange. Committing means choosing actions ex ante, WITHOUT conditioning on\nwhat the chance nodes reveal \u2014 which requires knowing which decision nodes\nacross different histories are the same decision (an information set). This\nrequest schema has no way to express that: each history reaches its own\nnode, so a correct estimator on the graph as given (max at decisions,\nprobability-weighted expectation at chance) reproduces backward induction\nexactly and returns identically 0 for every input. The field cannot carry\ninformation until the request can express information sets. That is a\nmodelling roadmap item.\n\n`sensitivity_to_timing` bucketed `value_of_flexibility / |best stage-0\nvalue|` at 0.3 / 0.1 into high/medium/low. It was a relabelling of the same\nnumber and carries the same defect, so it goes with it.\n\nUnaffected and still served: `optimal_policy` (backward induction),\n`stage_analyses`, `resolved_uncertainty`, `stage_evpi` and its disclosures.",
         "example": {
           "optimal_policy": {
             "expected_total_value": 45000.0,
@@ -6300,7 +6377,6 @@
             ]
           },
           "schema_version": "sequential.v1",
-          "sensitivity_to_timing": "medium",
           "stage_analyses": [
             {
               "options_at_stage": [
@@ -6317,8 +6393,7 @@
               "stage_index": 0,
               "stage_label": "Investment Decision"
             }
-          ],
-          "value_of_flexibility": 25000.0
+          ]
         },
         "properties": {
           "_metadata": {
@@ -6346,12 +6421,6 @@
             "title": "Schema Version",
             "type": "string"
           },
-          "sensitivity_to_timing": {
-            "description": "How sensitive results are to timing",
-            "pattern": "^(high|medium|low)$",
-            "title": "Sensitivity To Timing",
-            "type": "string"
-          },
           "stage_analyses": {
             "description": "Detailed analysis for each stage",
             "items": {
@@ -6359,18 +6428,11 @@
             },
             "title": "Stage Analyses",
             "type": "array"
-          },
-          "value_of_flexibility": {
-            "description": "Value of waiting vs committing now",
-            "title": "Value Of Flexibility",
-            "type": "number"
           }
         },
         "required": [
           "optimal_policy",
-          "stage_analyses",
-          "value_of_flexibility",
-          "sensitivity_to_timing"
+          "stage_analyses"
         ],
         "title": "SequentialAnalysisResponse",
         "type": "object"
@@ -7031,7 +7093,7 @@
   "paths": {
     "/api/v1/analysis/sequential": {
       "post": {
-        "description": "Solve multi-stage decision problems using backward induction.\n\n    Many strategic decisions are sequential: \"If we launch, then we'll need to\n    decide on pricing. If pricing works, we'll decide on expansion.\"\n    Optimal strategy requires reasoning backward from final outcomes.\n\n    **Algorithm:**\n    1. Start from final stage (terminal payoffs)\n    2. For each state at stage T, compute optimal action and value\n    3. Move backward, computing optimal action given immediate payoff + continuation value\n    4. Repeat until stage 0\n\n    **Value of Flexibility:**\n    Compares optimal policy (deciding at each stage with information) vs\n    committing upfront (ignoring future information).\n\n    **Use when:** Planning multi-stage strategies with uncertainty resolution.",
+        "description": "Solve multi-stage decision problems using backward induction.\n\n    Many strategic decisions are sequential: \"If we launch, then we'll need to\n    decide on pricing. If pricing works, we'll decide on expansion.\"\n    Optimal strategy requires reasoning backward from final outcomes.\n\n    **Algorithm:**\n    1. Start from final stage (terminal payoffs)\n    2. For each state at stage T, compute optimal action and value\n    3. Move backward, computing optimal action given immediate payoff + continuation value\n    4. Repeat until stage 0\n\n    **One decision per stage:** each stage may declare at most one decision node.\n    The engine builds exactly one decision rule per stage and the response has no\n    field in which a dropped decision could be disclosed, so more than one is\n    rejected (422, `MULTI_DECISION_STAGE_UNSUPPORTED`) rather than truncated.\n\n    **Not returned:** `value_of_flexibility` and `sensitivity_to_timing` are\n    omitted (arch step 1, 2026-07-26) \u2014 the committed leg averaged a chance\n    node's branches while the flexible leg probability-weighted them, so the\n    difference measured an estimator gap, not the value of waiting. See\n    `SequentialAnalysisResponse`.\n\n    **Use when:** Planning multi-stage strategies with uncertainty resolution.",
         "operationId": "analyze_sequential_decision_api_v1_analysis_sequential_post",
         "parameters": [
           {

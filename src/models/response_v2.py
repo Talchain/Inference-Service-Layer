@@ -642,7 +642,30 @@ class RobustnessResultV2(BaseModel):
     level: Literal["high", "moderate", "low", "very_low"] = Field(
         ..., description="Robustness level"
     )
-    confidence: float = Field(..., ge=0, le=1, description="Confidence [0, 1]")
+    confidence: float = Field(
+        ...,
+        ge=0,
+        le=1,
+        description="NOT A CONFIDENCE LEVEL. This is the UNCALIBRATED "
+        "recommendation-stability fraction — the share of sampled scenarios in "
+        "which the recommended option won — served under a legacy field name. It "
+        "carries no coverage guarantee and no calibration study; it does not say "
+        "how likely the recommendation is to be right. Read `recommendation_stability` "
+        "(the same quantity, honestly named) and branch on `confidence_basis`. "
+        "Arch step 1 (2026-07-26): the previous value, "
+        "min(0.99, stability*(1-1/sqrt(n_samples))), additionally moved with the "
+        "sample COUNT rather than with the estimator's sampling error. The "
+        "description this replaces read, in full, 'Confidence [0, 1]'.",
+    )
+    confidence_basis: Literal["recommendation_stability_uncalibrated"] = Field(
+        default="recommendation_stability_uncalibrated",
+        description="Machine-readable semantics of the `confidence` field, so a "
+        "consumer does not have to infer them from prose. "
+        "'recommendation_stability_uncalibrated': `confidence` is the "
+        "recommendation-stability fraction with no calibration behind it. Mirrors "
+        "the ConfidenceProvenance marker that rides beside "
+        "FactorSensitivityV2.confidence.",
+    )
     sensitive_factors: Optional[List[SensitiveFactorV2]] = Field(
         None, description="Factor sensitivity breakdown"
     )
@@ -1307,6 +1330,55 @@ class FactorEvpcEntryV2(BaseModel):
         return self
 
 
+class SamplePopulationProvenanceV2(BaseModel):
+    """Which sample population produced each served metric (arch step 1, 2026-07-26).
+
+    ``auto_noise_applied`` is a single boolean for a whole envelope that mixes two
+    populations. The B2 CRN-fix comment in ``RobustnessAnalyzerV2.analyze``
+    records why they are mixed: ``expected_regret`` is a JOINT
+    Common-Random-Numbers metric and must come from the PRE-noise samples (the
+    auto-noise draw is independent per option, which breaks CRN alignment and
+    inflates regret by a max-over-independent-noise premium), while the marginal
+    tail metrics stay on the noised samples for consistency with the noised
+    percentiles. That is a defensible choice — but a consumer reading a response
+    could not tell which of the numbers in front of it the noise had reached.
+    This block says so per metric.
+    """
+
+    auto_scaled_noise_applied: bool = Field(
+        ...,
+        description="Whether the auto-scaled noise heuristic actually modified any "
+        "samples in this response. Default-off since 2026-07-26 "
+        "(ENABLE_AUTO_SCALED_NOISE); when false, every metric below is model-only.",
+    )
+    noise_scale: Optional[str] = Field(
+        None,
+        description="Human-readable noise scale when applied, e.g. '1.0x model std "
+        "per outcome/risk sample (~sqrt(2) spread inflation)'. Null when not applied.",
+    )
+    calibration_status: str = Field(
+        default="uncalibrated_poc_heuristic",
+        description="Calibration standing of the noise heuristic. It is a PoC "
+        "heuristic pending formal review and calibration against pilot outcome "
+        "data — it has no coverage study behind it.",
+    )
+    metric_populations: Dict[str, Literal["model_only", "noise_inflated"]] = Field(
+        ...,
+        description="Per-metric population label. 'model_only' = computed from the "
+        "structural model's own samples; 'noise_inflated' = computed from samples "
+        "with the auto-scaled noise term added.",
+    )
+    unnoised_constraint_node_ids: List[str] = Field(
+        default_factory=list,
+        description="Constraint node IDs whose probabilities were computed on "
+        "model-only samples while the goal node's were noised (the same mix "
+        "disclosed by the CONSTRAINT_SAMPLES_UNNOISED inference warning). Empty "
+        "when there is no mix.",
+    )
+
+    model_config = {"extra": "ignore"}
+
+
 # =============================================================================
 # Main V2 Response
 # =============================================================================
@@ -1541,7 +1613,22 @@ class ISLResponseV2(BaseModel):
         None,
         description="Whether auto-scaled noise (√2 variance inflation) was applied to "
         "outcome distributions. Mirrors V1 _metadata.auto_noise_applied. "
-        "None when the analyser cannot determine the flag.",
+        "None when the analyser cannot determine the flag. Since arch step 1 "
+        "(2026-07-26) the heuristic is DEFAULT OFF (ENABLE_AUTO_SCALED_NOISE), so "
+        "this is normally false. For WHICH metrics each population produced, read "
+        "sample_population_provenance — this boolean cannot say.",
+    )
+
+    # Arch step 1 (2026-07-26): per-metric population provenance. `auto_noise_applied`
+    # says noise ran; it cannot say which of the numbers in front of you it reached.
+    sample_population_provenance: Optional[SamplePopulationProvenanceV2] = Field(
+        None,
+        description="Which sample population each served metric was computed from. "
+        "One response mixes both: expected_regret / win_probability / factor_evppi / "
+        "factor_evpc are computed on the PRE-noise Common-Random-Numbers population "
+        "(noise draws independent per option, which breaks CRN alignment), while "
+        "p10/p50/p90/mean/cvar_10/p05 are computed on the POST-noise one. None on "
+        "error/blocked paths where the analyser did not report it.",
     )
 
     # Correlation

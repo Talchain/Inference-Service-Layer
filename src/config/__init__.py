@@ -163,6 +163,23 @@ class Settings(BaseSettings):
         default=True, description="Enable Y₀ identifiability analysis with hard rule enforcement"
     )
 
+    # Auto-scaled outcome noise (arch step 1, 2026-07-26) — DEFAULT OFF.
+    # `RobustnessAnalyzerV2._apply_auto_scaled_noise` adds N(0, model_std) to each
+    # outcome/risk sample, which widens the p10/p90 spread by ~√2 and moves
+    # P(goal), constraint satisfaction probabilities and the robustness verdict.
+    # Its own docstring records it as a PoC heuristic "Pending formal review and
+    # calibration against pilot outcome data", and there is no request-side switch,
+    # so before this flag a client could not decline an uncalibrated widening of
+    # every interval it was served. An uncalibrated adjustment must be opt-in.
+    # Set ENABLE_AUTO_SCALED_NOISE=true to restore the pre-2026-07-26 behaviour
+    # (e.g. for calibration diagnostics); when on, the response discloses which
+    # metrics came from the noised population via `sample_population_provenance`.
+    ENABLE_AUTO_SCALED_NOISE: bool = Field(
+        default=False,
+        description="Apply the uncalibrated auto-scaled outcome noise heuristic "
+        "(~√2 spread inflation). Default OFF pending calibration.",
+    )
+
     model_config = SettingsConfigDict(env_file=".env", case_sensitive=True)
 
     @field_validator("ISL_API_KEYS")

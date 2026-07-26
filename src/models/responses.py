@@ -3251,17 +3251,47 @@ class StageAnalysis(BaseModel):
 
 
 class SequentialAnalysisResponse(BaseModel):
-    """Response model for sequential decision analysis."""
+    """Response model for sequential decision analysis.
+
+    Arch step 1 (2026-07-26): `value_of_flexibility` and `sensitivity_to_timing`
+    are OMITTED.
+
+    `value_of_flexibility` reported `max(0, V_flexible - V_committed)`. The two
+    legs were different ESTIMATORS of the same quantity, not two different
+    quantities: `V_flexible` came from backward induction, which weights a
+    chance node's branches by `_edge_probability`, while `V_committed` came from
+    `_calculate_average_continuation`, which took `np.mean` over the same
+    branches — the module's own probability reader was never called on that
+    walk. On the adjudication's reproduction graph (one decision node, so
+    nothing is ever chosen after the chance node resolves and the true value is
+    definitionally 0) it reported 40.0: `mean(100, 0) = 50` against
+    `0.9*100 + 0.1*0 = 90`. The error is deterministic, does not shrink with
+    sample size, and scales with branch asymmetry.
+
+    It is omitted rather than repaired because the repair is not a one-line
+    change. Committing means choosing actions ex ante, WITHOUT conditioning on
+    what the chance nodes reveal — which requires knowing which decision nodes
+    across different histories are the same decision (an information set). This
+    request schema has no way to express that: each history reaches its own
+    node, so a correct estimator on the graph as given (max at decisions,
+    probability-weighted expectation at chance) reproduces backward induction
+    exactly and returns identically 0 for every input. The field cannot carry
+    information until the request can express information sets. That is a
+    modelling roadmap item.
+
+    `sensitivity_to_timing` bucketed `value_of_flexibility / |best stage-0
+    value|` at 0.3 / 0.1 into high/medium/low. It was a relabelling of the same
+    number and carries the same defect, so it goes with it.
+
+    Unaffected and still served: `optimal_policy` (backward induction),
+    `stage_analyses`, `resolved_uncertainty`, `stage_evpi` and its disclosures.
+    """
 
     schema_version: str = Field(
         default="sequential.v1", description="Schema version for this response"
     )
     optimal_policy: Policy = Field(..., description="Optimal policy across all stages")
     stage_analyses: List[StageAnalysis] = Field(..., description="Detailed analysis for each stage")
-    value_of_flexibility: float = Field(..., description="Value of waiting vs committing now")
-    sensitivity_to_timing: str = Field(
-        ..., description="How sensitive results are to timing", pattern="^(high|medium|low)$"
-    )
 
     # Metadata for determinism and reproducibility
     metadata: Optional[ResponseMetadata] = Field(
@@ -3320,8 +3350,6 @@ class SequentialAnalysisResponse(BaseModel):
                         "stage_evpi_status": None,
                     }
                 ],
-                "value_of_flexibility": 25000.0,
-                "sensitivity_to_timing": "medium",
             }
         }
     }

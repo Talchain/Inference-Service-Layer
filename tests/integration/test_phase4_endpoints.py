@@ -232,8 +232,13 @@ class TestSequentialAnalysisEndpoint:
         assert data["schema_version"] == "sequential.v1"
         assert "optimal_policy" in data
         assert "stage_analyses" in data
-        assert "value_of_flexibility" in data
-        assert "sensitivity_to_timing" in data
+        # Arch step 1 (2026-07-26): value_of_flexibility and the
+        # sensitivity_to_timing label derived from it are OMITTED — the committed
+        # leg averaged a chance node's branches while the flexible leg
+        # probability-weighted them, so their difference measured an estimator
+        # gap, not the value of waiting. See SequentialAnalysisResponse.
+        assert "value_of_flexibility" not in data
+        assert "sensitivity_to_timing" not in data
 
         # Check optimal policy
         policy = data["optimal_policy"]
@@ -248,12 +253,6 @@ class TestSequentialAnalysisEndpoint:
         # (This fixture graph has no chance/decision stage collision, so 36930 holds
         # before and after the same-stage fix; it anchors correct behaviour.)
         assert policy["expected_total_value"] == pytest.approx(36930.0)
-
-        # Check value of flexibility is non-negative
-        assert data["value_of_flexibility"] >= 0
-
-        # Check timing sensitivity
-        assert data["sensitivity_to_timing"] in ["high", "medium", "low"]
 
     @pytest.mark.asyncio
     async def test_sequential_analysis_with_discount(self, client, sequential_analysis_request):
@@ -851,14 +850,21 @@ class TestSequentialEngineErrorMapping:
         assert "c2" in body["message"]
 
     @pytest.mark.asyncio
-    async def test_second_decision_node_unvalued_returns_422(self, sequential_error_client):
-        """F-1(a): a SECOND mis-staged decision node in decision_nodes (which
-        _build_policy skips via its post-first `break`) reaches _generate_stage_
-        analyses and must fail loud, NOT fabricate a StageOption with continuation 0.
+    async def test_multi_decision_stage_rejected_at_the_boundary(self, sequential_error_client):
+        """Arch step 1 (2026-07-26): >1 decision node per stage is now REJECTED.
 
-        RED at HEAD: 200 with a fabricated option (continuation_value 0.0) for d2's
-        unvalued chance child. d2 is second in stage 0's decision_nodes and absent
-        from stage_assignments.
+        This request is the one that used to exercise F-1(a) — a SECOND
+        mis-staged decision node reaching _generate_stage_analyses past
+        _build_policy's `break`. That shape can no longer be submitted at all:
+        `DecisionStage.decision_nodes` is capped at one node, because the engine
+        builds exactly one decision rule per stage and `StagePolicy` has no field
+        in which a dropped decision could be disclosed. Silent truncation is
+        replaced by a typed rejection.
+
+        The F-1(a) fail-loud itself is unchanged and still covered — see
+        test_mis_staged_decision_node_unvalued_returns_422 below, which reaches
+        _require_valued_decision_node through a stage whose ONLY decision node is
+        the mis-staged one.
         """
         request = {
             "graph": {
@@ -878,9 +884,47 @@ class TestSequentialEngineErrorMapping:
                 "stage_assignments": {"root": 0, "win": 1, "d2gc": 2},
             },
             "stages": [
-                # d2 is the SECOND decision node -> _build_policy breaks before it
                 {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root", "d2"]},
                 {"stage_index": 1, "stage_label": "Terminal", "decision_nodes": []},
+            ],
+            "discount_factor": 1.0,
+        }
+        response = await sequential_error_client.post(
+            "/api/v1/analysis/sequential", json=request
+        )
+        assert response.status_code == 422
+        assert "MULTI_DECISION_STAGE_UNSUPPORTED" in response.text
+
+    @pytest.mark.asyncio
+    async def test_mis_staged_decision_node_unvalued_returns_422(self, sequential_error_client):
+        """F-1(a) fail-loud, through the path that is still reachable.
+
+        A decision node listed in a stage's `decision_nodes` but absent from
+        `stage_assignments` is never valued by backward induction. It must fail
+        loud, NOT fabricate a StageOption with continuation 0. Here `d2` is the
+        only decision node of stage 1, so the boundary cap does not intercept it
+        and _require_valued_decision_node is the thing under test.
+        """
+        request = {
+            "graph": {
+                "nodes": [
+                    {"id": "root", "type": "decision", "label": "Root"},
+                    {"id": "win", "type": "terminal", "label": "Win", "payoff": 100},
+                    {"id": "d2", "type": "decision", "label": "D2"},
+                    {"id": "d2child", "type": "chance", "label": "D2 Child"},
+                    {"id": "d2gc", "type": "terminal", "label": "D2 GC", "payoff": 5},
+                ],
+                "edges": [
+                    {"from": "root", "to": "win", "action": "safe"},
+                    {"from": "d2", "to": "d2child", "action": "risky", "immediate_payoff": 7},
+                    {"from": "d2child", "to": "d2gc", "outcome": "x", "probability": 1.0},
+                ],
+                # d2 and d2child absent from stage_assignments
+                "stage_assignments": {"root": 0, "win": 1, "d2gc": 2},
+            },
+            "stages": [
+                {"stage_index": 0, "stage_label": "Root", "decision_nodes": ["root"]},
+                {"stage_index": 1, "stage_label": "Second", "decision_nodes": ["d2"]},
             ],
             "discount_factor": 1.0,
         }
