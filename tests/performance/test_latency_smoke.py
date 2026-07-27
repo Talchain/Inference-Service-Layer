@@ -58,15 +58,22 @@ STRICT_MIN_RPS = 100.0
 # WORK budget: CPU milliseconds per /health request, enforced on EVERY run.
 #
 # CALIBRATION (doctrine requires the tolerance be derived, not guessed).
-# Provisional, and honestly labelled as such: it is derived from local runs
-# WITH coverage instrumentation active (4.5ms/req, the configuration CI uses),
-# scaled for a shared runner roughly 4x slower in wall terms. Every run emits
-# a PerfMeasurement warning giving the measured value and the headroom
-# multiple, so the real CI figure is on the record from the first run onward
-# and this constant can be tightened to the observed distribution rather than
-# to this estimate. TIGHTEN IT ONCE A FEW RUNS HAVE REPORTED — a budget with
-# unknown headroom is only half-calibrated, and the warning exists precisely
-# so that the remaining half is not invisible.
+#
+# MEASURED ON THE CI RUNNER, ubuntu-latest, coverage instrumentation active
+# (run 30232013463, 2026-07-27):
+#
+#     cpu[health request work]: 16.25ms CPU / 40ms budget (2.5x headroom)
+#
+# 40ms therefore leaves 2.5x headroom over the observed value, while the
+# smallest genuine work regression characterised above inflated CPU ~3.9x
+# (3.11 -> 12.03ms) — so a real regression clears the budget and normal
+# run-to-run spread does not come close.
+#
+# ONE SAMPLE, stated as such. Every run emits a PerfMeasurement warning with
+# the measured value and headroom multiple (visible under `-q`, on green runs
+# too — the whole point), so the distribution accumulates in the logs. Tighten
+# this constant toward the observed spread once several runs have reported;
+# do not loosen it without a measurement that justifies doing so.
 MAX_CPU_MS_PER_HEALTH_REQUEST = 40.0
 
 # HANG ceiling: wall-clock milliseconds per request, enforced on EVERY run.
