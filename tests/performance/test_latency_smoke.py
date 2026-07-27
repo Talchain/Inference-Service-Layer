@@ -60,20 +60,22 @@ STRICT_MIN_RPS = 100.0
 # CALIBRATION (doctrine requires the tolerance be derived, not guessed).
 #
 # MEASURED ON THE CI RUNNER, ubuntu-latest, coverage instrumentation active
-# (run 30232013463, 2026-07-27):
+# (2026-07-27):
 #
-#     cpu[health request work]: 16.25ms CPU / 40ms budget (2.5x headroom)
+#     run 30232013463:  16.25ms CPU / 40ms budget (2.5x headroom)
+#     run 30232261585:  18.53ms CPU / 40ms budget (2.2x headroom)
 #
-# 40ms therefore leaves 2.5x headroom over the observed value, while the
-# smallest genuine work regression characterised above inflated CPU ~3.9x
-# (3.11 -> 12.03ms) — so a real regression clears the budget and normal
-# run-to-run spread does not come close.
+# Two samples, ~14% apart. 40ms leaves 2.2-2.5x headroom over observed, while
+# the smallest genuine work regression characterised above inflated CPU ~3.9x
+# (3.11 -> 12.03ms) — so a real regression clears the budget comfortably and
+# run-to-run spread is nowhere near it.
 #
-# ONE SAMPLE, stated as such. Every run emits a PerfMeasurement warning with
-# the measured value and headroom multiple (visible under `-q`, on green runs
-# too — the whole point), so the distribution accumulates in the logs. Tighten
-# this constant toward the observed spread once several runs have reported;
-# do not loosen it without a measurement that justifies doing so.
+# TWO SAMPLES, stated as such: enough to show the spread is small, not enough
+# to fix a tail. Every run emits a PerfMeasurement warning with the measured
+# value and headroom multiple (visible under `-q`, on green runs too — the
+# whole point), so the distribution keeps accumulating in the logs. Tighten
+# this constant toward the observed spread as they do; do not loosen it
+# without a measurement that justifies doing so.
 MAX_CPU_MS_PER_HEALTH_REQUEST = 40.0
 
 # HANG ceiling: wall-clock milliseconds per request, enforced on EVERY run.
