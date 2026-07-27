@@ -57,12 +57,16 @@ STRICT_MIN_RPS = 100.0
 
 # WORK budget: CPU milliseconds per /health request, enforced on EVERY run.
 #
-# CALIBRATION (doctrine requires the tolerance be derived, not guessed):
-# measured on the CI runner itself with coverage instrumentation active — the
-# figure is printed by this test on every run, so the basis stays auditable and
-# drift is visible in the log rather than silent. The budget is set at ~4x the
-# observed CI mean, which is below the ~4x inflation a genuine work regression
-# produced in the table above and far above run-to-run spread.
+# CALIBRATION (doctrine requires the tolerance be derived, not guessed).
+# Provisional, and honestly labelled as such: it is derived from local runs
+# WITH coverage instrumentation active (4.5ms/req, the configuration CI uses),
+# scaled for a shared runner roughly 4x slower in wall terms. Every run emits
+# a PerfMeasurement warning giving the measured value and the headroom
+# multiple, so the real CI figure is on the record from the first run onward
+# and this constant can be tightened to the observed distribution rather than
+# to this estimate. TIGHTEN IT ONCE A FEW RUNS HAVE REPORTED — a budget with
+# unknown headroom is only half-calibrated, and the warning exists precisely
+# so that the remaining half is not invisible.
 MAX_CPU_MS_PER_HEALTH_REQUEST = 40.0
 
 # HANG ceiling: wall-clock milliseconds per request, enforced on EVERY run.
@@ -223,8 +227,9 @@ class TestThroughputBaselines:
 
         cpu_per_request = cpu_ms_of_best / num_requests
         wall_per_request = best_wall_ms / num_requests
-        # Reported every run so the calibration basis is auditable in the log
-        # and budget drift shows up as a visible number, not a silent pass.
+        # This print is only rendered for FAILING tests under `-q` (and for all
+        # tests under the perf workflow's `-rA`). The always-visible copy of the
+        # CPU figure is the PerfMeasurement warning raised by assert_cpu_budget.
         rps = (num_requests / (best_wall_ms / 1000.0)) if best_wall_ms > 0 else float("inf")
         print(
             f"health: cpu={cpu_per_request:.2f}ms/req wall={wall_per_request:.2f}ms/req "

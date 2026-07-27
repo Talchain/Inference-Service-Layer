@@ -42,8 +42,22 @@ Sibling precedent: CEE fixed the same defect class the same way in PR #714
 
 import os
 import time
+import warnings
 
 from contextlib import contextmanager
+
+
+class PerfMeasurement(UserWarning):
+    """Carries a perf measurement into pytest's warnings summary.
+
+    ``print`` is NOT enough for a figure that must stay auditable: the default
+    gate runs ``pytest -q``, which captures stdout and shows it only for
+    FAILING tests. A budget whose measured value is invisible while it passes
+    is a budget nobody can see drifting toward its limit — you would learn the
+    headroom had gone only when it turned red. pytest always renders the
+    warnings summary under ``-q``, so routing the number through a warning
+    makes it visible on every run, green included, in one line.
+    """
 
 
 def is_perf_strict() -> bool:
@@ -110,6 +124,13 @@ def assert_cpu_budget(cpu_ms: float, budget_ms: float, label: str) -> None:
     the job of :func:`assert_time_budget` and of the event-loop responsiveness
     tests — see ``tests/integration/test_f15_responsiveness.py``.
     """
+    headroom = (budget_ms / cpu_ms) if cpu_ms > 0 else float("inf")
+    warnings.warn(
+        f"cpu[{label}]: {cpu_ms:.2f}ms CPU / {budget_ms:.0f}ms budget "
+        f"({headroom:.1f}x headroom)",
+        PerfMeasurement,
+        stacklevel=2,
+    )
     print(f"cpu[{label}]: {cpu_ms:.2f}ms CPU (budget {budget_ms:.0f}ms, always enforced)")
     assert cpu_ms <= budget_ms, (
         f"{label}: {cpu_ms:.2f}ms CPU exceeds {budget_ms:.0f}ms work budget. "
