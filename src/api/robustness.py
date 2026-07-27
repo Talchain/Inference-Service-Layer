@@ -910,6 +910,11 @@ async def _analyze_robustness_v2_enhanced(
                 constraint_analysis_v2 = ConstraintAnalysisV2(
                     constraints=[
                         ConstraintResultV2(
+                            # Slice 6b: the internal->wire hop of the echo. This
+                            # is the layer that actually reaches PLoT/CEE; the
+                            # field must be threaded at every hop or it is lost
+                            # here after surviving the analyzer.
+                            constraint_id=c.constraint_id,
                             node_id=c.node_id,
                             operator=c.operator,
                             threshold=c.threshold,

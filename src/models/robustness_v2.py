@@ -627,6 +627,29 @@ class GoalConstraint(BaseModel):
     Multiple constraints can be specified to compute joint probabilities.
     """
 
+    # Contract step-2 slice 6b — the READER half of constraint_id adoption
+    # (Codex OQ-5: ADOPT into ISL, do not delete). PLoT ALREADY sends this on
+    # every request (translator-v3.ts:543); until now `extra: "ignore"` dropped
+    # it at parse, so PLoT had to re-key ISL's results POSITIONALLY and CEE's
+    # `constraint_verdict` needed an `identity_unresolved` state for the cases
+    # that reconstruction cannot resolve. ISL declares it so it can ECHO it back
+    # on ConstraintResultV2 and consumers can key results by the ratified ID.
+    #
+    # Reader-first, and deliberately UNVALIDATED beyond its type: no pattern, no
+    # min/max length. The value is an opaque caller identity — CEE supplies
+    # arbitrary strings and PLoT also mints `compiled:<nodeId>` — and PLoT is
+    # ALREADY emitting it, so any constraint added here could turn a request
+    # that works today into a 422. Optional and unconstrained cannot regress a
+    # live producer. It is echo-only: never parsed, compared or computed on.
+    constraint_id: Optional[str] = Field(
+        None,
+        description=(
+            "Opaque caller-supplied identity for this constraint. Echoed back on "
+            "the corresponding constraint result so consumers can key results by "
+            "the ratified ID instead of reconstructing them positionally. Not used "
+            "in any computation."
+        ),
+    )
     node_id: str = Field(
         ...,
         pattern=r"^[a-z0-9_:-]+$",
@@ -1289,6 +1312,15 @@ class OutcomeDistribution(BaseModel):
 class ConstraintResult(BaseModel):
     """Internal result for a single goal constraint."""
 
+    # Slice 6b echo — carried here (a REGULAR field, not a PrivateAttr) because
+    # the analyzer may run inside the ProcessPoolExecutor worker, which returns
+    # the response via model_dump_json() and rebuilds it with
+    # model_validate_json(). Pydantic drops private attrs across that boundary,
+    # so an undeclared/private echo would be silently absent on OFFLOADED
+    # requests only — green in-process, missing in prod.
+    constraint_id: Optional[str] = Field(
+        None, description="Opaque caller-supplied identity echoed from the request constraint"
+    )
     node_id: str = Field(..., description="Node ID the constraint applies to")
     operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
     threshold: float = Field(..., description="Threshold value")
