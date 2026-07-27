@@ -72,7 +72,26 @@ jobs:
         # variable for hard wall-clock/RPS assertions). They run in the dedicated
         # perf-tests workflow with ISL_PERF_STRICT=1. Correctness assertions in
         # mixed tests remain in this suite; see tests/perf_utils.py.
-        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -x -q -m "not perf"
+        #
+        # NO -x, DELIBERATELY. It used to be here, and it converted any single
+        # early failure into near-total invisibility for the rest of the suite.
+        # Measured on the one run this actually bit (PR #60, 2026-07-06): one
+        # flaky wall-clock perf assertion failed at collection item 1184 of
+        # 2471, so pytest stopped and 1287 tests — 52% of the suite — never
+        # executed. They were not "passing"; they were never run, while the job
+        # reported a single named failure. Everything dark was tests/unit, and
+        # it included test_robustness_v2 (208), test_response_v2 (61),
+        # test_sensitivity_analyzer (36), test_counterfactual_engine (35), both
+        # identifiability suites (58), determinism and seed-hash versioning, and
+        # the security/rate-limit middleware tests.
+        #
+        # Fail-fast saves a few runner minutes and costs the entire picture on
+        # exactly the runs where the picture matters most. The perf workflow
+        # already made this call for the same reason ("No -x: report every
+        # budget breach in one run, not just the first"); this aligns the
+        # default gate with it. A red build should tell you everything that is
+        # red, not just the first thing.
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -m "not perf"
 
   contract-drift:
     name: Contract schema freshness gate

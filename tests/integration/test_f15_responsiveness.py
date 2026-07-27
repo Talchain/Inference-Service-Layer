@@ -218,11 +218,37 @@ class TestPCAResponsiveness:
             f"analysis (ratio {max_stall / analyze_wall:.2f}) with offload on — expected the "
             "loop free during worker compute (stall < 0.5x wall AND < 1s)"
         )
-        # /health, sampled mid-analysis, returns well under the 100ms SLA.
-        assert health_lat is not None and health_lat < 0.1, (
-            f"/health took {(health_lat or 0)*1000:.0f}ms during the analysis — "
-            "expected < 100ms while the worker computes"
-        )
+        # /health was SERVED during the analysis window (status asserted above).
+        #
+        # THE LATENCY BOUND THAT USED TO BE HERE WAS VACUOUS, AND IS REMOVED.
+        # It read ``assert health_lat < 0.1`` and looked like the test's second
+        # line of defence. Measured against the pre-F15 defect (offload
+        # disabled, loop fully blocked) with the stall assertion neutralised so
+        # this one was reachable:
+        #
+        #     BLOCKED: max_stall=0.938s  health_lat=0.006s  wall=0.935s
+        #
+        # 6ms. It PASSED with the event loop frozen for the entire analysis, so
+        # it never had the power to catch the defect it appeared to guard. The
+        # reason is structural, not a tuning problem: the sampler is a coroutine
+        # on the very loop it is measuring, and it only fires after its first
+        # successful tick — so when the loop is blocked it cannot run, and the
+        # sample is necessarily taken OUTSIDE the blocking window. Any threshold
+        # would pass. Loosening it would have been theatre; tightening it would
+        # only have produced more false REDs.
+        #
+        # Its one real-world effect was that false-RED: PR #115 disclosed this
+        # assertion failing a --no-verify push on a loaded runner while passing
+        # 3/3 in isolation. Zero detection value, non-zero false-RED rate.
+        #
+        # The stall/wall ratio assertion above is the instrument that genuinely
+        # detects this defect — it goes RED at ratio ~1.01 under the same
+        # mutation. Coverage is therefore not reduced by this removal.
+        #
+        # Restoring a REAL "served fast while blocked" probe needs an
+        # out-of-loop sampler (separate thread or process); tracked separately
+        # rather than faked here.
+        assert health_lat is not None, "/health should have been sampled during the analysis"
 
 
 class TestPCBWireOverload:
