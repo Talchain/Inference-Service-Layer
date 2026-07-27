@@ -6,17 +6,10 @@
     "source_ref": "1b936ecaf9ddde0ee09566d13d686e07b8877751",
     "package_name": "@talchain/schemas",
     "package_version": "0.20.0",
-    "omission_count": 42,
+    "omission_count": 41,
     "superset_count": 77
   },
   "omissions": [
-    {
-      "isl_model": "ConstraintResultV2",
-      "contract_location": "boundary.EnrichmentConstraintResultSchema",
-      "prop": "constraint_id",
-      "required": true,
-      "reason": "REQUIRED in contract (boundary.EnrichmentConstraintResultSchema) — ISL does not emit constraint_id; confirm PLoT synthesises it, else it is a silent drop at source"
-    },
     {
       "isl_model": "ConstraintResultV2",
       "contract_location": "boundary.EnrichmentConstraintResultSchema",

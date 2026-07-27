@@ -3012,6 +3012,12 @@ class RobustnessAnalyzerV2:
                     # Convert dict to ConstraintAnalysis model
                     constraint_results = [
                         ConstraintResult(
+                            # Slice 6b echo. Subscript, not .get(): the dict is
+                            # built one function away in
+                            # _compute_constraint_analysis, its only producer, so
+                            # a missing key is a real drift and should raise here
+                            # rather than silently None the identity.
+                            constraint_id=c["constraint_id"],
                             node_id=c["node_id"],
                             operator=c["operator"],
                             threshold=c["threshold"],
@@ -6131,6 +6137,9 @@ class RobustnessAnalyzerV2:
             diag = near_miss_diagnostics.get(c_idx, {})
             constraint_results.append(
                 {
+                    # Slice 6b: carry the caller's opaque id straight through.
+                    # Echo-only — it is never read by any computation here.
+                    "constraint_id": constraint.constraint_id,
                     "node_id": constraint.node_id,
                     "operator": constraint.operator,
                     "threshold": constraint.threshold,

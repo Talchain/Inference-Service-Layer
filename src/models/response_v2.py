@@ -382,6 +382,25 @@ class SensitiveFactorV2(BaseModel):
 class ConstraintResultV2(BaseModel):
     """Result for a single goal constraint."""
 
+    # Slice 6b — the wire end of the constraint_id echo. The paired contract
+    # schema (boundary.EnrichmentConstraintResultSchema) has REQUIRED this
+    # property all along; ISL's non-emission was carried as an accepted omission
+    # in tests/contract_drift/drift_baseline.json. Emitting it closes that
+    # omission, so the baseline entry is removed in the same change.
+    #
+    # Optional here, not required: a request that omits constraint_id must keep
+    # producing exactly the pre-adoption wire shape, and the endpoint serialises
+    # with exclude_none=True, so an absent id is OMITTED rather than sent as null.
+    constraint_id: Optional[str] = Field(
+        None,
+        description=(
+            "Opaque identity echoed verbatim from the request's goal_constraints "
+            "entry. Present iff the caller supplied one. Lets a consumer key "
+            "results by the ratified constraint ID instead of reconstructing them "
+            "from response ordinal or (node_id, operator), neither of which can "
+            "distinguish two constraints on the same node with the same operator."
+        ),
+    )
     node_id: str = Field(..., description="Node ID the constraint applies to")
     operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
     threshold: float = Field(..., description="Threshold value")

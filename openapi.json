@@ -494,6 +494,18 @@
             "description": "True if constraint is borderline (prob_satisfied \u2208 [0.4, 0.6])",
             "title": "Binding"
           },
+          "constraint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque caller-supplied identity echoed from the request constraint",
+            "title": "Constraint Id"
+          },
           "failure_margin_median": {
             "anyOf": [
               {
@@ -582,6 +594,18 @@
             ],
             "description": "True if constraint is borderline (prob_satisfied \u2208 [0.4, 0.6])",
             "title": "Binding"
+          },
+          "constraint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque identity echoed verbatim from the request's goal_constraints entry. Present iff the caller supplied one. Lets a consumer key results by the ratified constraint ID instead of reconstructing them from response ordinal or (node_id, operator), neither of which can distinguish two constraints on the same node with the same operator.",
+            "title": "Constraint Id"
           },
           "failure_margin_median": {
             "anyOf": [
@@ -3037,6 +3061,18 @@
           "value": 100000.0
         },
         "properties": {
+          "constraint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Opaque caller-supplied identity for this constraint. Echoed back on the corresponding constraint result so consumers can key results by the ratified ID instead of reconstructing them positionally. Not used in any computation.",
+            "title": "Constraint Id"
+          },
           "label": {
             "anyOf": [
               {
