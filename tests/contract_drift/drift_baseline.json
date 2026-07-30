@@ -3,11 +3,11 @@
     "purpose": "Ratchet baseline of KNOWN two-way drift (omissions + supersets) between ISL V2 response models and @talchain/schemas. Any drift NOT listed here fails CI loud. Add a new entry ONLY with a decision ref by re-running the refresh script on an intentional change; otherwise fix the drift.",
     "generated_by": "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline",
     "source_repo": "Talchain/olumi-schemas",
-    "source_ref": "1b936ecaf9ddde0ee09566d13d686e07b8877751",
+    "source_ref": "v0.30.0",
     "package_name": "@talchain/schemas",
-    "package_version": "0.20.0",
-    "omission_count": 41,
-    "superset_count": 77
+    "package_version": "0.30.0",
+    "omission_count": 44,
+    "superset_count": 73
   },
   "omissions": [
     {
@@ -16,6 +16,13 @@
       "prop": "probability",
       "required": false,
       "reason": "optional in contract (boundary.EnrichmentConstraintResultSchema) — ISL omits probability (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "contract_location": "boundary.EnrichmentConstraintResultSchema",
+      "prop": "scale_provenance",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentConstraintResultSchema) — ISL omits scale_provenance (PLoT may synthesise it, or the contract has it ahead of ISL)"
     },
     {
       "isl_model": "CritiqueV2",
@@ -195,9 +202,23 @@
     {
       "isl_model": "OptionResultV2",
       "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "constraint_margins",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits constraint_margins (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
       "prop": "constraint_probabilities",
       "required": false,
       "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits constraint_probabilities (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "contract_location": "boundary.EnrichmentOptionComparisonEntrySchema",
+      "prop": "constraints_decision_grade",
+      "required": false,
+      "reason": "optional in contract (boundary.EnrichmentOptionComparisonEntrySchema) — ISL omits constraints_decision_grade (PLoT may synthesise it, or the contract has it ahead of ISL)"
     },
     {
       "isl_model": "OptionResultV2",
@@ -506,16 +527,6 @@
     },
     {
       "isl_model": "ISLResponseV2",
-      "prop": "correlation_model",
-      "reason": "ISL superset — ISLResponseV2.correlation_model is not present in the paired contract schema (ISL emits ahead of contract adoption)"
-    },
-    {
-      "isl_model": "ISLResponseV2",
-      "prop": "decision_evpi",
-      "reason": "ISL superset — ISLResponseV2.decision_evpi is not present in the paired contract schema (ISL emits ahead of contract adoption)"
-    },
-    {
-      "isl_model": "ISLResponseV2",
       "prop": "diagnostics",
       "reason": "ISL superset — ISLResponseV2.diagnostics is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
@@ -536,11 +547,6 @@
     },
     {
       "isl_model": "ISLResponseV2",
-      "prop": "factor_evppi",
-      "reason": "ISL superset — ISLResponseV2.factor_evppi is not present in the paired contract schema (ISL emits ahead of contract adoption)"
-    },
-    {
-      "isl_model": "ISLResponseV2",
       "prop": "factor_sensitivity_status",
       "reason": "ISL superset — ISLResponseV2.factor_sensitivity_status is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
@@ -548,11 +554,6 @@
       "isl_model": "ISLResponseV2",
       "prop": "options",
       "reason": "ISL superset — ISLResponseV2.options is not present in the paired contract schema (ISL emits ahead of contract adoption)"
-    },
-    {
-      "isl_model": "ISLResponseV2",
-      "prop": "p_win_sensitivity",
-      "reason": "ISL superset — ISLResponseV2.p_win_sensitivity is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",

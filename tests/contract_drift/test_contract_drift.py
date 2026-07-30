@@ -21,6 +21,7 @@ from pathlib import Path
 
 import pytest
 
+from src.models.response_v2 import ISLResponseV2
 from tests.contract_drift.allowlist import ALLOWLIST, ALLOWLISTED_KEYS
 from tests.contract_drift.drift_baseline import (
     BASELINE_PATH,
@@ -34,6 +35,8 @@ from tests.contract_drift.drift_core import (
     PAIRINGS,
     PIN_PATH,
     DriftReport,
+    contract_properties,
+    isl_accepted_by_contract,
     load_artifact,
     load_pin,
     pydantic_properties,
@@ -457,3 +460,100 @@ def test_baseline_meta_matches_the_pinned_contract() -> None:
     assert BASELINE_META.get("source_ref") == pin["ref"]
     assert BASELINE_META.get("source_repo") == pin["repo"]
     assert BASELINE_META.get("package_version") == pin["package_version_expected"]
+
+
+# ============================================================================
+# ROADMAP 2.160 — the four VOI keys are CONTRACT-ADOPTED, so they are actually
+# COMPARED rather than waved through as an accepted superset.
+#
+# WHY THIS TEST EXISTS AND WHY IT IS NOT REDUNDANT.
+# `test_baseline_has_no_stale_entries` above already REDs if these four sit in
+# the superset baseline once the contract adopts them — and it is what caught
+# this at the 0.20.0 -> 0.30.0 bump. But it is a GENERIC hygiene gate: it says
+# "some entry is stale", names a tuple, and is satisfied the moment anyone
+# re-runs the refresh script. It cannot say WHY these four keys matter, and it
+# would stay just as green if a future pin regression put them BACK into the
+# superset baseline — because at that point the entry is live again, not stale.
+#
+# THE DEFECT BEING PINNED. While an ISL-emitted key sits in the superset
+# baseline, the check records only "the contract lacks this key" and NEVER
+# compares ISL's emitted domain against the contract's declared domain for it.
+# So a genuine type divergence on that key is invisible for exactly as long as
+# the exception exists. An exception for an ADOPTED field is therefore a
+# hand-maintained mirror that hides real drift (trap 12) — which is why the
+# four entries were removed rather than re-blessed.
+#
+# The VOI family travels together by design: `correlation_model` is the
+# DISCRIMINATOR that makes an absent `p_win_sensitivity` readable as
+# suppression rather than as "never computed", so a partial adoption is a
+# defect in itself and is asserted against below.
+# ============================================================================
+
+VOI_FAMILY = ("correlation_model", "decision_evpi", "factor_evppi", "p_win_sensitivity")
+
+
+def test_voi_family_is_not_carried_as_a_superset_exception() -> None:
+    """None of the four may sit in the superset baseline: the contract adopted
+    them at 0.30.0, and an exception for an adopted field suppresses the domain
+    comparison that is the whole point of pairing the models."""
+    carried = sorted(prop for (model, prop) in SUPERSET_BASELINE_KEYS if prop in VOI_FAMILY)
+    assert carried == [], (
+        "VOI key(s) still carried as ACCEPTED-SUPERSET exceptions, so their "
+        "shape is NOT being compared against the contract: "
+        f"{carried}. The contract declares all four on "
+        "boundary.AnalysisEnrichmentSchema (the schema ISLResponseV2 is paired "
+        "with). Re-run scripts/contract_schema/refresh_drift_baseline.py "
+        "--refresh-baseline; do not hand-edit."
+    )
+
+
+def test_voi_family_is_declared_by_the_paired_contract_schema() -> None:
+    """POSITIVE CONTROL for the assertion above (trap 13 — an absence claim is
+    vacuous until it can see a presence).
+
+    Absence from the superset baseline is NOT by itself proof of adoption: it is
+    equally consistent with ISL having STOPPED EMITTING the keys, which would
+    make the test above pass while the family silently vanished. So assert the
+    presence directly, on both sides of the pair."""
+    artifact = load_artifact()
+    module, export = PAIRINGS[ISLResponseV2]  # type: ignore[index]
+    contract_props = contract_properties(artifact, module, export)
+    missing_in_contract = sorted(k for k in VOI_FAMILY if k not in contract_props)
+    assert missing_in_contract == [], (
+        f"the paired contract schema {module}.{export} does not declare "
+        f"{missing_in_contract} — the pin has regressed below 0.30.0, or the "
+        "contract dropped the VOI family. Either way the keys are no longer "
+        "validated at any consumer."
+    )
+
+    isl_props = pydantic_properties(ISLResponseV2)
+    missing_in_isl = sorted(k for k in VOI_FAMILY if k not in isl_props)
+    assert missing_in_isl == [], (
+        f"ISLResponseV2 no longer emits {missing_in_isl}. The test above would "
+        "have stayed GREEN on this, because a key ISL does not emit cannot be a "
+        "superset — that is the vacuity this control exists to catch."
+    )
+
+
+def test_voi_family_domains_are_accepted_by_the_contract() -> None:
+    """The consequence of adoption: ISL's emitted domain for each of the four
+    must be ACCEPTED by the contract's declared domain. This is the comparison
+    the superset exceptions were suppressing, so it is the assertion that makes
+    removing them worth something rather than just tidier."""
+    artifact = load_artifact()
+    module, export = PAIRINGS[ISLResponseV2]  # type: ignore[index]
+    contract_props = contract_properties(artifact, module, export)
+    isl_props = pydantic_properties(ISLResponseV2)
+
+    rejected = []
+    for key in VOI_FAMILY:
+        isl_summary = isl_props[key]
+        contract_summary = contract_props[key]
+        if not isl_accepted_by_contract(isl_summary, contract_summary):
+            rejected.append(
+                f"{key}: ISL {isl_summary.describe()} vs contract {contract_summary.describe()}"
+            )
+    assert rejected == [], (
+        "ISL emits a VOI shape the contract would REJECT — a consumer "
+        "validating the ISL value against the contract fails:\n  " + "\n  ".join(rejected)
+    )
