@@ -93,16 +93,29 @@ _REF_ANALYSIS_FACT_STATUS = (
     "branch pins its own single-value domain -- which is why the disjoint "
     "branches (UnavailableFact 'unavailable', SuppressedFact 'suppressed') "
     "surface here while ComputedFact 'computed' does not.\n"
-    "WHY NO CONSUMER CAN CONFLATE THEM, verified at the bytes in the 0.30.0 "
-    "artifact: the family's own placement note declares it 'Additive and "
-    "OPTIONAL, CEE-internal only: RunAnalysisResult.analysis_facts?', and "
-    "records that RunAnalysisResultSchema 'is .strict() but never crosses the "
-    "UI wire (it is an ORCHESTRATOR_INTERNAL fixture-coverage exclusion -- the "
-    "persisted handler fact payload)'. An ISL response never populates an "
-    "analysis_fact, and nothing validates an ISL OptionResultV2 against a fact "
-    "branch. Kept VISIBLE here rather than suppressed in the engine, for the "
-    "same reason as the other unrelated-seam entries: the confidence_source "
-    "bite WAS exactly this class, so a same-named key is never silently OK.\n"
+    "WHY NO CONSUMER CAN CONFLATE THEM. The family's own placement note "
+    "declares it 'Additive and OPTIONAL, CEE-internal only: "
+    "RunAnalysisResult.analysis_facts?', and records that "
+    "RunAnalysisResultSchema 'is .strict() but never crosses the UI wire (it is "
+    "an ORCHESTRATOR_INTERNAL fixture-coverage exclusion -- the persisted "
+    "handler fact payload)'. An ISL response never populates an analysis_fact, "
+    "and nothing validates an ISL OptionResultV2 against a fact branch.\n"
+    "WHERE THAT QUOTE LIVES -- read it at the source, NOT here. It is a "
+    "TypeScript comment in olumi-schemas src/contracts/analysis-fact.ts "
+    "(~:47-51) at tag v0.30.0. It is NOT in this repo's committed contract "
+    "artifact: comments do not survive the JSON-Schema export, so `rg` over "
+    "tests/fixtures/contract-schema/talchain-schemas.json returns ZERO hits for "
+    "'Additive and OPTIONAL', 'CEE-internal', 'analysis_facts' and "
+    "'RunAnalysisResult' (positive control: 'AnalysisFactSchema' = 1 hit, so the "
+    "sweep works). An earlier draft of this note said the quote was 'verified at "
+    "the bytes in the 0.30.0 artifact' -- corrected on adversarial review, "
+    "because a citation pointing at a file that cannot contain the text is "
+    "exactly the label that teaches the next reader to stop looking, and it does "
+    "the most damage inside a decision reference. The SUBSTANCE was and remains "
+    "verified; only the location was wrong.\n"
+    "Kept VISIBLE here rather than suppressed in the engine, for the same reason "
+    "as the other unrelated-seam entries: the confidence_source bite WAS exactly "
+    "this class, so a same-named key is never silently OK.\n"
     "RE-EXAMINE IF: analysis facts reach the UI wire (the contract says that is "
     "a separate slice at a NEW top-level OlumiResponseSchema key, with a UI "
     "re-vendor in its train), or if ISL ever emits an analysis_fact directly."
@@ -251,6 +264,17 @@ ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
         # ------------------------------------------------------------------
         # Unrelated-seam name reuse on the AnalysisFact union — NEW in the
         # 0.20.0 -> 0.30.0 contract span (ROADMAP 2.160).
+        #
+        # THREE ENTRIES SILENCE FOUR REPORTED COLLISIONS, and the mismatch is
+        # not an omission — it is the counting unit, so state it rather than
+        # leave the next reader to wonder which number is wrong:
+        #   raw collision RECORDS reported by the engine : 4
+        #   unique (isl_model, isl_key, contract_location) keys : 3
+        # `index.AnalysisFactSchema.status` is reported TWICE because that one
+        # union node is reached via two `anyOf` branches (the 'unavailable' and
+        # 'suppressed' arms). ALLOWLISTED_KEYS is a set of those 3-tuples, so a
+        # single entry silences both records. Un-allowlisted collisions at
+        # 0.30.0: 0.
         # ------------------------------------------------------------------
         AllowlistEntry(
             "OptionResultV2",
