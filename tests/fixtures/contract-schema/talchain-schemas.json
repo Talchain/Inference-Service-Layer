@@ -3,8 +3,8 @@
     "determinism": "sorted-keys, no timestamps — byte-comparable by the CI freshness gate",
     "generator": "Inference-Service-Layer/scripts/contract_schema/generate_contract_schema.mjs",
     "package_name": "@talchain/schemas",
-    "package_version": "0.20.0",
-    "source_ref": "1b936ecaf9ddde0ee09566d13d686e07b8877751",
+    "package_version": "0.30.0",
+    "source_ref": "v0.30.0",
     "source_repo": "Talchain/olumi-schemas",
     "zod-to-json-schema": "3.22.5"
   },
@@ -44,7 +44,8 @@
               "explain_from_structure",
               "compare_options",
               "what_would_flip",
-              "analysis_readiness"
+              "analysis_readiness",
+              "what_changed"
             ],
             "type": "string"
           },
@@ -83,7 +84,8 @@
           "explain_from_structure",
           "compare_options",
           "what_would_flip",
-          "analysis_readiness"
+          "analysis_readiness",
+          "what_changed"
         ],
         "type": "string"
       },
@@ -150,6 +152,36 @@
                 "probability": {
                   "type": "number"
                 },
+                "scale_provenance": {
+                  "additionalProperties": true,
+                  "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+                  "properties": {
+                    "decision_grade": {
+                      "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+                      "type": "boolean"
+                    },
+                    "range_unified": {
+                      "description": "True iff the constraint threshold's normalisation range is identical by construction to the range the node's interventions used or would use; false precisely when resolution diverged (e.g. a producer-declared cap overridden by a measured intervention spread).",
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "threshold_clamped": {
+                      "enum": [
+                        "low",
+                        "high"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "range_unified",
+                    "decision_grade"
+                  ],
+                  "type": "object"
+                },
                 "value": {
                   "type": "number"
                 }
@@ -172,6 +204,18 @@
               "error"
             ],
             "type": "string"
+          },
+          "correlation_model": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "properties": {},
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "critiques": {
             "items": {
@@ -234,6 +278,13 @@
               {
                 "type": "null"
               }
+            ]
+          },
+          "decision_evpi": {
+            "description": "Absence means NOT COMPUTED — never 0. A measured 0 is a real result (nothing about this decision is worth learning) and must be preserved. The wire carries no discriminator between the two beyond key presence, so a consumer coalescing with `?? 0` converts \"we did not compute this\" into \"we measured that information is worthless here\".",
+            "type": [
+              "number",
+              "null"
             ]
           },
           "decision_review": {
@@ -356,6 +407,69 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "factor_evppi": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "description": "A factor ABSENT from this array was not assessed — a lever an option intervenes on, or a row whose estimator failed (disclosed as FACTOR_EVPPI_PARTIAL on inference_warnings). Absent is NEVER zero and MUST NOT be imputed, ranked, or rendered as \"no value\".",
+                  "properties": {
+                    "baseline_max_expected_utility": {
+                      "type": "number"
+                    },
+                    "clamped_high": {
+                      "type": "boolean"
+                    },
+                    "clamped_low": {
+                      "type": "boolean"
+                    },
+                    "conditional_max_expected_utility": {
+                      "type": "number"
+                    },
+                    "correlation_active": {
+                      "type": "boolean"
+                    },
+                    "evppi": {
+                      "type": "number"
+                    },
+                    "evppi_raw": {
+                      "type": "number"
+                    },
+                    "factor_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "method": {
+                      "type": "string"
+                    },
+                    "n_samples": {
+                      "type": "number"
+                    },
+                    "noise_floor": {
+                      "type": "number"
+                    },
+                    "regression_degree": {
+                      "type": "number"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "units": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "factor_id"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "factor_sensitivity": {
             "items": {
@@ -779,11 +893,48 @@
                   "minItems": 2,
                   "type": "array"
                 },
+                "constraint_margins": {
+                  "items": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "constraint_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "failure_margin_median": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "margin_precision": {
+                        "description": "Absent means precision is unknown; consumers MUST NOT assume exactness.",
+                        "enum": [
+                          "exact",
+                          "lower_bound"
+                        ],
+                        "type": "string"
+                      },
+                      "near_miss_fraction": {
+                        "maximum": 1,
+                        "minimum": 0,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "constraint_id"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "constraint_probabilities": {
                   "additionalProperties": {
                     "type": "number"
                   },
                   "type": "object"
+                },
+                "constraints_decision_grade": {
+                  "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+                  "type": "boolean"
                 },
                 "expected_outcome": {
                   "type": "number"
@@ -888,6 +1039,20 @@
             ],
             "type": "string"
           },
+          "p_win_sensitivity": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {},
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "results": {
             "items": {
               "additionalProperties": {},
@@ -945,6 +1110,7 @@
                           "type": "string"
                         },
                         "switch_probability": {
+                          "description": "Absence means NOT COMPUTED — never 0 and never 1. A measured 0 is a real measurement and must be preserved. Higher means MORE fragile, so reading absence as 1 fabricates the maximum of the scale. Consumers MUST branch on presence, never coalesce, and MUST omit anything derived from it.",
                           "type": "number"
                         },
                         "to_id": {
@@ -957,8 +1123,7 @@
                       "required": [
                         "edge_id",
                         "from_id",
-                        "to_id",
-                        "switch_probability"
+                        "to_id"
                       ],
                       "type": "object"
                     },
@@ -1073,6 +1238,7 @@
                           "type": "string"
                         },
                         "switch_probability": {
+                          "description": "Absence means NOT COMPUTED — never 0 and never 1. A measured 0 is a real measurement and must be preserved. Higher means MORE fragile, so reading absence as 1 fabricates the maximum of the scale. Consumers MUST branch on presence, never coalesce, and MUST omit anything derived from it.",
                           "type": "number"
                         },
                         "to_id": {
@@ -1085,8 +1251,7 @@
                       "required": [
                         "edge_id",
                         "from_id",
-                        "to_id",
-                        "switch_probability"
+                        "to_id"
                       ],
                       "type": "object"
                     },
@@ -1121,6 +1286,10 @@
       "AnalysisResultBlockSchema": {
         "additionalProperties": false,
         "properties": {
+          "computed_against_hash": {
+            "minLength": 1,
+            "type": "string"
+          },
           "enrichment": {
             "additionalProperties": {},
             "type": "object"
@@ -1219,7 +1388,8 @@
                   "UPSTREAM_TIMEOUT",
                   "UPSTREAM_UNAVAILABLE",
                   "LLM_UNAVAILABLE",
-                  "INTERNAL_ERROR"
+                  "INTERNAL_ERROR",
+                  "GRAPH_DIVERGED"
                 ],
                 "type": "string"
               },
@@ -1246,6 +1416,10 @@
           {
             "additionalProperties": false,
             "properties": {
+              "computed_against_hash": {
+                "minLength": 1,
+                "type": "string"
+              },
               "enrichment": {
                 "additionalProperties": {},
                 "type": "object"
@@ -2442,7 +2616,8 @@
           "UPSTREAM_TIMEOUT",
           "UPSTREAM_UNAVAILABLE",
           "LLM_UNAVAILABLE",
-          "INTERNAL_ERROR"
+          "INTERNAL_ERROR",
+          "GRAPH_DIVERGED"
         ],
         "type": "string"
       },
@@ -2480,7 +2655,8 @@
               "UPSTREAM_TIMEOUT",
               "UPSTREAM_UNAVAILABLE",
               "LLM_UNAVAILABLE",
-              "INTERNAL_ERROR"
+              "INTERNAL_ERROR",
+              "GRAPH_DIVERGED"
             ],
             "type": "string"
           },
@@ -3098,6 +3274,309 @@
           "options"
         ],
         "type": "object"
+      },
+      "CounterfactualConfidenceLevel": {
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "type": "string"
+      },
+      "CounterfactualResponseSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "config_details": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "config_fingerprint": {
+                    "type": "string"
+                  },
+                  "isl_version": {
+                    "type": "string"
+                  },
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "isl_version",
+                  "config_fingerprint",
+                  "config_details",
+                  "request_id"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "explanation": {
+            "additionalProperties": true,
+            "properties": {
+              "assumptions": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "learn_more_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reasoning": {
+                "type": "string"
+              },
+              "simple_explanation": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "summary": {
+                "type": "string"
+              },
+              "technical_basis": {
+                "type": "string"
+              },
+              "visual_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "summary",
+              "reasoning",
+              "technical_basis",
+              "assumptions"
+            ],
+            "type": "object"
+          },
+          "prediction": {
+            "additionalProperties": true,
+            "properties": {
+              "confidence_interval": {
+                "additionalProperties": true,
+                "properties": {
+                  "confidence_level": {
+                    "type": "number"
+                  },
+                  "lower": {
+                    "type": "number"
+                  },
+                  "upper": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "lower",
+                  "upper"
+                ],
+                "type": "object"
+              },
+              "point_estimate": {
+                "type": "number"
+              },
+              "sensitivity_range": {
+                "additionalProperties": true,
+                "properties": {
+                  "explanation": {
+                    "type": "string"
+                  },
+                  "optimistic": {
+                    "type": "number"
+                  },
+                  "pessimistic": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "optimistic",
+                  "pessimistic",
+                  "explanation"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "point_estimate",
+              "confidence_interval",
+              "sensitivity_range"
+            ],
+            "type": "object"
+          },
+          "robustness": {
+            "additionalProperties": true,
+            "properties": {
+              "critical_assumptions": {
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "assumption": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ],
+                      "type": "string"
+                    },
+                    "impact": {
+                      "type": "number"
+                    },
+                    "recommendation": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "assumption",
+                    "impact",
+                    "confidence",
+                    "recommendation"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "score": {
+                "enum": [
+                  "robust",
+                  "moderate",
+                  "fragile"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "score",
+              "critical_assumptions"
+            ],
+            "type": "object"
+          },
+          "scenario": {
+            "additionalProperties": true,
+            "properties": {
+              "context": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "intervention": {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              "outcome": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "intervention",
+              "outcome"
+            ],
+            "type": "object"
+          },
+          "uncertainty": {
+            "additionalProperties": true,
+            "properties": {
+              "overall": {
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "type": "string"
+              },
+              "sources": {
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "basis": {
+                      "type": "string"
+                    },
+                    "confidence": {
+                      "enum": [
+                        "high",
+                        "medium",
+                        "low"
+                      ],
+                      "type": "string"
+                    },
+                    "explanation": {
+                      "type": "string"
+                    },
+                    "factor": {
+                      "type": "string"
+                    },
+                    "impact": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "factor",
+                    "impact",
+                    "confidence",
+                    "explanation",
+                    "basis"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "overall",
+              "sources"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "scenario",
+          "prediction",
+          "uncertainty",
+          "robustness",
+          "explanation"
+        ],
+        "type": "object"
+      },
+      "CounterfactualRobustnessLevel": {
+        "enum": [
+          "robust",
+          "moderate",
+          "fragile"
+        ],
+        "type": "string"
+      },
+      "CounterfactualUncertaintyLevel": {
+        "enum": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "type": "string"
       },
       "DecisionClassificationReversibility": {
         "enum": [
@@ -3830,6 +4309,36 @@
         ],
         "type": "string"
       },
+      "EnrichmentConstraintMarginSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "constraint_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "failure_margin_median": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "margin_precision": {
+            "description": "Absent means precision is unknown; consumers MUST NOT assume exactness.",
+            "enum": [
+              "exact",
+              "lower_bound"
+            ],
+            "type": "string"
+          },
+          "near_miss_fraction": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "constraint_id"
+        ],
+        "type": "object"
+      },
       "EnrichmentConstraintResultSchema": {
         "additionalProperties": true,
         "properties": {
@@ -3845,6 +4354,36 @@
           },
           "probability": {
             "type": "number"
+          },
+          "scale_provenance": {
+            "additionalProperties": true,
+            "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+            "properties": {
+              "decision_grade": {
+                "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+                "type": "boolean"
+              },
+              "range_unified": {
+                "description": "True iff the constraint threshold's normalisation range is identical by construction to the range the node's interventions used or would use; false precisely when resolution diverged (e.g. a producer-declared cap overridden by a measured intervention spread).",
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string"
+              },
+              "threshold_clamped": {
+                "enum": [
+                  "low",
+                  "high"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "source",
+              "range_unified",
+              "decision_grade"
+            ],
+            "type": "object"
           },
           "value": {
             "type": "number"
@@ -4049,6 +4588,59 @@
         "required": [
           "n_seeds",
           "n_seeds_flipped"
+        ],
+        "type": "object"
+      },
+      "EnrichmentFactorEvppiEntrySchema": {
+        "additionalProperties": true,
+        "description": "A factor ABSENT from this array was not assessed — a lever an option intervenes on, or a row whose estimator failed (disclosed as FACTOR_EVPPI_PARTIAL on inference_warnings). Absent is NEVER zero and MUST NOT be imputed, ranked, or rendered as \"no value\".",
+        "properties": {
+          "baseline_max_expected_utility": {
+            "type": "number"
+          },
+          "clamped_high": {
+            "type": "boolean"
+          },
+          "clamped_low": {
+            "type": "boolean"
+          },
+          "conditional_max_expected_utility": {
+            "type": "number"
+          },
+          "correlation_active": {
+            "type": "boolean"
+          },
+          "evppi": {
+            "type": "number"
+          },
+          "evppi_raw": {
+            "type": "number"
+          },
+          "factor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "n_samples": {
+            "type": "number"
+          },
+          "noise_floor": {
+            "type": "number"
+          },
+          "regression_degree": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          },
+          "units": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "factor_id"
         ],
         "type": "object"
       },
@@ -4523,11 +5115,48 @@
             "minItems": 2,
             "type": "array"
           },
+          "constraint_margins": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "constraint_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "failure_margin_median": {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "margin_precision": {
+                  "description": "Absent means precision is unknown; consumers MUST NOT assume exactness.",
+                  "enum": [
+                    "exact",
+                    "lower_bound"
+                  ],
+                  "type": "string"
+                },
+                "near_miss_fraction": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "constraint_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "constraint_probabilities": {
             "additionalProperties": {
               "type": "number"
             },
             "type": "object"
+          },
+          "constraints_decision_grade": {
+            "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+            "type": "boolean"
           },
           "expected_outcome": {
             "type": "number"
@@ -4689,6 +5318,7 @@
             "type": "string"
           },
           "switch_probability": {
+            "description": "Absence means NOT COMPUTED — never 0 and never 1. A measured 0 is a real measurement and must be preserved. Higher means MORE fragile, so reading absence as 1 fabricates the maximum of the scale. Consumers MUST branch on presence, never coalesce, and MUST omit anything derived from it.",
             "type": "number"
           },
           "to_id": {
@@ -4701,8 +5331,7 @@
         "required": [
           "edge_id",
           "from_id",
-          "to_id",
-          "switch_probability"
+          "to_id"
         ],
         "type": "object"
       },
@@ -4754,6 +5383,7 @@
                   "type": "string"
                 },
                 "switch_probability": {
+                  "description": "Absence means NOT COMPUTED — never 0 and never 1. A measured 0 is a real measurement and must be preserved. Higher means MORE fragile, so reading absence as 1 fabricates the maximum of the scale. Consumers MUST branch on presence, never coalesce, and MUST omit anything derived from it.",
                   "type": "number"
                 },
                 "to_id": {
@@ -4766,8 +5396,7 @@
               "required": [
                 "edge_id",
                 "from_id",
-                "to_id",
-                "switch_probability"
+                "to_id"
               ],
               "type": "object"
             },
@@ -4882,6 +5511,7 @@
                   "type": "string"
                 },
                 "switch_probability": {
+                  "description": "Absence means NOT COMPUTED — never 0 and never 1. A measured 0 is a real measurement and must be preserved. Higher means MORE fragile, so reading absence as 1 fabricates the maximum of the scale. Consumers MUST branch on presence, never coalesce, and MUST omit anything derived from it.",
                   "type": "number"
                 },
                 "to_id": {
@@ -4894,8 +5524,7 @@
               "required": [
                 "edge_id",
                 "from_id",
-                "to_id",
-                "switch_probability"
+                "to_id"
               ],
               "type": "object"
             },
@@ -4905,6 +5534,35 @@
             "type": "number"
           }
         },
+        "type": "object"
+      },
+      "EnrichmentScaleProvenanceSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "decision_grade": {
+            "description": "Absence of this marker means NOT decision-grade (fail-closed). Consumers MUST NOT treat a missing marker as trustworthy.",
+            "type": "boolean"
+          },
+          "range_unified": {
+            "description": "True iff the constraint threshold's normalisation range is identical by construction to the range the node's interventions used or would use; false precisely when resolution diverged (e.g. a producer-declared cap overridden by a measured intervention spread).",
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "threshold_clamped": {
+            "enum": [
+              "low",
+              "high"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "range_unified",
+          "decision_grade"
+        ],
         "type": "object"
       },
       "ErrorBlockSchema": {
@@ -4924,7 +5582,8 @@
               "UPSTREAM_TIMEOUT",
               "UPSTREAM_UNAVAILABLE",
               "LLM_UNAVAILABLE",
-              "INTERNAL_ERROR"
+              "INTERNAL_ERROR",
+              "GRAPH_DIVERGED"
             ],
             "type": "string"
           },
@@ -5363,7 +6022,8 @@
           "UPSTREAM_TIMEOUT",
           "UPSTREAM_UNAVAILABLE",
           "LLM_UNAVAILABLE",
-          "INTERNAL_ERROR"
+          "INTERNAL_ERROR",
+          "GRAPH_DIVERGED"
         ],
         "type": "string"
       },
@@ -5372,6 +6032,23 @@
           "enabled",
           "disabled",
           "degraded"
+        ],
+        "type": "string"
+      },
+      "FeedbackRating": {
+        "enum": [
+          "up",
+          "down"
+        ],
+        "type": "string"
+      },
+      "FeedbackTargetKind": {
+        "enum": [
+          "turn",
+          "message",
+          "block",
+          "suggestion",
+          "analysis"
         ],
         "type": "string"
       },
@@ -5452,39 +6129,6 @@
           "conflict"
         ],
         "type": "string"
-      },
-      "GoalConstraintSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "bound": {
-            "enum": [
-              "lt",
-              "lte",
-              "gt",
-              "gte",
-              "eq"
-            ],
-            "type": "string"
-          },
-          "id": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "label": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "value": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "bound",
-          "value"
-        ],
-        "type": "object"
       },
       "GraphPatchBlockSchema": {
         "additionalProperties": false,
@@ -5839,6 +6483,55 @@
         ],
         "type": "object"
       },
+      "Intent": {
+        "enum": [
+          "elicit_options",
+          "add_option",
+          "challenge_frame",
+          "challenge_assumption",
+          "outside_view",
+          "pre_mortem",
+          "elicit_risks",
+          "estimate_help",
+          "mitigation_help",
+          "define_success",
+          "discuss"
+        ],
+        "type": "string"
+      },
+      "LegacyGoalConstraintStubSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "bound": {
+            "enum": [
+              "lt",
+              "lte",
+              "gt",
+              "gte",
+              "eq"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "bound",
+          "value"
+        ],
+        "type": "object"
+      },
       "MediationOnlyClaimSchema": {
         "additionalProperties": false,
         "properties": {
@@ -5884,7 +6577,28 @@
                   "explain_from_structure",
                   "compare_options",
                   "what_would_flip",
-                  "analysis_readiness"
+                  "analysis_readiness",
+                  "what_changed"
+                ],
+                "type": "string"
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "intent": {
+                "enum": [
+                  "elicit_options",
+                  "add_option",
+                  "challenge_frame",
+                  "challenge_assumption",
+                  "outside_view",
+                  "pre_mortem",
+                  "elicit_risks",
+                  "estimate_help",
+                  "mitigation_help",
+                  "define_success",
+                  "discuss"
                 ],
                 "type": "string"
               },
@@ -5900,6 +6614,199 @@
           },
           "generate_model": {
             "type": "boolean"
+          },
+          "graph_state": {
+            "additionalProperties": true,
+            "properties": {
+              "edges": {
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "edge_type": {
+                      "default": "directed",
+                      "enum": [
+                        "directed",
+                        "bidirected"
+                      ],
+                      "type": "string"
+                    },
+                    "effect_direction": {
+                      "enum": [
+                        "positive",
+                        "negative",
+                        "unknown"
+                      ],
+                      "type": "string"
+                    },
+                    "exists_probability": {
+                      "maximum": 1,
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    "from": {
+                      "maxLength": 100,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "strength": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "mean": {
+                          "maximum": 1,
+                          "minimum": -1,
+                          "type": "number"
+                        },
+                        "std": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "mean",
+                        "std"
+                      ],
+                      "type": "object"
+                    },
+                    "to": {
+                      "maxLength": 100,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "from",
+                    "to",
+                    "strength",
+                    "exists_probability"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "nodes": {
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "body": {
+                      "maxLength": 2000,
+                      "type": "string"
+                    },
+                    "categories": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "category": {
+                      "enum": [
+                        "controllable",
+                        "observable",
+                        "external"
+                      ],
+                      "type": "string"
+                    },
+                    "goal_threshold": {
+                      "type": "number"
+                    },
+                    "id": {
+                      "maxLength": 100,
+                      "minLength": 1,
+                      "pattern": "^[a-z0-9_:-]+$",
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "goal",
+                        "factor",
+                        "outcome",
+                        "risk",
+                        "action",
+                        "decision",
+                        "option",
+                        "constraint"
+                      ],
+                      "type": "string"
+                    },
+                    "label": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "observed_state": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "baseline": {
+                          "type": "number"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "std": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "value"
+                      ],
+                      "type": "object"
+                    },
+                    "state_space": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "range": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "max": {
+                              "type": "number"
+                            },
+                            "min": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "min",
+                            "max"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "numeric",
+                        "ordinal",
+                        "nominal",
+                        "boolean"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "label"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "nodes",
+              "edges"
+            ],
+            "type": "object"
           },
           "kind": {
             "const": "message",
@@ -6200,7 +7107,8 @@
                         "UPSTREAM_TIMEOUT",
                         "UPSTREAM_UNAVAILABLE",
                         "LLM_UNAVAILABLE",
-                        "INTERNAL_ERROR"
+                        "INTERNAL_ERROR",
+                        "GRAPH_DIVERGED"
                       ],
                       "type": "string"
                     },
@@ -6227,6 +7135,10 @@
                 {
                   "additionalProperties": false,
                   "properties": {
+                    "computed_against_hash": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
                     "enrichment": {
                       "additionalProperties": {},
                       "type": "object"
@@ -7582,6 +8494,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "graph_hash": {
+            "minLength": 1,
+            "type": "string"
+          },
           "insights": {
             "items": {
               "additionalProperties": false,
@@ -7634,7 +8550,8 @@
                     "explain_from_structure",
                     "compare_options",
                     "what_would_flip",
-                    "analysis_readiness"
+                    "analysis_readiness",
+                    "what_changed"
                   ],
                   "type": "string"
                 },
@@ -7675,6 +8592,125 @@
         ],
         "type": "object"
       },
+      "OptimiseResponseSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "action_semantics": {
+            "description": "MANDATORY disclosure marker. 'edge_weight_scaling' = an action multiplies the OUTGOING edge weights of its node by set_to. NOT a Pearl do-operator. Consumers MUST NOT present optimise actions as causal interventions.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "explanations": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "action_id": {
+                  "type": "string"
+                },
+                "marginal_gain": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "action_id",
+                "marginal_gain"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "properties": {
+              "constraints_applied": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "constraints_resolved": {
+                "additionalProperties": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "source"
+                  ],
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              "seed": {
+                "type": "number"
+              },
+              "solver": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "seed",
+              "solver",
+              "constraints_applied",
+              "constraints_resolved"
+            ],
+            "type": "object"
+          },
+          "method": {
+            "description": "MANDATORY disclosure marker. 'greedy_independent_v1' = greedy 0/1-knapsack over per-action marginal gains measured INDEPENDENTLY against the baseline graph; additive/independent, no joint evaluation, not guaranteed globally optimal. Consumers MUST surface the greedy caveat.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema": {
+            "type": "string"
+          },
+          "selected": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "utility": {
+            "additionalProperties": false,
+            "properties": {
+              "expected": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "expected"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "schema",
+          "method",
+          "action_semantics",
+          "selected",
+          "utility",
+          "explanations",
+          "meta"
+        ],
+        "type": "object"
+      },
+      "OptimiseUtilitySchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "expected"
+        ],
+        "type": "object"
+      },
       "OrchestratorTurnPayloadSchema": {
         "anyOf": [
           {
@@ -7694,7 +8730,28 @@
                       "explain_from_structure",
                       "compare_options",
                       "what_would_flip",
-                      "analysis_readiness"
+                      "analysis_readiness",
+                      "what_changed"
+                    ],
+                    "type": "string"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "intent": {
+                    "enum": [
+                      "elicit_options",
+                      "add_option",
+                      "challenge_frame",
+                      "challenge_assumption",
+                      "outside_view",
+                      "pre_mortem",
+                      "elicit_risks",
+                      "estimate_help",
+                      "mitigation_help",
+                      "define_success",
+                      "discuss"
                     ],
                     "type": "string"
                   },
@@ -7710,6 +8767,199 @@
               },
               "generate_model": {
                 "type": "boolean"
+              },
+              "graph_state": {
+                "additionalProperties": true,
+                "properties": {
+                  "edges": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "edge_type": {
+                          "default": "directed",
+                          "enum": [
+                            "directed",
+                            "bidirected"
+                          ],
+                          "type": "string"
+                        },
+                        "effect_direction": {
+                          "enum": [
+                            "positive",
+                            "negative",
+                            "unknown"
+                          ],
+                          "type": "string"
+                        },
+                        "exists_probability": {
+                          "maximum": 1,
+                          "minimum": 0,
+                          "type": "number"
+                        },
+                        "from": {
+                          "maxLength": 100,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "strength": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "mean": {
+                              "maximum": 1,
+                              "minimum": -1,
+                              "type": "number"
+                            },
+                            "std": {
+                              "exclusiveMinimum": 0,
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "mean",
+                            "std"
+                          ],
+                          "type": "object"
+                        },
+                        "to": {
+                          "maxLength": 100,
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "from",
+                        "to",
+                        "strength",
+                        "exists_probability"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "nodes": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "body": {
+                          "maxLength": 2000,
+                          "type": "string"
+                        },
+                        "categories": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "category": {
+                          "enum": [
+                            "controllable",
+                            "observable",
+                            "external"
+                          ],
+                          "type": "string"
+                        },
+                        "goal_threshold": {
+                          "type": "number"
+                        },
+                        "id": {
+                          "maxLength": 100,
+                          "minLength": 1,
+                          "pattern": "^[a-z0-9_:-]+$",
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "goal",
+                            "factor",
+                            "outcome",
+                            "risk",
+                            "action",
+                            "decision",
+                            "option",
+                            "constraint"
+                          ],
+                          "type": "string"
+                        },
+                        "label": {
+                          "maxLength": 200,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "observed_state": {
+                          "additionalProperties": true,
+                          "properties": {
+                            "baseline": {
+                              "type": "number"
+                            },
+                            "source": {
+                              "type": "string"
+                            },
+                            "std": {
+                              "exclusiveMinimum": 0,
+                              "type": "number"
+                            },
+                            "unit": {
+                              "type": "string"
+                            },
+                            "value": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "value"
+                          ],
+                          "type": "object"
+                        },
+                        "state_space": {
+                          "additionalProperties": true,
+                          "properties": {
+                            "range": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "max": {
+                                  "type": "number"
+                                },
+                                "min": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "min",
+                                "max"
+                              ],
+                              "type": "object"
+                            }
+                          },
+                          "type": "object"
+                        },
+                        "type": {
+                          "enum": [
+                            "numeric",
+                            "ordinal",
+                            "nominal",
+                            "boolean"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "kind",
+                        "label"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "nodes",
+                  "edges"
+                ],
+                "type": "object"
               },
               "kind": {
                 "const": "message",
@@ -7842,11 +9092,44 @@
                   {
                     "additionalProperties": false,
                     "properties": {
+                      "changed_edge_ids": {
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "changed_node_ids": {
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "fields_changed": {
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
                       "kind": {
                         "const": "direct_graph_edit",
                         "type": "string"
                       },
                       "operation": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "operations": {
+                        "items": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "summary": {
+                        "maxLength": 2000,
                         "minLength": 1,
                         "type": "string"
                       },
@@ -7859,6 +9142,43 @@
                       "kind",
                       "target_id",
                       "operation"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "field": {
+                        "const": "value",
+                        "description": "Which `observed_state` field was edited. The ONLY accepted value is \"value\", and ABSENCE IS THE SAME as passing it — so a client may omit it entirely. It exists to make the edited field EXPLICIT on the wire, not to offer a choice: a future field (e.g. \"baseline\") requires widening this literal to a union in a versioned release, which is deliberately louder than accepting an arbitrary string here and leaving each consumer to decide what to do with it.",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "factor_value_edit",
+                        "type": "string"
+                      },
+                      "raw_value": {
+                        "description": "The USER-UNIT magnitude as typed (e.g. 30000 for £30,000). ABSENCE IS DISTINCT from any value: it means the client did not state a user-unit magnitude, and the server must derive one from `value` and its own stored cap. It does NOT mean zero. Send this whenever the user typed a magnitude — it is the honest record of the input, and the server prefers it over `value`.",
+                        "type": "number"
+                      },
+                      "target_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "unit": {
+                        "description": "Unit symbol for `raw_value` (e.g. \"£\", \"%\"). ABSENCE IS DISTINCT from any value: a unit-less number is treated as an AMBIGUOUS bare number against a capped factor and may be refused, whereas a stated unit is validated against the factor's own unit. Absence never means \"no unit\" — it means \"the client did not say\".",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "The edited value on the MODEL scale (for a capped factor, raw_value / cap). Required: an edit with no value is a `direct_graph_edit` notification, not this event. The server RE-DERIVES the persisted model value from `raw_value` and its own stored cap and never persists this number verbatim — it is the client's statement of intent, cross-checked against `raw_value`, not a trusted input.",
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "target_id",
+                      "value"
                     ],
                     "type": "object"
                   },
@@ -7946,6 +9266,58 @@
                     "required": [
                       "kind",
                       "selected"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "comment": {
+                        "description": "User free-text feedback. MAY contain PII (names, emails, whatever the user typed) — consumers MUST handle per R-004: treat as sensitive, never log verbatim, redact before persistence/telemetry.",
+                        "maxLength": 2000,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "feedback",
+                        "type": "string"
+                      },
+                      "rating": {
+                        "enum": [
+                          "up",
+                          "down"
+                        ],
+                        "type": "string"
+                      },
+                      "target": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "enum": [
+                              "turn",
+                              "message",
+                              "block",
+                              "suggestion",
+                              "analysis"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "rating",
+                      "target"
                     ],
                     "type": "object"
                   }
@@ -8218,6 +9590,229 @@
         ],
         "type": "object"
       },
+      "SequentialAnalysisResponseSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "_metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "config_details": {
+                    "additionalProperties": {},
+                    "type": "object"
+                  },
+                  "config_fingerprint": {
+                    "type": "string"
+                  },
+                  "isl_version": {
+                    "type": "string"
+                  },
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "isl_version",
+                  "config_fingerprint",
+                  "config_details",
+                  "request_id"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "optimal_policy": {
+            "additionalProperties": true,
+            "properties": {
+              "expected_total_value": {
+                "type": "number"
+              },
+              "stages": {
+                "items": {
+                  "additionalProperties": true,
+                  "properties": {
+                    "contingent_on": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "decision_rule": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "conditional_actions": {
+                          "items": {
+                            "additionalProperties": true,
+                            "properties": {
+                              "action": {
+                                "type": "string"
+                              },
+                              "condition": {
+                                "type": "string"
+                              },
+                              "expected_value_if_taken": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "condition",
+                              "action",
+                              "expected_value_if_taken"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "default_action": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "default_action"
+                      ],
+                      "type": "object"
+                    },
+                    "stage_index": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "stage_label": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "stage_index",
+                    "stage_label",
+                    "decision_rule"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "value_distribution": {
+                "additionalProperties": true,
+                "properties": {
+                  "parameters": {
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "type": "object"
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "parameters"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "stages",
+              "expected_total_value",
+              "value_distribution"
+            ],
+            "type": "object"
+          },
+          "schema_version": {
+            "type": "string"
+          },
+          "sensitivity_to_timing": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "stage_analyses": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "information_value": {
+                  "type": "number"
+                },
+                "optimal_waiting_value": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "options_at_stage": {
+                  "items": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "continuation_value": {
+                        "type": "number"
+                      },
+                      "immediate_value": {
+                        "type": "number"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "option_id": {
+                        "type": "string"
+                      },
+                      "total_value": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "option_id",
+                      "label",
+                      "immediate_value",
+                      "continuation_value",
+                      "total_value"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "stage_index": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "stage_label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "stage_index",
+                "stage_label",
+                "options_at_stage",
+                "information_value"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "value_of_flexibility": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "optimal_policy",
+          "stage_analyses",
+          "value_of_flexibility",
+          "sensitivity_to_timing"
+        ],
+        "type": "object"
+      },
+      "SequentialSensitivityToTiming": {
+        "enum": [
+          "high",
+          "medium",
+          "low"
+        ],
+        "type": "string"
+      },
       "Severity": {
         "enum": [
           "info",
@@ -8297,10 +9892,12 @@
           "patch_accepted",
           "patch_dismissed",
           "direct_graph_edit",
+          "factor_value_edit",
           "chip_click",
           "undo",
           "redo",
-          "selection_change"
+          "selection_change",
+          "feedback"
         ],
         "type": "string"
       },
@@ -8345,11 +9942,44 @@
           {
             "additionalProperties": false,
             "properties": {
+              "changed_edge_ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "changed_node_ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "fields_changed": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "kind": {
                 "const": "direct_graph_edit",
                 "type": "string"
               },
               "operation": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "operations": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "summary": {
+                "maxLength": 2000,
                 "minLength": 1,
                 "type": "string"
               },
@@ -8362,6 +9992,43 @@
               "kind",
               "target_id",
               "operation"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "field": {
+                "const": "value",
+                "description": "Which `observed_state` field was edited. The ONLY accepted value is \"value\", and ABSENCE IS THE SAME as passing it — so a client may omit it entirely. It exists to make the edited field EXPLICIT on the wire, not to offer a choice: a future field (e.g. \"baseline\") requires widening this literal to a union in a versioned release, which is deliberately louder than accepting an arbitrary string here and leaving each consumer to decide what to do with it.",
+                "type": "string"
+              },
+              "kind": {
+                "const": "factor_value_edit",
+                "type": "string"
+              },
+              "raw_value": {
+                "description": "The USER-UNIT magnitude as typed (e.g. 30000 for £30,000). ABSENCE IS DISTINCT from any value: it means the client did not state a user-unit magnitude, and the server must derive one from `value` and its own stored cap. It does NOT mean zero. Send this whenever the user typed a magnitude — it is the honest record of the input, and the server prefers it over `value`.",
+                "type": "number"
+              },
+              "target_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "unit": {
+                "description": "Unit symbol for `raw_value` (e.g. \"£\", \"%\"). ABSENCE IS DISTINCT from any value: a unit-less number is treated as an AMBIGUOUS bare number against a capped factor and may be refused, whereas a stated unit is validated against the factor's own unit. Absence never means \"no unit\" — it means \"the client did not say\".",
+                "minLength": 1,
+                "type": "string"
+              },
+              "value": {
+                "description": "The edited value on the MODEL scale (for a capped factor, raw_value / cap). Required: an edit with no value is a `direct_graph_edit` notification, not this event. The server RE-DERIVES the persisted model value from `raw_value` and its own stored cap and never persists this number verbatim — it is the client's statement of intent, cross-checked against `raw_value`, not a trusted input.",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "target_id",
+              "value"
             ],
             "type": "object"
           },
@@ -8451,6 +10118,58 @@
               "selected"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "comment": {
+                "description": "User free-text feedback. MAY contain PII (names, emails, whatever the user typed) — consumers MUST handle per R-004: treat as sensitive, never log verbatim, redact before persistence/telemetry.",
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "feedback",
+                "type": "string"
+              },
+              "rating": {
+                "enum": [
+                  "up",
+                  "down"
+                ],
+                "type": "string"
+              },
+              "target": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "turn",
+                      "message",
+                      "block",
+                      "suggestion",
+                      "analysis"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "rating",
+              "target"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -8498,11 +10217,44 @@
               {
                 "additionalProperties": false,
                 "properties": {
+                  "changed_edge_ids": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "changed_node_ids": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "fields_changed": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
                   "kind": {
                     "const": "direct_graph_edit",
                     "type": "string"
                   },
                   "operation": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "operations": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "summary": {
+                    "maxLength": 2000,
                     "minLength": 1,
                     "type": "string"
                   },
@@ -8515,6 +10267,43 @@
                   "kind",
                   "target_id",
                   "operation"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "field": {
+                    "const": "value",
+                    "description": "Which `observed_state` field was edited. The ONLY accepted value is \"value\", and ABSENCE IS THE SAME as passing it — so a client may omit it entirely. It exists to make the edited field EXPLICIT on the wire, not to offer a choice: a future field (e.g. \"baseline\") requires widening this literal to a union in a versioned release, which is deliberately louder than accepting an arbitrary string here and leaving each consumer to decide what to do with it.",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "factor_value_edit",
+                    "type": "string"
+                  },
+                  "raw_value": {
+                    "description": "The USER-UNIT magnitude as typed (e.g. 30000 for £30,000). ABSENCE IS DISTINCT from any value: it means the client did not state a user-unit magnitude, and the server must derive one from `value` and its own stored cap. It does NOT mean zero. Send this whenever the user typed a magnitude — it is the honest record of the input, and the server prefers it over `value`.",
+                    "type": "number"
+                  },
+                  "target_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "unit": {
+                    "description": "Unit symbol for `raw_value` (e.g. \"£\", \"%\"). ABSENCE IS DISTINCT from any value: a unit-less number is treated as an AMBIGUOUS bare number against a capped factor and may be refused, whereas a stated unit is validated against the factor's own unit. Absence never means \"no unit\" — it means \"the client did not say\".",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "description": "The edited value on the MODEL scale (for a capped factor, raw_value / cap). Required: an edit with no value is a `direct_graph_edit` notification, not this event. The server RE-DERIVES the persisted model value from `raw_value` and its own stored cap and never persists this number verbatim — it is the client's statement of intent, cross-checked against `raw_value`, not a trusted input.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target_id",
+                  "value"
                 ],
                 "type": "object"
               },
@@ -8602,6 +10391,58 @@
                 "required": [
                   "kind",
                   "selected"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "comment": {
+                    "description": "User free-text feedback. MAY contain PII (names, emails, whatever the user typed) — consumers MUST handle per R-004: treat as sensitive, never log verbatim, redact before persistence/telemetry.",
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "feedback",
+                    "type": "string"
+                  },
+                  "rating": {
+                    "enum": [
+                      "up",
+                      "down"
+                    ],
+                    "type": "string"
+                  },
+                  "target": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "turn",
+                          "message",
+                          "block",
+                          "suggestion",
+                          "analysis"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "rating",
+                  "target"
                 ],
                 "type": "object"
               }
@@ -9492,6 +11333,315 @@
       }
     },
     "index": {
+      "AnalysisFactSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "analysis_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "fact_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "method_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "metric_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "population": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "const": "olumi.mc.model_only@1",
+                        "type": "string"
+                      },
+                      "stage": {
+                        "const": "raw",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "stage"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "const": "olumi.mc.auto_noise_sqrt2@1",
+                        "type": "string"
+                      },
+                      "parent_id": {
+                        "const": "olumi.mc.model_only@1",
+                        "type": "string"
+                      },
+                      "stage": {
+                        "const": "transformed",
+                        "type": "string"
+                      },
+                      "transform_id": {
+                        "const": "olumi.transform.auto_scaled_noise@1",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "stage"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "status": {
+                "const": "computed",
+                "type": "string"
+              },
+              "storage_fact_row_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "subject": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "option",
+                      "node",
+                      "edge",
+                      "goal",
+                      "scenario"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              },
+              "units": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "value": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "status",
+              "fact_id",
+              "analysis_id",
+              "metric_id",
+              "subject",
+              "value",
+              "units",
+              "method_id",
+              "population"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "analysis_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "fact_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "metric_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason_code": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "const": "unavailable",
+                "type": "string"
+              },
+              "storage_fact_row_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "subject": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "option",
+                      "node",
+                      "edge",
+                      "goal",
+                      "scenario"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "status",
+              "fact_id",
+              "analysis_id",
+              "metric_id",
+              "subject",
+              "reason_code"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "analysis_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "fact_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "guard": {
+                "additionalProperties": false,
+                "properties": {
+                  "evidence_fact_ids": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reason_code": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "version": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "reason_code",
+                  "evidence_fact_ids"
+                ],
+                "type": "object"
+              },
+              "metric_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "status": {
+                "const": "suppressed",
+                "type": "string"
+              },
+              "storage_fact_row_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "subject": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "enum": [
+                      "option",
+                      "node",
+                      "edge",
+                      "goal",
+                      "scenario"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "status",
+              "fact_id",
+              "analysis_id",
+              "metric_id",
+              "subject",
+              "guard"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "AnalysisFactSubjectKindSchema": {
+        "enum": [
+          "option",
+          "node",
+          "edge",
+          "goal",
+          "scenario"
+        ],
+        "type": "string"
+      },
+      "AnalysisFactSubjectSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "option",
+              "node",
+              "edge",
+              "goal",
+              "scenario"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "type": "object"
+      },
       "AnalysisReadyV3Schema": {
         "additionalProperties": true,
         "properties": {
@@ -10260,6 +12410,126 @@
         ],
         "type": "object"
       },
+      "ComputedFactSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "fact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "method_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "metric_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "population": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "const": "olumi.mc.model_only@1",
+                    "type": "string"
+                  },
+                  "stage": {
+                    "const": "raw",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "stage"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "const": "olumi.mc.auto_noise_sqrt2@1",
+                    "type": "string"
+                  },
+                  "parent_id": {
+                    "const": "olumi.mc.model_only@1",
+                    "type": "string"
+                  },
+                  "stage": {
+                    "const": "transformed",
+                    "type": "string"
+                  },
+                  "transform_id": {
+                    "const": "olumi.transform.auto_scaled_noise@1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "stage"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "const": "computed",
+            "type": "string"
+          },
+          "storage_fact_row_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "subject": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "option",
+                  "node",
+                  "edge",
+                  "goal",
+                  "scenario"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          "units": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "status",
+          "fact_id",
+          "analysis_id",
+          "metric_id",
+          "subject",
+          "value",
+          "units",
+          "method_id",
+          "population"
+        ],
+        "type": "object"
+      },
       "ConfidenceLevel": {
         "enum": [
           "high",
@@ -10722,6 +12992,38 @@
         ],
         "type": "object"
       },
+      "HealthManifestSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "contract_manifest_sha": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "schema_read_versions": {
+            "items": {
+              "pattern": "^(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "schema_sha": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "schema_write_version": {
+            "pattern": "^(\\d+)\\.(\\d+)\\.(\\d+)(?:[-+].*)?$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_write_version",
+          "schema_read_versions",
+          "schema_sha",
+          "contract_manifest_sha"
+        ],
+        "type": "object"
+      },
       "MediationOnlyClaimSchema": {
         "additionalProperties": false,
         "properties": {
@@ -10749,6 +13051,14 @@
           "to"
         ],
         "type": "object"
+      },
+      "MetricStatusSchema": {
+        "enum": [
+          "computed",
+          "unavailable",
+          "suppressed"
+        ],
+        "type": "string"
       },
       "NoDirectEffectClaimSchema": {
         "additionalProperties": false,
@@ -11031,6 +13341,54 @@
           "request_id"
         ],
         "type": "object"
+      },
+      "PopulationRefSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "const": "olumi.mc.model_only@1",
+                "type": "string"
+              },
+              "stage": {
+                "const": "raw",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "stage"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "const": "olumi.mc.auto_noise_sqrt2@1",
+                "type": "string"
+              },
+              "parent_id": {
+                "const": "olumi.mc.model_only@1",
+                "type": "string"
+              },
+              "stage": {
+                "const": "transformed",
+                "type": "string"
+              },
+              "transform_id": {
+                "const": "olumi.transform.auto_scaled_noise@1",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "stage"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "PriorSchema": {
         "additionalProperties": true,
@@ -11393,11 +13751,193 @@
         ],
         "type": "object"
       },
+      "SuppressedFactSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "fact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "guard": {
+            "additionalProperties": false,
+            "properties": {
+              "evidence_fact_ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason_code": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "version",
+              "reason_code",
+              "evidence_fact_ids"
+            ],
+            "type": "object"
+          },
+          "metric_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "const": "suppressed",
+            "type": "string"
+          },
+          "storage_fact_row_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "subject": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "option",
+                  "node",
+                  "edge",
+                  "goal",
+                  "scenario"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "status",
+          "fact_id",
+          "analysis_id",
+          "metric_id",
+          "subject",
+          "guard"
+        ],
+        "type": "object"
+      },
+      "SuppressionGuardSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_fact_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "reason_code",
+          "evidence_fact_ids"
+        ],
+        "type": "object"
+      },
       "TopologyPlanSchema": {
         "items": {
           "type": "string"
         },
         "type": "array"
+      },
+      "UnavailableFactSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "analysis_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "fact_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "metric_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason_code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "const": "unavailable",
+            "type": "string"
+          },
+          "storage_fact_row_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "subject": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "option",
+                  "node",
+                  "edge",
+                  "goal",
+                  "scenario"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "status",
+          "fact_id",
+          "analysis_id",
+          "metric_id",
+          "subject",
+          "reason_code"
+        ],
+        "type": "object"
       },
       "UnmeasuredConfounderClaimSchema": {
         "additionalProperties": false,

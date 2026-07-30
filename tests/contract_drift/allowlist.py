@@ -80,6 +80,34 @@ _REF_UNRELATED = (
     "Enumerated exactly so any NEW same-named-key collision still fails."
 )
 
+_REF_ANALYSIS_FACT_STATUS = (
+    "ROADMAP 2.160 contract-alignment lane 2026-07-30 (contract pin bumped "
+    "0.20.0 -> 0.30.0). SAME CLASS as _REF_UNRELATED, on a seam that did not "
+    "exist at 0.20.0: the AnalysisFact discriminated union "
+    "(olumi-schemas src/contracts/analysis-fact.ts, exported from index) is "
+    "new in this span and reuses the key name 'status'. ISL's "
+    "OptionResultV2.status is the PER-OPTION COMPUTE RESULT status on the "
+    "ISL->PLoT seam ('computed'|'failed'|'partial'). The contract's fact "
+    "'status' is the PER-METRIC-PER-SUBJECT fact status on a "
+    "status-DISCRIMINATED union ('win_probability' on 'option_a'), where each "
+    "branch pins its own single-value domain -- which is why the disjoint "
+    "branches (UnavailableFact 'unavailable', SuppressedFact 'suppressed') "
+    "surface here while ComputedFact 'computed' does not.\n"
+    "WHY NO CONSUMER CAN CONFLATE THEM, verified at the bytes in the 0.30.0 "
+    "artifact: the family's own placement note declares it 'Additive and "
+    "OPTIONAL, CEE-internal only: RunAnalysisResult.analysis_facts?', and "
+    "records that RunAnalysisResultSchema 'is .strict() but never crosses the "
+    "UI wire (it is an ORCHESTRATOR_INTERNAL fixture-coverage exclusion -- the "
+    "persisted handler fact payload)'. An ISL response never populates an "
+    "analysis_fact, and nothing validates an ISL OptionResultV2 against a fact "
+    "branch. Kept VISIBLE here rather than suppressed in the engine, for the "
+    "same reason as the other unrelated-seam entries: the confidence_source "
+    "bite WAS exactly this class, so a same-named key is never silently OK.\n"
+    "RE-EXAMINE IF: analysis facts reach the UI wire (the contract says that is "
+    "a separate slice at a NEW top-level OlumiResponseSchema key, with a UI "
+    "re-vendor in its train), or if ISL ever emits an analysis_fact directly."
+)
+
 ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
     {
         # ------------------------------------------------------------------
@@ -219,6 +247,31 @@ ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
             "index.OptionForAnalysisSchema.status",
             "ACCEPTED-UNRELATED-SEAM",
             _REF_UNRELATED,
+        ),
+        # ------------------------------------------------------------------
+        # Unrelated-seam name reuse on the AnalysisFact union — NEW in the
+        # 0.20.0 -> 0.30.0 contract span (ROADMAP 2.160).
+        # ------------------------------------------------------------------
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "index.AnalysisFactSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_ANALYSIS_FACT_STATUS,
+        ),
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "index.SuppressedFactSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_ANALYSIS_FACT_STATUS,
+        ),
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "index.UnavailableFactSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_ANALYSIS_FACT_STATUS,
         ),
     }
 )
