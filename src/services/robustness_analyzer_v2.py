@@ -1800,10 +1800,23 @@ class RobustnessAnalyzerV2:
         # `option_outcomes` is now POST-noise; win_probability uses the pre-noise
         # `option_wins`, and the pre-noise joint regret is passed in explicitly so
         # both joint metrics ride the SAME pre-noise population (B2 CRN-fix F1).
+        # ROADMAP 2.258: resolve goal_threshold into the goal SAMPLES' frame
+        # ONCE, here, before any comparison. A 'level' threshold is converted
+        # using the goal's own baseline; an unattested or unconvertible one
+        # resolves to None and probability_of_goal is omitted for every option,
+        # with the reason disclosed on inference_warnings.
+        (
+            goal_threshold_in_sample_frame,
+            goal_threshold_frame_warning,
+        ) = self._resolve_goal_threshold_in_sample_frame(request)
+        if goal_threshold_frame_warning is not None:
+            inference_warnings.append(goal_threshold_frame_warning)
+
         results = self._compute_option_results(
             option_outcomes,
             option_wins,
             request,
+            goal_threshold_in_sample_frame,
             constraint_node_values,
             pre_noise_expected_regret,
         )
@@ -3035,11 +3048,220 @@ class RobustnessAnalyzerV2:
                     mixed_nodes.add(node_id)
         return sorted(mixed_nodes)
 
+    @staticmethod
+    def _resolve_goal_threshold_in_sample_frame(
+        request: RobustnessRequestV2,
+    ) -> Tuple[Optional[float], Optional[InferenceWarning]]:
+        """Put ``goal_threshold`` into the goal SAMPLES' frame, or refuse (ROADMAP 2.258).
+
+        THE ARITHMETIC, derived from the evaluator rather than assumed
+        (``StructuralEquationEvaluator.evaluate``)::
+
+            sample = base_goal + intercept + SUM(parent_value * strength)
+
+        For a NON-ROOT goal ``base_goal`` is 0.0 — doctrine B, and the reason ISL
+        already emits ``GOAL_OBSERVED_VALUE_UNUSED``. Writing S for the parents'
+        propagated contribution::
+
+            sample     = intercept + S
+            real_level = B         + S          (B = the goal's level absent
+                                                 modelled contributions)
+
+        Eliminating S gives ``sample = real_level - B + intercept``, so the level
+        threshold T is met exactly when::
+
+            sample >= T - B + intercept
+
+        i.e. ``delta_threshold = level_threshold - goal_baseline + goal_intercept``.
+
+        The ``+ intercept`` term is not decoration: it makes the conversion
+        self-consistent. If a producer correctly models the goal by stamping
+        ``intercept = B``, then the samples ARE levels and the formula collapses
+        to ``T``, which is right. With the default ``intercept = 0.0`` it reduces
+        to ``T - B``. Both limbs fall out of the same identity.
+
+        B is read from the goal node's ``observed_state.baseline`` — the one field
+        the canonical schema (Olumi_Decision_Model_Schema_v2_6.md, B.3) defines as
+        the "Reference for 'change from baseline' calculations", which is exactly
+        this calculation. It is deliberately NOT defaulted from
+        ``observed_state.value``: that field is documented as the *current observed
+        value*, carries a live ISL warning declaring it unused for a non-root goal,
+        and silently repurposing it would be a second unattested frame assumption
+        of precisely the kind that caused this defect.
+
+        FAIL CLOSED. Every path that cannot be proved returns ``(None, warning)``:
+        the caller then omits ``probability_of_goal`` entirely (``exclude_none``
+        drops it from the wire) and the warning names what was missing. No
+        fabricated number, no clamp, no silent default.
+
+        Returns:
+            ``(threshold_in_sample_frame, warning)``. A non-None threshold means
+            "safe to compare against samples". ``(None, None)`` means no threshold
+            was requested at all — nothing to disclose.
+        """
+        threshold = request.goal_threshold
+        if threshold is None:
+            # No goal threshold requested: nothing to convert, nothing to disclose.
+            return None, None
+
+        goal_id = request.goal_node_id
+        frame = request.goal_threshold_frame
+
+        def refuse(reason: str, field: str, message: str, **extra: Any) -> Tuple[
+            Optional[float], Optional[InferenceWarning]
+        ]:
+            detail: Dict[str, Any] = {
+                "goal_node_id": goal_id,
+                "goal_threshold": threshold,
+                "goal_threshold_frame": frame,
+                "reason": reason,
+                "message": message,
+            }
+            detail.update(extra)
+            return None, InferenceWarning(
+                code=(
+                    "GOAL_THRESHOLD_FRAME_UNSPECIFIED"
+                    if reason == "frame_not_stamped"
+                    else "GOAL_THRESHOLD_NOT_CONVERTIBLE"
+                ),
+                field=field,
+                detail=detail,
+                # Degradation disclosure, NOT a benign input-adjustment
+                # diagnostic: PLoT hides severity=='info'. The whole point of
+                # this warning is that a downstream honesty surface can say
+                # "not available" WITH a reason, so it must ride as 'warning'.
+                severity="warning",
+            )
+
+        if frame is None:
+            return refuse(
+                "frame_not_stamped",
+                "goal_threshold_frame",
+                (
+                    f"goal_threshold={threshold} was supplied without "
+                    f"goal_threshold_frame, so the frame it is expressed in is "
+                    f"unknown. A level threshold compared against the goal's "
+                    f"change-from-origin samples yields a structurally impossible "
+                    f"probability, so probability_of_goal is omitted rather than "
+                    f"guessed. Stamp 'level' or 'delta'."
+                ),
+            )
+
+        if frame == "delta":
+            # Attested to be in the samples' own frame already. This is the
+            # pre-2.258 comparison, byte-identical, and it is the CALLER's
+            # attestation — ISL has no way to verify a number's provenance.
+            return threshold, None
+
+        # frame == "level": convert into the sample frame, or refuse.
+        goal_node = next((n for n in request.graph.nodes if n.id == goal_id), None)
+        if goal_node is None:
+            # Unreachable via the API (validate_goal_node_exists), kept so the
+            # helper is total for direct callers.
+            return refuse(
+                "goal_node_missing",
+                "goal_node_id",
+                f"Goal node '{goal_id}' is not present in the graph.",
+            )
+
+        # --- convertibility preconditions -------------------------------------
+        # Each of these makes `sample = intercept + S` false, so the identity the
+        # conversion rests on no longer holds. Refusing is the only honest answer.
+        if any(goal_id in option.interventions for option in request.options):
+            return refuse(
+                "goal_pinned_by_intervention",
+                "options[].interventions",
+                (
+                    f"At least one option intervenes directly on goal node "
+                    f"'{goal_id}', pinning its samples to an absolute value. Those "
+                    f"samples are not change-from-origin, so a level threshold "
+                    f"cannot be converted consistently across options."
+                ),
+            )
+
+        if not any(edge.to == goal_id for edge in request.graph.edges):
+            return refuse(
+                "root_goal",
+                f"nodes[{goal_id}]",
+                (
+                    f"Goal node '{goal_id}' has no parents. A root goal takes its "
+                    f"base from observed_state.value, so its samples are not in the "
+                    f"non-root change-from-origin frame this conversion is derived "
+                    f"for."
+                ),
+            )
+
+        if any(pu.node_id == goal_id for pu in (request.parameter_uncertainties or [])):
+            return refuse(
+                "goal_parameter_uncertainty_shifts_base",
+                f"parameter_uncertainties[{goal_id}]",
+                (
+                    f"Goal node '{goal_id}' carries a ParameterUncertainty: each "
+                    f"sample draws a base that is ADDED to parent propagation (see "
+                    f"GOAL_PU_BASE_ADDITIVE), so the samples' origin varies per "
+                    f"sample and a single static conversion is not valid."
+                ),
+            )
+
+        observed = goal_node.observed_state
+        baseline = observed.baseline if observed is not None else None
+        if baseline is None:
+            return refuse(
+                "missing_goal_baseline",
+                f"nodes[{goal_id}].observed_state.baseline",
+                (
+                    f"goal_threshold_frame='level' requires the goal node's "
+                    f"observed_state.baseline to convert the level into the "
+                    f"samples' frame, but node '{goal_id}' carries "
+                    + (
+                        "no observed_state at all."
+                        if observed is None
+                        else "an observed_state with no baseline."
+                    )
+                ),
+                observed_state_present=observed is not None,
+            )
+
+        intercept = goal_node.intercept
+        # Belt-and-braces: the field validators already reject non-finite
+        # baseline/threshold, but this helper is also called directly by tests and
+        # by any future non-HTTP entry point, and a non-finite threshold is exactly
+        # the input that would produce a silently absurd probability.
+        if not all(math.isfinite(v) for v in (threshold, baseline, intercept)):
+            return refuse(
+                "non_finite_conversion_input",
+                f"nodes[{goal_id}].observed_state.baseline",
+                (
+                    "Conversion inputs must all be finite "
+                    f"(goal_threshold={threshold}, baseline={baseline}, "
+                    f"intercept={intercept})."
+                ),
+                goal_baseline=baseline,
+                goal_intercept=intercept,
+            )
+
+        converted = threshold - baseline + intercept
+        if not math.isfinite(converted):
+            # Only reachable through floating-point overflow on extreme operands.
+            return refuse(
+                "non_finite_converted_threshold",
+                "goal_threshold",
+                (
+                    f"Converting level threshold {threshold} with baseline "
+                    f"{baseline} and intercept {intercept} produced a non-finite "
+                    f"value."
+                ),
+                goal_baseline=baseline,
+                goal_intercept=intercept,
+            )
+        return converted, None
+
     def _compute_option_results(
         self,
         outcomes: Dict[str, List[float]],
         wins: Dict[str, float],
         request: RobustnessRequestV2,
+        goal_threshold_in_sample_frame: Optional[float] = None,
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None,
         expected_regret: Optional[Dict[str, float]] = None,
     ) -> List[OptionResult]:
@@ -3049,6 +3271,12 @@ class RobustnessAnalyzerV2:
             outcomes: Dict[option_id, List[outcome_samples]]
             wins: Dict[option_id, win_count]
             request: The analysis request
+            goal_threshold_in_sample_frame: goal_threshold already resolved into
+                the goal SAMPLES' frame by
+                _resolve_goal_threshold_in_sample_frame (ROADMAP 2.258). None ->
+                probability_of_goal is OMITTED for every option. Passed in rather
+                than re-read from `request` so the frame resolution happens exactly
+                once, at one site, and cannot drift per option.
             constraint_node_values: Optional dict of constraint node sample values
                 for multi-constraint analysis
             expected_regret: Optional dict[option_id, pre-noise JOINT expected
@@ -3070,10 +3298,14 @@ class RobustnessAnalyzerV2:
                 samples_array, request.confidence_level
             )
 
-            # Compute probability_of_goal if threshold is provided
+            # Compute probability_of_goal if the threshold resolved into the
+            # samples' own frame (ROADMAP 2.258). This reads the RESOLVED value,
+            # never request.goal_threshold: an unattested or unconvertible
+            # threshold arrives here as None and the field is omitted, which is
+            # what stops the "< 1% chance of hitting your goal" untruth.
             probability_of_goal = None
-            if request.goal_threshold is not None:
-                n_meets_threshold = int(np.sum(samples_array >= request.goal_threshold))
+            if goal_threshold_in_sample_frame is not None:
+                n_meets_threshold = int(np.sum(samples_array >= goal_threshold_in_sample_frame))
                 probability_of_goal = n_meets_threshold / len(samples)
 
             # Compute constraint analysis if constraints provided

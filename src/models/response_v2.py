@@ -50,10 +50,19 @@ class InferenceWarning(BaseModel):
     # default diagnostics (STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE,
     # ROOT_NODE_DEFAULT_VALUE, ...) are built directly and must STAY 'info' so
     # PLoT's severity=='warning' ? 'warning' : 'info' mapping keeps them quiet.
-    # ONLY the four optional-phase degradation codes (E_VALUES_UNAVAILABLE /
+    # The four optional-phase degradation codes (E_VALUES_UNAVAILABLE /
     # STABILITY_BANDS_UNAVAILABLE / EVPI_UNAVAILABLE / PATH_DECOMPOSITION_UNAVAILABLE)
     # opt UP to 'warning', stamped explicitly by
-    # RobustnessAnalyzerV2._optional_phase_unavailable_warning(). ADDITIVE optional
+    # RobustnessAnalyzerV2._optional_phase_unavailable_warning().
+    # ROADMAP 2.258 adds two more 'warning'-severity codes, stamped by
+    # RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame():
+    # GOAL_THRESHOLD_FRAME_UNSPECIFIED and GOAL_THRESHOLD_NOT_CONVERTIBLE. They
+    # are degradation disclosures of the same class — probability_of_goal was
+    # WITHHELD — so they must not be filed under the quiet 'info' that PLoT hides;
+    # the reason is the whole payload. (This comment is a hand-maintained mirror
+    # of the code, trap 12: it is prose, not a guarantee. The enforcing test is
+    # tests/unit/test_goal_threshold_frame.py::TestFailClosedWarnings, which
+    # asserts the severity at the source.) ADDITIVE optional
     # field on the untyped-passthrough seam: a non-None default so it always rides
     # the wire under exclude_none, and older consumers ignore it (extra='ignore' on
     # every V2 model). Vocabulary is the CritiqueV2 subset (no 'blocker' — a

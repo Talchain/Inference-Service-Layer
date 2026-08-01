@@ -405,21 +405,78 @@ For each sample (1 of n_samples, default 1000):
 
 **Warning:** If all edges have `strength.mean = 0.5`, this indicates LLM output was lost in the pipeline.
 
-## B.5 Goal Threshold and Units
+## B.5 Goal Threshold, Units and FRAME
 
-`goal_threshold` must be in the **same units** as your factor values.
+`goal_threshold` must be in the **same units** as your factor values, **and it must
+declare its FRAME via `goal_threshold_frame`** (ROADMAP 2.258). Same units is not
+sufficient — two numbers can share a unit and still be measured from different
+origins.
 
-**ISL comparison (no internal conversion):**
-```python
-probability_of_goal = count(samples >= goal_threshold) / n_samples
+### Why a frame is required
+
+For a **non-root** goal node the evaluator uses a base offset of `0.0` (doctrine B),
+so a goal sample is
+
+```
+sample = intercept + Σ(parent_value × strength)
 ```
 
-**Example:**
-- Factor values in £k (e.g., `observed_state.value: 59`)
-- Goal threshold in £k (e.g., `goal_threshold: 100`)
-- ISL computes: P(outcome ≥ 100)
+That is a **change measured from an origin of `intercept`** (`0.0` by default) — not
+the goal quantity's real level. ISL has always disclosed this via the
+`GOAL_OBSERVED_VALUE_UNUSED` warning: the goal's own `observed_state.value` is not
+used as a base.
 
-**Note:** ISL is unit-agnostic. It computes with whatever values it receives. PLoT handles normalisation/denormalisation (see B.6).
+A producer that mints `goal_threshold` as an absolute **level** (e.g. `0.8` for a
+£6.0m target against a £7.5m cap) is therefore comparing a level against
+change-from-origin samples. The result is a **structurally impossible zero**, which
+the product rendered as "< 1% chance of hitting your goal". `goal_threshold_frame`
+closes that gap.
+
+### The two frames
+
+| `goal_threshold_frame` | Meaning | ISL behaviour |
+|---|---|---|
+| `'delta'` | Already in the goal samples' own frame | Compared as-is, no conversion |
+| `'level'` | An absolute level of the goal quantity, in the same normalised units as `observed_state` | Converted into the sample frame first |
+| *absent* | Unknown | **`probability_of_goal` is OMITTED** + `GOAL_THRESHOLD_FRAME_UNSPECIFIED` warning |
+
+### The conversion
+
+```
+delta_threshold = level_threshold − goal_baseline + goal_intercept
+probability_of_goal = count(samples >= delta_threshold) / n_samples
+```
+
+`goal_baseline` is the goal node's `observed_state.baseline` (B.3: "Reference for
+'change from baseline' calculations"). It is **not** defaulted from
+`observed_state.value` — that field means the *current observed value* and
+repurposing it would be a second unattested frame assumption.
+
+The `+ goal_intercept` term keeps the conversion self-consistent: if a producer
+correctly stamps `intercept = baseline`, the samples already **are** levels and the
+formula collapses to `level_threshold`.
+
+### Fail-closed
+
+ISL **omits** `probability_of_goal` and emits a `warning`-severity
+`GOAL_THRESHOLD_NOT_CONVERTIBLE` (never a fabricated or clamped number) when a
+`'level'` threshold cannot be converted, naming the reason:
+
+| Reason | Why the conversion is invalid |
+|---|---|
+| `missing_goal_baseline` | No `observed_state.baseline` on the goal node |
+| `root_goal` | A root goal takes its base from `observed_state.value`; its samples are not in the change-from-origin frame |
+| `goal_parameter_uncertainty_shifts_base` | A `ParameterUncertainty` on the goal draws a per-sample base, so the origin varies per sample |
+| `goal_pinned_by_intervention` | An option intervenes on the goal, pinning its samples to an absolute value |
+| `non_finite_conversion_input` / `non_finite_converted_threshold` | Non-finite operand or result |
+
+A **negative** converted threshold is legitimate (the goal is already met at
+baseline) and is never clamped. A converted threshold above every sample yields an
+honest `0.0` — fail-closed withholds *unprovable* numbers, not merely unwelcome ones.
+
+**Note:** ISL remains unit-agnostic. It computes with whatever values it receives;
+PLoT handles normalisation/denormalisation (see B.6). The frame attestation is the
+producer's, and ISL cannot verify it — it can only refuse to guess when it is absent.
 
 ## B.6 Normalisation Architecture
 
