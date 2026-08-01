@@ -865,6 +865,18 @@ class RobustnessRequestV2(BaseModel):
         description="Compute E-value analogue per edge (minimum strength perturbation "
         "to flip recommendation). Gated for performance — adds up to 2s latency.",
     )
+    # ROADMAP 2.228-F3. A REQUEST field, not an env var — per the no-env-var-gates
+    # rule the caller decides per analysis, and default-off keeps the response
+    # byte-identical for every consumer that has not opted in.
+    include_factor_flips: bool = Field(
+        default=False,
+        description="Compute per-root-factor flip thresholds: the normalised [0, 1] "
+        "value at which the winning option changes. Deterministic and closed-form "
+        "(2*n_options evaluations per factor to measure the transmission slopes, then "
+        "an algebraic crossing per rival) — no Monte Carlo, so no sampling error. "
+        "Factors whose per-option transmission slopes are identical are reported as "
+        "'structurally_invariant' rather than probed: their no-flip is provable.",
+    )
     include_voi: bool = Field(
         default=False,
         description="Compute Expected Value of Perfect Information (EVPI) per factor. "
@@ -1860,6 +1872,18 @@ class RobustnessResponseV2(BaseModel):
         None,
         description="E-value analogue per edge: minimum strength perturbation to flip "
         "recommendation. Only included when computed within time budget.",
+    )
+
+    # Factor-value flip thresholds (ROADMAP 2.228-F3 — optional, gated by budget
+    # and the include_factor_flips flag). Rows are built and consumed internally
+    # as dicts (same deliberate choice as factor_evppi/factor_evpc below); the V2
+    # WIRE model ISLResponseV2.factor_flip_values is typed List[FactorFlipValueV2]
+    # so the consumer boundary and the OpenAPI schema stay fail-loud.
+    factor_flip_values: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Per-root-factor flip thresholds: the normalised [0, 1] value at "
+        "which the winning option changes, with an attested flip_reason when there is "
+        "none. See ISLResponseV2.factor_flip_values.",
     )
 
     # Per-factor win-probability sensitivity (enhancement — optional, gated by

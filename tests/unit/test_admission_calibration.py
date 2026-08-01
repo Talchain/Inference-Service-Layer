@@ -389,6 +389,10 @@ class TestPhasePricingInventory:
         body = _request_dict(20, 40, 5000, 3, evpi_factors=4)
         body["include_e_values"] = True
         body["include_path_decomposition"] = True
+        # ROADMAP 2.228-F3: "every optional phase enabled" must MEAN every one —
+        # omitting a flag here silently shrinks the derived term set and turns the
+        # bidirectional check into a one-directional one.
+        body["include_factor_flips"] = True
         body["control_candidates"] = [{"factor_id": "n5", "values": [0.1, 0.2]}]
         formula_terms = set(
             compute_weighted_cost(RobustnessRequestV2(**body)).terms
@@ -500,7 +504,10 @@ class TestCalibrationPins:
         assert REGRESSION_EVPPI_NULL_PERMUTATIONS == 16
 
     def test_formula_version_pinned(self):
-        assert COMPLEXITY_FORMULA_VERSION == "v4-evppi-recal-2026-07-25"
+        # Bumped v4 -> v5 by ROADMAP 2.228-F3, which added the `factor_flips`
+        # term. This pin is doing its job: the formula cannot change without an
+        # explicit edit here and a new version string on /health.
+        assert COMPLEXITY_FORMULA_VERSION == "v5-factor-flips-2026-08-01"
 
     def test_env_override_resolves_new_var_only(self, monkeypatch):
         """ISL_MAX_COST_UNITS overrides; the OLD ISL_MAX_COMPUTE_COMPLEXITY does NOT."""

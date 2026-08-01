@@ -192,6 +192,32 @@ _ADDITIVE_WIRE_SURFACES = frozenset(
     }
 )
 
+# ROADMAP 2.228-F3 (2026-08-01): 'alternative_winner_id' and 'baseline_winner_id'
+# on each robustness.edge_e_values entry. Purely additive — the winner on the
+# flipped side of the bracket was already computed by the existing bisection and
+# discarded, and the baseline winner is the one the search already ran against,
+# so no existing value moves.
+#
+# ⚠ DELIBERATELY *NOT* ADDED TO _ADDITIVE_WIRE_SURFACES, which strips by key name
+# RECURSIVELY: `alternative_winner_id` ALREADY EXISTS on FragileEdgeV2 and is part
+# of the frozen golden, so a name-based strip would silently delete a pre-existing
+# field from `current` and hide any regression in it. (Not hypothetical — the
+# first attempt did exactly that and this test caught it.) Stripped by PATH
+# instead, so the fragile-edge field stays compared.
+_EDGE_E_VALUE_ADDITIVE_KEYS = ("alternative_winner_id", "baseline_winner_id")
+
+
+def _strip_edge_e_value_additions(payload: dict) -> dict:
+    """Remove the 2.228-F3 additive keys from robustness.edge_e_values entries only."""
+    data = copy.deepcopy(payload)
+    robustness = data.get("robustness")
+    if isinstance(robustness, dict):
+        for entry in robustness.get("edge_e_values") or []:
+            if isinstance(entry, dict):
+                for key in _EDGE_E_VALUE_ADDITIVE_KEYS:
+                    entry.pop(key, None)
+    return data
+
 # Arch step 1 (2026-07-26): robustness.confidence is NOT additive — its VALUE
 # changed, so it cannot be silently stripped. The golden holds the base value
 # min(0.99, stability*(1 - 1/sqrt(n_samples))); the wire now carries the
@@ -203,17 +229,22 @@ _ADDITIVE_WIRE_SURFACES = frozenset(
 _CHANGED_WIRE_VALUES = ("robustness", "confidence")
 
 
-def _strip_additive_surfaces(payload):
-    """Recursively remove every additive-only surface key so what remains is the
-    pre-feature base wire (compared byte-for-byte against the frozen golden)."""
+def _strip_additive_surfaces(payload, keys=_ADDITIVE_WIRE_SURFACES):
+    """Recursively remove additive-only surface keys so what remains is the
+    pre-feature base wire (compared byte-for-byte against the frozen golden).
+
+    ``keys`` is narrowable on purpose. The golden comparison strips EVERY
+    additive surface, but a caller asking a narrower question ("did the band
+    budget disturb the base e-values?") must strip only the surface it is
+    controlling for — stripping more would also hide a real regression in the
+    others.
+    """
     if isinstance(payload, dict):
         return {
-            k: _strip_additive_surfaces(v)
-            for k, v in payload.items()
-            if k not in _ADDITIVE_WIRE_SURFACES
+            k: _strip_additive_surfaces(v, keys) for k, v in payload.items() if k not in keys
         }
     if isinstance(payload, list):
-        return [_strip_additive_surfaces(item) for item in payload]
+        return [_strip_additive_surfaces(item, keys) for item in payload]
     return payload
 
 
@@ -311,7 +342,9 @@ class TestAdditiveVsBase:
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
         golden = json.loads(GOLDEN_PATH.read_text())
-        current = _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+        current = _strip_edge_e_value_additions(
+            _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+        )
         # See _CHANGED_WIRE_VALUES: one value deliberately moved; drop it from BOTH
         # sides so this pin keeps guarding everything else byte-for-byte.
         section, key = _CHANGED_WIRE_VALUES
@@ -458,7 +491,13 @@ class TestBudgetDegradation:
         control = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
         monkeypatch.setattr(RobustnessAnalyzerV2, "FLIP_STABILITY_BUDGET_MS", -1)
         degraded = RobustnessAnalyzerV2().analyze(_analyzer_request(2))
-        assert _strip_additive_surfaces(control.edge_e_values) == degraded.edge_e_values
+        # Strip ONLY the band, the surface this test controls for: the winner-capture
+        # fields (ROADMAP 2.228-F3) are part of the base e-values here and must be
+        # compared, not hidden — a band budget trip has no business changing them.
+        assert (
+            _strip_additive_surfaces(control.edge_e_values, {"stability"})
+            == degraded.edge_e_values
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -570,7 +609,13 @@ def _capture_golden() -> None:  # pragma: no cover
         raise SystemExit(f"capture failed: {resp.status_code} {resp.text}")
     GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     GOLDEN_PATH.write_text(
-        json.dumps(_strip_additive_surfaces(normalize_v2_payload(resp.json())), indent=2, sort_keys=True)
+        json.dumps(
+            _strip_edge_e_value_additions(
+                _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+            ),
+            indent=2,
+            sort_keys=True,
+        )
         + "\n"
     )
     print(f"golden written: {GOLDEN_PATH}")
