@@ -1451,6 +1451,30 @@
       "EdgeEValueV2": {
         "description": "E-value analogue for an edge: how wrong must the strength be to flip the recommendation?\n\nAnalogous to VanderWeele's E-value in observational epidemiology: larger values\nindicate the assumption is robust (needs a larger violation to overturn the finding).",
         "properties": {
+          "alternative_winner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Option that becomes the argmax when this edge's strength mean reaches flip_mean (expected-value background, analyzer tie-break: highest outcome, then lowest option id). Null when the edge is unflippable \u2014 never invented for an edge that cannot flip.",
+            "title": "Alternative Winner Id"
+          },
+          "baseline_winner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Argmax option at the expected-value baseline this row was searched against. Emitted per-row so a consumer can fail closed when it differs from the MC-recommended option (design R3): the E-value search runs in the expected-value world, which is not guaranteed to agree with the sampled recommendation.",
+            "title": "Baseline Winner Id"
+          },
           "current_mean": {
             "description": "Current edge strength mean",
             "title": "Current Mean",
@@ -2333,6 +2357,177 @@
           "correlation_active"
         ],
         "title": "FactorEvppiEntryV2",
+        "type": "object"
+      },
+      "FactorFlipStabilityBandV2": {
+        "description": "Seed-sweep stability band for one FACTOR's flip value (ROADMAP 2.228-F3).\n\nSame shape and semantics as FlipStabilityBandV2, with one deliberate\ndifference: the list field is ``seed_flip_values`` (factor values in the\nnormalised [0, 1] domain of observed_state.value), not ``seed_flip_means``\n(edge strength means). Sharing the name across two different quantities is\nexactly the kind of conflation that has cost this platform diagnoses before.\n\nMethod: N child seeds SHA-256-derived from the request seed under the tag\n``{seed}:factor_flip_stability:{i}`` \u2014 a DISTINCT tag from the edge band's\n``{seed}:flip_stability:{i}``, so the factor sweep never consumes or shifts\nthe edge sweep's stream. One sampled edge background per child seed, SHARED\nacross factors (common random numbers), so bands are comparable across rows.\nUnder each background the crossing is re-derived in closed form from freshly\nmeasured per-option slopes.\n\nMEMBERSHIP: as with edge bands, the base ``flip_value`` is NOT a member of\nthis sweep \u2014 it is derived against the expected-value background, which is\nnever one of the sampled backgrounds. flip_value MAY therefore lie outside\n[band_min, band_max]. Consumers must NOT assume membership.\n\nSCOPE OF THE UNCERTAINTY (design R7): these backgrounds vary EDGE strengths\nonly; other factors stay at their observed values. That matches the edge\nbands' semantics and keeps the two comparable, but it understates uncertainty\narising from correlated errors in other factors.",
+        "properties": {
+          "band_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum flip value across flipped seeds. Omitted when nothing flips.",
+            "title": "Band Max"
+          },
+          "band_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median flip value across flipped seeds. Omitted when nothing flips.",
+            "title": "Band Median"
+          },
+          "band_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Minimum flip value across flipped seeds. Omitted when nothing flips.",
+            "title": "Band Min"
+          },
+          "band_width": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "band_max - band_min. Omitted when nothing flips. INTERPRETATION TRAP (identical to the edge band): when n_seeds_flipped == 1 this is 0.0 by construction, so a naive width rubric reads maximal stability from a single flipped background. Consumers MUST condition any width-based confidence rubric on n_seeds_flipped.",
+            "title": "Band Width"
+          },
+          "n_seeds": {
+            "description": "Number of child seeds swept",
+            "minimum": 1.0,
+            "title": "N Seeds",
+            "type": "integer"
+          },
+          "n_seeds_flipped": {
+            "description": "Seeds whose sampled background admits a flip inside [0, 1]. When 0, the band_* fields are omitted (exclude_none).",
+            "minimum": 0.0,
+            "title": "N Seeds Flipped",
+            "type": "integer"
+          },
+          "seed_flip_values": {
+            "description": "Per-child-seed flip value, in child-seed order; null where that seed's background admits no flip inside [0, 1].",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Seed Flip Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "n_seeds",
+          "n_seeds_flipped",
+          "seed_flip_values"
+        ],
+        "title": "FactorFlipStabilityBandV2",
+        "type": "object"
+      },
+      "FactorFlipValueV2": {
+        "description": "Value at which changing ONE root factor changes the winning option.\n\nROADMAP 2.228-F3. Request-gated by ``include_factor_flips`` (default False),\nso a consumer that does not ask sees a byte-identical response.\n\nWHY THIS EXISTS. The prior flip search lived in PLoT and probed factors by\nre-running a full Monte Carlo per probe value. The diagnosis\n(diagnosis-2228-enrichment-values.md \u00a71) proved with a live control that the\nfactors it chose were mathematically incapable of flipping the winner: for a\nfactor no option intervenes on and that is not upstream of differential\nsevering, every option's outcome moves by the IDENTICAL amount, so the argmax\nis invariant. 43 live rows, zero `found`.\n\nMETHOD. Epsilon noise is disabled before all post-MC structural analyses, so\nthe SCM is exactly affine in a ROOT factor's value: goal_o(F) = A_o + T_o*F.\nTwo deterministic evaluations per option measure (A_o, T_o) exactly; the\nleader/rival crossing is then closed form, F* = (A_i - A_j)/(T_j - T_i). No\nMonte Carlo, so there is no sampling error to quote \u2014 the honest uncertainty\nstatement is ``stability``, not a noise floor.\n\nRESOLUTION CONTRACT (design \u00a72.3). ``flip_value`` is EXACT in the\nexpected-value world. How far it moves in other worlds is ``stability`` and\nNOTHING else: this row deliberately carries no flip probability and no EVPI\nquantity, because the probability machinery available here (K=100 marginal\nswitch, n=2000 p_win) sits below its own resolution.",
+        "properties": {
+          "alternative_winner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Option that becomes the argmax just past flip_value. Null unless flip_reason is 'found'.",
+            "title": "Alternative Winner Id"
+          },
+          "baseline_winner_id": {
+            "description": "Argmax option at the expected-value baseline, i.e. the winner this flip is measured AGAINST. Emitted per-row so a consumer can fail closed when it disagrees with the MC-recommended option (design R3).",
+            "title": "Baseline Winner Id",
+            "type": "string"
+          },
+          "current_value": {
+            "description": "The factor's current value, in the NORMALISED [0, 1] domain of observed_state.value (0.0 when the factor carries only a parameter_uncertainties entry). Denormalisation to user units is PLoT's responsibility \u2014 ISL never mixes a normalised number with a display unit.",
+            "title": "Current Value",
+            "type": "number"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "increase",
+                  "decrease"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Direction the factor value must move from current_value to reach flip_value. Null when flip_value is null: a direction for a flip that does not exist would be a fabricated claim.",
+            "title": "Direction"
+          },
+          "factor_id": {
+            "description": "Root factor node id",
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "flip_reason": {
+            "description": "'found' \u2014 a confirmed argmax change inside [0, 1]. 'no_effect_within_bounds' \u2014 per-option transmission slopes genuinely differ, but no crossing lies inside [0, 1]. 'structurally_invariant' \u2014 the per-option transmission slopes are identical (spread <= 1e-9), so no value of this factor can move the argmax. This is a MATHEMATICAL ATTESTATION, not a failed or timed-out probe, and it is the honest wire statement for the class the diagnosis proved unprobeable. 'candidate_cap_exceeded' \u2014 a genuine candidate that ranked below FACTOR_FLIP_MAX_CANDIDATES by slope spread and was not evaluated; emitted rather than dropped so the omission is never silent. Open vocabulary.",
+            "title": "Flip Reason",
+            "type": "string"
+          },
+          "flip_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Normalised [0, 1] value at which the winning option changes. Null whenever flip_reason is not 'found' \u2014 never a fabricated in-range number for a factor whose crossing lies outside the domain.",
+            "title": "Flip Value"
+          },
+          "stability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorFlipStabilityBandV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seed-sweep stability band. Present only for evaluated candidates: a 'structurally_invariant' row has no band because its no-flip is proven rather than sampled, and computing one would spend the compute the candidate screen exists to save."
+          }
+        },
+        "required": [
+          "factor_id",
+          "current_value",
+          "flip_reason",
+          "baseline_winner_id"
+        ],
+        "title": "FactorFlipValueV2",
         "type": "object"
       },
       "FactorSensitivityResult": {
@@ -3437,6 +3632,21 @@
             ],
             "description": "Per-factor Expected Value of Partial Perfect Information (EVPPI) in the SAME OUTCOME UNITS as outcome.mean and decision_evpi: for each uncertain factor, how much better the decision could be if that factor's true value were learned before choosing. Computed by a single-loop Strong-Oakley regression EVPPI = E[max_o E[U_o|theta_i]] \u2212 max_o E[U_o] on the retained joint pre-noise CRN samples (NO nested Monte Carlo, NO new sampling); the inner conditional expectation is a polynomial regression of each option's outcome on the factor's sampled values. Fields: factor_id, evppi (clamped to [0, decision_evpi]), evppi_raw (pre-clamp audit), baseline_max_expected_utility, conditional_max_expected_utility, units ('outcome'), method ('regression_evppi_v1'), regression_degree, n_samples, clamped_low (Howard non-negativity DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by construction for this estimator \u2014 least-squares mean-preservation + Jensen \u2014 so clamped_low is always false; a true value would mean the estimator itself changed, not that a real negative occurred), clamped_high (per-factor EVPPI <= whole-decision EVPI theorem \u2014 capped at decision_evpi), noise_floor (permutation-null overfit floor: the MAX of K theta-shuffled null EVPPIs, i.e. a permutation test at level ~1/(K+1) so a pure-noise factor is labelled below_resolution ~1-1/(K+1) of the time), status (below_resolution when evppi <= noise_floor), correlation_active. Unlike p_win_sensitivity, this captures option-switching and is honest under correlation (the samples are joint draws, so the regression conditions on the joint). Option-controlled levers (any option intervenes on the factor \u2014 union across options) are OMITTED (absent, not zero: their uncertainty is a choice, not information to buy).",
             "title": "Factor Evppi"
+          },
+          "factor_flip_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/FactorFlipValueV2"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-root-factor flip thresholds: the normalised [0, 1] value at which the winning option changes, plus an attested reason when there is no such value. Deterministic and closed-form (the SCM is exactly affine in a root factor's value once epsilon noise is disabled), so no Monte Carlo error is involved and none is quoted; cross-world robustness is carried ONLY by the per-row stability band. Present exactly when include_factor_flips was requested and the phase completed within budget \u2014 on a budget trip the whole block is omitted and FACTOR_FLIPS_UNAVAILABLE is disclosed on inference_warnings.",
+            "title": "Factor Flip Values"
           },
           "factor_sensitivity": {
             "anyOf": [
@@ -5364,6 +5574,12 @@
             "title": "Include E Values",
             "type": "boolean"
           },
+          "include_factor_flips": {
+            "default": false,
+            "description": "Compute per-root-factor flip thresholds: the normalised [0, 1] value at which the winning option changes. Deterministic and closed-form (2*n_options evaluations per factor to measure the transmission slopes, then an algebraic crossing per rival) \u2014 no Monte Carlo, so no sampling error. Factors whose per-option transmission slopes are identical are reported as 'structurally_invariant' rather than probed: their no-flip is provable.",
+            "title": "Include Factor Flips",
+            "type": "boolean"
+          },
           "include_path_decomposition": {
             "default": false,
             "description": "Compute a structural pathway decomposition for the recommended option's retained intervention targets: the top-3 simple directed paths to the goal, each with its signed structural contribution (analytic path tracing). Gated; off by default. This is a structural decomposition of the modelled effect, not a real-world causal claim, and is not weighted by intervention magnitude.",
@@ -5614,6 +5830,21 @@
             ],
             "description": "Per-factor Expected Value of Partial Perfect Information (EVPPI) in OUTCOME units, via single-loop Strong-Oakley regression on the retained joint CRN samples. Method 'regression_evppi_v1'. Option-controlled levers are OMITTED (absent, not zero). Emitted under active correlation. See ISLResponseV2.factor_evppi.",
             "title": "Factor Evppi"
+          },
+          "factor_flip_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-root-factor flip thresholds: the normalised [0, 1] value at which the winning option changes, with an attested flip_reason when there is none. See ISLResponseV2.factor_flip_values.",
+            "title": "Factor Flip Values"
           },
           "factor_sensitivity": {
             "description": "Sensitivity results per factor node value",

@@ -593,6 +593,28 @@ class EdgeEValueV2(BaseModel):
     )
     current_mean: float = Field(..., description="Current edge strength mean")
     flip_mean: float = Field(..., description="Minimum strength mean that flips the recommendation")
+    # ROADMAP 2.228-F3 (design §1.1 gap 1, §2.4). The bisection in
+    # RobustnessAnalyzerV2._compute_edge_e_values already evaluated the argmax on
+    # the flipped side of every bracket and DISCARDED it, so a consumer could say
+    # "this edge can flip the recommendation" but never "…to which option".
+    # Retained here at ZERO additional evaluations: the flipped endpoint of the
+    # final bracket is only ever assigned from an evaluation that flipped, so the
+    # argmax recorded at that assignment IS the argmax at flip_mean.
+    alternative_winner_id: Optional[str] = Field(
+        None,
+        description="Option that becomes the argmax when this edge's strength mean "
+        "reaches flip_mean (expected-value background, analyzer tie-break: highest "
+        "outcome, then lowest option id). Null when the edge is unflippable — never "
+        "invented for an edge that cannot flip.",
+    )
+    baseline_winner_id: Optional[str] = Field(
+        None,
+        description="Argmax option at the expected-value baseline this row was "
+        "searched against. Emitted per-row so a consumer can fail closed when it "
+        "differs from the MC-recommended option (design R3): the E-value search "
+        "runs in the expected-value world, which is not guaranteed to agree with "
+        "the sampled recommendation.",
+    )
     stability: Optional[FlipStabilityBandV2] = Field(
         None,
         description="Seed-sweep stability band for this flip threshold (Track S Phase 1). "
@@ -600,6 +622,152 @@ class EdgeEValueV2(BaseModel):
         "(FLIP_STABILITY_BUDGET_MS) trips.",
     )
 
+    model_config = {"extra": "ignore"}
+
+
+class FactorFlipStabilityBandV2(BaseModel):
+    """Seed-sweep stability band for one FACTOR's flip value (ROADMAP 2.228-F3).
+
+    Same shape and semantics as FlipStabilityBandV2, with one deliberate
+    difference: the list field is ``seed_flip_values`` (factor values in the
+    normalised [0, 1] domain of observed_state.value), not ``seed_flip_means``
+    (edge strength means). Sharing the name across two different quantities is
+    exactly the kind of conflation that has cost this platform diagnoses before.
+
+    Method: N child seeds SHA-256-derived from the request seed under the tag
+    ``{seed}:factor_flip_stability:{i}`` — a DISTINCT tag from the edge band's
+    ``{seed}:flip_stability:{i}``, so the factor sweep never consumes or shifts
+    the edge sweep's stream. One sampled edge background per child seed, SHARED
+    across factors (common random numbers), so bands are comparable across rows.
+    Under each background the crossing is re-derived in closed form from freshly
+    measured per-option slopes.
+
+    MEMBERSHIP: as with edge bands, the base ``flip_value`` is NOT a member of
+    this sweep — it is derived against the expected-value background, which is
+    never one of the sampled backgrounds. flip_value MAY therefore lie outside
+    [band_min, band_max]. Consumers must NOT assume membership.
+
+    SCOPE OF THE UNCERTAINTY (design R7): these backgrounds vary EDGE strengths
+    only; other factors stay at their observed values. That matches the edge
+    bands' semantics and keeps the two comparable, but it understates uncertainty
+    arising from correlated errors in other factors.
+    """
+
+    n_seeds: int = Field(..., ge=1, description="Number of child seeds swept")
+    n_seeds_flipped: int = Field(
+        ...,
+        ge=0,
+        description="Seeds whose sampled background admits a flip inside [0, 1]. "
+        "When 0, the band_* fields are omitted (exclude_none).",
+    )
+    band_min: Optional[float] = Field(
+        None, description="Minimum flip value across flipped seeds. Omitted when nothing flips."
+    )
+    band_median: Optional[float] = Field(
+        None, description="Median flip value across flipped seeds. Omitted when nothing flips."
+    )
+    band_max: Optional[float] = Field(
+        None, description="Maximum flip value across flipped seeds. Omitted when nothing flips."
+    )
+    band_width: Optional[float] = Field(
+        None,
+        description="band_max - band_min. Omitted when nothing flips. INTERPRETATION "
+        "TRAP (identical to the edge band): when n_seeds_flipped == 1 this is 0.0 by "
+        "construction, so a naive width rubric reads maximal stability from a single "
+        "flipped background. Consumers MUST condition any width-based confidence "
+        "rubric on n_seeds_flipped.",
+    )
+    seed_flip_values: List[Optional[float]] = Field(
+        ...,
+        description="Per-child-seed flip value, in child-seed order; null where that "
+        "seed's background admits no flip inside [0, 1].",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
+    model_config = {"extra": "ignore"}
+
+
+class FactorFlipValueV2(BaseModel):
+    """Value at which changing ONE root factor changes the winning option.
+
+    ROADMAP 2.228-F3. Request-gated by ``include_factor_flips`` (default False),
+    so a consumer that does not ask sees a byte-identical response.
+
+    WHY THIS EXISTS. The prior flip search lived in PLoT and probed factors by
+    re-running a full Monte Carlo per probe value. The diagnosis
+    (diagnosis-2228-enrichment-values.md §1) proved with a live control that the
+    factors it chose were mathematically incapable of flipping the winner: for a
+    factor no option intervenes on and that is not upstream of differential
+    severing, every option's outcome moves by the IDENTICAL amount, so the argmax
+    is invariant. 43 live rows, zero `found`.
+
+    METHOD. Epsilon noise is disabled before all post-MC structural analyses, so
+    the SCM is exactly affine in a ROOT factor's value: goal_o(F) = A_o + T_o*F.
+    Two deterministic evaluations per option measure (A_o, T_o) exactly; the
+    leader/rival crossing is then closed form, F* = (A_i - A_j)/(T_j - T_i). No
+    Monte Carlo, so there is no sampling error to quote — the honest uncertainty
+    statement is ``stability``, not a noise floor.
+
+    RESOLUTION CONTRACT (design §2.3). ``flip_value`` is EXACT in the
+    expected-value world. How far it moves in other worlds is ``stability`` and
+    NOTHING else: this row deliberately carries no flip probability and no EVPI
+    quantity, because the probability machinery available here (K=100 marginal
+    switch, n=2000 p_win) sits below its own resolution.
+    """
+
+    factor_id: str = Field(..., description="Root factor node id")
+    current_value: float = Field(
+        ...,
+        description="The factor's current value, in the NORMALISED [0, 1] domain of "
+        "observed_state.value (0.0 when the factor carries only a "
+        "parameter_uncertainties entry). Denormalisation to user units is PLoT's "
+        "responsibility — ISL never mixes a normalised number with a display unit.",
+    )
+    flip_value: Optional[float] = Field(
+        None,
+        description="Normalised [0, 1] value at which the winning option changes. "
+        "Null whenever flip_reason is not 'found' — never a fabricated in-range "
+        "number for a factor whose crossing lies outside the domain.",
+    )
+    direction: Optional[Literal["increase", "decrease"]] = Field(
+        None,
+        description="Direction the factor value must move from current_value to reach "
+        "flip_value. Null when flip_value is null: a direction for a flip that does "
+        "not exist would be a fabricated claim.",
+    )
+    flip_reason: str = Field(
+        ...,
+        description="'found' — a confirmed argmax change inside [0, 1]. "
+        "'no_effect_within_bounds' — per-option transmission slopes genuinely differ, "
+        "but no crossing lies inside [0, 1]. "
+        "'structurally_invariant' — the per-option transmission slopes are identical "
+        "(spread <= 1e-9), so no value of this factor can move the argmax. This is a "
+        "MATHEMATICAL ATTESTATION, not a failed or timed-out probe, and it is the "
+        "honest wire statement for the class the diagnosis proved unprobeable. "
+        "'candidate_cap_exceeded' — a genuine candidate that ranked below "
+        "FACTOR_FLIP_MAX_CANDIDATES by slope spread and was not evaluated; emitted "
+        "rather than dropped so the omission is never silent. Open vocabulary.",
+    )
+    alternative_winner_id: Optional[str] = Field(
+        None,
+        description="Option that becomes the argmax just past flip_value. Null unless "
+        "flip_reason is 'found'.",
+    )
+    baseline_winner_id: str = Field(
+        ...,
+        description="Argmax option at the expected-value baseline, i.e. the winner this "
+        "flip is measured AGAINST. Emitted per-row so a consumer can fail closed when it "
+        "disagrees with the MC-recommended option (design R3).",
+    )
+    stability: Optional[FactorFlipStabilityBandV2] = Field(
+        None,
+        description="Seed-sweep stability band. Present only for evaluated candidates: "
+        "a 'structurally_invariant' row has no band because its no-flip is proven "
+        "rather than sampled, and computing one would spend the compute the candidate "
+        "screen exists to save.",
+    )
+
+    # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     model_config = {"extra": "ignore"}
 
 
@@ -1603,6 +1771,24 @@ class ISLResponseV2(BaseModel):
         "signed structural contributions. Structural decomposition of the modelled "
         "effect, not a causal claim. Only present when include_path_decomposition "
         "was requested.",
+    )
+
+    # Factor-value flip thresholds (ROADMAP 2.228-F3 — additive optional,
+    # request-gated by include_factor_flips). Top-level on the envelope, beside
+    # the other per-factor blocks (factor_sensitivity / factor_evppi /
+    # factor_evpc), not nested under robustness: it is a factor-domain quantity,
+    # and PLoT maps it to the top-level enrichment.flip_thresholds[] array.
+    factor_flip_values: Optional[List[FactorFlipValueV2]] = Field(
+        None,
+        description="Per-root-factor flip thresholds: the normalised [0, 1] value at "
+        "which the winning option changes, plus an attested reason when there is no "
+        "such value. Deterministic and closed-form (the SCM is exactly affine in a root "
+        "factor's value once epsilon noise is disabled), so no Monte Carlo error is "
+        "involved and none is quoted; cross-world robustness is carried ONLY by the "
+        "per-row stability band. Present exactly when include_factor_flips was "
+        "requested and the phase completed within budget — on a budget trip the whole "
+        "block is omitted and FACTOR_FLIPS_UNAVAILABLE is disclosed on "
+        "inference_warnings.",
     )
 
     # Reference-option disclosure (T1-5 — additive optional)

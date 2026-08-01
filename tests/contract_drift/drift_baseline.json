@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.30.0",
     "omission_count": 44,
-    "superset_count": 73
+    "superset_count": 76
   },
   "omissions": [
     {
@@ -382,6 +382,16 @@
     },
     {
       "isl_model": "EdgeEValueV2",
+      "prop": "alternative_winner_id",
+      "reason": "ISL superset — EdgeEValueV2.alternative_winner_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeEValueV2",
+      "prop": "baseline_winner_id",
+      "reason": "ISL superset — EdgeEValueV2.baseline_winner_id is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "EdgeEValueV2",
       "prop": "is_unflippable",
       "reason": "ISL superset — EdgeEValueV2.is_unflippable is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
@@ -544,6 +554,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "factor_evpc",
       "reason": "ISL superset — ISLResponseV2.factor_evpc is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "factor_flip_values",
+      "reason": "ISL superset — ISLResponseV2.factor_flip_values is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",

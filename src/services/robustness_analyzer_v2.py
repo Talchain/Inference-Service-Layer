@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
@@ -274,7 +274,10 @@ FLIP_STABILITY_N_SEEDS = 10
 # (deg+1) factor is second-order inside the SVD, not a multiplier. New term:
 # W_EVPPI_COEF*U*(1+K)*S — still conservative (>=1.9x margin at the worst measured
 # cell on loaded local hardware; more on typical shapes). Shape changed -> bump.
-COMPLEXITY_FORMULA_VERSION = "v4-evppi-recal-2026-07-25"
+# v5 (ROADMAP 2.228-F3): adds the `factor_flips` term. Bumped deliberately —
+# tests/unit/test_admission_calibration.py::test_formula_version_pinned exists so
+# a formula change cannot land silently, and /health advertises this string.
+COMPLEXITY_FORMULA_VERSION = "v5-factor-flips-2026-08-01"
 
 # Per-phase structural weights (provisional; the calibration harness is the
 # source of truth for refining them — do not hand-tune without re-running it).
@@ -283,6 +286,10 @@ W_SENS_COEF = 4  # edge sensitivity: 4 sub-sweeps per edge (existence +/- , magn
 W_EVAL_COEF = 20  # e-values: ~binary-search depth per edge (wall-clock-capped, so flat)
 W_BANDS_COEF = 200  # stability bands: 10 seeds x ~20 search per edge (capped, so flat)
 W_PATH_COEF = 1  # path decomposition: analytic, bounded by MAX_DECOMPOSITION_PATHS
+# Factor flips (ROADMAP 2.228-F3): 1 unit per evaluate() x structural work W, the
+# same convention as base_mc (S*O evaluates x W). The evaluate COUNT is bounded in
+# closed form by the phase's own caps rather than estimated — see the term.
+W_FACTOR_FLIP_COEF = 1
 
 # Value-of-control (EVPC, S4) grid-do cost coefficient. _compute_factor_evpc grids
 # do(factor=x) over EVERY (candidate, value) pair on EVERY retained sample, each a
@@ -398,6 +405,7 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     "_compute_path_decomposition": "priced:path_decomposition",
     "_compute_robustness": "bounded: post-processing of existing samples; heavy child is _compute_alternative_winners",
     "_compute_edge_e_values": "priced:e_values",
+    "_compute_factor_flip_values": "priced:factor_flips",
     "_compute_factor_evppi": "priced:evppi_full",
     "_compute_factor_evpc": "priced:evpc",
     "_compute_evpi": "priced:evpi",
@@ -462,6 +470,7 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
              + MAX_INFLUENCE_WALK_CALLS_TOTAL              (structural influence, if sensitivity & U>0)
              + W_EVAL_COEF*E*O                             (e-values, if include_e_values)
              + W_BANDS_COEF*E*O                            (bands, ride on e-values)
+             + W_FACTOR_FLIP_COEF*O*W*(1 + 2N + 2*C*(O-1+B))  (factor flips, if include_factor_flips)
              + W_PATH_COEF*min(MAX_DECOMPOSITION_PATHS, E*E) (path decomp)
 
     where S=n_samples, O=len(options), N=n_nodes, E=n_edges, W=N+E (per-evaluate()
@@ -534,6 +543,24 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
         terms["e_values"] = W_EVAL_COEF * E * O
         terms["bands"] = W_BANDS_COEF * E * O
 
+    # Factor flips (ROADMAP 2.228-F3). The evaluate() count is BOUNDED IN CLOSED
+    # FORM by the phase's own structure, not estimated:
+    #     baseline winner          O
+    #     candidate screen         2*O per eligible root factor, and eligible root
+    #                              factors <= N (a factor cannot outnumber the nodes)
+    #     crossing confirmations   <= 2*(O-1) probes per candidate, O evaluates each
+    #     stability bands          B backgrounds x 2*O evaluates per candidate
+    # with the candidate count capped at FACTOR_FLIP_MAX_CANDIDATES. Each evaluate()
+    # costs ~W, matching the base_mc convention (cost = evaluates x W).
+    #
+    # DERIVED, NOT MIRRORED (trap 12): the cap and the seed count are read from the
+    # analyzer itself, so raising either one raises the admitted price automatically
+    # and this term can never drift out of step with the loop it prices.
+    if request.include_factor_flips:
+        candidate_cap = RobustnessAnalyzerV2.FACTOR_FLIP_MAX_CANDIDATES
+        evaluates = O * (1 + 2 * N + 2 * candidate_cap * (max(O - 1, 0) + FLIP_STABILITY_N_SEEDS))
+        terms["factor_flips"] = W_FACTOR_FLIP_COEF * evaluates * W
+
     # Path decomposition — analytic, path-count bounded.
     if request.include_path_decomposition:
         terms["path_decomposition"] = W_PATH_COEF * min(MAX_DECOMPOSITION_PATHS, E * E)
@@ -558,6 +585,7 @@ def build_compute_admission() -> Dict[str, Any]:
             "evpc_coef": W_EVPC_COEF,
             "evppi_full_coef": W_EVPPI_COEF,
             "evppi_null_permutations": REGRESSION_EVPPI_NULL_PERMUTATIONS,
+            "factor_flip_coef": W_FACTOR_FLIP_COEF,
             "influence_walk_pool": MAX_INFLUENCE_WALK_CALLS_TOTAL,
             "sensitivity_coef": W_SENS_COEF,
             "evalue_coef": W_EVAL_COEF,
@@ -1995,6 +2023,53 @@ class RobustnessAnalyzerV2:
                                 )
                             )
 
+        # ROADMAP 2.228-F3: per-root-factor flip thresholds. OPTIONAL phase,
+        # request-gated by include_factor_flips and default OFF, so a consumer
+        # that has not opted in sees a byte-identical response. Placed here so it
+        # runs on the same epsilon-disabled evaluator the E-value sweep uses (the
+        # closed form is only exact once the noise is off) and under the same
+        # governing request budget, degrading with disclosure rather than
+        # stacking a phase past the deadline.
+        factor_flip_values = None
+        if request.include_factor_flips:
+            remaining_ms = _budget_remaining_ms()
+            if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
+                elapsed_ms = _elapsed_ms()
+                self.logger.info(
+                    "factor_flip_budget_exceeded",
+                    extra={"elapsed_ms": elapsed_ms, "reason": "request_budget_exhausted"},
+                )
+                inference_warnings.append(
+                    self._optional_phase_unavailable_warning(
+                        "FACTOR_FLIPS_UNAVAILABLE",
+                        # Top-level on the V2 envelope (like path_decomposition).
+                        "factor_flip_values",
+                        "request_budget_exhausted",
+                        elapsed_ms,
+                        "Factor-flip analysis was skipped: the request budget was "
+                        "exhausted before it could run. Base analysis is unaffected.",
+                    )
+                )
+            else:
+                factor_flip_values = self._compute_factor_flip_values(
+                    request,
+                    evaluator,
+                    seed,
+                    budget_ms=min(self.FACTOR_FLIP_BUDGET_MS, remaining_ms),
+                )
+                if factor_flip_values is None:
+                    elapsed_ms = _elapsed_ms()
+                    inference_warnings.append(
+                        self._optional_phase_unavailable_warning(
+                            "FACTOR_FLIPS_UNAVAILABLE",
+                            "factor_flip_values",
+                            "factor_flip_budget_exceeded",
+                            elapsed_ms,
+                            "Factor-flip analysis exceeded its time budget and was "
+                            "omitted (all-or-nothing). Base analysis is unaffected.",
+                        )
+                    )
+
         # Find recommended option (needed before EVPI to fix decision policy)
         recommended_option_id = max(option_wins, key=lambda k: option_wins[k])
         recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
@@ -2261,6 +2336,7 @@ class RobustnessAnalyzerV2:
             conditional_winners=conditional_winners,
             stability_thresholds=stability_thresholds,
             edge_e_values=edge_e_values,
+            factor_flip_values=factor_flip_values,
             p_win_sensitivity=p_win_sensitivity,
             factor_evppi=factor_evppi,
             factor_evpc=factor_evpc,
@@ -4702,6 +4778,19 @@ class RobustnessAnalyzerV2:
                 if sorted_test[0][0] == baseline_winner:
                     continue  # This direction cannot flip — skip
 
+                # ROADMAP 2.228-F3: retain the argmax on the FLIPPED side, which
+                # this search already computes and used to discard.
+                #
+                # Why tracking the most recent flipping evaluation is EXACT rather
+                # than approximate: below, `hi` is assigned ONLY inside the
+                # flip branch when direction == "increase", and `lo` ONLY inside it
+                # when direction == "decrease". The reported flip_mean is exactly
+                # that endpoint. So the argmax recorded at the last such assignment
+                # IS the argmax at flip_mean. If no bisection step ever flipped, the
+                # endpoint is still the boundary probed just above, whose argmax is
+                # what we seed here. Zero extra evaluations either way.
+                alternative_winner = sorted_test[0][0]
+
                 # Binary search for the flip point
                 for _ in range(self.E_VALUE_BISECT_STEPS):
                     # Inner budget check — abort if time exceeded mid-search
@@ -4727,6 +4816,7 @@ class RobustnessAnalyzerV2:
                     sorted_test = sorted(test_outcomes.items(), key=lambda x: (-x[1], x[0]))
                     if sorted_test[0][0] != baseline_winner:
                         # Flip happened — narrow toward current_mean
+                        alternative_winner = sorted_test[0][0]
                         if direction == "increase":
                             hi = mid
                         else:
@@ -4758,6 +4848,8 @@ class RobustnessAnalyzerV2:
                         "flip_direction": direction,
                         "current_mean": current_mean,
                         "flip_mean": round(flip_mean, 6),
+                        "alternative_winner_id": alternative_winner,
+                        "baseline_winner_id": baseline_winner,
                     }
                 )
                 flip_found = True
@@ -4774,6 +4866,11 @@ class RobustnessAnalyzerV2:
                         "flip_direction": "increase",
                         "current_mean": current_mean,
                         "flip_mean": current_mean,
+                        # No flip exists, so there is no alternative winner to
+                        # name. Emitting the runner-up here would manufacture a
+                        # claim the search explicitly disproved.
+                        "alternative_winner_id": None,
+                        "baseline_winner_id": baseline_winner,
                     }
                 )
 
@@ -4790,6 +4887,37 @@ class RobustnessAnalyzerV2:
     # budget does trip, the flip_stability_budget_exceeded event disclosing
     # elapsed_ms is the find-out-it-was-slow signal — never a silent cut).
     FLIP_STABILITY_BUDGET_MS = 30000
+
+    def _sample_flip_backgrounds(
+        self,
+        request: RobustnessRequestV2,
+        master_seed: int,
+        n_seeds: int,
+        tag: str,
+    ) -> List[Dict[Tuple[str, str], float]]:
+        """N sampled edge backgrounds for a stability sweep, one per child seed.
+
+        Child seeds are SHA-256-derived (process-safe, NOT Python ``hash()``) from
+        ``f"{master_seed}:{tag}:{i}"`` — the same sub-seed pattern as the per-edge
+        marginal-switch and per-factor EVPI streams. Deriving them never consumes
+        any existing RNG stream, so every other number in the response is
+        unchanged by the sweep.
+
+        ``tag`` NAMESPACES the sweep. Two sweeps sharing a tag would draw
+        identical backgrounds, silently correlating what are meant to be
+        independent stability statements; each caller therefore passes its own
+        (edge bands: "flip_stability"; factor bands: "factor_flip_stability").
+        Extracted rather than duplicated so the two tags are derived from one
+        place and a test can observe both call sites.
+        """
+        backgrounds: List[Dict[Tuple[str, str], float]] = []
+        for i in range(n_seeds):
+            child_seed = int(
+                hashlib.sha256(f"{master_seed}:{tag}:{i}".encode()).hexdigest()[:8], 16
+            )
+            sweep_sampler = DualUncertaintySampler(request.graph.edges, SeededRNG(child_seed))
+            backgrounds.append(sweep_sampler.sample_edge_configuration())
+        return backgrounds
 
     def _attach_flip_stability_bands(
         self,
@@ -4857,19 +4985,10 @@ class RobustnessAnalyzerV2:
         t0 = time.monotonic()
         n_seeds = FLIP_STABILITY_N_SEEDS
 
-        # Child seeds: SHA-256-derived (process-safe, NOT Python hash()) —
-        # the same sub-seed pattern as the per-edge marginal-switch and
-        # per-factor EVPI streams.
-        child_seeds = [
-            int(hashlib.sha256(f"{master_seed}:flip_stability:{i}".encode()).hexdigest()[:8], 16)
-            for i in range(n_seeds)
-        ]
-
         # One sampled background per child seed, shared across all edges.
-        backgrounds: List[Dict[Tuple[str, str], float]] = []
-        for child_seed in child_seeds:
-            sweep_sampler = DualUncertaintySampler(request.graph.edges, SeededRNG(child_seed))
-            backgrounds.append(sweep_sampler.sample_edge_configuration())
+        backgrounds = self._sample_flip_backgrounds(
+            request, master_seed, n_seeds, "flip_stability"
+        )
 
         edges_by_key = {(e.from_, e.to): e for e in request.graph.edges}
 
@@ -5001,6 +5120,448 @@ class RobustnessAnalyzerV2:
             return hi if direction == "increase" else lo
 
         return None
+
+    # =====================================================================
+    # ROADMAP 2.228-F3 — factor-value flip thresholds
+    # =====================================================================
+    #
+    # WHAT THIS REPLACES. PLoT used to hunt factor flip thresholds by re-running
+    # a full Monte Carlo analysis per probe value (up to ~60 sequential HTTP
+    # calls under a 30 s budget). The diagnosis proved with a live control that
+    # the factors it selected were mathematically incapable of flipping the
+    # winner: 43 rows, 16 timeout / 13 error / 14 no_effect, ZERO found. Both the
+    # candidate selection and the probe mechanism are replaced here.
+    #
+    # WHY A CLOSED FORM IS EXACT, NOT AN APPROXIMATION. Before every post-MC
+    # structural analysis the evaluator's epsilon noise is disabled
+    # (``evaluator._epsilon_rng = None``), and SCMEvaluatorV2.evaluate is then
+    # ``base + intercept + sum(parent_value * strength)`` — linear and additive.
+    # For a ROOT factor F, ``base`` is exactly F's value, so at any FIXED edge
+    # background each option's goal is exactly affine in F:
+    #
+    #     goal_o(F) = A_o + T_o * F
+    #
+    # Two evaluations per option (at F = 0 and F = 1) determine (A_o, T_o)
+    # exactly, and the leader/rival crossing is algebra. There is no bisection,
+    # no sampling, and therefore NO sampling error to disclose — which is why the
+    # only uncertainty this phase publishes is the stability band.
+    #
+    # An option that intervenes on F has T_o = 0 because do(F=v) overrides the
+    # structural equation entirely; an option that intervenes on a node
+    # DOWNSTREAM of F severs F's path and also drives T_o toward 0. Both fall out
+    # of the measurement — nothing about interventions is special-cased.
+
+    # Wall-clock budget for the whole phase. ALL-OR-NOTHING on exceed (nothing is
+    # attached and FACTOR_FLIPS_UNAVAILABLE is disclosed) — the same semantics as
+    # E_VALUE_BUDGET_MS, for the same reason: a partial block would bias a reader
+    # toward whichever factors happened to be computed first.
+    FACTOR_FLIP_BUDGET_MS = 8000
+
+    # At most this many candidates get the crossing + band treatment, ranked by
+    # descending slope spread. Candidates below the cut are still EMITTED, with
+    # flip_reason 'candidate_cap_exceeded' — a silent omission here would recreate
+    # the exact defect this roadmap item exists to remove.
+    FACTOR_FLIP_MAX_CANDIDATES = 10
+
+    # Candidate rule: F can move the argmax iff the per-option transmission slopes
+    # differ. The live control measured non-candidates identical to 16 significant
+    # figures, so 1e-9 sits far above the observed floor of the class while still
+    # being tight enough that a real difference is never rounded away.
+    FACTOR_FLIP_SLOPE_EPSILON = 1e-9
+
+    # Domain of observed_state.value on the normalised wire.
+    FACTOR_VALUE_MIN = 0.0
+    FACTOR_VALUE_MAX = 1.0
+
+    # Offset placing the argmax CONFIRMATION strictly on the far side of a
+    # candidate crossing. Clamped to half the distance to the next crossing, so
+    # the confirmation can never step over a second crossing and attribute the
+    # wrong alternative winner.
+    FACTOR_FLIP_CONFIRM_EPSILON = 1e-6
+
+    def _option_goals(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        edge_config: Dict[Tuple[str, str], float],
+        factor_values: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, float]:
+        """Per-option goal value under one edge background and factor override."""
+        return {
+            option.id: evaluator.evaluate(
+                edge_strengths=edge_config,
+                interventions=option.interventions,
+                goal_node=request.goal_node_id,
+                factor_values=factor_values,
+            )
+            for option in request.options
+        }
+
+    @staticmethod
+    def _argmax_option(outcomes: Dict[str, float]) -> str:
+        """Analyzer-wide deterministic argmax: highest outcome, then lowest id."""
+        return sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))[0][0]
+
+    @classmethod
+    def _affine_coefficients(
+        cls, at_min: Dict[str, float], at_max: Dict[str, float]
+    ) -> Tuple[Dict[str, float], Dict[str, float]]:
+        """(intercepts A_o, slopes T_o) from goals measured at the domain ends."""
+        span = cls.FACTOR_VALUE_MAX - cls.FACTOR_VALUE_MIN
+        slopes = {oid: (at_max[oid] - at_min[oid]) / span for oid in at_min}
+        intercepts = {oid: at_min[oid] - slopes[oid] * cls.FACTOR_VALUE_MIN for oid in at_min}
+        return intercepts, slopes
+
+    def _evaluated_argmax_probe(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        edge_config: Dict[Tuple[str, str], float],
+        factor_id: str,
+    ) -> Callable[[float], str]:
+        """Argmax at a given value of ONE factor, via real evaluations.
+
+        A factory rather than an inline closure: the caller builds one per factor
+        inside a loop, and a closure over the loop variable is a footgun even
+        where it happens to be consumed immediately.
+        """
+
+        def probe(value: float) -> str:
+            return self._argmax_option(
+                self._option_goals(request, evaluator, edge_config, {factor_id: value})
+            )
+
+        return probe
+
+    @classmethod
+    def _affine_argmax_probe(
+        cls, intercepts: Dict[str, float], slopes: Dict[str, float]
+    ) -> Callable[[float], str]:
+        """Argmax of the affine family, by arithmetic only — zero evaluations.
+
+        Exact for the same reason the crossing is exact (the SCM is affine in a
+        root factor's value once epsilon noise is off), which is what keeps the
+        per-background band cost at the 2 * O evaluations the budget model
+        assumes.
+        """
+
+        def probe(value: float) -> str:
+            return cls._argmax_option(
+                {oid: intercepts[oid] + slopes[oid] * value for oid in intercepts}
+            )
+
+        return probe
+
+    @classmethod
+    def _nearest_confirmed_crossing(
+        cls,
+        intercepts: Dict[str, float],
+        slopes: Dict[str, float],
+        baseline_winner: str,
+        current_value: float,
+        confirm: Callable[[float], str],
+    ) -> Optional[Tuple[float, str, str]]:
+        """Nearest in-bounds crossing at which the ARGMAX actually changes.
+
+        Returns ``(flip_value, direction, alternative_winner_id)`` or None.
+
+        Every rival's crossing with the leader is enumerated in closed form,
+        F* = (A_i - A_j)/(T_j - T_i), skipping parallel rivals (a degenerate
+        denominator is not a near-crossing, it is NO crossing — dividing anyway
+        would manufacture a huge spurious value). Each candidate crossing is then
+        CONFIRMED by asking for the argmax strictly on its far side, because a
+        pairwise crossing is not necessarily an argmax change when a third option
+        is above both lines there (design R6). Crossings are walked outward from
+        current_value, so the first confirmation on each side is the nearest real
+        flip; both sides are computed and the closer one wins, with 'increase'
+        breaking a tie (mirroring _compute_edge_e_values, which tries 'increase'
+        first).
+        """
+        crossings: List[float] = []
+        for oid in intercepts:
+            if oid == baseline_winner:
+                continue
+            denom = slopes[oid] - slopes[baseline_winner]
+            if abs(denom) <= cls.FACTOR_FLIP_SLOPE_EPSILON:
+                continue  # parallel to the leader — they never meet
+            f_star = (intercepts[baseline_winner] - intercepts[oid]) / denom
+            if cls.FACTOR_VALUE_MIN <= f_star <= cls.FACTOR_VALUE_MAX:
+                crossings.append(f_star)
+        if not crossings:
+            return None
+
+        ordered = sorted(set(crossings))
+        above = [c for c in ordered if c > current_value]
+        descending_below = sorted((c for c in ordered if c < current_value), reverse=True)
+
+        found_up: Optional[Tuple[float, str, str]] = None
+        for idx, crossing in enumerate(above):
+            upper = above[idx + 1] if idx + 1 < len(above) else cls.FACTOR_VALUE_MAX
+            step = (
+                min(cls.FACTOR_FLIP_CONFIRM_EPSILON, (upper - crossing) / 2.0)
+                if upper > crossing
+                else 0.0
+            )
+            winner = confirm(crossing + step)
+            if winner != baseline_winner:
+                found_up = (crossing, "increase", winner)
+                break
+
+        found_down: Optional[Tuple[float, str, str]] = None
+        for idx, crossing in enumerate(descending_below):
+            lower = (
+                descending_below[idx + 1]
+                if idx + 1 < len(descending_below)
+                else cls.FACTOR_VALUE_MIN
+            )
+            step = (
+                min(cls.FACTOR_FLIP_CONFIRM_EPSILON, (crossing - lower) / 2.0)
+                if crossing > lower
+                else 0.0
+            )
+            winner = confirm(crossing - step)
+            if winner != baseline_winner:
+                found_down = (crossing, "decrease", winner)
+                break
+
+        if found_up is None:
+            return found_down
+        if found_down is None:
+            return found_up
+        if abs(found_down[0] - current_value) < abs(found_up[0] - current_value):
+            return found_down
+        return found_up
+
+    def _compute_factor_flip_values(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        master_seed: int,
+        budget_ms: Optional[float] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Per-root-factor flip thresholds (design §2.1/§2.2).
+
+        Returns one attested row per eligible root factor, or None when the
+        wall-clock budget tripped (all-or-nothing; the caller then discloses
+        FACTOR_FLIPS_UNAVAILABLE on the wire).
+
+        Eligibility: a node with no parents (the same ``is_root`` test
+        SCMEvaluatorV2.evaluate itself applies when deciding whether
+        observed_state.value is a node's base), that is not the goal, and that
+        carries either an observed value or a parameter_uncertainties entry.
+        Non-root nodes are excluded because ``factor_values`` would ADD to their
+        parent contribution rather than replace a base, so the affine reading
+        would not describe the quantity a consumer thinks it does.
+        """
+        budget = budget_ms if budget_ms is not None else self.FACTOR_FLIP_BUDGET_MS
+        # Monotonic clock: an NTP step must not corrupt the elapsed guard.
+        t0 = time.monotonic()
+
+        def _tripped(rows_done: int) -> bool:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            if elapsed_ms <= budget:
+                return False
+            self.logger.info(
+                "factor_flip_budget_exceeded",
+                extra={"elapsed_ms": round(elapsed_ms, 1), "factors_completed": rows_done},
+            )
+            return True
+
+        baseline_config = {
+            (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
+        }
+        baseline_winner = self._argmax_option(
+            self._option_goals(request, evaluator, baseline_config)
+        )
+
+        uncertainty_ids = {u.node_id for u in (request.parameter_uncertainties or [])}
+        eligible = [
+            node
+            for node in request.graph.nodes
+            if node.id != request.goal_node_id
+            and not evaluator._parents.get(node.id)
+            and (
+                (node.observed_state is not None and node.observed_state.value is not None)
+                or node.id in uncertainty_ids
+            )
+        ]
+        if not eligible:
+            return []
+
+        # --- Candidate screen (§2.1): 2 * O evaluations per factor, and NOTHING
+        # more for a factor that fails it. This is the whole point of the rule —
+        # the provably-inert class costs the screen and never a probe.
+        screened: List[Dict[str, Any]] = []
+        for node in eligible:
+            if _tripped(len(screened)):
+                return None
+            at_min = self._option_goals(
+                request, evaluator, baseline_config, {node.id: self.FACTOR_VALUE_MIN}
+            )
+            at_max = self._option_goals(
+                request, evaluator, baseline_config, {node.id: self.FACTOR_VALUE_MAX}
+            )
+            intercepts, slopes = self._affine_coefficients(at_min, at_max)
+            screened.append(
+                {
+                    "node": node,
+                    "intercepts": intercepts,
+                    "slopes": slopes,
+                    "spread": max(slopes.values()) - min(slopes.values()),
+                    "current_value": (
+                        node.observed_state.value
+                        if node.observed_state is not None
+                        and node.observed_state.value is not None
+                        else 0.0
+                    ),
+                }
+            )
+
+        candidates = [s for s in screened if s["spread"] > self.FACTOR_FLIP_SLOPE_EPSILON]
+        # Deterministic ranking: widest slope spread first, factor id as the
+        # tie-break so the same request always caps the same way.
+        candidates.sort(key=lambda s: (-s["spread"], s["node"].id))
+        selected_ids = {s["node"].id for s in candidates[: self.FACTOR_FLIP_MAX_CANDIDATES]}
+
+        backgrounds: Optional[List[Dict[Tuple[str, str], float]]] = None
+        if selected_ids:
+            # Sampled ONLY when there is a candidate to band — an all-invariant
+            # graph must not pay for a sweep whose rows would be discarded.
+            backgrounds = self._sample_flip_backgrounds(
+                request, master_seed, FLIP_STABILITY_N_SEEDS, "factor_flip_stability"
+            )
+
+        rows: List[Dict[str, Any]] = []
+        for entry in screened:  # graph order, so the block is stable across runs
+            node = entry["node"]
+            row: Dict[str, Any] = {
+                "factor_id": node.id,
+                "current_value": entry["current_value"],
+                "flip_value": None,
+                "direction": None,
+                "flip_reason": "structurally_invariant",
+                "alternative_winner_id": None,
+                "baseline_winner_id": baseline_winner,
+            }
+
+            if entry["spread"] <= self.FACTOR_FLIP_SLOPE_EPSILON:
+                # Provably inert: every option transmits this factor identically,
+                # so no value of it can move the argmax. Attested, not probed.
+                rows.append(row)
+                continue
+
+            if node.id not in selected_ids:
+                row["flip_reason"] = "candidate_cap_exceeded"
+                rows.append(row)
+                continue
+
+            if _tripped(len(rows)):
+                return None
+
+            confirmed = self._nearest_confirmed_crossing(
+                entry["intercepts"],
+                entry["slopes"],
+                baseline_winner,
+                entry["current_value"],
+                confirm=self._evaluated_argmax_probe(
+                    request, evaluator, baseline_config, node.id
+                ),
+            )
+            if confirmed is None:
+                row["flip_reason"] = "no_effect_within_bounds"
+            else:
+                flip_value, direction, alternative = confirmed
+                row["flip_value"] = round(flip_value, 6)
+                row["direction"] = direction
+                row["flip_reason"] = "found"
+                row["alternative_winner_id"] = alternative
+
+            band = self._factor_flip_band(
+                request, evaluator, node, entry["current_value"], backgrounds or [], t0, budget
+            )
+            if band is None:
+                return None  # budget tripped mid-sweep — all-or-nothing
+            row["stability"] = band
+            rows.append(row)
+
+        return rows
+
+    def _factor_flip_band(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+        node: NodeV2,
+        current_value: float,
+        backgrounds: List[Dict[Tuple[str, str], float]],
+        t0: float,
+        budget: float,
+    ) -> Optional[Dict[str, Any]]:
+        """Seed-sweep stability band for one factor's flip value.
+
+        Same pattern as the edge bands: one sampled edge background per child
+        seed, SHARED across factors (common random numbers, so bands are
+        comparable row to row), and the flip re-derived under each. Re-derivation
+        is closed form — 2 * O evaluations per background to re-measure the
+        slopes, then pure arithmetic — which is why this costs roughly a tenth of
+        the edge bands' bisection sweep.
+
+        The per-background confirmation is arithmetic on the affine family rather
+        than another evaluation. That is exact for the same reason the base
+        crossing is exact, and it keeps the per-background cost at the 2 * O the
+        budget model assumes.
+
+        Returns the band dict, or None when the wall-clock budget tripped.
+        """
+        seed_flip_values: List[Optional[float]] = []
+        for background in backgrounds:
+            elapsed_ms = (time.monotonic() - t0) * 1000
+            if elapsed_ms > budget:
+                self.logger.info(
+                    "factor_flip_budget_exceeded",
+                    extra={
+                        "elapsed_ms": round(elapsed_ms, 1),
+                        "phase": "stability_bands",
+                        "factor_id": node.id,
+                    },
+                )
+                return None
+            at_min = self._option_goals(
+                request, evaluator, background, {node.id: self.FACTOR_VALUE_MIN}
+            )
+            at_max = self._option_goals(
+                request, evaluator, background, {node.id: self.FACTOR_VALUE_MAX}
+            )
+            intercepts, slopes = self._affine_coefficients(at_min, at_max)
+            # The winner THIS background starts from — derived from the affine
+            # family, not re-evaluated, and not assumed to equal the
+            # expected-value baseline winner (a sampled background may well be
+            # led by a different option, and pretending otherwise would report a
+            # flip against a leader that background never had).
+            affine_argmax = self._affine_argmax_probe(intercepts, slopes)
+            background_winner = affine_argmax(current_value)
+            confirmed = self._nearest_confirmed_crossing(
+                intercepts,
+                slopes,
+                background_winner,
+                current_value,
+                confirm=affine_argmax,
+            )
+            seed_flip_values.append(round(confirmed[0], 6) if confirmed is not None else None)
+
+        flipped = [v for v in seed_flip_values if v is not None]
+        band: Dict[str, Any] = {
+            "n_seeds": len(backgrounds),
+            "n_seeds_flipped": len(flipped),
+            "seed_flip_values": seed_flip_values,
+        }
+        if flipped:
+            band_min = min(flipped)
+            band_max = max(flipped)
+            band["band_min"] = band_min
+            band["band_median"] = round(float(statistics.median(flipped)), 6)
+            band["band_max"] = band_max
+            band["band_width"] = round(band_max - band_min, 6)
+        return band
 
     def _compute_factor_evppi(
         self,

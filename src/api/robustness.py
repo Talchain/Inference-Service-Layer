@@ -38,6 +38,7 @@ from src.models.response_v2 import (
     DiagnosticsV2,
     DownsideV2,
     EdgeEValueV2,
+    FactorFlipValueV2,
     EdgeSensitivityV2,
     FactorSensitivityV2,
     FlipStabilityBandV2,
@@ -1110,6 +1111,12 @@ async def _analyze_robustness_v2_enhanced(
                             flip_direction=ev["flip_direction"],
                             current_mean=ev["current_mean"],
                             flip_mean=ev["flip_mean"],
+                            # ROADMAP 2.228-F3 — additive winner capture. .get()
+                            # rather than [] so an analyzer result built before
+                            # this field existed (or by a caller constructing the
+                            # dict directly) maps to None instead of raising.
+                            alternative_winner_id=ev.get("alternative_winner_id"),
+                            baseline_winner_id=ev.get("baseline_winner_id"),
                             stability=(
                                 FlipStabilityBandV2(**stability_raw) if stability_raw else None
                             ),
@@ -1312,6 +1319,15 @@ async def _analyze_robustness_v2_enhanced(
                         for p in pd.paths
                     ],
                 )
+            )
+
+        # ROADMAP 2.228-F3: per-root-factor flip thresholds (additive;
+        # request-gated by include_factor_flips). The analyzer emits dict rows
+        # like the other factor blocks; the WIRE model is typed, so a malformed
+        # row fails loud here rather than reaching a consumer as an untyped bag.
+        if v1_response.factor_flip_values is not None:
+            builder.set_factor_flip_values(
+                [FactorFlipValueV2(**row) for row in v1_response.factor_flip_values]
             )
 
         # T1-5: Reference-option disclosure (additive). Edge sensitivity,

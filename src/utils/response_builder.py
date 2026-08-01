@@ -26,6 +26,7 @@ from src.models.response_v2 import (
     CorrelationModelV2,
     CritiqueV2,
     DiagnosticsV2,
+    FactorFlipValueV2,
     FactorSensitivityV2,
     InferenceWarning,
     ISLV2Error422,
@@ -162,6 +163,10 @@ class ResponseBuilder:
         self.sample_population_provenance: Optional[SamplePopulationProvenanceV2] = None
         # T1-6: path decomposition passthrough (request-gated; additive)
         self.path_decomposition: Optional[PathDecompositionV2] = None
+        # ROADMAP 2.228-F3: per-root-factor flip thresholds (request-gated by
+        # include_factor_flips; additive). None => absent on the wire, which is
+        # the state every consumer that has not opted in must observe.
+        self.factor_flip_values: Optional[List[FactorFlipValueV2]] = None
         # T1-5: reference-option disclosure for sensitivity analyses (additive)
         self.sensitivity_reference_option_id: Optional[str] = None
         # B3-S1: correlated-factors disclosure (present iff correlation active)
@@ -248,6 +253,10 @@ class ResponseBuilder:
     def set_path_decomposition(self, path_decomposition: Optional[PathDecompositionV2]) -> None:
         """Set the path decomposition passthrough (T1-6 wire completeness)."""
         self.path_decomposition = path_decomposition
+
+    def set_factor_flip_values(self, factor_flip_values: Optional[List[FactorFlipValueV2]]) -> None:
+        """Set the per-factor flip-threshold block (ROADMAP 2.228-F3)."""
+        self.factor_flip_values = factor_flip_values
 
     def set_sensitivity_reference_option_id(self, option_id: Optional[str]) -> None:
         """Set the reference-option disclosure for sensitivity analyses (T1-5)."""
@@ -359,6 +368,7 @@ class ResponseBuilder:
             factor_evpc=self.factor_evpc,  # S4 — A3 value-of-control (D-23.8)
             decision_evpi=self.decision_evpi,  # S1 — A3 VOI (D-23.8)
             path_decomposition=self.path_decomposition,  # T1-6
+            factor_flip_values=self.factor_flip_values,  # ROADMAP 2.228-F3
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
             correlation_model=self.correlation_model,  # B3-S1
             auto_noise_applied=self.auto_noise_applied,
