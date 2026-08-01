@@ -40,7 +40,7 @@ With n_samples=10000 one standard error on a p~0.5 estimate is ~0.005, so every
 assertion below uses a 0.02 tolerance (~4 s.e.).
 """
 
-import math
+from typing import get_args
 
 import pytest
 
@@ -636,3 +636,176 @@ class TestNormalisedDomainGuard:
         response = analyse(goal_threshold=59.0, goal_threshold_frame="delta", baseline=49.0)
         assert response.results[0].probability_of_goal == 0.0
         assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
+
+
+# =============================================================================
+# 8. ROADMAP 2.279 — GOAL_OBSERVED_VALUE_UNUSED fires only when ACTIONABLE
+# =============================================================================
+
+
+def _declared_frames():
+    """The frame Literal, read from the model rather than hand-listed here."""
+    frames: set = set()
+    for arg in get_args(RobustnessRequestV2.model_fields["goal_threshold_frame"].annotation):
+        frames.update(get_args(arg))
+    return frames
+
+
+class TestObservedValueUnusedIsActionable:
+    """A warning that fires on every SUCCESS is a broken alarm.
+
+    ``ObservedState.value`` is a REQUIRED field, so once CEE populates a goal's
+    observed_state (CEE #787) every successfully-converted 'level' analysis
+    carries one — and GOAL_OBSERVED_VALUE_UNUSED, which fires for any non-root
+    goal whose observed_state.value is present, would fire on all of them. The
+    UI renders it on five surfaces, so that is visible noise on every healthy
+    goal analysis.
+
+    The suppression is keyed to CONSUMPTION, not to "a threshold was asked
+    for": when this run's conversion actually read the goal's
+    observed_state.baseline, the observed_state did its job and the warning has
+    nothing to say. On every run where it did NOT — no threshold, 'delta'
+    frame, unstamped frame, or any convertibility refusal — the observed_state
+    genuinely IS unused, the warning is actionable, and it must keep firing.
+    That firing case is also the diagnostic surface for #786/#787, so blanket
+    suppression would blind it.
+    """
+
+    CODE = "GOAL_OBSERVED_VALUE_UNUSED"
+
+    def test_converted_run_drops_the_warning(self):
+        """RED-FIRST (a). Before the fix this run carried the warning.
+
+        The probability assertion is a positive control ON THE FIXTURE: it
+        proves the conversion actually SUCCEEDED, so the absence below is
+        suppression-on-consumption and not an analysis that quietly failed.
+        """
+        response = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+
+        assert response.results[0].probability_of_goal == pytest.approx(0.60, abs=TOL), (
+            "fixture control: this run must CONVERT, otherwise the assertion "
+            "below would pass for the wrong reason"
+        )
+        assert warnings_by_code(response, self.CODE) == [], (
+            "the conversion consumed observed_state.baseline, so the "
+            "observed_state was used — this warning fires on every successful "
+            "goal analysis and is a broken alarm"
+        )
+
+    def test_no_threshold_keeps_the_warning(self):
+        """POSITIVE CONTROL (b). No threshold -> no conversion -> the
+        observed_state genuinely went unused. Green BEFORE and AFTER the fix;
+        this is what proves the fix is not a blanket suppression."""
+        response = analyse(goal_threshold=None, goal_threshold_frame=None)
+
+        found = warnings_by_code(response, self.CODE)
+        assert len(found) == 1
+        assert found[0].field == "nodes[g].observed_state.value"
+        assert found[0].detail["observed_value"] == pytest.approx(0.7)
+        assert found[0].detail["reason"] == "non_root_goal_forward_propagation"
+        # Name and severity are deliberately untouched by 2.279.
+        assert found[0].code == "GOAL_OBSERVED_VALUE_UNUSED"
+        assert found[0].severity == "info"
+
+    def test_delta_frame_keeps_the_warning(self):
+        """POSITIVE CONTROL. 'delta' resolves to a non-None threshold WITHOUT
+        reading the baseline, so the observed_state is still unused. Pins that
+        the predicate keys on consumption, not on "a threshold resolved"."""
+        response = analyse(goal_threshold=0.2, goal_threshold_frame="delta", baseline=0.7)
+
+        assert response.results[0].probability_of_goal == pytest.approx(0.60, abs=TOL)
+        assert len(warnings_by_code(response, self.CODE)) == 1
+
+    @pytest.mark.parametrize(
+        "kwargs,reason",
+        [
+            ({"goal_threshold_frame": None}, "frame_not_stamped"),
+            ({"goal_threshold_frame": "level", "baseline": None}, "missing_goal_baseline"),
+            (
+                {"goal_threshold_frame": "level", "baseline": 59.0},
+                "goal_values_outside_normalised_domain",
+            ),
+        ],
+    )
+    def test_every_refusal_keeps_the_warning(self, kwargs, reason):
+        """POSITIVE CONTROLS. A conversion that REFUSED consumed nothing, so the
+        observed_state is genuinely unused and the warning is actionable.
+
+        These are also #786/#787's diagnostic surface — suppressing here would
+        blind the exact runs an operator needs to see.
+        """
+        response = analyse(goal_threshold=0.9, **kwargs)
+
+        refusals = [
+            w
+            for w in response.inference_warnings
+            if w.code in ("GOAL_THRESHOLD_NOT_CONVERTIBLE", "GOAL_THRESHOLD_FRAME_UNSPECIFIED")
+        ]
+        assert [w.detail["reason"] for w in refusals] == [reason], "fixture control"
+        assert len(warnings_by_code(response, self.CODE)) == 1
+
+    def test_epsilon_clamp_refusal_keeps_the_warning(self):
+        """POSITIVE CONTROL. The clamp refusal reads the baseline to compute the
+        candidate, then refuses — nothing was CONSUMED because no threshold was
+        returned, so the warning stays."""
+        response = analyse(
+            goal_threshold=0.6,
+            goal_threshold_frame="level",
+            baseline=0.7,
+            goal_epsilon_std=0.001,
+        )
+
+        refusals = warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
+        assert [w.detail["reason"] for w in refusals] == [
+            "goal_epsilon_noise_clamps_samples"
+        ], "fixture control"
+        assert len(warnings_by_code(response, self.CODE)) == 1
+
+    def test_only_this_warning_differs_between_level_and_delta(self):
+        """CONTROL ON THE BLAST RADIUS. The same comparison expressed as a
+        converted 'level' and as an equivalent 'delta' must differ by EXACTLY
+        this one code — nothing else was suppressed, added or reordered."""
+        level = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        delta = analyse(goal_threshold=0.2, goal_threshold_frame="delta", baseline=0.7)
+
+        assert level.results[0].probability_of_goal == pytest.approx(
+            delta.results[0].probability_of_goal, abs=1e-12
+        )
+        level_codes = [w.code for w in level.inference_warnings]
+        delta_codes = [w.code for w in delta.inference_warnings]
+        assert level_codes == [c for c in delta_codes if c != "GOAL_OBSERVED_VALUE_UNUSED"]
+
+    def test_root_goal_is_untouched(self):
+        """CONTROL. A root goal never emitted this warning (only non-root goals
+        do) and still does not — 2.279 changes no other limb."""
+        response = analyse(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7, goal_is_root=True
+        )
+        assert warnings_by_code(response, self.CODE) == []
+
+
+class TestConsumptionPredicate:
+    """The predicate in isolation, and a guard against it going stale."""
+
+    def test_every_declared_frame_is_deliberately_classified(self):
+        """DRIFT GUARD (trap 12). The predicate treats 'level' as the only
+        baseline-consuming frame. If a third frame is ever added to the model,
+        this REDs instead of silently landing on the wrong side of it."""
+        assert _declared_frames() == {"level", "delta"}, (
+            "goal_threshold_frame gained or lost a value — re-derive whether it "
+            "reads observed_state.baseline and update "
+            "RobustnessAnalyzerV2._goal_baseline_was_consumed"
+        )
+
+    @pytest.mark.parametrize("frame,consumed", [("level", True), ("delta", False)])
+    def test_predicate_classifies_each_declared_frame(self, frame, consumed):
+        request = build_request(goal_threshold=0.2, goal_threshold_frame=frame, baseline=0.7)
+        value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(request)
+
+        assert value is not None and warning is None, "fixture control: both frames resolve"
+        assert RobustnessAnalyzerV2._goal_baseline_was_consumed(request, value) is consumed
+
+    def test_unresolved_threshold_is_never_consumed(self):
+        """A refusal returns None; None can never count as consumption."""
+        request = build_request(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        assert RobustnessAnalyzerV2._goal_baseline_was_consumed(request, None) is False
