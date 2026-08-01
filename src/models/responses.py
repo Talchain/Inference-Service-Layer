@@ -830,6 +830,22 @@ class ComputeAdmissionInfo(BaseModel):
     advertisement can never drift from enforcement. Consumers MUST version-guard
     on complexity_formula_version and fall back conservatively on an unknown
     version (the formula SHAPE is shared; only the numbers are advertised).
+
+    SUFFICIENCY CONTRACT (ROADMAP 2.260 step 3): between them `weights`,
+    `formula_parameters` and `caps` carry EVERY number the cost formula uses
+    that a consumer cannot derive from its own request, so a consumer holding
+    this block plus its own request can reproduce the price exactly for the
+    advertised formula shape. Enforced mechanically by
+    tests/unit/test_admission_calibration.py::TestAdvertisementSufficiency,
+    which reimplements the formula from these values alone and asserts
+    term-by-term equality.
+
+    `weights` is EXACT-SET-COUPLED to the formula version for consumers that
+    validate it (PLoT keys an expected key set by complexity_formula_version and
+    treats an unexpected key as skew), which is why per-term structural
+    parameters live in the SIBLING `formula_parameters` object instead of being
+    added to `weights` — see build_compute_admission.__doc__ for the full
+    rationale and for the drift-alarm this trades away.
     """
 
     max_cost_units: int = Field(
@@ -840,6 +856,18 @@ class ComputeAdmissionInfo(BaseModel):
     )
     weights: Dict[str, int] = Field(
         ..., description="Per-phase structural coefficients used by the cost formula."
+    )
+    formula_parameters: Dict[str, Dict[str, int]] = Field(
+        default_factory=dict,
+        description=(
+            "Per-term structural parameters, keyed by the term name the cost "
+            "breakdown uses (e.g. factor_flips.max_candidates, "
+            "sensitivity.subsample_cap). These are the bounds a term's own loop "
+            "applies, as distinct from the per-phase coefficients in `weights`; "
+            "a consumer needs both to reproduce the price. Sibling of `weights` "
+            "so it can grow without disturbing consumers that couple to the "
+            "`weights` key set."
+        ),
     )
     caps: Dict[str, int] = Field(
         ...,

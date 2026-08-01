@@ -231,6 +231,18 @@ EVPI_SAMPLE_CAP = 2000
 # than the 06-10 report's minimum "e.g. 5 seeds" recommendation.
 FLIP_STABILITY_N_SEEDS = 10
 
+# --- Edge-sensitivity sub-sweep sizing -----------------------------------------
+# Both edge-sensitivity sub-sweeps (_compute_existence_sensitivity and
+# _compute_magnitude_sensitivity) redraw `min(CAP, n_samples // DIVISOR)` samples
+# per sub-sweep. These were bare literals in THREE places — the two loop bodies
+# and the `sensitivity` pricing term — i.e. a hand-maintained mirror inside a
+# single file (programme trap 12). Naming them makes the loops and the price read
+# from one source, and lets the /health advertisement carry them so a planning
+# consumer can reproduce the term instead of hard-coding `min(100, S//10)` of its
+# own (PLoT does exactly that today — src/config/sampling.ts).
+SENSITIVITY_SUBSAMPLE_CAP = 100
+SENSITIVITY_SUBSAMPLE_DIVISOR = 10
+
 
 # =============================================================================
 # Weighted compute-admission cost model (Codex F8)
@@ -466,7 +478,7 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
              + (U+1)*min(S, EVPI_SAMPLE_CAP)*O*W           (EVPI/p_win, if include_voi & U>0)
              + W_EVPPI_COEF*U*(1+K)*S                      (full-pop EVPPI, if include_voi & U>0)
              + W_EVPC_COEF*S*W*Sum_c(len(c.values))        (EVPC, if control_candidates)
-             + W_SENS_COEF*E*min(100, S//10)*W             (edge sensitivity)
+             + W_SENS_COEF*E*min(SENS_CAP, S//SENS_DIV)*W  (edge sensitivity)
              + MAX_INFLUENCE_WALK_CALLS_TOTAL              (structural influence, if sensitivity & U>0)
              + W_EVAL_COEF*E*O                             (e-values, if include_e_values)
              + W_BANDS_COEF*E*O                            (bands, ride on e-values)
@@ -529,7 +541,12 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
 
     # Edge sensitivity — reference option only (not multiplied by O).
     if "sensitivity" in request.analysis_types:
-        terms["sensitivity"] = W_SENS_COEF * E * min(100, S // 10) * W
+        terms["sensitivity"] = (
+            W_SENS_COEF
+            * E
+            * min(SENSITIVITY_SUBSAMPLE_CAP, S // SENSITIVITY_SUBSAMPLE_DIVISOR)
+            * W
+        )
         # Structural influence (factor-sensitivity child; N2, D-23.19): charged at
         # the request-wide walk-pool ceiling (1 walk call ≈ 1 unit at the ceiling
         # anchor, measured ~0.77µs/call). Gate mirrors the phase gate
@@ -575,6 +592,42 @@ def build_compute_admission() -> Dict[str, Any]:
     Single source of truth: /health reads THIS, so the advertised ceiling,
     weights, and caps are exactly what the admission gate and the model enforce.
     ``max_cost_units`` is env-resolved (matches the live enforced ceiling).
+
+    SUFFICIENCY CONTRACT (ROADMAP 2.260 step 3). Between them, ``weights``,
+    ``formula_parameters`` and ``caps`` carry EVERY number
+    ``compute_weighted_cost`` uses that a consumer cannot derive from its own
+    request. Everything else is read off the caller's own request (S, O, N, E,
+    W=N+E, the unique uncertainty count, the control grid size).
+
+    The invariant: **a consumer holding this block plus its own request can
+    reproduce ``compute_weighted_cost`` exactly**, for the advertised formula
+    shape. Enforced mechanically, not by review —
+    ``tests/unit/test_admission_calibration.py::TestAdvertisementSufficiency``
+    reimplements the formula from the advertised values ALONE and asserts
+    term-by-term equality across a shape grid, so a new term (or a new constant
+    inside an existing term) that is not advertised breaks CI.
+
+    ⚠ WHY ``formula_parameters`` IS A SIBLING OF ``weights``, NOT PART OF IT.
+    ISL's own precedent would put these inside ``weights`` (``evpi_sample_cap``,
+    ``evppi_null_permutations``, ``influence_walk_pool`` and
+    ``max_decomposition_paths`` are already caps and counts living there). That
+    precedent is deliberately NOT followed, for a consumer-side reason verified
+    at the bytes on PLoT #302 (head 5fff2253): PLoT couples the ``weights`` KEY
+    SET exactly to the formula version — it requires every expected key present
+    (``compute-admission.ts:125-130``) AND treats any unexpected key as skew
+    (``:141-145``, ``:175-184``). Growing ``weights`` therefore forces a
+    lockstep PLoT release or PLoT degrades to its conservative fallback — the
+    very 10,000 -> 4,000 depth cut this change exists to lift. Sibling keys are
+    ignored by PLoT's shape check (``:110-122``), so this lands additively and a
+    consumer adopts the parameters when it is ready.
+
+    ⚠ THE COST OF THAT CHOICE, STATED PLAINLY. PLoT's unknown-weight-key guard
+    is a DRIFT ALARM: a new key inside ``weights`` tells PLoT that ISL's formula
+    grew something it does not price. Parameters here are OUTSIDE that alarm —
+    PLoT cannot detect their addition. That protection is therefore owed
+    entirely by ISL's own TestAdvertisementSufficiency (which is stronger, being
+    an equality rather than a key-set comparison) plus the formula version. Do
+    not add a parameter here believing a consumer will notice; it will not.
     """
     return {
         "max_cost_units": get_max_cost_units(),
@@ -592,6 +645,35 @@ def build_compute_admission() -> Dict[str, Any]:
             "bands_coef": W_BANDS_COEF,
             "path_coef": W_PATH_COEF,
             "max_decomposition_paths": MAX_DECOMPOSITION_PATHS,
+        },
+        # Per-term structural parameters (ROADMAP 2.260 step 3) — the numbers a
+        # term's own loop bounds itself by, as opposed to the per-phase
+        # coefficients in `weights`. Keyed BY TERM NAME (the same strings
+        # WeightedCost.terms uses), so a consumer can associate each parameter
+        # with the term it prices without a naming convention to remember.
+        # See build_compute_admission.__doc__ for why this is a sibling of
+        # `weights` rather than part of it.
+        "formula_parameters": {
+            # The `factor_flips` term is O*W*(1 + 2N + 2*C*(O-1+B)). C and B were
+            # the two numbers a consumer could not obtain, so the term was
+            # unpriceable from the advertisement and PLoT fell back conservatively
+            # — the silent 10,000 -> 4,000 depth cut that PLoT #302 made loud.
+            # DERIVED from the same symbols the term reads, so raising either
+            # raises the advertised price with it.
+            "factor_flips": {
+                "max_candidates": RobustnessAnalyzerV2.FACTOR_FLIP_MAX_CANDIDATES,
+                "stability_seeds": FLIP_STABILITY_N_SEEDS,
+            },
+            # The `sensitivity` term is W_SENS_COEF*E*min(CAP, S//DIVISOR)*W.
+            # Found by the 2.260 completeness audit, NOT by the original report:
+            # these were bare literals, so every consumer had to hard-code them
+            # (PLoT hard-codes `Math.min(100, Math.floor(S / 10))` at
+            # src/config/sampling.ts) and would silently mis-price the term if ISL
+            # ever retuned the sub-sweep.
+            "sensitivity": {
+                "subsample_cap": SENSITIVITY_SUBSAMPLE_CAP,
+                "subsample_divisor": SENSITIVITY_SUBSAMPLE_DIVISOR,
+            },
         },
         "caps": {
             "max_options": MAX_OPTIONS,
@@ -3548,7 +3630,9 @@ class RobustnessAnalyzerV2:
 
         Compares outcomes when edge is forced to exist vs forced to not exist.
         """
-        n_sensitivity_samples = min(100, request.n_samples // 10)
+        n_sensitivity_samples = min(
+            SENSITIVITY_SUBSAMPLE_CAP, request.n_samples // SENSITIVITY_SUBSAMPLE_DIVISOR
+        )
         ref_option = request.options[0]
 
         # Sample with edge forced to exist
@@ -3602,7 +3686,9 @@ class RobustnessAnalyzerV2:
 
         Varies strength mean by ±1 std and measures outcome change.
         """
-        n_sensitivity_samples = min(100, request.n_samples // 10)
+        n_sensitivity_samples = min(
+            SENSITIVITY_SUBSAMPLE_CAP, request.n_samples // SENSITIVITY_SUBSAMPLE_DIVISOR
+        )
         ref_option = request.options[0]
 
         # Sample with strength mean + std
