@@ -40,7 +40,6 @@ With n_samples=10000 one standard error on a p~0.5 estimate is ~0.005, so every
 assertion below uses a 0.02 tolerance (~4 s.e.).
 """
 
-import math
 from typing import get_args
 
 import pytest
