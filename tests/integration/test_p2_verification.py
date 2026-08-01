@@ -640,6 +640,11 @@ V2_REQUEST_WITH_GOAL_THRESHOLD = {
     "seed": 42,
     "n_samples": 100,
     "goal_threshold": 200.0,  # Between low output (100) and high output (300)
+    # ROADMAP 2.258: compared directly against this node's samples (~100 / ~300),
+    # so the threshold is in the sample frame. These four tests are QUARANTINED
+    # (dormant) — stamped here so un-quarantining them later does not surface a
+    # mystery red from the fail-closed default.
+    "goal_threshold_frame": "delta",
 }
 
 
