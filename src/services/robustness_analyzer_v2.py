@@ -1773,6 +1773,26 @@ class RobustnessAnalyzerV2:
                 )
             )
 
+        # ROADMAP 2.258: resolve goal_threshold into the goal SAMPLES' frame
+        # ONCE, here, before any comparison. A 'level' threshold is converted
+        # using the goal's own baseline; an unattested or unconvertible one
+        # resolves to None and probability_of_goal is omitted for every option,
+        # with the reason disclosed on inference_warnings.
+        #
+        # ROADMAP 2.279: this runs BEFORE the goal-node disclosures because one
+        # of them (GOAL_OBSERVED_VALUE_UNUSED) is only actionable when the
+        # conversion did NOT consume the goal's observed_state. HOISTED, not
+        # duplicated — the resolution still happens exactly once per analysis,
+        # at one site, and cannot drift. Moving it earlier cannot change its
+        # result: it is a pure static function of `request`, and `request` is
+        # never mutated after the non-inference-filter rebind above. The
+        # warning it produces is still appended at its original site below, so
+        # the emission ORDER of inference_warnings on the wire is unchanged.
+        (
+            goal_threshold_in_sample_frame,
+            goal_threshold_frame_warning,
+        ) = self._resolve_goal_threshold_in_sample_frame(request)
+
         # Cluster-2 goal-node disclosures (Track S Phase 0): make the goal
         # node's base/propagation semantics explicit — no numeric change.
         goal_disclosure_warnings, goal_disclosure_critiques = self._build_goal_node_disclosures(
@@ -1783,6 +1803,7 @@ class RobustnessAnalyzerV2:
             fully_intervened_node_ids,
             defaulted_root_node_ids,
             seed,
+            self._goal_baseline_was_consumed(request, goal_threshold_in_sample_frame),
         )
         inference_warnings.extend(goal_disclosure_warnings)
 
@@ -1882,15 +1903,10 @@ class RobustnessAnalyzerV2:
         # `option_outcomes` is now POST-noise; win_probability uses the pre-noise
         # `option_wins`, and the pre-noise joint regret is passed in explicitly so
         # both joint metrics ride the SAME pre-noise population (B2 CRN-fix F1).
-        # ROADMAP 2.258: resolve goal_threshold into the goal SAMPLES' frame
-        # ONCE, here, before any comparison. A 'level' threshold is converted
-        # using the goal's own baseline; an unattested or unconvertible one
-        # resolves to None and probability_of_goal is omitted for every option,
-        # with the reason disclosed on inference_warnings.
-        (
-            goal_threshold_in_sample_frame,
-            goal_threshold_frame_warning,
-        ) = self._resolve_goal_threshold_in_sample_frame(request)
+        # ROADMAP 2.258: goal_threshold was resolved into the goal SAMPLES'
+        # frame once, above (hoisted for 2.279 — see the comment there). Its
+        # warning is appended HERE, at the original emission site, so the order
+        # of inference_warnings on the wire is byte-identical to before.
         if goal_threshold_frame_warning is not None:
             inference_warnings.append(goal_threshold_frame_warning)
 
@@ -2723,6 +2739,7 @@ class RobustnessAnalyzerV2:
         fully_intervened_node_ids: set,
         defaulted_root_node_ids: List[str],
         seed: int,
+        goal_baseline_consumed: bool,
     ) -> Tuple[List[InferenceWarning], List[CritiqueV2]]:
         """
         Cluster-2 (Track S Phase 0): disclose the goal node's base/propagation
@@ -2735,7 +2752,15 @@ class RobustnessAnalyzerV2:
         previously SILENT, and is disclosed here:
 
         - GOAL_OBSERVED_VALUE_UNUSED: observed_state.value on a non-root goal
-          is not used as a base (only root nodes consult it).
+          is not used as a base (only root nodes consult it). SUPPRESSED when
+          ``goal_baseline_consumed`` (ROADMAP 2.279): if this same run's
+          goal-threshold frame conversion read the goal's
+          ``observed_state.baseline``, the observed_state DID do a job and the
+          warning has nothing actionable to say — a warning that fires on
+          every successful analysis is a broken alarm. It keeps firing on
+          every run where the conversion did not consume the baseline (no
+          threshold, 'delta' frame, unstamped frame, or any convertibility
+          refusal), which is precisely the case a user can act on.
         - GOAL_PU_BASE_ADDITIVE: a ParameterUncertainty entry on a non-root
           goal draws a per-sample base that is ADDED to parent propagation —
           it shifts the distribution, it does not pin the goal's value.
@@ -2814,7 +2839,7 @@ class RobustnessAnalyzerV2:
                     },
                 )
             )
-        elif observed_value is not None:
+        elif observed_value is not None and not goal_baseline_consumed:
             warnings.append(
                 InferenceWarning(
                     code="GOAL_OBSERVED_VALUE_UNUSED",
@@ -3129,6 +3154,37 @@ class RobustnessAnalyzerV2:
                 elif auto_noise_applied:
                     mixed_nodes.add(node_id)
         return sorted(mixed_nodes)
+
+    @staticmethod
+    def _goal_baseline_was_consumed(
+        request: RobustnessRequestV2,
+        goal_threshold_in_sample_frame: Optional[float],
+    ) -> bool:
+        """Did THIS run's frame conversion actually READ the goal's ``observed_state``?
+
+        Derived from the resolver's OUTCOME, not re-implemented from its
+        preconditions — there is no second copy of the convertibility rules here
+        to drift out of sync with the resolver.
+
+        ``_resolve_goal_threshold_in_sample_frame`` reads
+        ``observed_state.baseline`` on exactly one limb: ``frame == 'level'``
+        carried through to completion. Every other exit leaves the
+        observed_state untouched — no threshold returns ``(None, None)``,
+        ``'delta'`` returns the caller's number unconverted before the goal node
+        is even looked up, an unstamped frame refuses, and each convertibility
+        refusal (root goal, PU on the goal, goal pinned by an intervention,
+        missing baseline, non-finite or out-of-domain operands, epsilon clamp)
+        returns ``None``. So ``value is not None AND frame == 'level'`` is exact
+        evidence that the baseline was consumed.
+
+        ROADMAP 2.279 uses this to suppress GOAL_OBSERVED_VALUE_UNUSED on runs
+        where the observed_state did its job. The frame Literal is enumerated by
+        a test, so adding a third frame value REDs rather than silently landing
+        on the wrong side of this predicate.
+        """
+        return goal_threshold_in_sample_frame is not None and (
+            request.goal_threshold_frame == "level"
+        )
 
     @staticmethod
     def _resolve_goal_threshold_in_sample_frame(
