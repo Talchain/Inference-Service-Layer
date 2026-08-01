@@ -5573,7 +5573,7 @@
                 "type": "null"
               }
             ],
-            "description": "Declares which frame goal_threshold is expressed in. 'delta' = already in the goal SAMPLES' own frame (change from the model's origin); used as-is, no conversion. 'level' = an absolute level of the goal quantity in the same normalised units as the graph's observed_state values; ISL converts it into the sample frame before comparing. When absent, or when a 'level' threshold cannot be converted, probability_of_goal is OMITTED and a structured inference warning names what was missing \u2014 ISL never guesses a frame and never emits a fabricated or clamped probability.",
+            "description": "Declares which frame goal_threshold is expressed in. 'delta' = already in the goal SAMPLES' own frame (change from the model's origin); used as-is, no conversion. 'level' = an absolute level of the goal quantity, which MUST share the domain of the graph's observed_state values \u2014 whatever that domain is. ISL cannot verify the domain; the producer attests it. (ISL applies only a magnitude sanity guard derived from the evaluator's own [0, 1] node-value clamp, which catches raw units sent where normalised values were expected but cannot confirm the converse.) ISL converts a 'level' threshold into the sample frame before comparing. When absent, or when a 'level' threshold cannot be converted, probability_of_goal is OMITTED and a structured inference warning names what was missing \u2014 ISL never guesses a frame and never emits a fabricated or clamped probability.",
             "title": "Goal Threshold Frame"
           },
           "graph": {
