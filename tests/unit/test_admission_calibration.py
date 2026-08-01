@@ -663,6 +663,21 @@ def _sufficiency_shape_grid() -> dict:
         # these two to agree with ISL.
         "deep_samples_sensitivity_cap_binds": _request_dict(12, 40, 10000, 1),
         "shallow_samples_sensitivity_divisor_binds": _request_dict(12, 40, 200, 1),
+        # ⚠ BOTH SHAPES BELOW EXIST BECAUSE THE GRID WAS BRANCH-BLIND (adversarial
+        # review of #119). Every term was exercised, but two min() calls were only
+        # ever evaluated on ONE side, so mutants that DELETED the min survived the
+        # entire 2494-test gate. Covering a term is not covering its branches.
+        #
+        # min(S, evpi_sample_cap): every other VOI shape uses S=3000 > 2000, so the
+        # CAP always bound. S=1500 < 2000 binds the S side. (Reviewer mutant M6.)
+        "voi_shallow_samples_S_branch_binds": _request_dict(12, 40, 1500, 2, evpi_factors=3),
+        # min(max_decomposition_paths, E*E): the other path shape has E=50, so
+        # E*E=2500 < 20000 and E*E always bound. E=145 gives E*E=21025 > 20000,
+        # binding the CAP side. (Reviewer mutant M7.)
+        "paths_cap_branch_binds": {
+            **_request_dict(50, 145, 1000, 2, sensitivity=False),
+            "include_path_decomposition": True,
+        },
     }
 
 
