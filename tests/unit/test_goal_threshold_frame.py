@@ -7,7 +7,7 @@ an origin of ``intercept`` (0.0 by default) — a CHANGE, not a level. Nobody
 converted, so ``probability_of_goal`` computed "P(change >= level)": a
 STRUCTURAL zero, rendered to users as "< 1% chance of hitting your goal".
 
-THE ARITHMETIC, derived from ``StructuralEquationEvaluator.evaluate`` and pinned
+THE ARITHMETIC, derived from ``SCMEvaluatorV2.evaluate`` and pinned
 by the witness below::
 
     sample      = intercept + S            (S = parents' propagated contribution)
@@ -74,6 +74,9 @@ def build_request(
     goal_is_root=False,
     pu_on_goal=False,
     intervene_on_goal=False,
+    goal_epsilon_std=0.0,
+    parent_epsilon_std=0.0,
+    strength_mean=0.5,
 ):
     """The witness graph. Every knob exists to drive one adversarial fixture."""
     goal_observed = (
@@ -87,6 +90,7 @@ def build_request(
             kind="outcome",
             label="Goal",
             intercept=intercept,
+            epsilon_std=goal_epsilon_std,
             observed_state=goal_observed,
         )
     ]
@@ -95,13 +99,19 @@ def build_request(
     if not goal_is_root:
         nodes.insert(
             0,
-            NodeV2(id="f", kind="factor", label="Driver", observed_state=ObservedState(value=0.5)),
+            NodeV2(
+                id="f",
+                kind="factor",
+                label="Driver",
+                epsilon_std=parent_epsilon_std,
+                observed_state=ObservedState(value=0.5),
+            ),
         )
         edges.append(
             EdgeV2(
                 **{"from": "f", "to": "g"},
                 exists_probability=1.0,
-                strength=StrengthDistribution(mean=0.5, std=0.0011),
+                strength=StrengthDistribution(mean=strength_mean, std=0.0011),
             )
         )
         uncertainties.append(
@@ -433,7 +443,196 @@ class TestResolverUnit:
         value, warning = self.resolve(
             goal_threshold=1e308, goal_threshold_frame="level", baseline=-1e308
         )
-        # Overflow to inf must be refused, never returned as a comparison operand.
-        assert value is None or math.isfinite(value)
-        if value is None:
-            assert warning.detail["reason"] == "non_finite_converted_threshold"
+        # Operands that would overflow are refused. Since the domain guard bounds
+        # every operand by 1.5, they are caught THERE — |converted| <= 4.5 makes a
+        # non-finite result unreachable, which is why no post-conversion finiteness
+        # branch exists to be tested.
+        assert value is None
+        assert warning.detail["reason"] == "goal_values_outside_normalised_domain"
+
+    def test_nan_operand_is_refused_despite_passing_a_magnitude_test(self):
+        """`abs(nan) > 1.5` is False, so a NaN would sail through the domain guard.
+
+        Pins that the finiteness check runs FIRST. NaN reaches the resolver only
+        via a directly-constructed model (the field validator rejects a NaN
+        goal_threshold at parse time), so it is built by hand here.
+        """
+        request = build_request(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        goal = next(n for n in request.graph.nodes if n.id == "g")
+        object.__setattr__(goal.observed_state, "baseline", float("nan"))
+
+        value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(request)
+        assert value is None
+        assert warning.detail["reason"] == "non_finite_conversion_input"
+
+
+# =============================================================================
+# 6. A1 — goal-node epsilon_std clamps samples to [0, 1]
+# =============================================================================
+
+
+class TestGoalEpsilonClamp:
+    """SCMEvaluatorV2 clamps an epsilon-noised node to [0, 1] (:1187-1189).
+
+    That clamp FALSIFIES `sample = intercept + S`, so it breaks the conversion
+    identity. Witness graph for this class (strength_mean=1.0, intercept=1.0)::
+
+        sample(g) = 0 + 1.0 + f * 1.0  ~  Uniform(1, 2)     when eps == 0
+        B = 0.5, T = 0.7  ->  converted = 0.7 - 0.5 + 1.0 = 1.20
+        P(sample >= 1.20), sample ~ U(1, 2)  =  0.80        by hand
+
+    With eps > 0 on the goal every sample is clamped to <= 1.0, so P collapses to
+    a silent 0.0 — the 2.258 untruth, re-manufactured by the converter itself.
+    """
+
+    @staticmethod
+    def over_unit(**kwargs):
+        """Converted threshold 1.20, i.e. OUTSIDE (0, 1]."""
+        return analyse(
+            goal_threshold=0.7,
+            goal_threshold_frame="level",
+            baseline=0.5,
+            intercept=1.0,
+            strength_mean=1.0,
+            **kwargs,
+        )
+
+    def test_goal_epsilon_over_unit_interval_refuses_instead_of_faking_zero(self):
+        """RED-FIRST. Before this guard the same request returned 0.0 with ZERO
+        warnings: measured 0.7967 at eps=0.0 and 0.0 at eps=0.001."""
+        clean = self.over_unit(goal_epsilon_std=0.0)
+        assert clean.results[0].probability_of_goal == pytest.approx(0.80, abs=TOL)
+
+        noised = self.over_unit(goal_epsilon_std=0.001)
+        assert noised.results[0].probability_of_goal is None, (
+            "a goal epsilon clamps samples to [0,1]; a converted threshold of 1.20 "
+            "can then only ever return a manufactured 0.0"
+        )
+        found = warnings_by_code(noised, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
+        assert len(found) == 1
+        assert found[0].detail["reason"] == "goal_epsilon_noise_clamps_samples"
+        assert found[0].field == "nodes[g].epsilon_std"
+
+    def test_goal_epsilon_inside_unit_interval_still_converts(self):
+        """Inside (0, 1] the clamp provably cannot change P, so refusing would be
+        over-broad. B=0.5, T=0.9, I=0, strength 1.0 -> samples ~U(0,1),
+        converted 0.4 -> P = 1 - 0.4 = 0.60."""
+        response = analyse(
+            goal_threshold=0.9,
+            goal_threshold_frame="level",
+            baseline=0.5,
+            strength_mean=1.0,
+            goal_epsilon_std=0.001,
+        )
+        assert response.results[0].probability_of_goal == pytest.approx(0.60, abs=TOL)
+        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
+
+    def test_parent_epsilon_does_not_trigger_the_guard(self):
+        """CONTROL. Only the GOAL's epsilon clamps the goal's samples; a parent's
+        epsilon perturbs S, which the identity already accommodates."""
+        response = self.over_unit(parent_epsilon_std=0.001)
+        assert response.results[0].probability_of_goal == pytest.approx(0.80, abs=TOL)
+        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
+
+    def test_no_goal_epsilon_means_no_guard_at_all(self):
+        """CONTROL. Without a goal epsilon there is no clamp, so a converted
+        threshold outside (0, 1] is perfectly legitimate and must convert."""
+        response = self.over_unit(goal_epsilon_std=0.0)
+        assert response.results[0].probability_of_goal == pytest.approx(0.80, abs=TOL)
+
+    @pytest.mark.parametrize(
+        "threshold,baseline,converted,accepted",
+        [
+            (1.0, 0.0, 1.0, True),  # converted == 1 -> ACCEPTED (pins `<= 1`)
+            (0.9, 0.9, 0.0, False),  # converted == 0 -> REFUSED  (pins `0 <`)
+        ],
+    )
+    def test_unit_interval_boundaries(self, threshold, baseline, converted, accepted):
+        value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(
+            build_request(
+                goal_threshold=threshold,
+                goal_threshold_frame="level",
+                baseline=baseline,
+                goal_epsilon_std=0.001,
+            )
+        )
+        assert value == pytest.approx(converted, abs=1e-12) if accepted else value is None
+        if not accepted:
+            assert warning.detail["reason"] == "goal_epsilon_noise_clamps_samples"
+
+
+# =============================================================================
+# 7. A4 Tier-2 — magnitude guard on the normalised domain
+# =============================================================================
+
+
+class TestNormalisedDomainGuard:
+    """A 'level' threshold and the baseline must share a domain, and ISL cannot
+    verify the producer's attestation. It CAN reject operands that are obviously
+    raw user units — the failure mode fail-closed does not otherwise cover,
+    because it yields a WRONG NUMBER rather than no number.
+
+    The 1.5 bound derives from the evaluator's own [0, 1] node-value clamp
+    (:1189 "keep normalised node values in valid range") plus slack.
+    """
+
+    def test_raw_user_units_are_refused(self):
+        """RED-FIRST. ObservedState's own normative example is RAW: value 59.0 /
+        baseline 49.0 for £59k/£49k. Paired with a normalised threshold of 0.8
+        that silently produced a converted threshold of 0.8-49.0 = -48.2, i.e.
+        P = 1.0 — a confident, wrong 100%."""
+        response = analyse(
+            goal_threshold=0.8,
+            goal_threshold_frame="level",
+            baseline=49.0,
+            goal_observed_value=59.0,
+        )
+        assert response.results[0].probability_of_goal is None
+        found = warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
+        assert len(found) == 1
+        assert found[0].detail["reason"] == "goal_values_outside_normalised_domain"
+        assert found[0].detail["out_of_domain"] == {"goal_baseline": 49.0}
+
+    def test_legitimate_negative_baseline_still_converts(self):
+        """CONTROL on the guard: it must REFUSE, never clamp, and it must not
+        catch legitimate in-domain negatives. B=-0.3, T=0.1 -> P = 0.20."""
+        response = analyse(goal_threshold=0.1, goal_threshold_frame="level", baseline=-0.3)
+        assert response.results[0].probability_of_goal == pytest.approx(0.20, abs=TOL)
+        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
+
+    def test_guard_is_symmetric_in_sign(self):
+        """A one-sided bound would let a large NEGATIVE raw value through."""
+        value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(
+            build_request(goal_threshold=0.1, goal_threshold_frame="level", baseline=-3.0)
+        )
+        assert value is None
+        assert warning.detail["reason"] == "goal_values_outside_normalised_domain"
+        assert warning.detail["out_of_domain"] == {"goal_baseline": -3.0}
+
+    @pytest.mark.parametrize(
+        "baseline,accepted", [(1.5, True), (1.51, False), (-1.5, True), (-1.51, False)]
+    )
+    def test_bound_is_inclusive_at_1_5(self, baseline, accepted):
+        value, _ = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(
+            build_request(goal_threshold=0.1, goal_threshold_frame="level", baseline=baseline)
+        )
+        assert (value is not None) is accepted
+
+    @pytest.mark.parametrize("field", ["goal_threshold", "goal_intercept"])
+    def test_every_operand_is_guarded_not_just_the_baseline(self, field):
+        kwargs = {"goal_threshold": 0.1, "goal_threshold_frame": "level", "baseline": 0.5}
+        kwargs["goal_threshold" if field == "goal_threshold" else "intercept"] = 90.0
+        value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(
+            build_request(**kwargs)
+        )
+        assert value is None
+        assert warning.detail["out_of_domain"] == {field: 90.0}
+
+    def test_delta_frame_is_not_domain_guarded(self):
+        """CONTROL. 'delta' is in the SAMPLES' frame, which carries no domain
+        promise — ISL must not impose the normalised bound on it. Samples here are
+        ~U(0, 0.5), so a delta threshold of 59.0 is legitimately P = 0.0.
+        """
+        response = analyse(goal_threshold=59.0, goal_threshold_frame="delta", baseline=49.0)
+        assert response.results[0].probability_of_goal == 0.0
+        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
