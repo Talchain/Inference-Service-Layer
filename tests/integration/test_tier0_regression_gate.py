@@ -151,6 +151,10 @@ class TestGoalConstraintConsistency:
     def _request_with_goal_constraint(self, **overrides):
         return outcome_goal_request(
             goal_threshold=self.THRESHOLD,
+            # ROADMAP 2.258: this gate's whole subject is that goal_threshold and
+            # the goal_constraint below must agree EXACTLY on the same samples, so
+            # the threshold is definitionally in the sample frame.
+            goal_threshold_frame="delta",
             goal_constraints=[{"node_id": "revenue", "operator": ">=", "value": self.THRESHOLD}],
             **overrides,
         )

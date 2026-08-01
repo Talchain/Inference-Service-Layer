@@ -603,6 +603,10 @@ class TestConstraintAnalysisIntegration:
             n_samples=500,
             seed=42,
             goal_threshold=25.0,  # Legacy single threshold
+            # ROADMAP 2.258: the SAME number is used as the goal_constraint value
+            # on the same node, which is compared directly against that node's
+            # samples — so this threshold is definitionally in the sample frame.
+            goal_threshold_frame="delta",
             goal_constraints=[
                 GoalConstraint(node_id="revenue", operator=">=", value=25.0),
             ],

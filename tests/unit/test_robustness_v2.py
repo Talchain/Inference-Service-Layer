@@ -3256,6 +3256,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=50.0,  # Well below expected outcome of ~100
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3302,6 +3303,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=1000.0,  # Well above expected outcome of ~100
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3322,6 +3324,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=-100.0,  # Well below expected outcome of ~100
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3362,6 +3365,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=50.0,  # Exactly at expected outcome (100 * 0.5 = 50)
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3427,6 +3431,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=-50.0,  # Negative threshold
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3447,6 +3452,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=0.0,
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3496,6 +3502,7 @@ class TestGoalThresholdProbability:
             n_samples=100,
             seed=42,
             goal_threshold=150.0,  # Between low (~50) and high (~250) expected outcomes
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()
@@ -3540,6 +3547,7 @@ class TestGoalThresholdProbability:
             n_samples=1000,  # More samples for stable estimate
             seed=42,
             goal_threshold=50.0,  # At expected mean (100 * 0.5 = 50)
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
 
         analyzer = RobustnessAnalyzerV2()

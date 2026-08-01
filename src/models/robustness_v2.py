@@ -856,7 +856,43 @@ class RobustnessRequestV2(BaseModel):
     goal_threshold: Optional[float] = Field(
         None,
         description="Success threshold for goal outcome. When provided, "
-        "computes probability_of_goal (fraction of samples meeting/exceeding threshold).",
+        "computes probability_of_goal (fraction of samples meeting/exceeding threshold). "
+        "REQUIRES goal_threshold_frame to declare which frame the number is in — an "
+        "unattested threshold is refused, not guessed (ROADMAP 2.258).",
+    )
+    # ROADMAP 2.258. The frame attestation for goal_threshold.
+    #
+    # WHY THIS EXISTS. A non-root goal node's samples are, per doctrine B, the
+    # forward-propagated composition of its parents: the evaluator uses a base
+    # offset of 0.0 for non-root nodes, so
+    #     sample = intercept + SUM(parent_value * strength)
+    # The goal's own observed level is deliberately NOT a base — ISL already
+    # discloses this via the GOAL_OBSERVED_VALUE_UNUSED inference warning. So a
+    # sample is a CHANGE measured from an origin of `intercept` (0.0 by default),
+    # not the goal quantity's real level.
+    #
+    # CEE, meanwhile, mints goal_threshold as a normalised LEVEL (0.8 == a
+    # GBP 6.0m target against a GBP 7.5m cap). Comparing a level against
+    # change-from-origin samples is a category error that yields a STRUCTURAL
+    # zero, which the product rendered as "< 1% chance of hitting your goal".
+    # That untruth is the defect this field closes.
+    #
+    # Mirrors @talchain/schemas 0.31.0 `z.enum(['level','delta']).optional()`.
+    # Absent = NOT STAMPED, which is refused (fail-closed), never assumed.
+    goal_threshold_frame: Optional[Literal["level", "delta"]] = Field(
+        None,
+        description="Declares which frame goal_threshold is expressed in. "
+        "'delta' = already in the goal SAMPLES' own frame (change from the model's "
+        "origin); used as-is, no conversion. 'level' = an absolute level of the goal "
+        "quantity, which MUST share the domain of the graph's observed_state values "
+        "— whatever that domain is. ISL cannot verify the domain; the producer "
+        "attests it. (ISL applies only a magnitude sanity guard derived from the "
+        "evaluator's own [0, 1] node-value clamp, which catches raw units sent where "
+        "normalised values were expected but cannot confirm the converse.) ISL "
+        "converts a 'level' threshold into the sample frame before comparing. When "
+        "absent, or when a 'level' threshold cannot be converted, probability_of_goal "
+        "is OMITTED and a structured inference warning names what was missing — ISL "
+        "never guesses a frame and never emits a fabricated or clamped probability.",
     )
 
     # Enhancement flags

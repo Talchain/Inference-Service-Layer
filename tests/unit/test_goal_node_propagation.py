@@ -151,6 +151,7 @@ class TestPinnedTipBehaviour:
             n_samples=200,
             seed=42,
             goal_threshold=0.5,
+            goal_threshold_frame="delta",  # ROADMAP 2.258: sample-frame threshold
         )
         response = RobustnessAnalyzerV2().analyze(request)
 
