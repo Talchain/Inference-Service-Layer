@@ -157,7 +157,7 @@
         "type": "object"
       },
       "ComputeAdmissionInfo": {
-        "description": "Compute-admission capability advertised on /health (Codex F8).\n\nLets a planning consumer (PLoT) size requests against ISL's LIVE admission\nceiling and formula instead of hand-mirroring the numbers. Every value is\nread from the same ISL module constants the admission gate and request model\nenforce (src.services.robustness_analyzer_v2 / src.constants), so the\nadvertisement can never drift from enforcement. Consumers MUST version-guard\non complexity_formula_version and fall back conservatively on an unknown\nversion (the formula SHAPE is shared; only the numbers are advertised).",
+        "description": "Compute-admission capability advertised on /health (Codex F8).\n\nLets a planning consumer (PLoT) size requests against ISL's LIVE admission\nceiling and formula instead of hand-mirroring the numbers. Every value is\nread from the same ISL module constants the admission gate and request model\nenforce (src.services.robustness_analyzer_v2 / src.constants), so the\nadvertisement can never drift from enforcement. Consumers MUST version-guard\non complexity_formula_version and fall back conservatively on an unknown\nversion (the formula SHAPE is shared; only the numbers are advertised).\n\nSUFFICIENCY CONTRACT (ROADMAP 2.260 step 3): between them `weights`,\n`formula_parameters` and `caps` carry EVERY number the cost formula uses\nthat a consumer cannot derive from its own request, so a consumer holding\nthis block plus its own request can reproduce the price exactly for the\nadvertised formula shape. Enforced mechanically by\ntests/unit/test_admission_calibration.py::TestAdvertisementSufficiency,\nwhich reimplements the formula from these values alone and asserts\nterm-by-term equality.\n\n`weights` is EXACT-SET-COUPLED to the formula version for consumers that\nvalidate it (PLoT keys an expected key set by complexity_formula_version and\ntreats an unexpected key as skew), which is why per-term structural\nparameters live in the SIBLING `formula_parameters` object instead of being\nadded to `weights` \u2014 see build_compute_admission.__doc__ for the full\nrationale and for the drift-alarm this trades away.",
         "properties": {
           "caps": {
             "additionalProperties": {
@@ -171,6 +171,17 @@
             "description": "Version tag of the weighted cost formula shape.",
             "title": "Complexity Formula Version",
             "type": "string"
+          },
+          "formula_parameters": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            "description": "Per-term structural parameters, keyed by the term name the cost breakdown uses (e.g. factor_flips.max_candidates, sensitivity.subsample_cap). These are the bounds a term's own loop applies, as distinct from the per-phase coefficients in `weights`; a consumer needs both to reproduce the price. Sibling of `weights` so it can grow without disturbing consumers that couple to the `weights` key set.",
+            "title": "Formula Parameters",
+            "type": "object"
           },
           "max_cost_units": {
             "description": "Admission ceiling in cost units (env-resolved; ISL_MAX_COST_UNITS).",
