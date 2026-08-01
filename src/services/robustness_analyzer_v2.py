@@ -3226,9 +3226,16 @@ class RobustnessAnalyzerV2:
         # Belt-and-braces: the field validators already reject non-finite
         # baseline/threshold, but this helper is also called directly by tests and
         # by any future non-HTTP entry point, and a non-finite threshold is exactly
-        # the input that would produce a silently absurd probability. This runs
-        # BEFORE the domain guard below because `abs(nan) > 1.5` is False — a NaN
-        # would sail straight through a magnitude test.
+        # the input that would produce a silently absurd probability.
+        #
+        # This check must EXIST — `abs(nan) > 1.5` is False, so the domain guard
+        # below cannot catch a NaN and deleting this reds
+        # test_nan_operand_is_refused_despite_passing_a_magnitude_test. Its
+        # POSITION, however, is not load-bearing: a NaN is refused either way (the
+        # domain guard lets it through, this check then catches it), and relocating
+        # it below the domain guard leaves all tests green. An earlier version of
+        # this comment claimed the order was required; nothing enforces it and
+        # nothing needs it.
         if not all(math.isfinite(v) for v in (threshold, baseline, intercept)):
             return refuse(
                 "non_finite_conversion_input",

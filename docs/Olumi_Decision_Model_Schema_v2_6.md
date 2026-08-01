@@ -437,7 +437,7 @@ closes that gap.
 | `goal_threshold_frame` | Meaning | ISL behaviour |
 |---|---|---|
 | `'delta'` | Already in the goal samples' own frame | Compared as-is, no conversion |
-| `'level'` | An absolute level of the goal quantity, in the same normalised units as `observed_state` | Converted into the sample frame first |
+| `'level'` | An absolute level of the goal quantity, which must share the domain of the graph's `observed_state` values — whatever that domain is. ISL cannot verify it; the producer attests it | Converted into the sample frame first |
 | *absent* | Unknown | **`probability_of_goal` is OMITTED** + `GOAL_THRESHOLD_FRAME_UNSPECIFIED` warning |
 
 ### The conversion
@@ -468,7 +468,28 @@ ISL **omits** `probability_of_goal` and emits a `warning`-severity
 | `root_goal` | A root goal takes its base from `observed_state.value`; its samples are not in the change-from-origin frame |
 | `goal_parameter_uncertainty_shifts_base` | A `ParameterUncertainty` on the goal draws a per-sample base, so the origin varies per sample |
 | `goal_pinned_by_intervention` | An option intervenes on the goal, pinning its samples to an absolute value |
-| `non_finite_conversion_input` / `non_finite_converted_threshold` | Non-finite operand or result |
+| `goal_epsilon_noise_clamps_samples` | The goal has `epsilon_std > 0`, so its samples are clamped to `[0, 1]` after noise, and the converted threshold falls outside `(0, 1]` where that clamp changes the probability |
+| `goal_values_outside_normalised_domain` | An operand exceeds `\|1.5\|`, so it is not in the normalised `[0, 1]` domain the evaluator assumes — usually raw user units sent where normalised values were expected |
+| `non_finite_conversion_input` | Non-finite operand |
+
+Two of those deserve their own note.
+
+**`goal_epsilon_noise_clamps_samples`.** `SCMEvaluatorV2.evaluate` clamps a node
+carrying `epsilon_std > 0` to `[0, 1]` after adding its noise, which falsifies
+`sample = intercept + Σ` — the identity the conversion rests on. The clamp is only
+*harmful* outside `(0, 1]`: inside it, mass clamped down to `1.0` still satisfies
+`>= delta_threshold` (since `delta_threshold <= 1`) and mass clamped up to `0.0`
+still fails it (since `delta_threshold > 0`), so the probability is unchanged.
+Outside, `<= 0` overstates and `> 1` manufactures a structural zero. Only the
+**goal's** own epsilon matters; a parent's perturbs `Σ`, which the identity already
+accommodates.
+
+**`goal_values_outside_normalised_domain`.** A magnitude sanity check only, derived
+from the evaluator's own `[0, 1]` clamp plus slack. It catches raw user units — the
+one failure mode fail-closed does not otherwise cover, because it yields a *wrong
+number* rather than *no number*. It is symmetric in `abs()`, so a legitimate
+negative baseline still converts. It cannot confirm the converse: a raw value that
+happens to be small passes.
 
 A **negative** converted threshold is legitimate (the goal is already met at
 baseline) and is never clamped. A converted threshold above every sample yields an
