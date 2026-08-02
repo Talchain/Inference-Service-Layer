@@ -1,38 +1,55 @@
-"""ROADMAP 2.258 — goal_threshold FRAME conversion.
+"""ROADMAP 2.258 / 2.286 — resolving goal_threshold against the right reference.
 
-THE DEFECT. CEE mints ``goal_threshold`` as a normalised LEVEL (0.8 == a
-GBP 6.0m target against a GBP 7.5m cap). ISL's goal samples, for a NON-ROOT
-goal, are the forward-propagated composition of the goal's parents measured from
-an origin of ``intercept`` (0.0 by default) — a CHANGE, not a level. Nobody
-converted, so ``probability_of_goal`` computed "P(change >= level)": a
-STRUCTURAL zero, rendered to users as "< 1% chance of hitting your goal".
+THE ORIGINAL DEFECT (2.258). CEE mints ``goal_threshold`` as a normalised LEVEL
+(0.8 == a GBP 6.0m target against a GBP 7.5m cap). ISL compared it directly
+against the goal's samples, which are not levels, and reported a STRUCTURAL zero
+rendered to users as "< 1% chance of hitting your goal".
 
-THE ARITHMETIC, derived from ``SCMEvaluatorV2.evaluate`` and pinned
-by the witness below::
+⚠ THE FIX WAS WRONG TOO (2.286), and wrong in the more dangerous direction.
+2.258 converted with ``delta_threshold = T - B + intercept``, derived from::
 
     sample      = intercept + S            (S = parents' propagated contribution)
-    real_level  = baseline  + S
-    => sample >= level_threshold - baseline + intercept
+    real_level  = baseline  + S            <-- FALSE
 
-    delta_threshold = level_threshold - goal_baseline + goal_intercept
+The second line assumes S is a CHANGE, i.e. that S == 0 when nothing is done.
+It is not. ``SCMEvaluatorV2.evaluate`` seeds ``observed_state.value`` as the base
+of ROOT nodes ONLY, and ``FactorSampler`` centres factor draws on that same
+observed value, so parents carry ABSOLUTE current values and a non-root goal —
+whose own base is 0.0 — receives their absolute propagated sum. Under the status
+quo S is emphatically non-zero, so anchoring at zero shifted every level
+comparison by exactly S_sq. Measured on staging tip 71a962e8 (f=0.5, s=0.5,
+B=0.7, T=0.9, do-nothing option): status quo scores 0.25 against a converted
+threshold of 0.20, so ISL reported **probability_of_goal = 1.0** for a goal the
+status quo does not reach. A confident INVERSION, not a missing number.
+
+THE ARITHMETIC NOW. Levels are recovered per draw against a status-quo
+REFERENCE, under common random numbers::
+
+    level_i = B + (option_sample_i - status_quo_sample_i)
+
+S_sq cancels because it appears in both terms — and so does the intercept, which
+is why the ``+ intercept`` term is gone rather than re-derived.
 
 THE WITNESS GRAPH used throughout this module, chosen so every expected
 probability is computable BY HAND rather than read back off the code::
 
-    f  root factor, ParameterUncertainty uniform(0, 1)
+    f  root factor, observed_state{value: 0.5}, ParameterUncertainty uniform(0, 1)
     g  goal, NON-ROOT outcome, observed_state{baseline: B}, intercept I
-    f -> g  strength mean 0.5, std 0.0011 (near-deterministic), exists_prob 1.0
+    f -> g  strength mean s=0.5, std 0.0011 (near-deterministic), exists_prob 1.0
 
-    sample(g) = 0 (non-root base) + I + f * 0.5    ~  Uniform(I, I + 0.5)
+    sample(g)   = 0 (non-root base) + I + f * s     ~  Uniform(I, I + 0.5)
+    level(g)    = B + s * (1 - f)                   under `analyse_level`, which
+                                                    intervenes do(f := 1.0)
 
-    P(sample >= T - B + I)
-        = P(I + 0.5f >= T - B + I)
-        = P(f >= 2 * (T - B))
-        = 1 - 2 * (T - B)                for 0 <= 2 * (T - B) <= 1
+    P(level >= T) = P(1 - f >= (T - B)/s) = 1 - 2 * (T - B)   for 0 <= 2(T-B) <= 1
 
-Note the intercept I CANCELS. That is not a coincidence — the conversion adds
-back exactly what the samples were shifted by — and it is the property that
-makes ``test_intercept_cancels_out`` bite if the ``+ intercept`` term is dropped.
+Note this is the SAME closed form the 2.258 fixture produced, because ``1 - f``
+is also U(0, 1). Every expected probability in this module is therefore
+numerically UNCHANGED by the 2.286 fix — the old numbers were arithmetically
+right about the wrong quantity. What proves the fix is not these pins but
+``TestStatusQuoIsNotProgress``, where the two quantities disagree completely.
+
+The intercept I CANCELS, now structurally rather than by a remembered term.
 
 Auto-scaled noise is default-OFF (``ENABLE_AUTO_SCALED_NOISE``), so the samples
 here are purely model-driven and the hand arithmetic is exact up to MC error.
@@ -77,6 +94,9 @@ def build_request(
     goal_epsilon_std=0.0,
     parent_epsilon_std=0.0,
     strength_mean=0.5,
+    option_interventions=None,
+    factor_now=0.5,
+    factor_pu=True,
 ):
     """The witness graph. Every knob exists to drive one adversarial fixture."""
     goal_observed = (
@@ -104,7 +124,7 @@ def build_request(
                 kind="factor",
                 label="Driver",
                 epsilon_std=parent_epsilon_std,
-                observed_state=ObservedState(value=0.5),
+                observed_state=ObservedState(value=factor_now),
             ),
         )
         edges.append(
@@ -114,9 +134,12 @@ def build_request(
                 strength=StrengthDistribution(mean=strength_mean, std=0.0011),
             )
         )
-        uncertainties.append(
-            ParameterUncertainty(node_id="f", distribution="uniform", range_min=0.0, range_max=1.0)
-        )
+        if factor_pu:
+            uncertainties.append(
+                ParameterUncertainty(
+                    node_id="f", distribution="uniform", range_min=0.0, range_max=1.0
+                )
+            )
     if pu_on_goal:
         uncertainties.append(ParameterUncertainty(node_id="g", distribution="normal", std=0.1))
     if goal_is_root:
@@ -132,7 +155,9 @@ def build_request(
             InterventionOption(
                 id="hold",
                 label="Hold",
-                interventions={"g": 0.5} if intervene_on_goal else {},
+                interventions=(
+                    {"g": 0.5} if intervene_on_goal else (option_interventions or {})
+                ),
             )
         ],
         goal_node_id="g",
@@ -148,8 +173,141 @@ def analyse(**kwargs):
     return RobustnessAnalyzerV2().analyze(build_request(**kwargs))
 
 
+# Push the driver to its ceiling. Level-frame requests are analysed with an option
+# that actually DOES something, because a reference-anchored probability for a
+# do-nothing option is degenerate by construction — that degeneracy is itself the
+# subject of TestStatusQuoIsNotProgress below, and is where the 2.286 defect lived.
+PUSH_DRIVER = {"f": 1.0}
+
+
+def analyse_level(**kwargs):
+    """Analyse with the driver pushed to 1.0 — the level-frame workhorse.
+
+    P(goal reaches T) = P(B + s*(1 - f) >= T) = P(f <= 1 - (T-B)/s)
+                      = 1 - 2*(T - B)                        for s = 0.5, f ~ U(0,1)
+
+    Note this is the SAME closed form the pre-2.286 fixture produced, because
+    ``1 - f`` is also U(0, 1). Every expected probability in this module is
+    therefore numerically unchanged by the fix — what changed is that the number
+    now answers the user's question ("will my goal reach T if I do this?")
+    instead of "is the model's absolute propagated sum above T - B?".
+    """
+    return analyse(option_interventions=PUSH_DRIVER, **kwargs)
+
+
 def warnings_by_code(response, code):
     return [w for w in response.inference_warnings if w.code == code]
+
+
+# =============================================================================
+# 0. ROADMAP 2.286 — the INVERSION. RED-first on the zero-anchor defect.
+# =============================================================================
+
+
+class TestStatusQuoIsNotProgress:
+    """A do-nothing option cannot reach a goal it does not already reach.
+
+    THE DEFECT 2.286 REPAIRS. The 2.258 conversion anchored a level threshold at
+    ZERO: ``delta_threshold = T - B + intercept``, on the premise that the goal's
+    samples are a CHANGE from its current level. They are not. The evaluator
+    seeds ``observed_state.value`` as the base of ROOT nodes only, so factors
+    carry their ABSOLUTE current values and propagate ``parent_value * strength``
+    into a non-root goal whose own base is 0.0.
+
+    So under the status quo the goal still scores ``S_sq = 0.5 * 0.5 = 0.25``,
+    the converted threshold was ``0.9 - 0.7 + 0 = 0.20``, and ``0.25 >= 0.20``
+    held for every single draw. ISL reported **100%** confidence in a goal the
+    status quo does not reach at all. The truth is 0%: doing nothing leaves the
+    goal at 0.7, and 0.7 < 0.9.
+
+    This is the failure mode that matters most — not a missing number, and not a
+    pessimistic one, but a CONFIDENTLY INVERTED one, which a UI renders as
+    certainty and a user acts on.
+    """
+
+    def test_status_quo_does_not_reach_an_unreached_goal(self):
+        """RED-FIRST PIN, and the exact scenario measured on staging tip 71a962e8.
+
+        f pinned at its observed 0.5 (no parameter uncertainty), so every draw is
+        the same story and the arithmetic is a single line rather than a
+        distribution: status-quo sample 0.25, old converted threshold 0.20,
+        0.25 >= 0.20 on all 10,000 draws -> the old code returns exactly 1.0.
+        """
+        response = analyse(
+            goal_threshold=0.9,
+            goal_threshold_frame="level",
+            baseline=0.7,
+            option_interventions={},  # explicit: change nothing
+            factor_pu=False,  # f stays at its observed 0.5
+        )
+        prob = response.results[0].probability_of_goal
+
+        assert prob is not None, "a convertible level threshold must produce a probability"
+        assert prob == 0.0, (
+            f"expected 0.0 — the status quo leaves the goal at its baseline 0.7, "
+            f"which does not reach 0.9 — but got {prob}. 1.0 is the 2.286 "
+            f"inversion: the threshold was anchored at zero instead of at the "
+            f"status quo's own score of 0.25."
+        )
+
+    def test_status_quo_does_not_reach_it_under_parameter_uncertainty_either(self):
+        """The same claim with f ~ U(0, 1) restored.
+
+        Uncertainty about where the driver currently SITS is not an opportunity
+        to reach the goal by doing nothing: under common random numbers it
+        cancels between the option and the reference, so the answer stays a hard
+        0.0. The old code returned ~0.60 here — a different wrong number from the
+        one above, from the same zero anchor.
+        """
+        response = analyse(
+            goal_threshold=0.9,
+            goal_threshold_frame="level",
+            baseline=0.7,
+            option_interventions={},
+        )
+        assert response.results[0].probability_of_goal == 0.0
+
+    def test_status_quo_reaches_a_goal_it_already_meets(self):
+        """The mirror image, so the pin cannot be satisfied by always returning 0.
+
+        Without this, `probability_of_goal = 0.0` would pass the tests above while
+        being just as wrong in the other direction.
+        """
+        response = analyse(
+            goal_threshold=0.6,
+            goal_threshold_frame="level",
+            baseline=0.7,
+            option_interventions={},
+        )
+        assert response.results[0].probability_of_goal == 1.0, (
+            "the goal is already at 0.7 and the target is 0.6, so doing nothing "
+            "meets it with certainty"
+        )
+
+    def test_the_effect_is_measured_against_the_status_quo_not_against_zero(self):
+        """The mechanism itself, isolated from any particular probability.
+
+        Two runs identical except for the driver's CURRENT value. The option
+        pushes f to 1.0 either way, so a model anchored at zero sees the same
+        option score and must return the same probability. A correctly anchored
+        one does not: there is less room to gain from 0.8 than from 0.2.
+        """
+        # No parameter uncertainty on f: a PU draw REPLACES the observed value in
+        # both the option and the reference, so factor_now would be unread and
+        # this test would compare two identical runs and pass vacuously.
+        from_low = analyse(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7,
+            option_interventions=PUSH_DRIVER, factor_now=0.2, factor_pu=False,
+        )
+        from_high = analyse(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7,
+            option_interventions=PUSH_DRIVER, factor_now=0.8, factor_pu=False,
+        )
+        assert from_low.results[0].probability_of_goal is not None
+        assert from_low.results[0].probability_of_goal > from_high.results[0].probability_of_goal, (
+            "the same intervention must be worth MORE when the driver starts "
+            "lower; if these are equal the status-quo reference is not being read"
+        )
 
 
 # =============================================================================
@@ -161,27 +319,30 @@ class TestFrameConversionWitness:
     """The conversion produces the BY-HAND probability, not the structural zero."""
 
     def test_level_threshold_yields_hand_computed_probability(self):
-        """B=0.7, T=0.9, I=0 -> delta=0.2 -> P = 1 - 2*(0.9-0.7) = 0.60.
+        """B=0.7, T=0.9, s=0.5 -> P = 1 - 2*(0.9-0.7) = 0.60.
 
-        RED-FIRST PIN. Before the converter, this same request compared samples
-        (~U(0, 0.5)) against the raw LEVEL 0.9 and returned exactly 0.0 — the
-        structural zero of the defect. Reverting the conversion turns this
-        assertion RED at 0.0 vs 0.60.
+        The option pushes f to 1.0, so the goal gains s*(1 - f) over its baseline
+        and reaches 0.9 exactly when f <= 0.6.
         """
-        response = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        response = analyse_level(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
         prob = response.results[0].probability_of_goal
 
         assert prob is not None, "a convertible level threshold must produce a probability"
         assert prob == pytest.approx(0.60, abs=TOL), (
-            f"expected the hand-computed 0.60, got {prob}. A value of 0.0 means the "
-            f"raw LEVEL was compared against change-from-origin samples (the 2.258 defect)."
+            f"expected the hand-computed 0.60, got {prob}."
         )
 
-    def test_samples_are_change_from_origin_not_levels(self):
-        """The premise of the whole row, asserted rather than assumed.
+    def test_samples_are_neither_levels_nor_changes_from_the_goals_own_level(self):
+        """The premise of the row, asserted rather than assumed — and CORRECTED.
 
-        The goal's own level (baseline 0.7) lies OUTSIDE the sample range, so the
-        samples cannot be levels of the goal quantity.
+        ⚠ 2.286. The predecessor of this test asserted the samples were
+        "change-from-origin", which licensed the zero anchor. They are not. A
+        non-root goal's sample is the propagated sum of its parents' ABSOLUTE
+        current values — so under the status quo it is NOT zero, which is exactly
+        why anchoring a level threshold at zero inverted answers.
+
+        Both halves are pinned here, because the samples being neither thing is
+        the whole reason a status-quo REFERENCE is required.
         """
         response = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
         samples = response.results[0].outcome_distribution.samples
@@ -189,15 +350,37 @@ class TestFrameConversionWitness:
         assert min(samples) == pytest.approx(0.0, abs=0.01)
         assert max(samples) == pytest.approx(0.5, abs=0.01)
         assert not (min(samples) <= 0.7 <= max(samples)), (
-            "the goal's baseline level sits inside the sample range — the frame "
-            "premise of ROADMAP 2.258 no longer holds and this converter needs re-deriving"
+            "the goal's baseline level sits inside the sample range — the samples "
+            "would then be levels and this converter needs re-deriving"
+        )
+
+        # ... and NOT changes from the goal's current level either: with f at its
+        # observed 0.5 and nothing intervening, a change-from-origin sample would
+        # be 0.0. It is 0.25.
+        status_quo = analyse(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7,
+            option_interventions={}, factor_pu=False,
+        )
+        sq_samples = status_quo.results[0].outcome_distribution.samples
+        assert sum(sq_samples) / len(sq_samples) == pytest.approx(0.25, abs=0.01), (
+            "the status quo must score 0.5 * 0.5 = 0.25, NOT 0.0 — if this ever "
+            "reads 0.0 the samples really are change-from-origin and the status-quo "
+            "reference could be dropped"
         )
 
     def test_conversion_changes_only_the_comparison_not_the_samples(self):
-        """Control: the converter must not perturb sampling.
+        """Control: resolving the frame must not perturb sampling.
 
-        Same seed, one request stamped 'level' and one 'delta' — identical
+        Same seed, one request stamped 'level' and one 'delta' — byte-identical
         sample series, different probabilities.
+
+        2.286 gives this control a SECOND job, and it is the sharper one. The
+        level path now runs an EXTRA evaluation per draw (the status-quo
+        reference). If that reference were drawn from the shared evaluator it
+        would consume the epsilon RNG stream and shift every subsequent sample,
+        silently changing results across the repo. It is given its own
+        epsilon-free evaluator precisely so this equality still holds — so this
+        assertion is what pins that decision.
         """
         level = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
         delta = analyse(goal_threshold=0.2, goal_threshold_frame="delta", baseline=0.7)
@@ -206,19 +389,26 @@ class TestFrameConversionWitness:
             level.results[0].outcome_distribution.samples
             == delta.results[0].outcome_distribution.samples
         ), "the frame field must not touch sampling"
-        # 0.9 - 0.7 == 0.2, so the two must agree exactly on the probability too.
-        assert level.results[0].probability_of_goal == delta.results[0].probability_of_goal
+        # The probabilities now legitimately DIFFER: 'delta' asks whether the
+        # model's propagated sum clears 0.2 (0.60 of the time), 'level' asks
+        # whether this option gets the goal to 0.9 (never — it does nothing).
+        assert delta.results[0].probability_of_goal == pytest.approx(0.60, abs=TOL)
+        assert level.results[0].probability_of_goal == 0.0
 
     def test_intercept_cancels_out(self):
-        """delta = T - B + I, so a non-zero goal intercept must NOT move the answer.
+        """A non-zero goal intercept must NOT move the answer.
 
-        Samples shift to U(I, I+0.5) and the threshold shifts by the same I.
-        Drop the '+ intercept' term and this reds: P becomes 1-2*(T-B-I) = 0.80.
+        Under 2.258 this held by arithmetic: the '+ intercept' term in
+        `T - B + I` cancelled the shift in the samples. Under 2.286 it holds
+        STRUCTURALLY — the intercept is present in both the option sample and the
+        status-quo sample, so it cancels in the difference and no term has to be
+        remembered. That is why the '+ intercept' term is gone rather than
+        preserved, and this test is the guard on the change.
         """
-        without = analyse(
+        without = analyse_level(
             goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7, intercept=0.0
         )
-        with_intercept = analyse(
+        with_intercept = analyse_level(
             goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7, intercept=0.1
         )
 
@@ -359,7 +549,7 @@ class TestAdversarialBaselines:
 
         B=0.0, T=0.25 -> delta 0.25 -> P = 1 - 2*0.25 = 0.50.
         """
-        response = analyse(goal_threshold=0.25, goal_threshold_frame="level", baseline=0.0)
+        response = analyse_level(goal_threshold=0.25, goal_threshold_frame="level", baseline=0.0)
 
         assert (
             response.results[0].probability_of_goal is not None
@@ -369,26 +559,27 @@ class TestAdversarialBaselines:
 
     def test_negative_baseline_converts(self):
         """B=-0.3, T=0.1 -> delta 0.4 -> P = 1 - 2*0.4 = 0.20."""
-        response = analyse(goal_threshold=0.1, goal_threshold_frame="level", baseline=-0.3)
+        response = analyse_level(goal_threshold=0.1, goal_threshold_frame="level", baseline=-0.3)
         assert response.results[0].probability_of_goal == pytest.approx(0.20, abs=TOL)
 
     def test_converted_threshold_may_be_negative_and_is_not_clamped(self):
         """B=0.7, T=0.6 -> delta = -0.1: the goal is ALREADY met at baseline.
 
-        A negative converted threshold is legitimate, so it must not be clamped
-        to 0 or refused. Every sample (>= 0) clears -0.1 => P = 1.0 exactly.
+        The goal starts at 0.7 and the option can only raise it, so every draw
+        clears 0.6 => P = 1.0 exactly. A target already met must not be refused
+        or clamped away.
         """
-        response = analyse(goal_threshold=0.6, goal_threshold_frame="level", baseline=0.7)
+        response = analyse_level(goal_threshold=0.6, goal_threshold_frame="level", baseline=0.7)
         assert response.results[0].probability_of_goal == 1.0
 
     def test_honest_zero_is_still_reported(self):
-        """B=0.7, T=1.5 -> delta 0.8, above every sample (max 0.5) => P = 0.0.
+        """B=0.7, T=1.5, best reachable level 0.7 + 0.5 = 1.2 => P = 0.0.
 
         This zero is TRUE — the goal is genuinely unreachable in this model — and
         must still be emitted. Fail-closed withholds UNPROVABLE numbers, never
         merely unwelcome ones.
         """
-        response = analyse(goal_threshold=1.5, goal_threshold_frame="level", baseline=0.7)
+        response = analyse_level(goal_threshold=1.5, goal_threshold_frame="level", baseline=0.7)
         assert response.results[0].probability_of_goal == 0.0
         assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
 
@@ -406,28 +597,58 @@ class TestResolverUnit:
         return RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(build_request(**kwargs))
 
     @pytest.mark.parametrize(
-        "threshold,baseline,intercept,expected",
+        "threshold,baseline,intercept",
         [
-            (0.9, 0.7, 0.0, 0.2),  # the witness
-            (0.9, 0.7, 0.1, 0.3),  # + intercept
-            (0.25, 0.0, 0.0, 0.25),  # zero baseline
-            (0.1, -0.3, 0.0, 0.4),  # negative baseline
-            (0.6, 0.7, 0.0, -0.1),  # negative result, unclamped
+            (0.9, 0.7, 0.0),  # the witness
+            (0.9, 0.7, 0.1),  # non-zero intercept
+            (0.25, 0.0, 0.0),  # zero baseline
+            (0.1, -0.3, 0.0),  # negative baseline
+            (0.6, 0.7, 0.0),  # target already met at baseline
         ],
     )
-    def test_arithmetic(self, threshold, baseline, intercept, expected):
-        value, warning = self.resolve(
+    def test_level_plan_carries_the_threshold_and_baseline_verbatim(
+        self, threshold, baseline, intercept
+    ):
+        """A level plan does NO arithmetic — that is the point of 2.286.
+
+        Its predecessor asserted ``value == T - B + I``. That single number was
+        the defect: collapsing the comparison to a constant known before the
+        Monte Carlo runs is only possible if the samples' origin is known in
+        advance, and it is not — it depends on where the factors currently sit.
+        The plan therefore carries T and B forward untouched, and the anchor is
+        applied per draw against the status-quo reference.
+        """
+        plan, warning = self.resolve(
             goal_threshold=threshold,
             goal_threshold_frame="level",
             baseline=baseline,
             intercept=intercept,
         )
         assert warning is None
-        assert value == pytest.approx(expected, abs=1e-12)
+        assert plan.level_threshold == pytest.approx(threshold, abs=1e-12)
+        assert plan.goal_baseline == pytest.approx(baseline, abs=1e-12)
+        assert plan.delta_threshold is None
+        assert plan.needs_status_quo_reference is True
+
+    def test_the_intercept_is_no_longer_an_operand(self):
+        """Two requests differing only in intercept must yield the SAME plan.
+
+        Under 2.258 the intercept entered the converted number. Under 2.286 it
+        cancels in the per-draw difference, so it must not appear in the plan at
+        all — if it reappears, it is being double-counted.
+        """
+        flat, _ = self.resolve(goal_threshold=0.9, goal_threshold_frame="level", intercept=0.0)
+        raised, _ = self.resolve(goal_threshold=0.9, goal_threshold_frame="level", intercept=0.9)
+        assert flat == raised
 
     def test_delta_returns_the_input_unchanged(self):
-        value, warning = self.resolve(goal_threshold=0.2, goal_threshold_frame="delta")
-        assert value == 0.2
+        plan, warning = self.resolve(goal_threshold=0.2, goal_threshold_frame="delta")
+        assert plan.delta_threshold == 0.2
+        assert plan.level_threshold is None
+        assert plan.needs_status_quo_reference is False, (
+            "a delta plan compares raw samples, so it must not pay for the "
+            "status-quo reference"
+        )
         assert warning is None
 
     def test_absent_frame_returns_none_and_a_warning(self):
@@ -467,28 +688,39 @@ class TestResolverUnit:
 
 
 # =============================================================================
-# 6. A1 — goal-node epsilon_std clamps samples to [0, 1]
+# 6. Epsilon breaks the status-quo reference — widened by 2.286
 # =============================================================================
 
 
-class TestGoalEpsilonClamp:
-    """SCMEvaluatorV2 clamps an epsilon-noised node to [0, 1] (:1187-1189).
+class TestEpsilonBreaksTheStatusQuoReference:
+    """Any epsilon that can REACH the goal now refuses, and the widening is forced.
 
-    That clamp FALSIFIES `sample = intercept + S`, so it breaks the conversion
-    identity. Witness graph for this class (strength_mean=1.0, intercept=1.0)::
+    2.258 refused only when the GOAL carried epsilon AND the converted threshold
+    escaped (0, 1], because the only hazard then was the evaluator's [0, 1] clamp
+    falsifying `sample = intercept + S`.
 
-        sample(g) = 0 + 1.0 + f * 1.0  ~  Uniform(1, 2)     when eps == 0
-        B = 0.5, T = 0.7  ->  converted = 0.7 - 0.5 + 1.0 = 1.20
-        P(sample >= 1.20), sample ~ U(1, 2)  =  0.80        by hand
+    2.286 resolves a level threshold by DIFFERENCING each option's sample against
+    a status-quo sample from the same draw, and that adds a second, independent
+    hazard: `SCMEvaluatorV2.evaluate` draws epsilon inside each call, so the two
+    evaluations get two independent noise vectors. Their difference would carry
+    ~2x epsilon variance that no option caused — manufacturing UNCERTAINTY, which
+    is the same class of untruth as manufacturing confidence. The clamp hazard is
+    still present too, and is not additive.
 
-    With eps > 0 on the goal every sample is clamped to <= 1.0, so P collapses to
-    a silent 0.0 — the 2.258 untruth, re-manufactured by the converter itself.
+    Neither hazard is fixable without pre-drawing epsilon per node per sample,
+    which would change RNG consumption for every existing caller. So the honest
+    move is the one this seam already makes everywhere else: refuse, and name it.
+
+    Witness graph for this class (strength_mean=1.0, intercept=1.0, B=0.5,
+    T=0.7), with do(f := 1.0)::
+
+        level(g) = 0.5 + 1.0 * (1 - f)
+        P(level >= 0.7) = P(1 - f >= 0.2) = 0.80        by hand
     """
 
     @staticmethod
     def over_unit(**kwargs):
-        """Converted threshold 1.20, i.e. OUTSIDE (0, 1]."""
-        return analyse(
+        return analyse_level(
             goal_threshold=0.7,
             goal_threshold_frame="level",
             baseline=0.5,
@@ -497,68 +729,61 @@ class TestGoalEpsilonClamp:
             **kwargs,
         )
 
-    def test_goal_epsilon_over_unit_interval_refuses_instead_of_faking_zero(self):
-        """RED-FIRST. Before this guard the same request returned 0.0 with ZERO
-        warnings: measured 0.7967 at eps=0.0 and 0.0 at eps=0.001."""
+    def test_goal_epsilon_refuses(self):
+        """RED-FIRST on the widening. 2.258 accepted a goal epsilon whenever the
+        converted threshold happened to land inside (0, 1]; the reference cannot
+        be CRN-matched through per-call noise regardless of where it lands."""
+        noised = self.over_unit(goal_epsilon_std=0.001)
+
+        assert noised.results[0].probability_of_goal is None
+        refusals = warnings_by_code(noised, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
+        assert len(refusals) == 1
+        assert refusals[0].detail["reason"] == "epsilon_breaks_status_quo_reference"
+        assert refusals[0].detail["noisy_node_ids"] == ["g"]
+
+    def test_parent_epsilon_also_refuses(self):
+        """⚠ REVERSED BY 2.286, deliberately.
+
+        Its predecessor was a CONTROL asserting a parent's epsilon was harmless,
+        on the reasoning that it "perturbs S, which the identity already
+        accommodates". Under a per-draw reference that reasoning no longer holds:
+        the parent's noise is drawn twice — once for the option evaluation, once
+        for the reference — so it does NOT cancel and lands in the effect
+        estimate as fabricated spread.
+        """
+        noised = self.over_unit(parent_epsilon_std=0.001)
+
+        assert noised.results[0].probability_of_goal is None
+        refusals = warnings_by_code(noised, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
+        assert refusals[0].detail["reason"] == "epsilon_breaks_status_quo_reference"
+        assert refusals[0].detail["noisy_node_ids"] == ["f"]
+
+    def test_no_epsilon_anywhere_converts(self):
+        """POSITIVE CONTROL on the fixture. Without it every assertion above
+        would pass on a fixture that refuses for some unrelated reason."""
         clean = self.over_unit(goal_epsilon_std=0.0)
         assert clean.results[0].probability_of_goal == pytest.approx(0.80, abs=TOL)
+        assert warnings_by_code(clean, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
 
-        noised = self.over_unit(goal_epsilon_std=0.001)
-        assert noised.results[0].probability_of_goal is None, (
-            "a goal epsilon clamps samples to [0,1]; a converted threshold of 1.20 "
-            "can then only ever return a manufactured 0.0"
+    def test_epsilon_on_a_node_that_cannot_reach_the_goal_does_not_refuse(self):
+        """The guard is scoped to the goal's ANCESTORS, not to the whole graph.
+
+        Over-refusal has its own cost — a user sees "not available" for an answer
+        ISL could have given honestly — so a noisy node in a disconnected branch
+        must not veto the conversion. Written with an explicit graph because the
+        shared fixture has no unrelated node to make noisy.
+        """
+        request = build_request(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        request.graph.nodes.append(
+            NodeV2(id="unrelated", kind="factor", label="Elsewhere", epsilon_std=0.5)
         )
-        found = warnings_by_code(noised, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
-        assert len(found) == 1
-        assert found[0].detail["reason"] == "goal_epsilon_noise_clamps_samples"
-        assert found[0].field == "nodes[g].epsilon_std"
+        plan, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(request)
 
-    def test_goal_epsilon_inside_unit_interval_still_converts(self):
-        """Inside (0, 1] the clamp provably cannot change P, so refusing would be
-        over-broad. B=0.5, T=0.9, I=0, strength 1.0 -> samples ~U(0,1),
-        converted 0.4 -> P = 1 - 0.4 = 0.60."""
-        response = analyse(
-            goal_threshold=0.9,
-            goal_threshold_frame="level",
-            baseline=0.5,
-            strength_mean=1.0,
-            goal_epsilon_std=0.001,
+        assert warning is None, (
+            f"a noisy node with no path to the goal must not refuse, got "
+            f"{warning.detail['reason'] if warning else None}"
         )
-        assert response.results[0].probability_of_goal == pytest.approx(0.60, abs=TOL)
-        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
-
-    def test_parent_epsilon_does_not_trigger_the_guard(self):
-        """CONTROL. Only the GOAL's epsilon clamps the goal's samples; a parent's
-        epsilon perturbs S, which the identity already accommodates."""
-        response = self.over_unit(parent_epsilon_std=0.001)
-        assert response.results[0].probability_of_goal == pytest.approx(0.80, abs=TOL)
-        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
-
-    def test_no_goal_epsilon_means_no_guard_at_all(self):
-        """CONTROL. Without a goal epsilon there is no clamp, so a converted
-        threshold outside (0, 1] is perfectly legitimate and must convert."""
-        response = self.over_unit(goal_epsilon_std=0.0)
-        assert response.results[0].probability_of_goal == pytest.approx(0.80, abs=TOL)
-
-    @pytest.mark.parametrize(
-        "threshold,baseline,converted,accepted",
-        [
-            (1.0, 0.0, 1.0, True),  # converted == 1 -> ACCEPTED (pins `<= 1`)
-            (0.9, 0.9, 0.0, False),  # converted == 0 -> REFUSED  (pins `0 <`)
-        ],
-    )
-    def test_unit_interval_boundaries(self, threshold, baseline, converted, accepted):
-        value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(
-            build_request(
-                goal_threshold=threshold,
-                goal_threshold_frame="level",
-                baseline=baseline,
-                goal_epsilon_std=0.001,
-            )
-        )
-        assert value == pytest.approx(converted, abs=1e-12) if accepted else value is None
-        if not accepted:
-            assert warning.detail["reason"] == "goal_epsilon_noise_clamps_samples"
+        assert plan is not None
 
 
 # =============================================================================
@@ -596,7 +821,7 @@ class TestNormalisedDomainGuard:
     def test_legitimate_negative_baseline_still_converts(self):
         """CONTROL on the guard: it must REFUSE, never clamp, and it must not
         catch legitimate in-domain negatives. B=-0.3, T=0.1 -> P = 0.20."""
-        response = analyse(goal_threshold=0.1, goal_threshold_frame="level", baseline=-0.3)
+        response = analyse_level(goal_threshold=0.1, goal_threshold_frame="level", baseline=-0.3)
         assert response.results[0].probability_of_goal == pytest.approx(0.20, abs=TOL)
         assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
 
@@ -680,7 +905,7 @@ class TestObservedValueUnusedIsActionable:
         proves the conversion actually SUCCEEDED, so the absence below is
         suppression-on-consumption and not an analysis that quietly failed.
         """
-        response = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        response = analyse_level(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
 
         assert response.results[0].probability_of_goal == pytest.approx(0.60, abs=TOL), (
             "fixture control: this run must CONVERT, otherwise the assertion "
@@ -744,9 +969,9 @@ class TestObservedValueUnusedIsActionable:
         assert [w.detail["reason"] for w in refusals] == [reason], "fixture control"
         assert len(warnings_by_code(response, self.CODE)) == 1
 
-    def test_epsilon_clamp_refusal_keeps_the_warning(self):
-        """POSITIVE CONTROL. The clamp refusal reads the baseline to compute the
-        candidate, then refuses — nothing was CONSUMED because no threshold was
+    def test_epsilon_refusal_keeps_the_warning(self):
+        """POSITIVE CONTROL. The epsilon refusal reads the baseline on its way to
+        the guard, then refuses — nothing was CONSUMED because no plan was
         returned, so the warning stays."""
         response = analyse(
             goal_threshold=0.6,
@@ -757,20 +982,27 @@ class TestObservedValueUnusedIsActionable:
 
         refusals = warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
         assert [w.detail["reason"] for w in refusals] == [
-            "goal_epsilon_noise_clamps_samples"
+            "epsilon_breaks_status_quo_reference"
         ], "fixture control"
         assert len(warnings_by_code(response, self.CODE)) == 1
 
     def test_only_this_warning_differs_between_level_and_delta(self):
-        """CONTROL ON THE BLAST RADIUS. The same comparison expressed as a
-        converted 'level' and as an equivalent 'delta' must differ by EXACTLY
-        this one code — nothing else was suppressed, added or reordered."""
-        level = analyse(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
+        """CONTROL ON THE BLAST RADIUS. A 'level' run and a 'delta' run must
+        differ by EXACTLY this one code — nothing else suppressed, added or
+        reordered.
+
+        2.286 note: the two no longer produce the same NUMBER, and must not be
+        asserted to. 'delta' asks whether the model's propagated sum clears 0.2;
+        'level' asks whether this option gets the goal to 0.9. Under 2.258 those
+        two questions were conflated, which is precisely the defect. Both are
+        asserted to be present, so this stays a control on warning codes rather
+        than passing because one of them silently declined to answer.
+        """
+        level = analyse_level(goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7)
         delta = analyse(goal_threshold=0.2, goal_threshold_frame="delta", baseline=0.7)
 
-        assert level.results[0].probability_of_goal == pytest.approx(
-            delta.results[0].probability_of_goal, abs=1e-12
-        )
+        assert level.results[0].probability_of_goal is not None, "fixture control"
+        assert delta.results[0].probability_of_goal is not None, "fixture control"
         level_codes = [w.code for w in level.inference_warnings]
         delta_codes = [w.code for w in delta.inference_warnings]
         assert level_codes == [c for c in delta_codes if c != "GOAL_OBSERVED_VALUE_UNUSED"]

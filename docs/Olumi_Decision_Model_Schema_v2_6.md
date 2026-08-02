@@ -440,21 +440,42 @@ closes that gap.
 | `'level'` | An absolute level of the goal quantity, which must share the domain of the graph's `observed_state` values — whatever that domain is. ISL cannot verify it; the producer attests it | Converted into the sample frame first |
 | *absent* | Unknown | **`probability_of_goal` is OMITTED** + `GOAL_THRESHOLD_FRAME_UNSPECIFIED` warning |
 
-### The conversion
+### The resolution
+
+> ⚠ **CORRECTED (ROADMAP 2.286).** This section previously documented a static
+> conversion `delta_threshold = level_threshold − goal_baseline + goal_intercept`.
+> **That formula inverted answers and has been withdrawn.** It assumed a non-root
+> goal's samples were a *change* from its current level — i.e. that the parents
+> contribute zero under the status quo. They do not: `SCMEvaluatorV2.evaluate`
+> seeds `observed_state.value` as the base of **root** nodes only, so parents
+> carry **absolute** current values and propagate `parent_value × strength` into
+> a goal whose own base is `0.0`. Measured (`f=0.5`, strength `0.5`, `B=0.7`,
+> `T=0.9`, do-nothing option): the status quo scores `0.25` against a converted
+> threshold of `0.20`, so ISL reported `probability_of_goal = 1.0` for a goal the
+> status quo does not reach at all.
+
+Levels are recovered **per draw** against a status-quo **reference**, under common
+random numbers:
 
 ```
-delta_threshold = level_threshold − goal_baseline + goal_intercept
-probability_of_goal = count(samples >= delta_threshold) / n_samples
+level_i             = goal_baseline + (option_sample_i − status_quo_sample_i)
+probability_of_goal = count(level_i >= level_threshold) / n_samples
 ```
+
+`status_quo_sample_i` is the goal's value with **no interventions**, evaluated on
+the same edge strengths and factor values as every option in that draw. Everything
+not caused by the option — the factors' current values, the sampled strengths, and
+the goal's `intercept` — therefore cancels, leaving the option's causal **effect**
+added to the level the goal is actually at.
+
+`goal_intercept` is **not** a term in this arithmetic. It cancels structurally, so
+there is nothing to remember and nothing to double-count.
 
 `goal_baseline` is the goal node's `observed_state.baseline` (B.3: "Reference for
 'change from baseline' calculations"). It is **not** defaulted from
 `observed_state.value` — that field means the *current observed value* and
 repurposing it would be a second unattested frame assumption.
 
-The `+ goal_intercept` term keeps the conversion self-consistent: if a producer
-correctly stamps `intercept = baseline`, the samples already **are** levels and the
-formula collapses to `level_threshold`.
 
 ### Fail-closed
 
@@ -465,24 +486,30 @@ ISL **omits** `probability_of_goal` and emits a `warning`-severity
 | Reason | Why the conversion is invalid |
 |---|---|
 | `missing_goal_baseline` | No `observed_state.baseline` on the goal node |
-| `root_goal` | A root goal takes its base from `observed_state.value`; its samples are not in the change-from-origin frame |
+| `root_goal` | A root goal takes its base from `observed_state.value`; its samples are not in the frame this resolution is derived for |
 | `goal_parameter_uncertainty_shifts_base` | A `ParameterUncertainty` on the goal draws a per-sample base, so the origin varies per sample |
 | `goal_pinned_by_intervention` | An option intervenes on the goal, pinning its samples to an absolute value |
-| `goal_epsilon_noise_clamps_samples` | The goal has `epsilon_std > 0`, so its samples are clamped to `[0, 1]` after noise, and the converted threshold falls outside `(0, 1]` where that clamp changes the probability |
+| `epsilon_breaks_status_quo_reference` | The goal **or any ancestor** has `epsilon_std > 0`. Epsilon is drawn inside each evaluation, so the option sample and the status-quo sample get independent noise that does not cancel — and the `[0, 1]` clamp applied after it is not additive |
+| `auto_scaled_noise_breaks_status_quo_reference` | Auto-scaled noise was applied to the option samples but not to the pre-noise reference they are differenced against |
 | `goal_values_outside_normalised_domain` | An operand exceeds `\|1.5\|`, so it is not in the normalised `[0, 1]` domain the evaluator assumes — usually raw user units sent where normalised values were expected |
 | `non_finite_conversion_input` | Non-finite operand |
 
 Two of those deserve their own note.
 
-**`goal_epsilon_noise_clamps_samples`.** `SCMEvaluatorV2.evaluate` clamps a node
-carrying `epsilon_std > 0` to `[0, 1]` after adding its noise, which falsifies
-`sample = intercept + Σ` — the identity the conversion rests on. The clamp is only
-*harmful* outside `(0, 1]`: inside it, mass clamped down to `1.0` still satisfies
-`>= delta_threshold` (since `delta_threshold <= 1`) and mass clamped up to `0.0`
-still fails it (since `delta_threshold > 0`), so the probability is unchanged.
-Outside, `<= 0` overstates and `> 1` manufactures a structural zero. Only the
-**goal's** own epsilon matters; a parent's perturbs `Σ`, which the identity already
-accommodates.
+**`epsilon_breaks_status_quo_reference`.** Two independent hazards, either alone
+sufficient. (1) `SCMEvaluatorV2.evaluate` draws epsilon *inside* each call, so the
+option evaluation and the status-quo evaluation in one draw receive two independent
+noise vectors; their difference would carry roughly twice the epsilon variance,
+none of it caused by the option — fabricated spread, which is the same class of
+untruth as fabricated confidence. (2) The `[0, 1]` clamp applied after that noise is
+not additive, so at either rail the difference stops being the option's effect.
+
+⚠ This **widened** the pre-2.286 guard, which fired only on the *goal's* own
+epsilon and only when the converted threshold escaped `(0, 1]`. A **parent's**
+epsilon was previously documented as harmless because it "perturbs Σ, which the
+identity already accommodates" — that reasoning does not survive a per-draw
+reference, and parent epsilon now refuses too. The guard is scoped to the goal's
+**ancestors**, so a noisy node with no path to the goal does not over-refuse.
 
 **`goal_values_outside_normalised_domain`.** A magnitude sanity check only, derived
 from the evaluator's own `[0, 1]` clamp plus slack. It catches raw user units — the
@@ -491,9 +518,14 @@ number* rather than *no number*. It is symmetric in `abs()`, so a legitimate
 negative baseline still converts. It cannot confirm the converse: a raw value that
 happens to be small passes.
 
-A **negative** converted threshold is legitimate (the goal is already met at
-baseline) and is never clamped. A converted threshold above every sample yields an
-honest `0.0` — fail-closed withholds *unprovable* numbers, not merely unwelcome ones.
+A target **already met at baseline** is legitimate and yields an honest `1.0`; a
+target beyond anything the model can reach yields an honest `0.0`. Fail-closed
+withholds *unprovable* numbers, not merely unwelcome ones.
+
+A **do-nothing option** now correctly yields `1.0` or `0.0` according to whether the
+goal's current level already meets the target — its effect is zero by construction,
+so there is nothing for uncertainty to add. Under the withdrawn formula this was the
+exact case that inverted.
 
 **Note:** ISL remains unit-agnostic. It computes with whatever values it receives;
 PLoT handles normalisation/denormalisation (see B.6). The frame attestation is the

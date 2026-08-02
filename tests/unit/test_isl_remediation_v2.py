@@ -347,7 +347,7 @@ class TestWinnerTieBreaking:
                 rng=SeededRNG(seed + 1),
             )
             evaluator = SCMEvaluatorV2(req.graph)
-            _, _, winners, _, _, _, _ = analyzer._run_monte_carlo(
+            _, _, winners, _, _, _, _, _ = analyzer._run_monte_carlo(
                 req, sampler, factor_sampler, evaluator
             )
             return winners
@@ -377,7 +377,7 @@ class TestWinnerTieBreaking:
             rng=SeededRNG(seed + 1),
         )
         evaluator = SCMEvaluatorV2(req.graph)
-        _, _, winners, _, _, _, _ = analyzer._run_monte_carlo(
+        _, _, winners, _, _, _, _, _ = analyzer._run_monte_carlo(
             req, sampler, factor_sampler, evaluator
         )
 

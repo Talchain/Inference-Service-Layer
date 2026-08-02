@@ -1385,6 +1385,60 @@ class PhaseDeadline:
         return round((time.monotonic() - self.t0) * 1000.0, 1)
 
 
+@dataclass(frozen=True)
+class GoalThresholdPlan:
+    """HOW ``probability_of_goal`` must be computed for one request (ROADMAP 2.286).
+
+    Two modes, and the distinction is not cosmetic — it is the difference
+    between a number and an inverted number:
+
+    ``delta`` mode
+        The caller ATTESTED the threshold is already in the samples' own frame.
+        Compare raw samples against ``delta_threshold``. Byte-identical to the
+        pre-2.286 path; ISL cannot verify a caller's provenance claim.
+
+    ``level`` mode
+        The threshold is a LEVEL of the goal quantity. Levels are recovered from
+        the samples per draw, against a status-quo REFERENCE::
+
+            level_i = goal_baseline + (option_sample_i - status_quo_sample_i)
+
+        and compared against ``level_threshold``. Both terms come from the SAME
+        Monte Carlo draw (common random numbers), so everything that is not
+        caused by the option — the factors' current values, the sampled edge
+        strengths, the goal's intercept — cancels exactly, leaving the option's
+        causal EFFECT on the goal added to the level the goal is actually at.
+
+    Why this replaces the static ``T - B + intercept`` conversion: that formula
+    assumed the goal's samples were a CHANGE from its current level, i.e. that
+    the parents contribute zero under the status quo. They do not. The evaluator
+    seeds ``observed_state.value`` as the base of ROOT nodes only, so parents
+    carry their ABSOLUTE current values and propagate ``parent_value *
+    strength`` into a non-root goal whose own base is 0.0. The status-quo sample
+    is therefore ``intercept + S_sq`` with ``S_sq != 0``, and anchoring the
+    conversion at zero shifted every comparison by exactly ``S_sq``. Measured on
+    the witness graph (f=0.5, strength=0.5, B=0.7, T=0.9): the status quo scores
+    0.25 against a converted threshold of 0.20, so ISL reported ``100%``
+    confidence in reaching a goal the status quo does not reach at all — a
+    CONFIDENT INVERSION, not a rounding error.
+
+    The ``+ intercept`` term of the old formula is gone because under a
+    reference anchor it cancels on its own: it is present in both the option
+    sample and the status-quo sample. It is still domain-guarded as an operand,
+    because an intercept in raw user units is still evidence the whole request
+    is mis-normalised.
+    """
+
+    delta_threshold: Optional[float] = None
+    level_threshold: Optional[float] = None
+    goal_baseline: Optional[float] = None
+
+    @property
+    def needs_status_quo_reference(self) -> bool:
+        """True iff computing this plan requires the per-draw status-quo series."""
+        return self.level_threshold is not None
+
+
 # =============================================================================
 # Robustness Analyzer V2
 # =============================================================================
@@ -1789,7 +1843,7 @@ class RobustnessAnalyzerV2:
         # warning it produces is still appended at its original site below, so
         # the emission ORDER of inference_warnings on the wire is unchanged.
         (
-            goal_threshold_in_sample_frame,
+            goal_threshold_plan,
             goal_threshold_frame_warning,
         ) = self._resolve_goal_threshold_in_sample_frame(request)
 
@@ -1803,7 +1857,7 @@ class RobustnessAnalyzerV2:
             fully_intervened_node_ids,
             defaulted_root_node_ids,
             seed,
-            self._goal_baseline_was_consumed(request, goal_threshold_in_sample_frame),
+            self._goal_baseline_was_consumed(request, goal_threshold_plan),
         )
         inference_warnings.extend(goal_disclosure_warnings)
 
@@ -1816,8 +1870,16 @@ class RobustnessAnalyzerV2:
             tie_count,
             constraint_node_values,
             factor_values_per_sample,
+            status_quo_outcomes,
         ) = self._run_monte_carlo(
-            request, sampler, factor_sampler, evaluator, constraint_target_nodes
+            request,
+            sampler,
+            factor_sampler,
+            evaluator,
+            constraint_target_nodes,
+            need_status_quo_reference=(
+                goal_threshold_plan is not None and goal_threshold_plan.needs_status_quo_reference
+            ),
         )
 
         # B2 CRN-fix (CODE-REVIEW-ISL F1): expected_regret is a JOINT Common-
@@ -1907,6 +1969,44 @@ class RobustnessAnalyzerV2:
         # frame once, above (hoisted for 2.279 — see the comment there). Its
         # warning is appended HERE, at the original emission site, so the order
         # of inference_warnings on the wire is byte-identical to before.
+        #
+        # ROADMAP 2.286: the level-frame plan differences each option's samples
+        # against the status-quo reference, but that reference is drawn PRE-noise
+        # while `option_outcomes` is now POST-noise. Auto-scaled noise is drawn
+        # independently per option, so it does NOT cancel in the difference — it
+        # would land in the effect estimate as variance no option caused. The
+        # reference cannot be re-noised coherently either (there is no
+        # "status-quo option" for _apply_auto_scaled_noise to scale). So the only
+        # honest move is the one the rest of this seam already makes: refuse.
+        # This is unreachable at current settings (ENABLE_AUTO_SCALED_NOISE is
+        # False by default) and is written as a live guard rather than an
+        # assertion precisely because flipping that flag must not silently
+        # re-open the defect.
+        if (
+            goal_threshold_plan is not None
+            and goal_threshold_plan.needs_status_quo_reference
+            and auto_noise_applied
+        ):
+            goal_threshold_plan = None
+            goal_threshold_frame_warning = InferenceWarning(
+                code="GOAL_THRESHOLD_NOT_CONVERTIBLE",
+                field="goal_threshold_frame",
+                detail={
+                    "goal_node_id": request.goal_node_id,
+                    "goal_threshold": request.goal_threshold,
+                    "goal_threshold_frame": request.goal_threshold_frame,
+                    "reason": "auto_scaled_noise_breaks_status_quo_reference",
+                    "message": (
+                        "Auto-scaled noise was applied to the option samples but "
+                        "not to the status-quo reference they are differenced "
+                        "against, so a level threshold cannot be resolved without "
+                        "attributing that noise to the option. "
+                        "probability_of_goal is omitted."
+                    ),
+                },
+                severity="warning",
+            )
+
         if goal_threshold_frame_warning is not None:
             inference_warnings.append(goal_threshold_frame_warning)
 
@@ -1914,9 +2014,10 @@ class RobustnessAnalyzerV2:
             option_outcomes,
             option_wins,
             request,
-            goal_threshold_in_sample_frame,
+            goal_threshold_plan,
             constraint_node_values,
             pre_noise_expected_regret,
+            status_quo_outcomes,
         )
 
         # Build critiques for analysis warnings
@@ -2563,6 +2664,7 @@ class RobustnessAnalyzerV2:
         factor_sampler: FactorSampler,
         evaluator: SCMEvaluatorV2,
         constraint_target_nodes: Optional[List[str]] = None,
+        need_status_quo_reference: bool = False,
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
@@ -2571,6 +2673,7 @@ class RobustnessAnalyzerV2:
         int,
         Optional[Dict[str, Dict[str, List[float]]]],
         List[Dict[str, float]],
+        List[float],
     ]:
         """
         Run Monte Carlo simulation with dual edge uncertainty and factor uncertainty.
@@ -2591,6 +2694,9 @@ class RobustnessAnalyzerV2:
             - tie_count: Number of samples with ties
             - constraint_node_values: Dict[option_id, Dict[node_id, List[value]]] or None
             - factor_values_per_sample: List of sampled factor value dicts per MC iteration
+            - status_quo_outcomes: Per-draw goal value with NO interventions, on the
+              same edge/factor draws as every option (ROADMAP 2.286). Empty list
+              unless need_status_quo_reference is set.
 
         Note: option_wins uses float to support split-tie handling where ties are
         divided equally among tied options.
@@ -2610,6 +2716,23 @@ class RobustnessAnalyzerV2:
                 for opt in request.options
             }
 
+        # ROADMAP 2.286: the per-draw status-quo REFERENCE for a level-frame
+        # goal_threshold. Built only when a plan actually needs it, so every
+        # other request path does strictly the same work it did before.
+        #
+        # It gets its OWN evaluator with NO epsilon RNG, which is what keeps this
+        # addition invisible to everything else: the shared `evaluator` would
+        # consume draws from the epsilon stream and shift every subsequent
+        # sample, silently changing results across the repo for a feature that
+        # only one field asked for. Passing epsilon_rng=None cannot lose fidelity
+        # HERE because the resolver refuses outright when any node that can reach
+        # the goal carries epsilon_std > 0 — so on every request that gets this
+        # far, the goal's value is epsilon-free by construction. The two facts
+        # are load-bearing on each other; changing either without the other
+        # re-opens the defect.
+        status_quo_outcomes: List[float] = []
+        sq_evaluator = SCMEvaluatorV2(request.graph) if need_status_quo_reference else None
+
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
@@ -2617,6 +2740,20 @@ class RobustnessAnalyzerV2:
             # Sample factor values (parameter uncertainty)
             factor_values = factor_sampler.sample_factor_values()
             factor_values_per_sample.append(factor_values)
+
+            # The reference draw: the SAME edge strengths and factor values as
+            # every option below (common random numbers), with no interventions.
+            # Differencing against this is what turns an absolute propagated sum
+            # back into the option's causal effect.
+            if sq_evaluator is not None:
+                status_quo_outcomes.append(
+                    sq_evaluator.evaluate(
+                        edge_strengths=edge_config,
+                        interventions={},
+                        goal_node=request.goal_node_id,
+                        factor_values=factor_values,
+                    )
+                )
 
             # Evaluate each option
             sample_outcomes = {}
@@ -2681,6 +2818,7 @@ class RobustnessAnalyzerV2:
             tie_count,
             constraint_node_values,
             factor_values_per_sample,
+            status_quo_outcomes,
         )
 
     @staticmethod
@@ -3158,7 +3296,7 @@ class RobustnessAnalyzerV2:
     @staticmethod
     def _goal_baseline_was_consumed(
         request: RobustnessRequestV2,
-        goal_threshold_in_sample_frame: Optional[float],
+        goal_threshold_plan: Optional["GoalThresholdPlan"],
     ) -> bool:
         """Did THIS run's frame conversion actually READ the goal's ``observed_state``?
 
@@ -3173,24 +3311,22 @@ class RobustnessAnalyzerV2:
         ``'delta'`` returns the caller's number unconverted before the goal node
         is even looked up, an unstamped frame refuses, and each convertibility
         refusal (root goal, PU on the goal, goal pinned by an intervention,
-        missing baseline, non-finite or out-of-domain operands, epsilon clamp)
-        returns ``None``. So ``value is not None AND frame == 'level'`` is exact
-        evidence that the baseline was consumed.
+        missing baseline, non-finite or out-of-domain operands, epsilon reaching
+        the goal) returns ``None``. So ``plan is not None AND frame == 'level'``
+        is exact evidence that the baseline was consumed.
 
         ROADMAP 2.279 uses this to suppress GOAL_OBSERVED_VALUE_UNUSED on runs
         where the observed_state did its job. The frame Literal is enumerated by
         a test, so adding a third frame value REDs rather than silently landing
         on the wrong side of this predicate.
         """
-        return goal_threshold_in_sample_frame is not None and (
-            request.goal_threshold_frame == "level"
-        )
+        return goal_threshold_plan is not None and (request.goal_threshold_frame == "level")
 
     @staticmethod
     def _resolve_goal_threshold_in_sample_frame(
         request: RobustnessRequestV2,
-    ) -> Tuple[Optional[float], Optional[InferenceWarning]]:
-        """Put ``goal_threshold`` into the goal SAMPLES' frame, or refuse (ROADMAP 2.258).
+    ) -> Tuple[Optional["GoalThresholdPlan"], Optional[InferenceWarning]]:
+        """Decide HOW ``goal_threshold`` is compared, or refuse (ROADMAP 2.258 / 2.286).
 
         THE ARITHMETIC, derived from the evaluator rather than assumed
         (``SCMEvaluatorV2.evaluate``)::
@@ -3201,22 +3337,37 @@ class RobustnessAnalyzerV2:
         already emits ``GOAL_OBSERVED_VALUE_UNUSED``. Writing S for the parents'
         propagated contribution::
 
-            sample     = intercept + S
-            real_level = B         + S          (B = the goal's level absent
-                                                 modelled contributions)
+            sample = intercept + S
 
-        Eliminating S gives ``sample = real_level - B + intercept``, so the level
-        threshold T is met exactly when::
+        ⚠ 2.286 CORRECTION. The 2.258 derivation continued ``real_level = B + S``
+        and eliminated S to get ``sample >= T - B + intercept``. **That step is
+        false, and it inverted answers.** It requires S to be a CHANGE from the
+        goal's current level, i.e. ``S == 0`` under the status quo. But the
+        evaluator seeds ``observed_state.value`` as the base of ROOT nodes ONLY
+        (see the ``is_root`` branch in ``evaluate``), and ``FactorSampler`` draws
+        factor values centred on ``observed_state.value``. So parents carry their
+        ABSOLUTE current values, and ``S_sq = SUM(current_parent * strength)`` is
+        emphatically not zero. Anchoring at zero shifted every level comparison
+        by exactly ``S_sq``.
 
-            sample >= T - B + intercept
+        Measured, not argued (f=0.5, strength=0.5, B=0.7, T=0.9, status-quo
+        option): status-quo sample ``0.25`` vs converted threshold ``0.20`` ->
+        ISL reported ``probability_of_goal = 1.0``. The status quo leaves the
+        goal at 0.7, which does not reach 0.9, so the truth is ``0.0``. A
+        confident inversion rendered to a user as certainty.
 
-        i.e. ``delta_threshold = level_threshold - goal_baseline + goal_intercept``.
+        THE FIX: recover levels per draw against a status-quo REFERENCE, under
+        common random numbers::
 
-        The ``+ intercept`` term is not decoration: it makes the conversion
-        self-consistent. If a producer correctly models the goal by stamping
-        ``intercept = B``, then the samples ARE levels and the formula collapses
-        to ``T``, which is right. With the default ``intercept = 0.0`` it reduces
-        to ``T - B``. Both limbs fall out of the same identity.
+            level_i = B + (option_sample_i - status_quo_sample_i)
+
+        S_sq cancels because it is present in both terms — and so does the
+        intercept, which is why the old ``+ intercept`` term is gone rather than
+        merely re-derived. What survives is the option's causal effect on the
+        goal, added to the level the goal is actually at. This resolver therefore
+        returns a PLAN (``GoalThresholdPlan``) rather than a scalar: the
+        comparison can no longer be collapsed to one number known before the
+        Monte Carlo runs.
 
         B is read from the goal node's ``observed_state.baseline`` — the one field
         the canonical schema (Olumi_Decision_Model_Schema_v2_6.md, B.3) defines as
@@ -3233,9 +3384,9 @@ class RobustnessAnalyzerV2:
         fabricated number, no clamp, no silent default.
 
         Returns:
-            ``(threshold_in_sample_frame, warning)``. A non-None threshold means
-            "safe to compare against samples". ``(None, None)`` means no threshold
-            was requested at all — nothing to disclose.
+            ``(plan, warning)``. A non-None plan means "safe to compute a
+            probability". ``(None, None)`` means no threshold was requested at
+            all — nothing to disclose.
         """
         threshold = request.goal_threshold
         if threshold is None:
@@ -3246,7 +3397,7 @@ class RobustnessAnalyzerV2:
         frame = request.goal_threshold_frame
 
         def refuse(reason: str, field: str, message: str, **extra: Any) -> Tuple[
-            Optional[float], Optional[InferenceWarning]
+            Optional["GoalThresholdPlan"], Optional[InferenceWarning]
         ]:
             detail: Dict[str, Any] = {
                 "goal_node_id": goal_id,
@@ -3289,7 +3440,7 @@ class RobustnessAnalyzerV2:
             # Attested to be in the samples' own frame already. This is the
             # pre-2.258 comparison, byte-identical, and it is the CALLER's
             # attestation — ISL has no way to verify a number's provenance.
-            return threshold, None
+            return GoalThresholdPlan(delta_threshold=threshold), None
 
         # frame == "level": convert into the sample frame, or refuse.
         goal_node = next((n for n in request.graph.nodes if n.id == goal_id), None)
@@ -3434,59 +3585,76 @@ class RobustnessAnalyzerV2:
                 domain_limit=NORMALISED_DOMAIN_LIMIT,
             )
 
-        # The domain guard bounds every operand by 1.5, so |converted| <= 4.5 and a
-        # non-finite RESULT is unreachable. No post-conversion finiteness branch is
-        # emitted here on purpose: unreachable machinery that reads as a guarantee
-        # is exactly the defect class this repo hunts.
-        converted = threshold - baseline + intercept
-
-        # --- epsilon clamp guard ----------------------------------------------
-        # SCMEvaluatorV2.evaluate CLAMPS a node with epsilon_std > 0 to [0, 1]
-        # after adding its noise. That clamp FALSIFIES `sample = intercept + S`,
-        # the identity this whole conversion rests on, so a goal-node epsilon is
-        # not a detail — measured on the witness graph, a converted threshold of
-        # 1.20 goes from a correct 0.80 to a silent 0.0 the instant the goal
-        # carries epsilon_std=0.001. That is the 2.258 untruth re-manufactured.
+        # --- epsilon guard -----------------------------------------------------
+        # 2.286 WIDENED this from "the goal's own epsilon, when the converted
+        # threshold escapes (0, 1]" to "any epsilon that can reach the goal", and
+        # the widening is forced by the reference anchor rather than chosen.
         #
-        # But the clamp is only HARMFUL outside (0, 1]. Inside it, the clamp
-        # provably cannot change the comparison:
-        #   - mass clamped DOWN to 1.0 still satisfies `>= converted` (converted <= 1)
-        #   - mass clamped UP to 0.0 still fails it                   (converted > 0)
-        # so P is unchanged and the conversion stays honest. Outside:
-        #   - converted <= 0 OVERSTATES (the 0.0 clamp piles mass onto a passing value)
-        #   - converted > 1  manufactures a structural zero (no sample can exceed 1.0)
-        # Hence: refuse iff NOT (0 < converted <= 1). The strict `0 <` is
-        # load-bearing — converted == 0 is refused, converted == 1 is accepted.
+        # The anchor needs `option_sample_i` and `status_quo_sample_i` to differ
+        # ONLY by the option. Epsilon breaks that in two independent ways:
         #
-        # Only the GOAL's own epsilon matters: a parent's epsilon perturbs S, which
-        # the identity already accommodates.
-        if goal_node.epsilon_std > 0 and not (0 < converted <= 1):
+        #   1. NOT CRN-MATCHABLE. `SCMEvaluatorV2.evaluate` draws epsilon inside
+        #      each call, so two calls in one MC draw get two independent noise
+        #      vectors. The difference would then carry ~2x epsilon variance that
+        #      no option caused — manufacturing uncertainty, which is the same
+        #      class of untruth as manufacturing confidence.
+        #   2. THE CLAMP IS NOT ADDITIVE. A node with epsilon_std > 0 is clamped
+        #      to [0, 1] after noise, so `option - status_quo` stops being the
+        #      option's effect at either rail.
+        #
+        # Only epsilon that can actually REACH the goal matters, so this walks the
+        # goal's ancestors rather than the whole graph: a noisy node in a
+        # disconnected branch cannot perturb the goal's samples and refusing on it
+        # would be over-refusal, which has its own cost (a user sees "not
+        # available" for an answer ISL could have given honestly).
+        parents_of: Dict[str, List[str]] = defaultdict(list)
+        for edge in request.graph.edges:
+            parents_of[edge.to].append(edge.from_)
+        influencers = {goal_id}
+        frontier = [goal_id]
+        while frontier:
+            for parent in parents_of[frontier.pop()]:
+                if parent not in influencers:
+                    influencers.add(parent)
+                    frontier.append(parent)
+        noisy = sorted(
+            node.id
+            for node in request.graph.nodes
+            if node.id in influencers and node.epsilon_std > 0
+        )
+        if noisy:
             return refuse(
-                "goal_epsilon_noise_clamps_samples",
+                "epsilon_breaks_status_quo_reference",
                 f"nodes[{goal_id}].epsilon_std",
                 (
-                    f"Goal node '{goal_id}' has epsilon_std="
-                    f"{goal_node.epsilon_std}, so its samples are clamped to "
-                    f"[0, 1] after noise. The converted threshold {converted} "
-                    f"lies outside (0, 1], where that clamp changes the "
-                    f"probability: at or below 0 it overstates, above 1 it "
-                    f"manufactures a structural zero."
+                    f"Nodes {noisy} carry epsilon_std > 0 and can influence goal "
+                    f"'{goal_id}'. A level threshold is resolved by differencing "
+                    f"each option's sample against a status-quo sample from the "
+                    f"same draw, but epsilon is drawn per evaluation and clamped "
+                    f"to [0, 1], so that difference would carry noise no option "
+                    f"caused. probability_of_goal is omitted rather than widened "
+                    f"by fabricated variance."
                 ),
                 goal_baseline=baseline,
                 goal_intercept=intercept,
-                goal_epsilon_std=goal_node.epsilon_std,
-                converted_threshold=converted,
+                noisy_node_ids=noisy,
             )
-        return converted, None
+
+        # The domain guard bounds every operand by 1.5, so both plan values are
+        # finite by construction. No post-hoc finiteness branch is emitted here on
+        # purpose: unreachable machinery that reads as a guarantee is exactly the
+        # defect class this repo hunts.
+        return GoalThresholdPlan(level_threshold=threshold, goal_baseline=baseline), None
 
     def _compute_option_results(
         self,
         outcomes: Dict[str, List[float]],
         wins: Dict[str, float],
         request: RobustnessRequestV2,
-        goal_threshold_in_sample_frame: Optional[float] = None,
+        goal_threshold_plan: Optional["GoalThresholdPlan"] = None,
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None,
         expected_regret: Optional[Dict[str, float]] = None,
+        status_quo_outcomes: Optional[List[float]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -3494,12 +3662,11 @@ class RobustnessAnalyzerV2:
             outcomes: Dict[option_id, List[outcome_samples]]
             wins: Dict[option_id, win_count]
             request: The analysis request
-            goal_threshold_in_sample_frame: goal_threshold already resolved into
-                the goal SAMPLES' frame by
-                _resolve_goal_threshold_in_sample_frame (ROADMAP 2.258). None ->
-                probability_of_goal is OMITTED for every option. Passed in rather
-                than re-read from `request` so the frame resolution happens exactly
-                once, at one site, and cannot drift per option.
+            goal_threshold_plan: How to compare goal_threshold, already resolved by
+                _resolve_goal_threshold_in_sample_frame (ROADMAP 2.258 / 2.286).
+                None -> probability_of_goal is OMITTED for every option. Passed in
+                rather than re-read from `request` so the frame resolution happens
+                exactly once, at one site, and cannot drift per option.
             constraint_node_values: Optional dict of constraint node sample values
                 for multi-constraint analysis
             expected_regret: Optional dict[option_id, pre-noise JOINT expected
@@ -3507,6 +3674,9 @@ class RobustnessAnalyzerV2:
                 outcomes (B2 CRN-fix F1) so it rides the same population as
                 win_probability. Stored on OptionResult.pre_noise_expected_regret (serialized;
                 survives offload) for the V2 emission layer. None -> not threaded.
+            status_quo_outcomes: Per-draw no-intervention goal values, CRN-paired
+                element-wise with every option's samples. Required by, and only
+                by, a level-frame plan (ROADMAP 2.286).
         """
         expected_regret = expected_regret or {}
         results = []
@@ -3521,15 +3691,26 @@ class RobustnessAnalyzerV2:
                 samples_array, request.confidence_level
             )
 
-            # Compute probability_of_goal if the threshold resolved into the
-            # samples' own frame (ROADMAP 2.258). This reads the RESOLVED value,
-            # never request.goal_threshold: an unattested or unconvertible
-            # threshold arrives here as None and the field is omitted, which is
-            # what stops the "< 1% chance of hitting your goal" untruth.
+            # Compute probability_of_goal from the resolved PLAN (ROADMAP 2.258 /
+            # 2.286). This never reads request.goal_threshold: an unattested or
+            # unconvertible threshold arrives here as a None plan and the field is
+            # omitted, which is what stops the "< 1% chance of hitting your goal"
+            # untruth in one direction and the "100% chance" untruth in the other.
             probability_of_goal = None
-            if goal_threshold_in_sample_frame is not None:
-                n_meets_threshold = int(np.sum(samples_array >= goal_threshold_in_sample_frame))
-                probability_of_goal = n_meets_threshold / len(samples)
+            if goal_threshold_plan is not None:
+                if goal_threshold_plan.delta_threshold is not None:
+                    # Caller attested the threshold is already in the samples' frame.
+                    meets = samples_array >= goal_threshold_plan.delta_threshold
+                else:
+                    # Level frame: recover the goal's LEVEL per draw by adding the
+                    # option's causal effect to the level the goal is actually at.
+                    # Paired element-wise with the status-quo draw, so the factors'
+                    # current values, the sampled strengths and the goal's intercept
+                    # all cancel instead of being mistaken for progress.
+                    effect = samples_array - np.array(status_quo_outcomes)
+                    levels = goal_threshold_plan.goal_baseline + effect
+                    meets = levels >= goal_threshold_plan.level_threshold
+                probability_of_goal = int(np.sum(meets)) / len(samples)
 
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
