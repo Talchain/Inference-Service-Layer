@@ -345,6 +345,7 @@ class TestConditionalWinnersSkipConditions:
             _,
             _,
             factor_values_per_sample,
+            _,
         ) = analyzer._run_monte_carlo(request, sampler, factor_sampler, evaluator)
 
         # With min_bucket_size=60, each bucket of ~50 is too small
