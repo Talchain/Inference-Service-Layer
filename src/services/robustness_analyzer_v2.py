@@ -82,6 +82,7 @@ from src.models.critique import (
     GOAL_ANCESTOR_DATA_GAP,
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
+    MARGINAL_SWITCH_TRUNCATED,
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueV2
@@ -154,6 +155,30 @@ _CORRELATION_SUPPRESSION_REASON = "not_separable_under_correlation"
 
 # Default samples for marginal switch probability calculation
 MARGINAL_K_SAMPLES = 100
+
+# ROADMAP 2.356 — the fragile-edge cap for the marginal-switch sweep.
+#
+# WHY A CAP EXISTS AT ALL. `_compute_marginal_switch_probability` spends
+# MARGINAL_K_SAMPLES * O evaluate() calls PER FRAGILE EDGE, and the fragile set
+# was threshold-gated but NOT count-capped, so the phase's cost was bounded only
+# by the edge count — up to E * K * O * W units of work that the admission gate
+# charged NOTHING for. Admission cannot price a quantity it cannot bound, and an
+# unbounded phase behind a ceiling means the ceiling is not a ceiling.
+#
+# WHY 10, AND WHY TOP-K RATHER THAN FIRST-K. The marginal switch probability is a
+# per-edge diagnostic a reader scans in rank order; the edges that matter are the
+# most elastic ones, and they are already ranked by the elasticity the sensitivity
+# phase computed. Selecting the top 10 by that same score keeps every edge a
+# reader would actually look at and drops the tail that only ever cost compute.
+# 10 matches FACTOR_FLIP_MAX_CANDIDATES, the house precedent for exactly this
+# "rank, then bound" shape.
+#
+# WHAT IS LOST, STATED PLAINLY. Fragile edges beyond rank 10 keep their
+# `switch_probability` (that is free — it partitions samples the base MC already
+# drew) and lose only `marginal_switch_probability`, which is set to None and
+# DISCLOSED via MARGINAL_SWITCH_TRUNCATED. A silently-omitted number would be the
+# defect this lane exists to close, one level down.
+MARGINAL_MAX_EDGES = 10
 
 # --- EVPI below-resolution labelling (provisional_doctrine_v0) ------------------
 # EVPI is the difference of two Monte Carlo proportion estimates
@@ -289,7 +314,22 @@ SENSITIVITY_SUBSAMPLE_DIVISOR = 10
 # v5 (ROADMAP 2.228-F3): adds the `factor_flips` term. Bumped deliberately —
 # tests/unit/test_admission_calibration.py::test_formula_version_pinned exists so
 # a formula change cannot land silently, and /health advertises this string.
-COMPLEXITY_FORMULA_VERSION = "v5-factor-flips-2026-08-01"
+# v6 (ROADMAP 2.356): adds `status_quo` and `alternative_winners` — two phases
+# that were performing real evaluate() work the formula did not charge for, so
+# the "ceiling" could be cleared by a request that then did up to ~3x the
+# admitted work. Found by the evaluator-call-count ORACLE
+# (tests/unit/test_admission_evaluator_oracle.py), which instruments the real
+# SCMEvaluatorV2 and asserts advertised >= counted*W end to end — the check no
+# self-consistency test could make, because both residuals were consistent with
+# a formula that was simply missing terms.
+#
+# ⚠ THIS BUMP ALSO GROWS THE `weights` KEY SET, WHICH IS A BREAKING CHANGE AT THE
+# PLoT SEAM BY DESIGN. PLoT couples the weights key set exactly to the version and
+# treats an unexpected key as skew, so v6 must ship with the lockstep PLoT release
+# that teaches it the v6 spec (see this PR's cross-reference). DEPLOY PLoT FIRST:
+# PLoT keeps BOTH the v5 and v6 specs, so a v6-aware PLoT still prices a v5 ISL
+# correctly, while a v6 ISL in front of a v5-only PLoT would skew every request.
+COMPLEXITY_FORMULA_VERSION = "v6-status-quo-alt-winners-2026-08-03"
 
 # Per-phase structural weights (provisional; the calibration harness is the
 # source of truth for refining them — do not hand-tune without re-running it).
@@ -333,6 +373,20 @@ W_EVPC_COEF = BASE_COST_COEF  # 1 unit per (grid-point x sample x struct)
 # staging hardware.
 W_EVPPI_COEF = 1  # unit per (factor-fit x permutation x sample); charge is O-flat,
 # wall is O-sublinear (1.6-2.8x measured O=2->10) — the ~3x margin absorbs it
+
+# ROADMAP 2.356. Per-draw STATUS-QUO reference (ROADMAP 2.286): for a level-framed
+# goal_threshold, _run_monte_carlo runs one additional complete SCM evaluation per
+# draw, on its own evaluator, with no interventions. That is exactly one evaluate()
+# per sample — no option multiplier, because the reference is shared across options
+# by construction (common random numbers) — so it costs S*W at the base_mc
+# convention of 1 unit per evaluate() x W.
+W_STATUS_QUO_COEF = BASE_COST_COEF
+
+# ROADMAP 2.356. Marginal-switch sweep inside _compute_alternative_winners: one
+# baseline winner determination (O evaluates, now computed ONCE for the whole
+# request — see _compute_alternative_winners) plus MARGINAL_K_SAMPLES * O
+# evaluates per priced fragile edge. Same evaluate()-times-W convention.
+W_ALT_WINNER_COEF = BASE_COST_COEF
 
 # PROVISIONAL admission ceiling in cost units.
 #
@@ -387,7 +441,12 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     # N3 widening (_run_ prefix) immediately surfaced _run_monte_carlo — the
     # ACTUAL S*O*W evaluate() loop; option_results post-processes its outputs
     # (the earlier priced attribution on option_results was imprecise).
-    "_run_monte_carlo": "priced:base_mc",
+    # ROADMAP 2.356: _run_monte_carlo carries TWO priced loops, not one. Since
+    # 2.286 it also runs the per-draw status-quo reference for a level-framed
+    # goal. The single-term attribution was true when written and went false
+    # underneath it — which is why the evaluator-call-count oracle exists: this
+    # registry can only record an answer, never check it.
+    "_run_monte_carlo": "priced:base_mc,status_quo",
     "_compute_option_results": "subsumed:_run_monte_carlo",
     "_compute_confidence_interval": "subsumed:_compute_option_results",
     "_compute_constraint_analysis": "subsumed:_compute_option_results",
@@ -422,12 +481,13 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     "_compute_factor_evpc": "priced:evpc",
     "_compute_evpi": "priced:evpi",
     "_compute_evpi_metric": "subsumed:_compute_evpi",
-    "_compute_alternative_winners": (
-        "bounded: KNOWN-UNDERCHARGE — ~100*O*W new evaluates per fragile edge, "
-        "fragile set threshold-gated but not count-capped; only reachable when the "
-        "priced sensitivity phase ran, net under-charge ~1.5-2x on admissible "
-        "shapes; folded into the ceiling-recalibration docket (D-23.17 residual)"
-    ),
+    # ROADMAP 2.356 CLOSED the known-undercharge this entry used to confess. The
+    # confession was honest and it was still not a bound: the phase is now
+    # count-capped (MARGINAL_MAX_EDGES) and priced.
+    "_compute_alternative_winners": "priced:alternative_winners",
+    # The once-per-request expected-value baseline the sweep probes against; its
+    # O evaluations are the `1 +` inside the alternative_winners term.
+    "_compute_marginal_baseline": "subsumed:_compute_alternative_winners",
     "_compute_marginal_switch_probability": "subsumed:_compute_alternative_winners",
 }
 
@@ -475,6 +535,9 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
     """Weighted compute-admission cost for a v2 request, in cost units.
 
         cost = S*O*W                                       (base MC, always)
+             + W_STATUS_QUO_COEF*S*W                       (status-quo reference, if level-framed goal_threshold)
+             + W_ALT_WINNER_COEF*O*(1+min(E,MARGINAL_MAX_EDGES)*MARGINAL_K_SAMPLES)*W
+                                                           (alternative winners, rides on sensitivity)
              + (U+1)*min(S, EVPI_SAMPLE_CAP)*O*W           (EVPI/p_win, if include_voi & U>0)
              + W_EVPPI_COEF*U*(1+K)*S                      (full-pop EVPPI, if include_voi & U>0)
              + W_EVPC_COEF*S*W*Sum_c(len(c.values))        (EVPC, if control_candidates)
@@ -510,6 +573,23 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
     W = N + E
 
     terms: Dict[str, int] = {"base_mc": BASE_COST_COEF * S * O * W}
+
+    # Per-draw STATUS-QUO reference (ROADMAP 2.286, priced by 2.356). One extra
+    # evaluate() per sample, NO option factor — the reference is shared across
+    # options by construction (common random numbers).
+    #
+    # THE GATE IS DELIBERATELY WIDER THAN THE PHASE'S OWN CONDITION, and that is
+    # the safe direction. The phase runs iff the resolver produces a level plan
+    # (GoalThresholdPlan.needs_status_quo_reference), which additionally requires a
+    # convertible goal — attested baseline, parents, no pinning intervention, no
+    # goal-node ParameterUncertainty. Reproducing those preconditions here would
+    # duplicate the resolver in the pricing path, where a drift between the two
+    # copies would silently UNDER-price (trap 12). Charging on the two request
+    # fields a consumer can read directly — `goal_threshold` present AND
+    # `goal_threshold_frame == "level"` — over-charges only the requests the
+    # resolver then refuses, and can never under-charge one it accepts.
+    if request.goal_threshold is not None and request.goal_threshold_frame == "level":
+        terms["status_quo"] = W_STATUS_QUO_COEF * S * W
 
     # EVPI (p_win sensitivity) — priced on the DEDUPLICATED factor count (uniqueness
     # is enforced at parse time, but count unique defensively so admission never
@@ -554,6 +634,27 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
         # the correlation-suppressed case — conservative, and the term is small.
         if request.parameter_uncertainties:
             terms["structural_influence"] = MAX_INFLUENCE_WALK_CALLS_TOTAL
+
+        # Alternative winners / marginal switch (ROADMAP 2.356). Gated on the
+        # SENSITIVITY phase, not on a flag of its own: the fragile set is derived
+        # from the sensitivity results, so with no sensitivity phase the list is
+        # empty and the sweep performs zero evaluations.
+        #
+        # The evaluate() count is bounded in closed form, which it was not before
+        # this version:
+        #     baseline winner      O          computed ONCE per request (hoisted
+        #                                     out of the per-edge loop — the
+        #                                     baseline config never depended on
+        #                                     the edge, so this was F-fold
+        #                                     duplicated work)
+        #     per priced edge      K * O      K = MARGINAL_K_SAMPLES
+        #     priced edges         <= min(E, MARGINAL_MAX_EDGES)
+        # DERIVED, NOT MIRRORED (trap 12): both bounds are read from the constants
+        # the sweep itself uses, so raising either raises the admitted price
+        # automatically and the term cannot drift out of step with its loop.
+        priced_edges = min(E, MARGINAL_MAX_EDGES)
+        alt_evaluates = O * (1 + priced_edges * MARGINAL_K_SAMPLES)
+        terms["alternative_winners"] = W_ALT_WINNER_COEF * alt_evaluates * W
 
     # E-values and the stability bands that ride on them (bands default-on).
     if request.include_e_values:
@@ -645,6 +746,17 @@ def build_compute_admission() -> Dict[str, Any]:
             "bands_coef": W_BANDS_COEF,
             "path_coef": W_PATH_COEF,
             "max_decomposition_paths": MAX_DECOMPOSITION_PATHS,
+            # ROADMAP 2.356 — the two v6 terms. These are the FIRST additions to
+            # this key set since the sibling-vs-weights argument was settled, and
+            # they go here rather than in `formula_parameters` for the reason that
+            # argument turned on: they are per-phase COEFFICIENTS, not a term's own
+            # loop bounds. The cost is the one the docstring names — a consumer
+            # coupled to the key set sees skew — and it is paid deliberately, with
+            # the version bumped to v6 and the lockstep consumer release shipped
+            # alongside. Growing `weights` without bumping the version is the thing
+            # that must never happen; growing it WITH a bump is the sanctioned path.
+            "status_quo_coef": W_STATUS_QUO_COEF,
+            "alt_winner_coef": W_ALT_WINNER_COEF,
         },
         # Per-term structural parameters (ROADMAP 2.260 step 3) — the numbers a
         # term's own loop bounds itself by, as opposed to the per-phase
@@ -673,6 +785,16 @@ def build_compute_admission() -> Dict[str, Any]:
             "sensitivity": {
                 "subsample_cap": SENSITIVITY_SUBSAMPLE_CAP,
                 "subsample_divisor": SENSITIVITY_SUBSAMPLE_DIVISOR,
+            },
+            # ROADMAP 2.356. The `alternative_winners` term is
+            # O*W*(1 + min(E, max_edges)*marginal_k_samples). Both numbers bound
+            # the sweep's own loop, so both are parameters rather than
+            # coefficients, and both are DERIVED from the constants the sweep
+            # reads — raising the cap raises the advertised price with it, and a
+            # consumer can never be left hard-coding a bound ISL later retunes.
+            "alternative_winners": {
+                "max_edges": MARGINAL_MAX_EDGES,
+                "marginal_k_samples": MARGINAL_K_SAMPLES,
             },
         },
         "caps": {
@@ -2118,6 +2240,7 @@ class RobustnessAnalyzerV2:
             seed,
             n_defaulted_roots=len(defaulted_root_node_ids),
             defaulted_root_node_ids=defaulted_root_node_ids,
+            critiques=critiques,
         )
 
         # Compute E-value analogue per edge if requested. OPTIONAL phase —
@@ -5236,6 +5359,7 @@ class RobustnessAnalyzerV2:
         global_seed: int,
         n_defaulted_roots: int = 0,
         defaulted_root_node_ids: Optional[List[str]] = None,
+        critiques: Optional[List[CritiqueV2]] = None,
     ) -> RobustnessResult:
         """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
@@ -5293,6 +5417,8 @@ class RobustnessAnalyzerV2:
             request,
             evaluator,
             global_seed,
+            edge_max_elasticity=edge_max_elasticity,
+            critiques=critiques,
         )
 
         # Overall robustness
@@ -6862,6 +6988,8 @@ class RobustnessAnalyzerV2:
         request: Optional[RobustnessRequestV2] = None,
         evaluator: Optional[SCMEvaluatorV2] = None,
         global_seed: Optional[int] = None,
+        edge_max_elasticity: Optional[Dict[str, float]] = None,
+        critiques: Optional[List[CritiqueV2]] = None,
     ) -> List[FragileEdgeEnhanced]:
         """
         Compute alternative winners for fragile edges.
@@ -6871,6 +6999,25 @@ class RobustnessAnalyzerV2:
         marginal switch probability (isolated edge contribution) when
         request, evaluator, and global_seed are provided.
 
+        ROADMAP 2.356 — TWO CHANGES, both about the marginal sweep's cost.
+
+        1. THE BASELINE IS COMPUTED ONCE PER REQUEST, not once per edge. The
+           baseline config is `{every edge: mean * exists_probability}` and the
+           baseline winner follows from it — NEITHER depends on which edge is
+           being probed. Recomputing them inside the per-edge loop spent O
+           evaluate() calls per fragile edge to re-derive an identical answer.
+           Hoisting is exactly equivalent (same config, same deterministic
+           tie-break) and removes (F-1)*O evaluations.
+
+        2. THE SWEEP IS BOUNDED to the MARGINAL_MAX_EDGES most elastic fragile
+           edges. The fragile set was threshold-gated but not count-capped, so
+           the phase's evaluate() count was bounded only by the edge count and
+           the compute-admission gate could not price it — the whole ceiling was
+           clearable by a request that then did several times the admitted work.
+           Omitted edges keep `switch_probability` (free — it partitions samples
+           already drawn) and lose only `marginal_switch_probability`, which is
+           set to None and disclosed via MARGINAL_SWITCH_TRUNCATED.
+
         Args:
             fragile_edge_info: Map of edge_id -> (from_id, to_id)
             edge_configs_per_sample: Edge strengths for each MC sample
@@ -6879,6 +7026,11 @@ class RobustnessAnalyzerV2:
             request: Full robustness request with graph and options (optional)
             evaluator: SCM evaluator instance (optional)
             global_seed: Request-level seed for reproducibility (optional)
+            edge_max_elasticity: edge_id -> max |elasticity|, the ranking key for
+                the top-K selection. When absent (direct callers in tests), the
+                selection falls back to sorted edge_id order so the cap still
+                binds deterministically and the bound still holds.
+            critiques: Optional sink for the truncation disclosure.
 
         Returns:
             List of FragileEdgeEnhanced objects with enhanced fragile edge information
@@ -6888,24 +7040,64 @@ class RobustnessAnalyzerV2:
             request is not None and evaluator is not None and global_seed is not None
         )
 
+        # --- select the edges whose marginal sweep we will actually pay for ----
+        # Rank by the elasticity the sensitivity phase already computed, so the
+        # edges a reader would look at first are the ones that keep their number.
+        # Ties break on edge_id, so the selection is deterministic across
+        # processes (the same class of defect as the fragile-edge set ordering
+        # fixed in the science-validation report §5.7b).
+        all_edge_ids = sorted(fragile_edge_info)
+        if edge_max_elasticity is not None:
+            ranked = sorted(
+                all_edge_ids,
+                key=lambda eid: (-abs(edge_max_elasticity.get(eid, 0.0)), eid),
+            )
+        else:
+            ranked = all_edge_ids
+        priced_edge_ids = set(ranked[:MARGINAL_MAX_EDGES])
+        omitted_count = len(all_edge_ids) - len(priced_edge_ids)
+
+        if can_compute_marginal and omitted_count > 0 and critiques is not None:
+            critiques.append(
+                MARGINAL_SWITCH_TRUNCATED.build(
+                    computed=len(priced_edge_ids),
+                    total=len(all_edge_ids),
+                    omitted=omitted_count,
+                    k_samples=MARGINAL_K_SAMPLES,
+                    affected_node_ids=sorted(
+                        {fragile_edge_info[eid][1] for eid in ranked[MARGINAL_MAX_EDGES:]}
+                    ),
+                    seed=global_seed,
+                )
+            )
+
+        # --- the once-per-request baseline (see change 1 above) ----------------
+        marginal_baseline: Optional[Tuple[Dict[Tuple[str, str], float], str]] = None
+        if can_compute_marginal and priced_edge_ids:
+            assert request is not None
+            assert evaluator is not None
+            marginal_baseline = self._compute_marginal_baseline(request, evaluator)
+
         results = []
 
         for edge_id, (from_id, to_id) in fragile_edge_info.items():
             edge_key = (from_id, to_id)
 
-            # Compute marginal switch probability (isolated edge contribution)
-            # Only computed when all required parameters are provided
-            # Note: marginal computes its own baseline winner under expected-value config
+            # Compute marginal switch probability (isolated edge contribution).
+            # Only for the priced (top-K) edges, and only when all required
+            # parameters are provided.
             marginal_prob: Optional[float] = None
-            if can_compute_marginal:
+            if can_compute_marginal and edge_id in priced_edge_ids:
                 assert request is not None
                 assert evaluator is not None
                 assert global_seed is not None
+                assert marginal_baseline is not None
                 marginal_prob = self._compute_marginal_switch_probability(
                     edge_key=edge_key,
                     request=request,
                     evaluator=evaluator,
                     global_seed=global_seed,
+                    baseline=marginal_baseline,
                 )
 
             # Collect edge strengths across all samples
@@ -6991,6 +7183,45 @@ class RobustnessAnalyzerV2:
 
         return results
 
+    def _compute_marginal_baseline(
+        self,
+        request: RobustnessRequestV2,
+        evaluator: SCMEvaluatorV2,
+    ) -> Tuple[Dict[Tuple[str, str], float], str]:
+        """The expected-value config and its winner — shared by every edge probe.
+
+        ROADMAP 2.356. Extracted verbatim from
+        `_compute_marginal_switch_probability`, where it ran once PER FRAGILE
+        EDGE and produced the same answer every time: neither the config
+        (`mean * exists_probability` for every edge) nor the winner derived from
+        it takes the probed edge as an input. Hoisting it removes (F-1)*O
+        evaluate() calls with no change to any returned number.
+
+        Its O evaluations are the `1 +` inside the `alternative_winners` term, so
+        it is registered `subsumed:_compute_alternative_winners` rather than
+        priced separately.
+
+        ⚠ AN EARLIER DRAFT OF THIS DOCSTRING CLAIMED THE METHOD WAS "deliberately
+        named without the `_compute_` prefix so it does not enter the phase
+        inventory". It was named `_compute_marginal_baseline`, so that claim was
+        false on its own line, and TestPhasePricingInventory caught it within one
+        run. Recorded rather than quietly deleted: the prefix tripwire is exactly
+        the assume-good mirror that trap 12 says must fail loud, and here it did.
+        """
+        baseline_config = {
+            (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
+        }
+        baseline_outcomes = {}
+        for option in request.options:
+            baseline_outcomes[option.id] = evaluator.evaluate(
+                edge_strengths=baseline_config,
+                interventions=option.interventions,
+                goal_node=request.goal_node_id,
+            )
+        # Deterministic tie-breaking for baseline winner
+        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
+        return baseline_config, sorted_baseline[0][0]
+
     def _compute_marginal_switch_probability(
         self,
         edge_key: Tuple[str, str],
@@ -6998,6 +7229,7 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
         global_seed: int,
         k_samples: int = MARGINAL_K_SAMPLES,
+        baseline: Optional[Tuple[Dict[Tuple[str, str], float], str]] = None,
     ) -> float:
         """Compute probability of decision flip when ONLY this edge varies.
 
@@ -7039,24 +7271,16 @@ class RobustnessAnalyzerV2:
             )
             return 0.0
 
-        # Build baseline config: all edges at expected value (mean * exists_probability)
-        # This is consistent with how existence is a sampling gate in the rest of the system
-        baseline_config = {
-            (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
-        }
-
-        # Compute baseline winner under this config (not overall_winner from MC)
-        # This ensures we compare against the correct reference point
-        baseline_outcomes = {}
-        for option in request.options:
-            baseline_outcomes[option.id] = evaluator.evaluate(
-                edge_strengths=baseline_config,
-                interventions=option.interventions,
-                goal_node=request.goal_node_id,
-            )
-        # Deterministic tie-breaking for baseline winner
-        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
-        marginal_baseline_winner = sorted_baseline[0][0]
+        # Baseline config (all edges at expected value) and the winner under it —
+        # NOT overall_winner from the MC, so the comparison is self-consistent.
+        # ROADMAP 2.356: computed once per request and passed in; recomputed here
+        # only for direct callers that do not supply it (tests), which keeps this
+        # method's contract unchanged.
+        baseline_config, marginal_baseline_winner = (
+            baseline
+            if baseline is not None
+            else self._compute_marginal_baseline(request, evaluator)
+        )
 
         flip_count = 0
 
