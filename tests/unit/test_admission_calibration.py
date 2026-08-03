@@ -400,14 +400,27 @@ class TestPhasePricingInventory:
         # bidirectional check into a one-directional one.
         body["include_factor_flips"] = True
         body["control_candidates"] = [{"factor_id": "n5", "values": [0.1, 0.2]}]
+        # ROADMAP 2.356: `status_quo` is gated on a LEVEL-framed goal_threshold,
+        # which is not a boolean flag — omitting it here would shrink the derived
+        # term set and re-open exactly the one-directional hole the 2.228-F3
+        # comment above warns about.
+        body["goal_threshold"] = 0.9
+        body["goal_threshold_frame"] = "level"
         formula_terms = set(
             compute_weighted_cost(RobustnessRequestV2(**body)).terms
         ) | {"bands"}  # bands ride e_values; both emitted together
 
+        # ROADMAP 2.356: a phase may carry MORE THAN ONE priced loop
+        # (`_run_monte_carlo` runs base MC and, for a level-framed goal, the
+        # per-draw status-quo reference), so the value is a comma-separated term
+        # list. Splitting here rather than forcing one term per phase keeps the
+        # registry able to state the truth; a registry that cannot express a
+        # two-loop phase is a registry that will be given a wrong single answer.
         priced_terms = {
-            v.split(":", 1)[1]
+            term
             for v in PHASE_COST_ATTRIBUTION.values()
             if v.startswith("priced:")
+            for term in v.split(":", 1)[1].split(",")
         }
         unknown = priced_terms - formula_terms
         assert not unknown, (
@@ -513,7 +526,7 @@ class TestCalibrationPins:
         # Bumped v4 -> v5 by ROADMAP 2.228-F3, which added the `factor_flips`
         # term. This pin is doing its job: the formula cannot change without an
         # explicit edit here and a new version string on /health.
-        assert COMPLEXITY_FORMULA_VERSION == "v5-factor-flips-2026-08-01"
+        assert COMPLEXITY_FORMULA_VERSION == "v6-status-quo-alt-winners-2026-08-03"
 
     def test_env_override_resolves_new_var_only(self, monkeypatch):
         """ISL_MAX_COST_UNITS overrides; the OLD ISL_MAX_COMPUTE_COMPLEXITY does NOT."""
@@ -542,7 +555,12 @@ class TestCalibrationPins:
 # conservative fallback this change exists to lift. New per-term parameters go in
 # the `formula_parameters` sibling instead. If a future change genuinely must add
 # a weight key, this pin is the place that makes the consumer cost visible.
-_WEIGHT_KEYS_AT_29CB4E27 = {
+# ⚠ RE-PINNED AT THE v6 BUMP (ROADMAP 2.356). The two keys below the v5 block
+# were added deliberately, WITH `complexity_formula_version` bumped to v6 and the
+# lockstep PLoT release shipped alongside — the escape hatch the assertion's own
+# message names. The pin is not weakened: it still fails loud on any key added
+# without a version bump, which is the case it exists to catch.
+_WEIGHT_KEYS_AT_V6 = {
     "base_per_sample_per_option_per_struct",
     "evpi_sample_cap",
     "evpc_coef",
@@ -555,6 +573,9 @@ _WEIGHT_KEYS_AT_29CB4E27 = {
     "bands_coef",
     "path_coef",
     "max_decomposition_paths",
+    # v6 (ROADMAP 2.356)
+    "status_quo_coef",
+    "alt_winner_coef",
 }
 
 
@@ -586,6 +607,9 @@ def _reference_terms_from_advertisement(req: RobustnessRequestV2, admission: dic
 
     terms = {"base_mc": w["base_per_sample_per_option_per_struct"] * S * O * W}
 
+    if req.goal_threshold is not None and req.goal_threshold_frame == "level":
+        terms["status_quo"] = w["status_quo_coef"] * S * W
+
     if req.include_voi and req.parameter_uncertainties:
         u = len({pu.node_id for pu in req.parameter_uncertainties})
         if u > 0:
@@ -609,6 +633,9 @@ def _reference_terms_from_advertisement(req: RobustnessRequestV2, admission: dic
         )
         if req.parameter_uncertainties:
             terms["structural_influence"] = w["influence_walk_pool"]
+        alt = params["alternative_winners"]
+        alt_evaluates = O * (1 + min(E, alt["max_edges"]) * alt["marginal_k_samples"])
+        terms["alternative_winners"] = w["alt_winner_coef"] * alt_evaluates * W
 
     if req.include_e_values:
         terms["e_values"] = w["evalue_coef"] * E * O
@@ -662,6 +689,23 @@ def _sufficiency_shape_grid() -> dict:
         # 200//10 = 20 -> DIVISOR binds. Both parameters must be advertised for
         # these two to agree with ISL.
         "deep_samples_sensitivity_cap_binds": _request_dict(12, 40, 10000, 1),
+        # ROADMAP 2.356 — the `status_quo` term is gated on a LEVEL-framed
+        # goal_threshold, so it needs a shape of its own; without one the
+        # sufficiency EQUALITY never evaluates that term and would pass
+        # vacuously (the exact hazard this grid's own guard exists to catch).
+        "level_framed_goal_threshold": {
+            **_request_dict(12, 40, 3000, 2, sensitivity=False),
+            "goal_threshold": 0.9,
+            "goal_threshold_frame": "level",
+        },
+        # ...and its DELTA twin, so the gate is exercised on BOTH sides. A term
+        # covered only in its present state leaves the branch that omits it
+        # untested (the branch-blindness lesson recorded above).
+        "delta_framed_goal_threshold": {
+            **_request_dict(12, 40, 3000, 2, sensitivity=False),
+            "goal_threshold": 0.9,
+            "goal_threshold_frame": "delta",
+        },
         "shallow_samples_sensitivity_divisor_binds": _request_dict(12, 40, 200, 1),
         # ⚠ BOTH SHAPES BELOW EXIST BECAUSE THE GRID WAS BRANCH-BLIND (adversarial
         # review of #119). Every term was exercised, but two min() calls were only
@@ -768,9 +812,9 @@ class TestAdvertisementSufficiency:
         `formula_parameters`, which PLoT's shape check ignores (:110-122).
         """
         advertised = set(build_compute_admission()["weights"])
-        assert advertised == _WEIGHT_KEYS_AT_29CB4E27, (
-            f"the `weights` key set changed — added={sorted(advertised - _WEIGHT_KEYS_AT_29CB4E27)}, "
-            f"removed={sorted(_WEIGHT_KEYS_AT_29CB4E27 - advertised)}. This is a "
+        assert advertised == _WEIGHT_KEYS_AT_V6, (
+            f"the `weights` key set changed — added={sorted(advertised - _WEIGHT_KEYS_AT_V6)}, "
+            f"removed={sorted(_WEIGHT_KEYS_AT_V6 - advertised)}. This is a "
             f"BREAKING change for consumers that couple to the key set; put new "
             f"per-term parameters in `formula_parameters` instead, or bump "
             f"complexity_formula_version and coordinate the consumer release."
@@ -794,7 +838,7 @@ class TestAdvertisementSufficiency:
         assert params["sensitivity"]["subsample_divisor"] == SENSITIVITY_SUBSAMPLE_DIVISOR
         # The sibling placement must hold ON THE WIRE too, not just in the builder:
         # these must NOT have leaked into `weights`, or PLoT sees skew.
-        assert set(block["weights"]) == _WEIGHT_KEYS_AT_29CB4E27
+        assert set(block["weights"]) == _WEIGHT_KEYS_AT_V6
 
     def test_advertisement_reproduces_every_term_exactly(self):
         """THE SUFFICIENCY GUARANTEE — the point of the exercise.
@@ -835,10 +879,13 @@ class TestAdvertisementSufficiency:
         a hand-listed set, so a newly-priced phase joins this expectation
         automatically and the grid must be extended to cover it.
         """
+        # ROADMAP 2.356: comma-separated, because a phase can price more than
+        # one loop (see the registry note on _run_monte_carlo).
         priced_terms = {
-            v.split("priced:", 1)[1]
+            term
             for v in PHASE_COST_ATTRIBUTION.values()
             if v.startswith("priced:")
+            for term in v.split("priced:", 1)[1].split(",")
         }
         seen: set = set()
         for body in _sufficiency_shape_grid().values():

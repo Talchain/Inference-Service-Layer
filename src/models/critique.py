@@ -354,6 +354,31 @@ STRUCTURAL_INFLUENCE_TRUNCATED = CritiqueDefinition(
     ),
 )
 
+MARGINAL_SWITCH_TRUNCATED = CritiqueDefinition(
+    code="MARGINAL_SWITCH_TRUNCATED",
+    severity="warning",
+    source="analysis",
+    # ROADMAP 2.356. Unlike STRUCTURAL_INFLUENCE_TRUNCATED, the surviving values
+    # here ARE valid: marginal_switch_probability is computed per edge in
+    # isolation, so truncating the set does not change any retained edge's
+    # number. Only COVERAGE is lost, and only for the least elastic edges. So we
+    # publish what we computed and name what we did not — withholding the whole
+    # cohort would destroy sound numbers for no gain.
+    message_template=(
+        "Marginal switch probability was computed for the {computed} most "
+        "elastic fragile edge(s) of {total}; the remaining {omitted} carry "
+        "marginal_switch_probability=null. Each edge's sweep costs "
+        "{k_samples} isolated re-evaluations per option, so the set is bounded "
+        "to keep the analysis inside its compute-admission budget. Retained "
+        "values are unaffected — each is computed independently of the others"
+    ),
+    default_suggestion=(
+        "The omitted edges are the least elastic of the fragile set; if a "
+        "specific edge's marginal contribution matters, re-run with a graph "
+        "scoped to it"
+    ),
+)
+
 HIGH_TIE_RATE = CritiqueDefinition(
     code="HIGH_TIE_RATE",
     severity="warning",
