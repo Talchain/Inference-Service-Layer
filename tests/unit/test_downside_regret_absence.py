@@ -204,6 +204,49 @@ def _crossing_graph_request(include_dead_option: bool) -> RobustnessRequestV2:
     )
 
 
+OVERFLOW_GAP = 1e307  # finite per draw; the per-sample gap sums past float64 max
+
+
+def _overflowing_gap_request() -> RobustnessRequestV2:
+    """Every sample FINITE, every regret NON-FINITE — the second route to an
+    absent bound, with no dead option anywhere.
+
+    `f_p` and `f_q` both sit at ~1e307 with independent exists_probability 0.5
+    edges. Each option zeroes the OTHER one, so at a draw where only `f_p`'s edge
+    fires `opt_p` leads by ~1e307, and where only `f_q`'s fires `opt_q` does — the
+    lead alternates. Each option's own outcomes stay finite (~1e307), but the
+    accumulated per-sample regret overflows, so BOTH regrets are `inf`.
+    """
+    nodes = [
+        {"id": "f_p", "kind": "factor", "label": "P", "observed_state": {"value": OVERFLOW_GAP}},
+        {"id": "f_q", "kind": "factor", "label": "Q", "observed_state": {"value": OVERFLOW_GAP}},
+        {"id": "f_info", "kind": "factor", "label": "INFO", "observed_state": {"value": 1.0}},
+        {"id": "goal_out", "kind": "outcome", "label": "Goal"},
+    ]
+    edges = [
+        {"from": "f_p", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 1.0, "std": 0.01}},
+        {"from": "f_q", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 1.0, "std": 0.01}},
+        {"from": "f_info", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 2.0, "std": 0.3}},
+    ]
+    options = [
+        {"id": "opt_p", "label": "Push P", "interventions": {"f_q": 0.0}},
+        {"id": "opt_q", "label": "Push Q", "interventions": {"f_p": 0.0}},
+    ]
+    return RobustnessRequestV2.model_validate(
+        {
+            "graph": {"nodes": nodes, "edges": edges},
+            "options": options,
+            "goal_node_id": "goal_out",
+            "n_samples": 200,
+            "seed": 42,
+            "parameter_uncertainties": [
+                {"node_id": "f_info", "distribution": "normal", "std": 2.0}
+            ],
+            "include_voi": True,
+        }
+    )
+
+
 class TestAnalyzerEmitsAbsentRegretForADeadOption:
     def test_dead_option_carries_absent_regret_live_siblings_carry_numbers(self):
         """Identity-bound: opt_dead ABSENT, opt_x/opt_y PRESENT and finite.
@@ -227,6 +270,50 @@ class TestAnalyzerEmitsAbsentRegretForADeadOption:
         # The claim, by identity.
         assert by_id["opt_dead"] is None, (
             f"opt_dead has no finite draw and must carry NO regret; got {by_id['opt_dead']!r}"
+        )
+
+    def test_all_regrets_non_finite_is_a_SECOND_route_to_an_absent_bound(self):
+        """The bound is absent on TWO routes, not one — this is the second.
+
+        ⚠ WHY THIS TEST EXISTS. An earlier version of this lane's evidence claimed
+        `decision_evpi_from_regrets` can only return None when every option is
+        DEAD (no finite draw), and that such input raises in
+        `_compute_factor_sensitivity` before EVPPI is reached — so the None branch
+        was called unreachable. **That was a demonstration of ONE route, wrongly
+        generalised to the branch.** The helper also returns None when every
+        regret is NON-FINITE, which needs no dead option at all: every sample can
+        be finite while the per-sample regret `best_i - o_i` (or its mean)
+        overflows, giving `inf` regrets from a perfectly healthy population.
+
+        Here every option has 200/200 FINITE samples — the in-run positive
+        control that this is NOT the dead-option route — and yet every regret is
+        non-finite, so the bound is honestly ABSENT. `analyze()` completes; no
+        raise, so the "it raises first" argument does not cover this route.
+        """
+        response = RobustnessAnalyzerV2().analyze(_overflowing_gap_request())
+        by_id = {r.option_id: r for r in response.results}
+        assert set(by_id) == {"opt_p", "opt_q"}, f"fixture drift: {sorted(by_id)}"
+
+        for option_id in ("opt_p", "opt_q"):
+            samples = by_id[option_id].outcome_distribution.samples or []
+            assert len(samples) == 200, f"{option_id}: expected 200 draws, got {len(samples)}"
+            # POSITIVE CONTROL: every draw is finite. This option is NOT dead.
+            assert all(math.isfinite(s) for s in samples), (
+                f"{option_id} must have an entirely FINITE sample population — "
+                f"otherwise this test would be re-testing the dead-option route"
+            )
+            regret = by_id[option_id].pre_noise_expected_regret
+            assert regret is not None and not math.isfinite(regret), (
+                f"{option_id}: this fixture must produce a NON-FINITE regret "
+                f"(the overflowing-gap route); got {regret!r}"
+            )
+
+        from src.utils.downside import decision_evpi_from_regrets
+
+        regrets = {oid: r.pre_noise_expected_regret for oid, r in by_id.items()}
+        assert decision_evpi_from_regrets(regrets) is None, (
+            "every regret is non-finite, so there is no honest bound — it must be "
+            "ABSENT. Coalescing it to 0.0 would clamp every factor's EVPPI to zero."
         )
 
     def test_the_live_options_regrets_are_unchanged_by_the_dead_options_presence(self):
