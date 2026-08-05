@@ -205,8 +205,21 @@ class DiagnosticsV2(BaseModel):
 class OutcomeDistributionV2(BaseModel):
     """Outcome distribution with core percentiles."""
 
-    mean: float = Field(..., description="Mean outcome value")
-    std: float = Field(..., description="Standard deviation")
+    # 2.477(a): Optional — OMITTED (exclude_none, never a JSON null) when the
+    # option has no finite sample population to summarise, i.e. every Monte
+    # Carlo draw was non-finite. Reporting 0.0 there would fabricate a
+    # measurement; the pre-2.477 behaviour was worse still — a non-finite float
+    # in a required field made the WHOLE response unserializable and the run
+    # 500'd, taking its own MONTE_CARLO_FAILED critique with it. Present for
+    # every option with >=1 finite draw, which is every option in every run that
+    # could serialize before. Travels with p10/p50/p90 and downside, which are
+    # already absent in exactly this case.
+    mean: Optional[float] = Field(
+        None, description="Mean outcome value (omitted when no valid samples)"
+    )
+    std: Optional[float] = Field(
+        None, description="Standard deviation (omitted when no valid samples)"
+    )
     # CIL 0.2: Optional — null when true percentiles cannot be computed
     # (no samples or all non-finite). See code review C3.
     p10: Optional[float] = Field(None, description="10th percentile (null when unavailable)")
@@ -227,6 +240,44 @@ class OutcomeDistributionV2(BaseModel):
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
     model_config = {"extra": "ignore"}
+
+    @model_validator(mode="after")
+    def _summary_stats_absent_only_without_samples(self) -> "OutcomeDistributionV2":
+        """2.477(a): guard the FABRICATION and the SILENT-LOSS directions of
+        ``mean``/``std`` absence.
+
+        Two rules, both fail-loud at construction so a mutation cannot pass
+        silently (trap #13):
+
+        (1) ``mean`` and ``std`` travel TOGETHER — either both present or both
+            absent. A half-summarised distribution is not a thing, and a
+            one-sided drop is the shape a careless guard would produce.
+        (2) They may be absent ONLY when this option has no usable sample
+            population (``percentiles_source == 'unavailable'``). Dropping the
+            summary statistics of a distribution we DID sample would be silent
+            data loss.
+
+        The REVERSE of (2) is deliberately NOT enforced, for the same reason
+        ``_downside_requires_samples`` enforces only one direction: an option
+        can legitimately have no raw ``samples`` array (percentiles
+        'unavailable') while the analyzer still computed an honest mean and std
+        for it, and forcing the biconditional would break those constructors.
+        """
+        if (self.mean is None) != (self.std is None):
+            raise ValueError(
+                "2.477 invariant: outcome.mean and outcome.std must be present or "
+                f"absent together; got mean={self.mean!r}, std={self.std!r}. A "
+                "distribution cannot be half-summarised."
+            )
+        if self.mean is None and self.percentiles_source != "unavailable":
+            raise ValueError(
+                "2.477 invariant: outcome.mean/std are absent but "
+                f"percentiles_source={self.percentiles_source!r} — summary "
+                "statistics may only be omitted when the option has no usable "
+                "sample population (percentiles_source == 'unavailable'). "
+                "Dropping them for a sampled option is silent data loss."
+            )
+        return self
 
 
 # =============================================================================
@@ -249,10 +300,25 @@ class DownsideV2(BaseModel):
       which breaks the CRN alignment this metric relies on, so it is NOT taken
       from the noised samples (CODE-REVIEW-ISL F1).
 
-    Rides as a sibling to ``outcome`` and is present EXACTLY when the option's
-    samples are available at the emission locus (``outcome.percentiles_source ==
-    'samples'``); otherwise omitted (absent, never a JSON null). All values are
-    in the SAME units as ``outcome.mean`` / ``outcome.p10`` (no normalisation).
+    Rides as a sibling to ``outcome``; when omitted it is ABSENT, never a JSON
+    null. All values are in the SAME units as ``outcome.mean`` /
+    ``outcome.p10`` (no normalisation).
+
+    EMISSION RULE — ⚠ this said "present EXACTLY when
+    ``outcome.percentiles_source == 'samples'``" until 2.477(h); that
+    biconditional was made false by 2.475 and is now stated as the implication
+    it actually is. Sample availability is NECESSARY but not SUFFICIENT:
+
+        ``downside`` present  ⟹  ``outcome.percentiles_source == 'samples'``
+
+    (that direction IS enforced, by ``OptionResultV2._downside_requires_samples``).
+    The block is additionally omitted, on a run that still returns 200, when any
+    of its three components cannot be computed honestly — the threaded pre-noise
+    joint regret absent or non-finite, or ``cvar_10``/``p05`` non-finite on an
+    extreme finite population. Those are runs that could not produce a response
+    AT ALL before 2.475: omitting one block is strictly more information than the
+    500 it replaced, and a tail-risk number from a degraded population is not
+    trustworthy (absent != wrong, trap #13).
     """
 
     cvar_10: float = Field(
@@ -303,15 +369,19 @@ class OptionResultV2(BaseModel):
     id: str = Field(..., description="Option identifier")
     label: Optional[str] = Field(None, description="Human-readable label")
     outcome: OutcomeDistributionV2 = Field(..., description="Outcome distribution")
-    # B2 downside — additive, optional, sibling to `outcome`. Populated EXACTLY
-    # when the option's MC samples are available (outcome.percentiles_source ==
-    # 'samples'); left None (=> ABSENT under exclude_none=True on the wire, never
-    # a JSON null) otherwise. Enforced one-directionally below.
+    # B2 downside — additive, optional, sibling to `outcome`. Left None (=>
+    # ABSENT under exclude_none=True on the wire, never a JSON null) when it
+    # cannot be built. 2.477(h): this comment and the description below claimed
+    # "EXACTLY when outcome.percentiles_source == 'samples'"; 2.475 made that
+    # false — sample availability is necessary, not sufficient. The implication
+    # (downside => samples) is the one that holds and the one enforced below;
+    # see DownsideV2's docstring for the full emission rule.
     downside: Optional[DownsideV2] = Field(
         None,
         description="Downside / tail-risk view {cvar_10, p05, expected_regret}. "
-        "Present exactly when the option's MC samples are available "
-        "(outcome.percentiles_source == 'samples'); omitted (not null) otherwise.",
+        "Requires the option's MC samples (outcome.percentiles_source == "
+        "'samples'), and is additionally omitted when the pre-noise joint regret "
+        "or cvar_10/p05 cannot be computed as finite values. Omitted, never null.",
     )
     win_probability: Optional[float] = Field(
         None,
@@ -1870,29 +1940,62 @@ class ISLResponseV2(BaseModel):
         (hence finite-sample) option has, including the argmax-mean (== argmin-regret)
         option. So the wire downside set contains the true minimiser, and:
 
-        (1) EMISSION-IFF (both directions): decision_evpi is present EXACTLY when the
-            regret population is present (>=1 option carries downside.expected_regret).
+        (1) EMISSION (both directions, with ONE wire-derivable exemption):
+            decision_evpi is present EXACTLY when the regret population is present
+            (>=1 option carries downside.expected_regret) — UNLESS that population
+            is INCOMPLETE, in which case honest ABSENCE is required.
             This mirrors the per-option downside emission rule and fails loud if a
             mutation ever emits the number without the population (fabrication) or
-            drops it when the population exists (silent loss).
+            drops it when the population exists and is complete (silent loss).
         (2) VALUE: when present, decision_evpi EQUALS the minimum per-option expected
             regret on the wire, and is non-negative. Catches a min->max / wrong-field
             mutation (it would no longer equal the wire minimum).
+
+        ⚠ 2.477(e) — WHY THE EXEMPTION EXISTS. The paragraph above used to argue
+        that the downside-bearing set always contains the true minimiser, "so on
+        every 200 the population is all-finite and this min is the exact EVPI".
+        That argument rested on an INCIDENTAL serializer guard (a non-finite
+        outcome.mean made the whole response 500 before the number could ship),
+        and 2.475 removed it: 200s with partially-populated options now exist. In
+        the residual corner — an option's downside dropped by the cvar/p05 or
+        regret finiteness guards while a sibling survives — ``min`` over the
+        SURVIVORS can only be >= the true ``min_o``, i.e. it OVERSTATES the value
+        of perfect information. The emitter therefore omits decision_evpi
+        whenever any sampled option lacks a downside, and this validator must
+        permit that. The exemption is DERIVED FROM THE WIRE, not asserted: an
+        incomplete population is visible as an option with
+        ``percentiles_source == 'samples'`` and no ``downside`` — so absence is
+        still rejected when the population is complete, and the silent-loss
+        direction keeps biting. (Options with no samples at all are not part of
+        the population and do not license absence: they carry no honest regret
+        and never did.)
         """
         regrets = [
             o.downside.expected_regret
             for o in (self.options or [])
             if o.downside is not None
         ]
+        population_incomplete = any(
+            o.downside is None and o.outcome.percentiles_source == "samples"
+            for o in (self.options or [])
+        )
         evpi = self.decision_evpi
         present = evpi is not None
-        if present != bool(regrets):
+        if present and not regrets:
             raise ValueError(
-                "decision_evpi emission-iff violated: decision_evpi is "
-                f"{'present' if present else 'absent'} but the joint regret "
-                f"population is {'present' if regrets else 'absent'}. decision_evpi "
-                "must be emitted EXACTLY when >=1 option carries "
-                "downside.expected_regret (min_o expected_regret[o])."
+                "decision_evpi emission-iff violated: decision_evpi is present but the "
+                "joint regret population is absent. It is min_o expected_regret[o] "
+                "and cannot be computed without >=1 option carrying "
+                "downside.expected_regret."
+            )
+        if not present and regrets and not population_incomplete:
+            raise ValueError(
+                "decision_evpi emission-iff violated: decision_evpi is absent while the "
+                "joint regret population is present AND COMPLETE (every sampled "
+                "option carries downside.expected_regret). Absence is permitted only "
+                "when some option with percentiles_source == 'samples' lacks a "
+                "downside, which would make min over the survivors an OVERSTATEMENT "
+                "(2.477(e)); dropping it otherwise is silent loss."
             )
         if evpi is not None:
             min_regret = min(regrets)
