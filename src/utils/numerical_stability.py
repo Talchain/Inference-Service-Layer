@@ -7,7 +7,8 @@ baseline near-zero division.
 
 import logging
 import math
-from typing import List, Optional, Tuple
+
+from typing import List, Tuple
 
 import numpy as np
 
@@ -105,6 +106,37 @@ def check_baseline_near_zero(
         )
         return True
     return False
+
+
+def overflow_safe_mean_std(values: np.ndarray) -> Tuple[float, float]:
+    """
+    Mean and std of a finite-valued array, robust to float64 accumulator overflow.
+
+    ``np.mean``/``np.std`` overflow when the elements are near float64 max even
+    though every element is finite (the sum, or the squared deviations, exceed
+    ~1.8e308). Scaling by the max magnitude keeps every intermediate in
+    [-1, 1]; the rescaled results are exact up to float rounding and always
+    finite (|mean| <= scale, std <= scale).
+
+    Used for partial-validity options (ROADMAP 2.475), whose finite
+    sub-population can legitimately sit at extreme magnitudes — the raw-array
+    ``np.mean`` at the analyzer is poisoned by the non-finite samples, and a
+    plain recompute over the finite subset can overflow.
+
+    Args:
+        values: 1-D array of FINITE floats (caller filters non-finite)
+
+    Returns:
+        (mean, std) as Python floats, both finite for finite non-empty input
+    """
+    if values.size == 0:
+        # Callers gate on n_valid >= 1; never fabricate a number for "no data".
+        return float("nan"), float("nan")
+    scale = float(np.max(np.abs(values)))
+    if scale == 0.0:
+        return 0.0, 0.0
+    scaled = values / scale
+    return scale * float(np.mean(scaled)), scale * float(np.std(scaled))
 
 
 def validate_mc_samples(

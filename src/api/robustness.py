@@ -15,19 +15,27 @@ Response versioning:
 import logging
 import math
 import uuid
+
 from typing import Any, Dict, NamedTuple, Optional, Union
 
 import numpy as np
+
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from src.api.error_helpers import raise_invalid_input
+from src.config.stability_thresholds import (
+    compute_factor_confidence,
+    compute_graph_structural_confidence,
+    get_confidence_method_version,
+)
 from src.constants import (
     DEFAULT_EXISTS_PROBABILITY_THRESHOLD,
     DEFAULT_RESPONSE_VERSION,
     DEFAULT_STRENGTH_THRESHOLD,
 )
+from src.models.critique import LOW_EFFECTIVE_SAMPLES
 from src.models.metadata import create_response_metadata
 from src.models.response_v2 import (
     BucketResultV2,
@@ -38,8 +46,8 @@ from src.models.response_v2 import (
     DiagnosticsV2,
     DownsideV2,
     EdgeEValueV2,
-    FactorFlipValueV2,
     EdgeSensitivityV2,
+    FactorFlipValueV2,
     FactorSensitivityV2,
     FlipStabilityBandV2,
     FragileEdgeV2,
@@ -70,20 +78,15 @@ from src.services.robustness_analyzer_v2 import (
     compute_weighted_cost,
     get_max_cost_units,
 )
-from src.config.stability_thresholds import (
-    compute_factor_confidence,
-    compute_graph_structural_confidence,
-    get_confidence_method_version,
-)
 from src.utils.business_metrics import track_robustness_analysis
+from src.utils.downside import cvar_from_samples
+from src.utils.numerical_stability import overflow_safe_mean_std, validate_mc_samples
 from src.utils.response_builder import (
     ResponseBuilder,
     build_request_echo,
     determine_option_status,
     hash_node_id,
 )
-from src.utils.downside import cvar_from_samples
-from src.utils.numerical_stability import validate_mc_samples
 from src.utils.tracing import sanitize_request_id
 from src.validation.degenerate_detector import detect_degenerate_outcomes
 from src.validation.path_validator import PathValidationConfig
@@ -887,7 +890,7 @@ async def _analyze_robustness_v2_enhanced(
             if dist.samples is not None and len(dist.samples) > 0:
                 # Use numerical stability utility for validation + critique emission
                 samples_array = np.array(dist.samples)
-                cleaned_samples, sample_critiques = validate_mc_samples(samples_array)
+                _imputed, sample_critiques = validate_mc_samples(samples_array)
 
                 # Add any numerical stability critiques (once per option set)
                 for critique in sample_critiques:
@@ -895,14 +898,38 @@ async def _analyze_robustness_v2_enhanced(
                     critique.affected_option_ids = [result.option_id]
                     builder.add_critique(critique)
 
-                # Count valid samples from cleaned array
-                n_valid = int(np.sum(np.isfinite(cleaned_samples)))
+                # 2.475 defect A: count valid samples from the RAW array, never
+                # the imputed one. validate_mc_samples replaces every non-finite
+                # sample with the median of the valid ones, so counting AFTER
+                # replacement always yielded n_valid == n_total and the wire
+                # fields n_valid_samples ("Samples without NaN/Inf") and
+                # validity_ratio OVERSTATED validity — determine_option_status's
+                # 'partial' branch was dead code at its only call site.
+                finite_samples = samples_array[np.isfinite(samples_array)]
+                n_valid = int(finite_samples.size)
             else:
                 # V1 analyzer doesn't track validity - assume all valid
+                finite_samples = None
                 n_valid = n_total
 
             validity_ratio = n_valid / n_total if n_total > 0 else 0.0
             status = determine_option_status(n_valid, n_total)
+
+            # 2.475: LOW_EFFECTIVE_SAMPLES — the user-facing disclosure for a
+            # partially-valid option. Registered (with an S-bucket copy at CEE
+            # and a deployed UI reader) but never emitted anywhere until now.
+            # Success-path emission: the run still returns 200; the option is
+            # honestly 'partial'. Threshold is the existing MIN_VALID_RATIO
+            # (0.8) inside determine_option_status — no new number.
+            if status == "partial":
+                builder.add_critique(
+                    LOW_EFFECTIVE_SAMPLES.build(
+                        valid_count=n_valid,
+                        total_count=n_total,
+                        affected_option_ids=[result.option_id],
+                        seed=v1_response.metadata.seed_used,
+                    )
+                )
 
             # Convert constraint_analysis if present
             constraint_analysis_v2 = None
@@ -931,24 +958,26 @@ async def _analyze_robustness_v2_enhanced(
                     conditional_probabilities=ca.conditional_probabilities,
                 )
 
-            # Task 2: Compute actual p10/p50/p90 from the *cleaned* samples
-            # (same array used for n_valid_samples and critiques above) instead
-            # of aliasing ci_lower (2.5th) → p10 and ci_upper (97.5th) → p90.
+            # Task 2: Compute actual p10/p50/p90 from the *finite* samples
+            # (same population n_valid_samples counts) instead of aliasing
+            # ci_lower (2.5th) → p10 and ci_upper (97.5th) → p90.
             # This fixes the percentile semantic drift where a 95% CI was
             # mislabelled as an 80% interval, and ensures percentiles reflect
-            # the same sample set as validity metrics.
+            # the same sample set as validity metrics. (2.475: the population
+            # is now the finite subset of the RAW samples — before, it was the
+            # median-IMPUTED array, which is identical whenever every sample is
+            # finite, i.e. for every run that could serialize at all, but
+            # double-weighted the median on the partial runs this fix unlocks.)
             #
             # CIL 0.2: return null when true percentiles unavailable, not
             #          mislabelled CI bounds. See code review C3.
-            # B2 downside — cvar_10/p05 from the SAME finite_cleaned (post-noise)
+            # B2 downside — cvar_10/p05 from the SAME finite (post-noise)
             # population as the percentiles; expected_regret is the PRE-noise
             # joint value threaded from the analyzer. Present exactly when
             # percentiles_source=="samples" AND the pre-noise regret is available.
             downside: Optional[DownsideV2] = None
-            if dist.samples is not None and len(dist.samples) > 0:
-                # Use cleaned_samples (from validate_mc_samples above) filtered
-                # to finite values — identical population to n_valid_samples.
-                finite_cleaned = cleaned_samples[np.isfinite(cleaned_samples)]
+            if finite_samples is not None:
+                finite_cleaned = finite_samples
                 if len(finite_cleaned) > 0:
                     # Task 4: single np.percentile call for efficiency. B2 adds
                     # p05, extending the p10/p50/p90 family downward with the SAME
@@ -962,13 +991,25 @@ async def _analyze_robustness_v2_enhanced(
                     # unexpectedly absent, omit downside rather than fabricate —
                     # absent != wrong (trap #13). cvar_10 (mean of the worst
                     # decile) and p05 stay on the finite (post-noise) population.
+                    #
+                    # 2.475: omit the WHOLE block when any component is
+                    # non-finite. On a partial-validity run the joint regret is
+                    # poisoned for EVERY option (max over options includes the
+                    # inf samples), and cvar_10 can overflow on an extreme
+                    # finite population — tail-risk numbers from a degraded
+                    # population are not trustworthy, and a non-finite float
+                    # is unserializable (the render rejects it). For every
+                    # run that could serialize before this fix, all three are
+                    # finite and the block is built exactly as before.
                     pre_noise_regret = result.pre_noise_expected_regret
-                    if pre_noise_regret is not None:
-                        downside = DownsideV2(
-                            cvar_10=cvar_from_samples(finite_cleaned),
-                            p05=p05_val,
-                            expected_regret=pre_noise_regret,
-                        )
+                    if pre_noise_regret is not None and math.isfinite(pre_noise_regret):
+                        cvar_val = cvar_from_samples(finite_cleaned)
+                        if math.isfinite(cvar_val) and math.isfinite(p05_val):
+                            downside = DownsideV2(
+                                cvar_10=cvar_val,
+                                p05=p05_val,
+                                expected_regret=pre_noise_regret,
+                            )
                 else:
                     # All samples non-finite — cannot compute true percentiles
                     p10_val = None
@@ -982,14 +1023,29 @@ async def _analyze_robustness_v2_enhanced(
                 p90_val = None
                 percentiles_source = "unavailable"
 
+            # 2.475: the analyzer's dist.mean/dist.std are np.mean/np.std over
+            # the RAW samples array — one non-finite sample poisons both, and a
+            # non-finite float in a required field makes the whole response
+            # unserializable (the pre-fix behaviour: every partial-validity run
+            # died as a 500 and no critique ever reached a user). For a partial
+            # option, report the finite sub-population's mean/std instead — the
+            # same population n_valid_samples counts — via the overflow-safe
+            # helper (the finite subset can sit near float64 max, where plain
+            # np.mean/np.std overflow in the accumulator). Guarded on status so
+            # every fully-valid option keeps dist.mean/dist.std verbatim.
+            if status == "partial" and finite_samples is not None and finite_samples.size > 0:
+                outcome_mean, outcome_std = overflow_safe_mean_std(finite_samples)
+            else:
+                outcome_mean, outcome_std = dist.mean, dist.std
+
             option_results.append(
                 OptionResultV2(
                     id=result.option_id,
                     # Task 3: Propagate option label from request to response
                     label=option_label_map.get(result.option_id),
                     outcome=OutcomeDistributionV2(
-                        mean=dist.mean,
-                        std=dist.std,
+                        mean=outcome_mean,
+                        std=outcome_std,
                         p10=p10_val,
                         p50=p50_val,
                         p90=p90_val,
@@ -1036,13 +1092,9 @@ async def _analyze_robustness_v2_enhanced(
         # (>=1 downside); the ISLResponseV2 validator enforces the emission-iff and
         # the value both ways.
         decision_evpi_regrets = [
-            o.downside.expected_regret
-            for o in option_results
-            if o.downside is not None
+            o.downside.expected_regret for o in option_results if o.downside is not None
         ]
-        builder.set_decision_evpi(
-            min(decision_evpi_regrets) if decision_evpi_regrets else None
-        )
+        builder.set_decision_evpi(min(decision_evpi_regrets) if decision_evpi_regrets else None)
 
         # Check for degenerate outcomes
         degen_critique = detect_degenerate_outcomes(option_results)
