@@ -87,7 +87,7 @@ from src.models.critique import (
 )
 from src.models.response_v2 import CritiqueV2
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
-from src.utils.downside import expected_regret_per_option
+from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
 from src.utils.evppi import (
     REGRESSION_EVPPI_METHOD,
     REGRESSION_EVPPI_NULL_PERMUTATIONS,
@@ -2503,8 +2503,14 @@ class RobustnessAnalyzerV2:
             # ONE factor cannot beat learning EVERYTHING). decision_evpi on the
             # pre-noise CRN population = min_o expected_regret[o] = E[max]−max E;
             # this is the exact cap the emission clamps to (with disclosure).
-            finite_regrets = [r for r in pre_noise_expected_regret.values() if math.isfinite(r)]
-            decision_evpi_bound = min(finite_regrets) if finite_regrets else None
+            # ABSENCE, not zero: an option with no finite draw carries a `None`
+            # regret and is EXCLUDED from the bound. It used to carry a fabricated
+            # 0.0, which passed the `math.isfinite` filter this line used to apply
+            # and collapsed the bound to 0.0 — clamping EVERY factor's EVPPI to
+            # zero, i.e. reporting that no factor is worth learning about, because
+            # one option's draws overflowed. The exclusion rule now lives in the
+            # named helper (single statement of the rule, testable in one place).
+            decision_evpi_bound = decision_evpi_from_regrets(pre_noise_expected_regret)
             # Per-factor estimator failures degrade IN-LOOP (that factor omitted,
             # computable rows kept — hunter F-4). This outer guard is a last-resort
             # for an unexpected WHOLE-call failure (not a per-factor estimator raise),
@@ -3804,7 +3810,7 @@ class RobustnessAnalyzerV2:
         request: RobustnessRequestV2,
         goal_threshold_plan: Optional["GoalThresholdPlan"] = None,
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None,
-        expected_regret: Optional[Dict[str, float]] = None,
+        expected_regret: Optional[Dict[str, Optional[float]]] = None,
         status_quo_outcomes: Optional[List[float]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.

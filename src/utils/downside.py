@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 
-from typing import Dict, Mapping, Sequence
+from typing import Dict, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -62,7 +62,7 @@ def cvar_from_samples(samples: Sequence[float], level: float = CVAR_LEVEL) -> fl
 
 def expected_regret_per_option(
     option_samples: Mapping[str, Sequence[float]],
-) -> Dict[str, float]:
+) -> Dict[str, Optional[float]]:
     """Joint expected regret per option from CRN-aligned per-option samples.
 
     ``expected_regret[o] = mean_i( best_i - o_i )`` where ``best_i`` is the
@@ -77,6 +77,13 @@ def expected_regret_per_option(
     and an option's regret averages only over the samples where IT is finite.
     This never inpaints or reorders — alignment is by index, so the joint
     comparison stays honest.
+
+    An option with NO finite sample gets ``None`` — ABSENCE, not a number. There
+    is no honest regret for an option that was never measured, and ``0.0`` is the
+    worst possible placeholder for this statistic: it is exactly the value of an
+    option that WINS EVERY SAMPLE, i.e. the most favourable regret expressible.
+    (It used to be returned here as a "defensive" default; see
+    ``decision_evpi_from_regrets`` for the reader that consumed it as real.)
 
     All arrays must be the same length (the engine draws ``n_samples`` for every
     option). Returns ``{}`` for empty input.
@@ -110,15 +117,46 @@ def expected_regret_per_option(
     masked = np.where(finite_mask, matrix, -np.inf)
     best_per_sample = masked.max(axis=0)  # (n_samples,)
 
-    regrets: Dict[str, float] = {}
+    regrets: Dict[str, Optional[float]] = {}
     for row, option_id in enumerate(ids):
         valid = finite_mask[row]
         if not valid.any():
-            # Option has no finite sample — no honest regret. Callers only emit
-            # downside when the option HAS finite samples, so this is defensive.
-            regrets[option_id] = 0.0
+            # Option has no finite sample — there is no honest regret to report,
+            # so report NONE. Emitting 0.0 here was a fabrication: it is the
+            # regret of an option that wins every draw, and a downstream reader
+            # (the decision-EVPI bound) accepted it as a real measurement
+            # because `math.isfinite(0.0)` is True. Absent != wrong (trap #13).
+            regrets[option_id] = None
             continue
         per_sample_regret = best_per_sample[valid] - matrix[row][valid]
         regrets[option_id] = float(np.mean(per_sample_regret))
 
     return regrets
+
+
+def decision_evpi_from_regrets(
+    regrets: Mapping[str, Optional[float]],
+) -> Optional[float]:
+    """Whole-decision EVPI = ``min_o expected_regret[o]``, over the options that
+    HAVE an honest regret.
+
+    Exact identity on a complete population: ``min_o (E[max_o U] - E[U_o])`` is
+    achieved at ``argmax_o E[U_o]``, so this equals ``E[max_o U] - max_o E[U_o]``
+    — the value of perfect information about the decision, in outcome units.
+
+    ABSENCE HANDLING — this is the whole point of the function existing. An
+    option whose regret is ``None`` (no finite draw) or non-finite is EXCLUDED
+    from the minimisation rather than counted as a low value. Including such an
+    option would collapse the minimum toward the most favourable end and thereby
+    UNDERSTATE the value of information — and, because this bound caps every
+    per-factor EVPPI, would silently report that no factor is worth learning
+    about. Returns ``None`` when no option carries an honest regret: the bound is
+    then unknown, and an unknown cap is applied as "no cap" by callers rather
+    than as "cap of zero".
+
+    This is deliberately a NAMED function rather than an inline ``min(...)``: the
+    exclusion rule is the load-bearing part and must be stated and testable in
+    one place, not re-derived at each call site.
+    """
+    honest = [r for r in regrets.values() if r is not None and math.isfinite(r)]
+    return min(honest) if honest else None
