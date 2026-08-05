@@ -4560,7 +4560,24 @@ class RobustnessAnalyzerV2:
 
         # Convert to results with ranks
         results = []
+        rank = 0
         for i, s in enumerate(sensitivities):
+            # 2.514(a), second half: `elasticity` is a REQUIRED float, so a factor
+            # whose elasticity could not be computed (the reference option's
+            # outcomes were non-finite, making the % change nan) has NO honest row
+            # at all — there is no field to null. Emitting it anyway put a nan in
+            # the body and the JSONResponse render killed the WHOLE 200, taking
+            # every critique with it; that is why fixing `elasticity_std` alone did
+            # not clear the 500 on this input. Omit the row instead. If that leaves
+            # the list empty, the EXISTING response_builder derivation reports
+            # `factor_sensitivity_status` honestly rather than claiming "computed".
+            if not math.isfinite(float(s["elasticity"])):
+                self.logger.warning(
+                    "factor_sensitivity_non_finite_elasticity",
+                    extra={"node_id": str(s["node_id"])},
+                )
+                continue
+            rank += 1
             # Update zero_reason: DISCONNECTED takes priority if factor has no causal path.
             # N1 corollary: under a truncated cohort the influence score is withheld
             # (None) AND unreliable — a factor whose productive path was beyond the
@@ -4585,7 +4602,7 @@ class RobustnessAnalyzerV2:
                     node_label=s["node_label"],
                     elasticity=s["elasticity"],
                     elasticity_display=s.get("elasticity_display"),
-                    importance_rank=i + 1,
+                    importance_rank=rank,
                     observed_value=s["observed_value"],
                     interpretation=s["interpretation"],
                     zero_reason=zero_reason,
@@ -4892,6 +4909,38 @@ class RobustnessAnalyzerV2:
             # Use primary (deterministic) elasticity for the negligible check,
             # not the bootstrap mean — the primary value is the reported number.
             primary_e = primary_elasticities.get(nid, 0.0)
+
+            # 2.514(a): a bootstrap population containing non-finite elasticities
+            # has NO honest stability summary, and reporting one was doing damage
+            # in two directions at once:
+            #  * `elasticity_std` is `ge=0`, so a nan raised a pydantic
+            #    ValidationError and the ENTIRE analysis 500'd — taking every
+            #    critique with it, including the MONTE_CARLO_FAILED that named the
+            #    option responsible (the 2.477 pattern exactly);
+            #  * `classify_attribution_stability` compares the CV against
+            #    thresholds, and EVERY comparison against nan is False, so the
+            #    factor fell through to the confident label "low". That is a
+            #    fabricated classification, not a measurement — the same family as
+            #    the fabricated regret 0.0 this branch fixes.
+            # The whole stability sub-block is therefore ABSENT together (all three
+            # fields derive from the same population; part-null would invite the
+            # reader to trust the survivors). `stability_method` is kept: it
+            # records which method was ATTEMPTED, which stays true.
+            # Every run that could serialize before had a finite e_std by
+            # construction, so this branch is never taken on those and their bytes
+            # are unchanged.
+            if not math.isfinite(e_std) or not math.isfinite(primary_e):
+                self.logger.warning(
+                    "factor_stability_non_finite_population",
+                    extra={"node_id": nid},
+                )
+                result[nid] = {
+                    "elasticity_std": None,
+                    "attribution_stability": None,
+                    "rank_flip_rate": None,
+                    "stability_method": stability_method,
+                }
+                continue
 
             # Attribution stability from coefficient of variation
             # Thresholds are configurable via STABILITY_THRESHOLDS (provisional)
@@ -6476,6 +6525,41 @@ class RobustnessAnalyzerV2:
                     exc_info=True,
                 )
                 failed.append((fid, "estimator_error"))
+                continue
+
+            # 2.514(b): a NON-FINITE estimate is not an estimate. The estimator
+            # does not raise on a poisoned option matrix — it returns nan/inf
+            # components (measured: an option with no finite draw makes
+            # `baseline_max_expected_utility` inf and `evppi_raw` nan, because
+            # `factor_evppi_estimate` does not filter non-finite option columns).
+            # Emitting that did two dishonest things:
+            #  * `evppi = max(0.0, nan)` returns **0.0** — every nan comparison is
+            #    False, so Python keeps the first argument. On the wire that is
+            #    indistinguishable from a real "learning this factor is worth
+            #    nothing", and it shipped with clamped_low=False, so nothing
+            #    marked it as degraded;
+            #  * `round(nan, 6)` is still nan, so `evppi_raw` reached the response
+            #    body and the JSONResponse render died with "Out of range float
+            #    values are not JSON compliant" — a 500 for the whole analysis.
+            # Drop THIS factor instead (missing != zero) and let the block's
+            # EXISTING partial-drop disclosure report it, rather than inventing a
+            # parallel scheme. Computable factors keep their rows.
+            non_finite_components = [
+                name
+                for name, value in (
+                    ("evppi_raw", est.evppi_raw),
+                    ("baseline_max_expected_utility", est.baseline_max_expected_utility),
+                    ("conditional_max_expected_utility", est.conditional_max_expected_utility),
+                    ("noise_floor", est.noise_floor),
+                )
+                if not math.isfinite(value)
+            ]
+            if non_finite_components:
+                self.logger.warning(
+                    "factor_evppi_non_finite_estimate",
+                    extra={"factor_id": fid, "non_finite_components": non_finite_components},
+                )
+                failed.append((fid, "non_finite_estimate"))
                 continue
 
             # Howard non-negativity clamp — DEAD-MAN'S-SWITCH: evppi_raw is >= 0 by

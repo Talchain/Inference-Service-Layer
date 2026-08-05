@@ -204,6 +204,131 @@ def _crossing_graph_request(include_dead_option: bool) -> RobustnessRequestV2:
     )
 
 
+ROUTE_B_BIG = 5.0e306
+ROUTE_B_SEED = 99
+
+
+def _route_b_request() -> RobustnessRequestV2:
+    """ROUTE B — an UNKNOWN decision-EVPI bound must not be applied as a CAP OF ZERO.
+
+    This is the fixture that makes the bound's absence OBSERVABLE, and it is a
+    different regime from every other test here. There is **no dead option**:
+    every draw of every option is finite. What overflows is the REGRET MEAN —
+    `mean_i(best_i - o_i)` sums 200 strictly-positive terms of ~1e306, so both
+    regrets are `inf` and the bound is honestly `None`.
+
+    The trick that makes `evppi_raw` FINITE at the same time is that each option's
+    outcomes **alternate sign** (+BIG / 0 / -BIG, via paired coin-flip edges with
+    +1 and -1 strengths), so its own partial sums CANCEL — the estimator's
+    baseline stays finite and the least-squares fit succeeds. A dead option can
+    never produce this: non-finite draws make `evppi_raw` nan, and then
+    `max(0.0, nan) == 0.0` on both sides of the mutant, so nothing discriminates.
+    That is precisely why an earlier sweep of this lane's — which only ever used
+    dead options — found 0 discriminating cases and must NOT have been read as
+    evidence that none exist.
+
+    Measured at this shape: 8 of 12 (BIG, seed) settings discriminate.
+    """
+    nodes = [
+        {"id": "f_ap", "kind": "factor", "label": "AP", "observed_state": {"value": ROUTE_B_BIG}},
+        {"id": "f_an", "kind": "factor", "label": "AN", "observed_state": {"value": ROUTE_B_BIG}},
+        {"id": "f_bp", "kind": "factor", "label": "BP", "observed_state": {"value": ROUTE_B_BIG}},
+        {"id": "f_bn", "kind": "factor", "label": "BN", "observed_state": {"value": ROUTE_B_BIG}},
+        {"id": "f_info", "kind": "factor", "label": "INFO", "observed_state": {"value": 1.0}},
+        {"id": "goal_out", "kind": "outcome", "label": "Goal"},
+    ]
+    edges = [
+        {"from": "f_ap", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 1.0, "std": 0.01}},
+        {"from": "f_an", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": -1.0, "std": 0.01}},
+        {"from": "f_bp", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 1.0, "std": 0.01}},
+        {"from": "f_bn", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": -1.0, "std": 0.01}},
+        {"from": "f_info", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 2.0, "std": 0.3}},
+    ]
+    options = [
+        {"id": "opt_p", "label": "P", "interventions": {"f_bp": 0.0, "f_bn": 0.0}},
+        {"id": "opt_q", "label": "Q", "interventions": {"f_ap": 0.0, "f_an": 0.0}},
+    ]
+    return RobustnessRequestV2.model_validate(
+        {
+            "graph": {"nodes": nodes, "edges": edges},
+            "options": options,
+            "goal_node_id": "goal_out",
+            "n_samples": 200,
+            "seed": ROUTE_B_SEED,
+            "parameter_uncertainties": [
+                {"node_id": "f_info", "distribution": "normal", "std": 2.0}
+            ],
+            "include_voi": True,
+        }
+    )
+
+
+class TestAnUnknownBoundIsNotAppliedAsACapOfZero:
+    """The property `decision_evpi_from_regrets`' docstring asserts and nothing
+    else tests: `None` means "no cap", NEVER "cap of zero".
+
+    Found by adversarial review, which refuted this lane's claim that the `None`
+    branch was unreachable. It is reachable, and the consequence is user-visible:
+    every factor's EVPPI clamped to zero — "nothing is worth finding out" — on a
+    graph with no dead option and no failed sample.
+    """
+
+    def test_unknown_bound_leaves_a_real_evppi_intact(self):
+        response = RobustnessAnalyzerV2().analyze(_route_b_request())
+
+        by_id = {r.option_id: r for r in response.results}
+        assert set(by_id) == {"opt_p", "opt_q"}, f"fixture drift: {sorted(by_id)}"
+
+        # IN-RUN GUARD 1: every draw is finite. Without this the fixture could
+        # silently drift into the dead-option regime, where `evppi_raw` is nan and
+        # the discriminating assertion below would pass for the WRONG reason.
+        for option_id in ("opt_p", "opt_q"):
+            samples = by_id[option_id].outcome_distribution.samples or []
+            assert len(samples) == 200, f"{option_id}: expected 200 draws"
+            assert all(math.isfinite(s) for s in samples), (
+                f"{option_id}: this fixture REQUIRES an entirely finite sample "
+                f"population — it is testing route B, not the dead-option route"
+            )
+
+        # IN-RUN GUARD 2: every regret is non-finite, so the bound really is None.
+        regrets = {oid: r.pre_noise_expected_regret for oid, r in by_id.items()}
+        for option_id, regret in regrets.items():
+            assert regret is not None and not math.isfinite(regret), (
+                f"{option_id}: fixture requires a NON-finite regret; got {regret!r}"
+            )
+
+        from src.utils.downside import decision_evpi_from_regrets
+
+        assert decision_evpi_from_regrets(regrets) is None, (
+            "precondition: with every regret non-finite the bound must be absent"
+        )
+
+        rows = {r["factor_id"]: r for r in (response.factor_evppi or [])}
+        assert "f_info" in rows, "fixture must produce an EVPPI row for f_info"
+        row = rows["f_info"]
+
+        # POSITIVE CONTROL: a real, strictly-positive EVPPI exists on this run —
+        # so a harness that could only ever yield 0.0 is excluded.
+        assert math.isfinite(row["evppi_raw"]) and row["evppi_raw"] > 0.0, (
+            f"positive control failed: this fixture must produce a FINITE, "
+            f"strictly-positive raw EVPPI; got {row['evppi_raw']!r}"
+        )
+
+        # THE DISCRIMINATING ASSERTION, bound to f_info BY ID: an absent bound
+        # applies NO cap. Coalescing it to 0.0 clamps this to zero.
+        assert row["evppi"] == pytest.approx(row["evppi_raw"], rel=1e-12), (
+            f"an UNKNOWN decision-EVPI bound was applied as a CAP OF ZERO: "
+            f"evppi={row['evppi']!r} but evppi_raw={row['evppi_raw']!r}"
+        )
+        assert row["evppi"] > 0.0, (
+            "the user asked what is worth finding out and was told 'nothing', "
+            "because one bound could not be computed"
+        )
+        assert row["clamped_high"] is False, (
+            "no cap exists, so the per-factor <= total-EVPI clamp must not fire"
+        )
+
+
 OVERFLOW_GAP = 1e307  # finite per draw; the per-sample gap sums past float64 max
 
 
