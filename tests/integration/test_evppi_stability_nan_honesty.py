@@ -135,6 +135,37 @@ def _factor_sensitivity_row(body, node_id):
     return None
 
 
+# ============================================================ shared control
+
+
+class TestTheHarnessCanSeeAPresence:
+    """THE positive control for every absence assertion in this file (trap #13).
+
+    The control request is the degraded one MINUS the all-non-finite option. If
+    this harness cannot reproduce these two numbers, it cannot see a presence and
+    nothing it says about an absence counts. Both are pinned to the values
+    measured on the untouched control path, so a harness that silently stopped
+    computing EVPI/EVPPI would fail here rather than passing every absence test.
+    """
+
+    def test_control_reproduces_the_reference_decision_evpi_and_evppi(
+        self, client, auth_headers
+    ):
+        resp = _post(client, auth_headers, _graph(include_dead_option=False))
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        assert body.get("decision_evpi") == pytest.approx(0.9908, abs=1e-4), (
+            f"control decision_evpi drifted from the reference 0.9908; "
+            f"got {body.get('decision_evpi')!r}"
+        )
+        rows = {r["factor_id"]: r["evppi"] for r in (body.get("factor_evppi") or [])}
+        assert rows.get("f_info") == pytest.approx(0.0497, abs=1e-4), (
+            f"control factor_evppi[f_info] drifted from the reference 0.0497; "
+            f"got {rows!r}"
+        )
+
+
 # ============================================================ (a)
 
 
