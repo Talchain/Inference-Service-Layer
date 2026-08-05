@@ -233,6 +233,112 @@ class TestNonFiniteBootstrapStabilityDegradesInsteadOf500:
         assert failed[0]["affected_option_ids"] == ["opt_dead"]
 
 
+def _decoupled_stability_request(p=0.7, paths=2, seed=42, n=100):
+    """The input where `e_std` is NON-finite while the primary elasticity is FINITE.
+
+    ⚠ THIS IS THE ONE THE ROW-DROP DOES NOT CATCH, and it is why the stability
+    guard is load-bearing rather than defence-in-depth. This lane originally could
+    not construct it and — correctly — declined to call the guard's mutant
+    equivalent. Adversarial review constructed it; reproduced here independently
+    (36 node-hits over 24 configs of this family).
+
+    WHY the obvious fixtures all fail to reach it: `baseline_denom` and
+    `pct_factor_change` are IDENTICAL between the primary and the bootstrap
+    elasticity — the only differing input is `outcome_diff`. So when
+    `baseline_mean` is `nan`, both sides are `nan` and the row is dropped by the
+    required-`elasticity` guard before stability is ever emitted. The decoupler is
+    `baseline_mean = +inf`: a finite `outcome_diff` divides to exactly `0.0`
+    (FINITE -> row survives) while a non-finite one divides to `nan`
+    (NON-finite -> stability unmeasurable). The asymmetry that produces one of
+    each is that the primary uses `strength.mean * exists_probability` (damped by
+    p) while the bootstrap uses the undamped sampled strength.
+
+    Shape: `f_big` at 1e308 with `normal std=1e307`, feeding the goal through
+    `paths` parallel 2-edge routes at `exists_probability=p`. The mean config's
+    path coefficient `(1.0*p)^2` keeps the sum under float max; a sampled config
+    with >=2 live paths overflows, so MC outcomes are `+inf` (all-positive, so the
+    mean is `inf`, never `nan`).
+    """
+    nodes = [
+        {"id": "f_big", "kind": "factor", "label": "BIG", "observed_state": {"value": 1.0e308}},
+        {"id": "f_ok", "kind": "factor", "label": "OK", "observed_state": {"value": 1.0}},
+        {"id": "goal_out", "kind": "outcome", "label": "Goal"},
+    ]
+    edges = [
+        {"from": "f_ok", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.05}},
+    ]
+    for i in range(paths):
+        nodes.append({"id": f"m{i}", "kind": "factor", "label": f"M{i}", "observed_state": {"value": 0.0}})
+        edges.append({"from": "f_big", "to": f"m{i}", "exists_probability": p, "strength": {"mean": 1.0, "std": 0.05}})
+        edges.append({"from": f"m{i}", "to": "goal_out", "exists_probability": p, "strength": {"mean": 1.0, "std": 0.05}})
+    return {
+        "graph": {"nodes": nodes, "edges": edges},
+        "options": [
+            {"id": "opt_a", "label": "A", "interventions": {"f_ok": 2.0}},
+            {"id": "opt_b", "label": "B", "interventions": {"f_ok": 3.0}},
+        ],
+        "goal_node_id": "goal_out",
+        "n_samples": n,
+        "seed": seed,
+        "parameter_uncertainties": [
+            {"node_id": "f_big", "distribution": "normal", "std": 1.0e307},
+            {"node_id": "f_ok", "distribution": "normal", "std": 0.5},
+        ],
+    }
+
+
+class TestUnmeasurableStabilityIsAbsentOnASURVIVINGRow:
+    """2.514(a), the half the row-drop does NOT cover — a live 500-preventer."""
+
+    def test_surviving_row_reports_absent_stability_and_still_ships_200(
+        self, client, auth_headers
+    ):
+        resp = _post(client, auth_headers, _decoupled_stability_request())
+
+        assert resp.status_code == 200, (
+            f"an unmeasurable stability summary must not 500 the analysis; got "
+            f"{resp.status_code}: {resp.text[:400]}"
+        )
+        body = _strict_parse(resp)  # witnesses JSON compliance
+
+        rows = body.get("factor_sensitivity") or []
+        assert rows, "fixture must produce factor_sensitivity rows"
+
+        row = _factor_sensitivity_row(body, "f_big")
+        # IN-RUN GUARD: the row SURVIVED. This is what makes the test cover the
+        # stability branch rather than the row-drop branch — if the primary
+        # elasticity were non-finite the row would be omitted and every assertion
+        # below would vanish with it (trap 13b).
+        assert row is not None, (
+            "fixture drift: the f_big row must SURVIVE (its primary elasticity is "
+            "finite). If it is being dropped, this test is silently re-testing the "
+            "required-elasticity guard instead of the stability guard."
+        )
+        assert math.isfinite(row["elasticity"]), "the surviving row's elasticity must be finite"
+
+        # The claim: the stability sub-block is absent TOGETHER.
+        assert row.get("elasticity_std") is None, (
+            f"a std over a non-finite bootstrap population must be ABSENT; "
+            f"got {row.get('elasticity_std')!r}"
+        )
+        assert row.get("attribution_stability") is None, (
+            f"a stability CLASS derived from a nan CV is a fabricated label — every "
+            f"comparison against nan is False, so it falls through to the confident "
+            f"'low'; got {row.get('attribution_stability')!r}"
+        )
+        assert row.get("rank_flip_rate") is None, (
+            f"rank flips over a non-finite population are not measurable; "
+            f"got {row.get('rank_flip_rate')!r}"
+        )
+        # ...but the METHOD is kept: it records what was ATTEMPTED, which stays
+        # true. This distinguishes a targeted absence from a wholesale blank —
+        # without it, wiping the entire row would also pass.
+        assert row.get("stability_method") == "bootstrap_20", (
+            f"the attempted method must survive the absence; got "
+            f"{row.get('stability_method')!r}"
+        )
+
+
 # ============================================================ (b)
 
 
