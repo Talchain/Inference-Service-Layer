@@ -243,8 +243,18 @@ INTERVENTION_VALUE_INVALID = CritiqueDefinition(
     code="INTERVENTION_VALUE_INVALID",
     severity="blocker",
     source="validation",
-    message_template="Intervention value must be finite number, got: {value}",
-    default_suggestion="Ensure intervention values are valid finite numbers",
+    # 2.477(b): wording widened when this code got its FIRST emission site. The
+    # values that actually break the pipeline are not only the non-finite ones:
+    # canonicalisation computes round(v / 1e-9), which overflows for any
+    # magnitude above ~1.8e299 — finite, but unusable. Saying "must be finite"
+    # to a caller who sent a finite 1.9e299 would be a confusing lie.
+    message_template=(
+        "Intervention value must be a finite number within the supported "
+        "magnitude range, got: {value}"
+    ),
+    default_suggestion=(
+        "Use finite intervention values of a realistic magnitude " "(below ~1.8e299)"
+    ),
 )
 
 # P2-ISL-4: Inference errors

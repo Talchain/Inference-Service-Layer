@@ -6,6 +6,8 @@ Any blocker prevents analysis entirely.
 """
 
 import json
+import math
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -17,6 +19,7 @@ from src.models.critique import (
     GRAPH_DISCONNECTED,
     GRAPH_EMPTY,
     IDENTICAL_OPTIONS,
+    INTERVENTION_VALUE_INVALID,
     INVALID_INTERVENTION_TARGET,
     MISSING_GOAL_NODE,
     NO_EFFECTIVE_PATH_TO_GOAL,
@@ -91,9 +94,39 @@ def detect_graph_cycle(edges: List[Dict[str, Any]]) -> bool:
     return False
 
 
+# ROADMAP 2.477(b). DERIVED from the tolerance, never hardcoded: canonicalisation
+# computes ``round(v / IDENTICAL_OPTIONS_VALUE_TOLERANCE)``, and that quotient
+# overflows to ``inf`` — which ``round()`` cannot convert to an integer — as soon
+# as ``abs(v)`` exceeds ``float_info.max * tolerance``. If the tolerance ever
+# changes, this bound follows it; a hand-copied number would not (trap 12).
+MAX_CANONICALISABLE_INTERVENTION_VALUE = sys.float_info.max * IDENTICAL_OPTIONS_VALUE_TOLERANCE
+
+
+def is_canonicalisable_intervention_value(value: Any) -> bool:
+    """Can ``canonicalise_interventions`` handle this value without raising?
+
+    ``False`` for non-numeric, non-finite, and absurd-magnitude values — the
+    exact set that made ``round(v / tolerance)`` raise ``OverflowError`` and
+    turned a bad REQUEST into a 500 INTERNAL_ERROR (measured at pristine:
+    intervention ``1.9e299`` with two options →
+    ``OverflowError: cannot convert float infinity to integer`` at
+    ``request_validator.py:108``, via ``detect_identical_options`` ← ``validate``).
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value) and abs(value) <= MAX_CANONICALISABLE_INTERVENTION_VALUE
+
+
 def canonicalise_interventions(interventions: Dict[str, float]) -> str:
     """
     Create canonical string representation for comparison.
+
+    CALLER CONTRACT: every value must satisfy
+    ``is_canonicalisable_intervention_value``. ``RequestValidator.validate``
+    enforces this with a blocker critique (→ 422) BEFORE reaching here, and
+    additionally filters non-conforming options out of the identical-options
+    comparison, so both the honest error and the crash-proofing are in place
+    (2.477(b)).
 
     Args:
         interventions: Intervention dict
@@ -279,6 +312,25 @@ class RequestValidator:
                 )
                 continue  # Can't validate paths with invalid targets
 
+            # 2.477(b): reject intervention VALUES the pipeline cannot handle.
+            # INTERVENTION_VALUE_INVALID has been registered (and documented as
+            # "must be finite number") with ZERO emission sites — so an absurd
+            # value fell through to canonicalisation and blew up as a 500. An
+            # absurd input is the caller's fault: report it as a blocker, which
+            # the endpoint already maps to an honest 422.
+            uncanonicalisable = sorted(
+                t for t, v in interventions.items() if not is_canonicalisable_intervention_value(v)
+            )
+            if uncanonicalisable:
+                critiques.append(
+                    INTERVENTION_VALUE_INVALID.build(
+                        value=", ".join(f"{t}={interventions[t]!r}" for t in uncanonicalisable),
+                        affected_option_ids=[option_id],
+                        affected_node_ids=uncanonicalisable,
+                    )
+                )
+                continue  # Can't validate paths with unusable values
+
             # Validate paths to goal
             diag = self.path_validator.validate_option(
                 option_id=option_id,
@@ -297,11 +349,16 @@ class RequestValidator:
                 )
 
         # 4. Check for identical options (only if we have valid options)
+        # 2.477(b): the value guard is repeated here, not merely relied on from
+        # the loop above. This step runs even when a blocker was already
+        # recorded (has_blockers is computed AFTER it), so without the filter an
+        # absurd value would still reach canonicalise_interventions and raise.
         valid_options = [
             o
             for o in self.options
             if o.get("interventions")
             and all(t in self.nodes_by_id for t in o["interventions"].keys())
+            and all(is_canonicalisable_intervention_value(v) for v in o["interventions"].values())
         ]
         if len(valid_options) >= 2:
             identical = detect_identical_options(valid_options)

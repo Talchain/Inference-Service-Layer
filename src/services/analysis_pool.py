@@ -37,7 +37,7 @@ from typing import Any, List, Tuple, cast
 
 from src.models.robustness_v2 import RobustnessRequestV2, RobustnessResponseV2
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
-from src.services.robustness_worker import run_robustness_v2
+from src.services.robustness_worker import decode_analysis_response, run_robustness_v2
 
 logger = logging.getLogger(__name__)
 
@@ -211,4 +211,6 @@ async def run_offloaded(
         _swap_in_fresh_pool(app, pool)
         return _run_in_process(request, request_id, reason="broken_process_pool", degraded=True)
 
-    return RobustnessResponseV2.model_validate_json(result_json)
+    # 2.477(i): paired with the worker's encoder. NOT model_validate_json — see
+    # encode_analysis_response for the measured failure that pairing caused.
+    return decode_analysis_response(result_json)

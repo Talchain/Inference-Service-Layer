@@ -1432,7 +1432,7 @@
         "type": "string"
       },
       "DownsideV2": {
-        "description": "Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome\nsamples the v2 engine already draws \u2014 no new sampling.\n\nTwo metric families with DIFFERENT (deliberate) sample populations:\n\n* ``cvar_10`` / ``p05`` \u2014 MARGINAL tail metrics of this option's own outcome\n  samples, taken from the SAME post-``_apply_auto_scaled_noise`` population as\n  ``outcome.p10/p50/p90/mean`` (consistent, conservative/noised distribution).\n* ``expected_regret`` \u2014 a JOINT (cross-option) metric, computed from the\n  PRE-noise Common-Random-Numbers population \u2014 the same samples that produce\n  ``win_probability``. Auto-scaled noise draws INDEPENDENT per-option noise,\n  which breaks the CRN alignment this metric relies on, so it is NOT taken\n  from the noised samples (CODE-REVIEW-ISL F1).\n\nRides as a sibling to ``outcome`` and is present EXACTLY when the option's\nsamples are available at the emission locus (``outcome.percentiles_source ==\n'samples'``); otherwise omitted (absent, never a JSON null). All values are\nin the SAME units as ``outcome.mean`` / ``outcome.p10`` (no normalisation).",
+        "description": "Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome\nsamples the v2 engine already draws \u2014 no new sampling.\n\nTwo metric families with DIFFERENT (deliberate) sample populations:\n\n* ``cvar_10`` / ``p05`` \u2014 MARGINAL tail metrics of this option's own outcome\n  samples, taken from the SAME post-``_apply_auto_scaled_noise`` population as\n  ``outcome.p10/p50/p90/mean`` (consistent, conservative/noised distribution).\n* ``expected_regret`` \u2014 a JOINT (cross-option) metric, computed from the\n  PRE-noise Common-Random-Numbers population \u2014 the same samples that produce\n  ``win_probability``. Auto-scaled noise draws INDEPENDENT per-option noise,\n  which breaks the CRN alignment this metric relies on, so it is NOT taken\n  from the noised samples (CODE-REVIEW-ISL F1).\n\nRides as a sibling to ``outcome``; when omitted it is ABSENT, never a JSON\nnull. All values are in the SAME units as ``outcome.mean`` /\n``outcome.p10`` (no normalisation).\n\nEMISSION RULE \u2014 \u26a0 this said \"present EXACTLY when\n``outcome.percentiles_source == 'samples'``\" until 2.477(h); that\nbiconditional was made false by 2.475 and is now stated as the implication\nit actually is. Sample availability is NECESSARY but not SUFFICIENT:\n\n    ``downside`` present  \u27f9  ``outcome.percentiles_source == 'samples'``\n\n(that direction IS enforced, by ``OptionResultV2._downside_requires_samples``).\nThe block is additionally omitted, on a run that still returns 200, when any\nof its three components cannot be computed honestly \u2014 the threaded pre-noise\njoint regret absent or non-finite, or ``cvar_10``/``p05`` non-finite on an\nextreme finite population. Those are runs that could not produce a response\nAT ALL before 2.475: omitting one block is strictly more information than the\n500 it replaced, and a tail-risk number from a degraded population is not\ntrustworthy (absent != wrong, trap #13).",
         "properties": {
           "cvar_10": {
             "description": "Expected shortfall: the MEAN of the worst 10% (lowest) outcome samples. Tail mass = CVAR_LEVEL (0.10), a DOCTRINE-PENDING(Neil) default. Same units as outcome.mean. Guaranteed <= outcome.p10 (mean of the worst decile cannot exceed the decile boundary). POPULATION: computed from the POST-``_apply_auto_scaled_noise`` outcome samples \u2014 the SAME (noised) population as outcome.p10/p50/p90/mean and p05, and DIFFERENT from expected_regret (which is pre-noise).",
@@ -4446,7 +4446,7 @@
                 "type": "null"
               }
             ],
-            "description": "Downside / tail-risk view {cvar_10, p05, expected_regret}. Present exactly when the option's MC samples are available (outcome.percentiles_source == 'samples'); omitted (not null) otherwise."
+            "description": "Downside / tail-risk view {cvar_10, p05, expected_regret}. Requires the option's MC samples (outcome.percentiles_source == 'samples'), and is additionally omitted when the pre-noise joint regret or cvar_10/p05 cannot be computed as finite values. Omitted, never null."
           },
           "id": {
             "description": "Option identifier",
@@ -4597,9 +4597,16 @@
         "description": "Outcome distribution with core percentiles.",
         "properties": {
           "mean": {
-            "description": "Mean outcome value",
-            "title": "Mean",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean outcome value (omitted when no valid samples)",
+            "title": "Mean"
           },
           "n_samples": {
             "description": "Total samples",
@@ -4658,9 +4665,16 @@
             "type": "string"
           },
           "std": {
-            "description": "Standard deviation",
-            "title": "Std",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Standard deviation (omitted when no valid samples)",
+            "title": "Std"
           },
           "validity_ratio": {
             "description": "n_valid_samples / n_samples",
@@ -4669,8 +4683,6 @@
           }
         },
         "required": [
-          "mean",
-          "std",
           "n_samples",
           "n_valid_samples",
           "validity_ratio"

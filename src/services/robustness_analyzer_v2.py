@@ -2791,7 +2791,7 @@ class RobustnessAnalyzerV2:
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
-        List[str],
+        List[Optional[str]],
         List[Dict[Tuple[str, str], float]],
         int,
         Optional[Dict[str, Dict[str, List[float]]]],
@@ -2826,7 +2826,8 @@ class RobustnessAnalyzerV2:
         """
         option_outcomes: Dict[str, List[float]] = {opt.id: [] for opt in request.options}
         option_wins: Dict[str, float] = {opt.id: 0.0 for opt in request.options}
-        winner_per_sample: List[str] = []
+        # 2.477(c): Optional — None marks a draw where no option was finite.
+        winner_per_sample: List[Optional[str]] = []
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
         factor_values_per_sample: List[Dict[str, float]] = []
         tie_count = 0
@@ -2909,11 +2910,38 @@ class RobustnessAnalyzerV2:
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
 
-            # Track winner with fair tie-breaking (split ties equally)
-            max_outcome = max(sample_outcomes.values())
-            winners = [opt_id for opt_id, val in sample_outcomes.items() if val == max_outcome]
+            # Track winner with fair tie-breaking (split ties equally).
+            #
+            # 2.477(c): compare only the options that are FINITE at THIS sample.
+            # Two defects fixed here, both executed at pristine:
+            #   * a sample where EVERY option is non-finite produced
+            #     ``winners == []`` (NaN != NaN, so nothing equals the max) and
+            #     then ``1.0 / len(winners)`` → ZeroDivisionError → HTTP 500
+            #     (witnessed at robustness_analyzer_v2.py:2923);
+            #   * more insidiously, a single NaN could BEAT the field: ``max()``
+            #     short-circuits on NaN comparisons, so one poisoned option could
+            #     make ``max_outcome`` NaN and suppress the genuine winner of an
+            #     otherwise perfectly good sample.
+            # Restricting to the finite subset is the same per-index convention
+            # ``expected_regret_per_option`` already uses (best_i taken over the
+            # options finite at i) — alignment stays by index, nothing is
+            # inpainted or reordered. A sample with no finite option is
+            # UNINFORMATIVE: no option wins it, and it is not a tie either.
+            finite_outcomes = {
+                opt_id: val for opt_id, val in sample_outcomes.items() if math.isfinite(val)
+            }
+            max_outcome = max(finite_outcomes.values()) if finite_outcomes else None
+            winners = [opt_id for opt_id, val in finite_outcomes.items() if val == max_outcome]
 
-            if len(winners) == 1:
+            if not winners:
+                # No option produced a finite outcome at this draw. Award no
+                # win (win_probabilities then sum to the informative fraction,
+                # which is the honest report) and record the absence — never a
+                # fabricated winner. ``None`` rather than a sentinel string so
+                # mypy forces every consumer to handle it (trap 12: the type
+                # checker is the completeness check a hand-kept list is not).
+                winner_per_sample.append(None)
+            elif len(winners) == 1:
                 # Clear winner
                 option_wins[winners[0]] += 1.0
                 winner_per_sample.append(winners[0])
@@ -4582,7 +4610,7 @@ class RobustnessAnalyzerV2:
     def _compute_conditional_winners(
         self,
         factor_values_per_sample: List[Dict[str, float]],
-        winner_per_sample: List[str],
+        winner_per_sample: List[Optional[str]],
         option_outcomes: Dict[str, List[float]],
         factor_sampler: "FactorSampler",
         request: RobustnessRequestV2,
@@ -4681,7 +4709,7 @@ class RobustnessAnalyzerV2:
     def _compute_bucket_result(
         self,
         mask: np.ndarray,
-        winner_per_sample: List[str],
+        winner_per_sample: List[Optional[str]],
         option_labels: Dict[str, str],
         option_means: Dict[str, float],
     ) -> BucketResult:
@@ -4689,10 +4717,14 @@ class RobustnessAnalyzerV2:
         indices = np.where(mask)[0]
         bucket_size = len(indices)
 
-        # Count wins per option in this bucket
+        # Count wins per option in this bucket. 2.477(c): a draw where no option
+        # was finite has no winner (None) and is skipped — never counted as a
+        # phantom option that could then win the bucket.
         win_counts: Dict[str, int] = {}
         for idx in indices:
             winner = winner_per_sample[idx]
+            if winner is None:
+                continue
             win_counts[winner] = win_counts.get(winner, 0) + 1
 
         # Determine bucket winner (ties broken by higher mean outcome)
@@ -5351,7 +5383,7 @@ class RobustnessAnalyzerV2:
     def _compute_robustness(
         self,
         option_wins: Dict[str, float],
-        winner_per_sample: List[str],
+        winner_per_sample: List[Optional[str]],
         sensitivity: List[SensitivityResult],
         request: RobustnessRequestV2,
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
@@ -6983,7 +7015,7 @@ class RobustnessAnalyzerV2:
         self,
         fragile_edge_info: Dict[str, Tuple[str, str]],
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
-        winner_per_sample: List[str],
+        winner_per_sample: List[Optional[str]],
         overall_winner: str,
         request: Optional[RobustnessRequestV2] = None,
         evaluator: Optional[SCMEvaluatorV2] = None,
@@ -7140,7 +7172,17 @@ class RobustnessAnalyzerV2:
             # Count winner distribution in weak-edge samples
             weak_winner_counts: Dict[str, int] = defaultdict(int)
             for idx in weak_sample_indices:
-                weak_winner_counts[winner_per_sample[idx]] += 1
+                # 2.477(c): skip draws where no option was finite — they have no
+                # winner to attribute. Counting a None would invent a phantom
+                # option and could make it the "weak winner".
+                weak_sample_winner = winner_per_sample[idx]
+                if weak_sample_winner is None:
+                    continue
+                weak_winner_counts[weak_sample_winner] += 1
+
+            if not weak_winner_counts:
+                # Every weak-edge draw was uninformative — no attribution to make.
+                continue
 
             # Find most frequent winner in weak-edge samples
             weak_winner = max(weak_winner_counts, key=lambda k: weak_winner_counts[k])

@@ -976,6 +976,12 @@ async def _analyze_robustness_v2_enhanced(
             # joint value threaded from the analyzer. Present exactly when
             # percentiles_source=="samples" AND the pre-noise regret is available.
             downside: Optional[DownsideV2] = None
+            # 2.477(f): p10/p50/p90 can now be dropped to None when percentile
+            # interpolation overflows, so they are Optional from the start
+            # rather than narrowed to float by the first assignment.
+            p10_val: Optional[float]
+            p50_val: Optional[float]
+            p90_val: Optional[float]
             if finite_samples is not None:
                 finite_cleaned = finite_samples
                 if len(finite_cleaned) > 0:
@@ -986,6 +992,26 @@ async def _analyze_robustness_v2_enhanced(
                         float(v) for v in np.percentile(finite_cleaned, [5, 10, 50, 90])
                     )
                     percentiles_source = "samples"
+                    # 2.477(f): np.percentile INTERPOLATES, and interpolation
+                    # over a finite but extreme mixed-sign population overflows
+                    # (executed: [-1.7e308, 1.7e308] -> [inf, inf, -inf, -inf]).
+                    # p10/p50/p90 flowed from here into OutcomeDistributionV2
+                    # UNGUARDED — only the downside path checked finiteness — so
+                    # the render rejected the body and the whole run 500'd. The
+                    # percentile family travels together (the model documents
+                    # them as null together), so if any member cannot be
+                    # computed honestly the family is 'unavailable' rather than
+                    # part-null. Downside is gated on percentiles_source ==
+                    # 'samples' by the model validator and is therefore omitted
+                    # with them, which is correct: tail-risk numbers from a
+                    # population whose own percentiles overflowed are not
+                    # trustworthy. For every run that could serialize before,
+                    # all four are finite and this branch is never taken.
+                    if not all(math.isfinite(v) for v in (p05_val, p10_val, p50_val, p90_val)):
+                        p10_val = None
+                        p50_val = None
+                        p90_val = None
+                        percentiles_source = "unavailable"
                     # PRE-noise CRN-aligned joint regret (B2 CRN-fix F1), threaded
                     # from the analyzer. Present for every option with samples; if
                     # unexpectedly absent, omit downside rather than fabricate —
@@ -1002,7 +1028,11 @@ async def _analyze_robustness_v2_enhanced(
                     # run that could serialize before this fix, all three are
                     # finite and the block is built exactly as before.
                     pre_noise_regret = result.pre_noise_expected_regret
-                    if pre_noise_regret is not None and math.isfinite(pre_noise_regret):
+                    if (
+                        percentiles_source == "samples"
+                        and pre_noise_regret is not None
+                        and math.isfinite(pre_noise_regret)
+                    ):
                         cvar_val = cvar_from_samples(finite_cleaned)
                         if math.isfinite(cvar_val) and math.isfinite(p05_val):
                             downside = DownsideV2(
@@ -1027,16 +1057,48 @@ async def _analyze_robustness_v2_enhanced(
             # the RAW samples array — one non-finite sample poisons both, and a
             # non-finite float in a required field makes the whole response
             # unserializable (the pre-fix behaviour: every partial-validity run
-            # died as a 500 and no critique ever reached a user). For a partial
-            # option, report the finite sub-population's mean/std instead — the
-            # same population n_valid_samples counts — via the overflow-safe
-            # helper (the finite subset can sit near float64 max, where plain
-            # np.mean/np.std overflow in the accumulator). Guarded on status so
-            # every fully-valid option keeps dist.mean/dist.std verbatim.
-            if status == "partial" and finite_samples is not None and finite_samples.size > 0:
+            # died as a 500 and no critique ever reached a user). Report the
+            # finite sub-population's mean/std instead — the same population
+            # n_valid_samples counts — via the overflow-safe helper (the finite
+            # subset can sit near float64 max, where plain np.mean/np.std
+            # overflow in the accumulator).
+            #
+            # ⚠ 2.477(f)+(g): 2.475 gated this on `status == "partial"`, and that
+            # gate was TOO NARROW in both directions — measured, not reasoned:
+            #  * (f) an option with 25 of 200 samples non-finite has validity
+            #    0.875 >= MIN_VALID_RATIO (0.8), so its status is "computed" and
+            #    it kept the POISONED dist.mean/dist.std verbatim. The entire
+            #    validity band 0.8 <= ratio < 1.0 still 500'd. (The executed
+            #    shape the adversarial review labelled a percentile overflow was
+            #    in fact this: the field manifest showed outcome.mean = nan and
+            #    outcome.std = nan, on a "computed" option.)
+            #  * (g) samples that are ALL finite at ~1e299 overflow np.std's
+            #    squared-deviation accumulator, so a fully-valid "computed"
+            #    option shipped std = inf and 500'd.
+            # The honest gate is FINITENESS, not status. `status == "partial"`
+            # implies >=1 non-finite sample implies dist.mean is non-finite, so
+            # the finiteness condition is a strict SUPERSET of the old one: every
+            # 2.475 behaviour is preserved exactly, and the two holes close.
+            #
+            # NO-REGRESSION: a run that could serialize before had finite
+            # dist.mean/dist.std by construction (the render rejects non-finite
+            # floats), so it never enters this branch and its bytes are
+            # unchanged.
+            outcome_mean: Optional[float]
+            outcome_std: Optional[float]
+            if math.isfinite(dist.mean) and math.isfinite(dist.std):
+                outcome_mean, outcome_std = dist.mean, dist.std
+            elif finite_samples is not None and finite_samples.size > 0:
                 outcome_mean, outcome_std = overflow_safe_mean_std(finite_samples)
             else:
-                outcome_mean, outcome_std = dist.mean, dist.std
+                # 2.477(a): ZERO finite samples — there is no honest mean or std
+                # to report, and inventing 0.0 would be a fabrication dressed as
+                # a measurement. Omit both (exclude_none => ABSENT on the wire,
+                # never a JSON null), exactly as p10/p50/p90 and downside are
+                # already omitted for this option. The response now SHIPS as a
+                # 200 carrying the option's MONTE_CARLO_FAILED critique, instead
+                # of dying as a 500 that took every critique with it.
+                outcome_mean, outcome_std = None, None
 
             option_results.append(
                 OptionResultV2(
@@ -1080,21 +1142,54 @@ async def _analyze_robustness_v2_enhanced(
         # outcome_std over an option's pre-noise samples, and a single non-finite
         # sample makes std nan/inf, so rng.normal(0, nan/inf) then DESTROYS a
         # partially-finite option's finiteness → downside omitted → excluded here →
-        # the remaining min could OVERSTATE. The reason that overstatement never
-        # reaches a 200 response is INCIDENTAL, not this code's invariant: any
-        # non-finite sample also poisons outcome.mean (np.mean over the same array),
-        # and the JSONResponse render rejects non-finite floats (allow_nan=False) →
-        # the whole response 500s before the number ships. So on every 200 the
-        # population is all-finite and this min is the exact EVPI. That serializer
-        # guard is pre-existing and accidental; hardening _apply_auto_scaled_noise to
-        # skip/ignore non-finite-std options is a separate, tracked row — NOT this
-        # slice's regression. Present exactly when the regret population is present
-        # (>=1 downside); the ISLResponseV2 validator enforces the emission-iff and
-        # the value both ways.
+        # the remaining min could OVERSTATE.
+        #
+        # ⚠ 2.477(e) — THE OLD ARGUMENT HERE IS WITHDRAWN, AND THIS IS THE FIX.
+        # This comment used to say the overstatement "never reaches a 200 response"
+        # because of an INCIDENTAL serializer guard: any non-finite sample also
+        # poisoned outcome.mean, and the render rejects non-finite floats, so the
+        # whole response 500'd before the number could ship — "so on every 200 the
+        # population is all-finite and this min is the exact EVPI". 2.475 REMOVED
+        # that guard (partial options now report an overflow-safe mean over their
+        # finite sub-population, and the run returns 200), and 2.477(f)/(g) removed
+        # what was left of it. A comment that reasons from a guard which no longer
+        # exists is worse than no comment: the exactness claim became false the day
+        # 2.475 merged, and nothing failed.
+        #
+        # So the exactness is now ENFORCED rather than argued. min over a PARTIAL
+        # population can only be >= the true min_o (dropping candidates can only
+        # raise a minimum), i.e. it OVERSTATES the value of perfect information —
+        # a trust defect, and the wrong direction to be wrong in. decision_evpi is
+        # therefore emitted only when the population is COMPLETE: every option that
+        # HAS a usable sample population (percentiles_source == 'samples') carries
+        # a downside. Otherwise it is honestly ABSENT — absent != wrong (trap #13),
+        # and an absent number cannot mislead the way an inflated one can.
+        #
+        # Options with no samples at all are deliberately NOT counted as gaps: they
+        # carry no honest regret, were never in the population, and their presence
+        # must not suppress a perfectly good EVPI over the options that were
+        # actually sampled. (expected_regret_per_option assigns such an option a
+        # DEFENSIVE 0.0, which would be a fabricated minimum — it never reaches the
+        # wire because the downside block requires >=1 finite sample.)
+        #
+        # For every run that could serialize before 2.475, every sampled option
+        # carries a downside, so the population is complete and this is
+        # byte-identical to the previous behaviour. The ISLResponseV2 validator
+        # enforces the emission rule (including that absence is licensed only by a
+        # wire-visible gap) and the value, both ways.
         decision_evpi_regrets = [
             o.downside.expected_regret for o in option_results if o.downside is not None
         ]
-        builder.set_decision_evpi(min(decision_evpi_regrets) if decision_evpi_regrets else None)
+        decision_evpi_population_complete = all(
+            o.downside is not None
+            for o in option_results
+            if o.outcome.percentiles_source == "samples"
+        )
+        builder.set_decision_evpi(
+            min(decision_evpi_regrets)
+            if decision_evpi_regrets and decision_evpi_population_complete
+            else None
+        )
 
         # Check for degenerate outcomes
         degen_critique = detect_degenerate_outcomes(option_results)
