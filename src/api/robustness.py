@@ -1168,9 +1168,20 @@ async def _analyze_robustness_v2_enhanced(
         # Options with no samples at all are deliberately NOT counted as gaps: they
         # carry no honest regret, were never in the population, and their presence
         # must not suppress a perfectly good EVPI over the options that were
-        # actually sampled. (expected_regret_per_option assigns such an option a
-        # DEFENSIVE 0.0, which would be a fabricated minimum — it never reaches the
-        # wire because the downside block requires >=1 finite sample.)
+        # actually sampled.
+        #
+        # ⚠ THIS PARAGRAPH USED TO END WITH A FALSE REASSURANCE, and the reassurance
+        # is why the defect survived: it said expected_regret_per_option "assigns
+        # such an option a DEFENSIVE 0.0, which would be a fabricated minimum — it
+        # never reaches the wire because the downside block requires >=1 finite
+        # sample." The premise was true and the conclusion was scoped to ONE reader.
+        # A SECOND reader consumed the same 0.0 as a real measurement:
+        # robustness_analyzer_v2.py's decision_evpi_bound filtered on math.isfinite,
+        # which 0.0 passes, so the bound collapsed to 0.0 and clamped EVERY factor's
+        # EVPPI to zero. Fixed at the source — the helper now returns None for an
+        # option with no finite draw, so there is no fabricated value for any reader
+        # to find. Never argue a fabricated value is harmless from the readers you
+        # happen to know about.
         #
         # For every run that could serialize before 2.475, every sampled option
         # carries a downside, so the population is complete and this is
