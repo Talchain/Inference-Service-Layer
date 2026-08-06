@@ -55,7 +55,11 @@ from src.services.robustness_analyzer_v2 import (
     compute_weighted_cost,
 )
 
-from tests.unit.test_admission_calibration import _graph, _request_dict
+from tests.unit.test_admission_calibration import (
+    _graph,
+    _request_dict,
+    _sufficiency_shape_grid,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -153,8 +157,289 @@ def _fragile_edge_body(n_nodes: int, n_edges: int, n_samples: int, n_options: in
     return body
 
 
+def _root_factor_graph(n_drivers: int, n_extra_edges: int = 0) -> dict:
+    """A fan-in decision graph: ``n_drivers`` PARENTLESS factors feeding one outcome.
+
+    ⚠ WHY THIS EXISTS, AND WHY `_graph` CANNOT BE USED FOR A FLIPS SHAPE.
+
+    `_graph` lays a n0->n1->...->n_last chain down FIRST, so every node except n0
+    has a parent: the fixture graph has exactly ONE root, and that root carries an
+    `observed_state` only when `evpi_factors` is set. The factor-flip phase screens
+    only ROOT factors (`_compute_factor_flip_values`: a non-root's `factor_values`
+    would ADD to its parent contribution rather than replace a base), so on a
+    `_graph` shape the phase finds **0 eligible factors** and returns an empty list
+    after a single baseline-winner evaluation.
+
+    Measured at 686fcb7f: `_request_dict(12, 20, 2000, 3)` + `include_factor_flips`
+    yields roots=['n0'], eligible=[], **0 flip rows** and 3 extra evaluate() calls,
+    while the term charges 25,440 units. So simply SETTING the flag on the existing
+    fixtures would have priced a phase that never runs — the oracle would pass by
+    testing nothing (trap 13). The topology, not just the flag, is the fix.
+
+    Every driver carries an `observed_state.value`, which is the other half of the
+    eligibility test, so eligible == every driver.
+    """
+    nodes = [
+        {
+            "id": f"n{i}",
+            "kind": "factor",
+            "label": f"N{i}",
+            "observed_state": {"value": 0.5, "std": 0.1},
+        }
+        for i in range(n_drivers)
+    ]
+    goal_id = f"n{n_drivers}"
+    nodes.append({"id": goal_id, "kind": "outcome", "label": "GOAL"})
+    # Varied strengths so the slope spreads differ and the candidate ranking is a
+    # real ordering rather than an arbitrary tie-break.
+    edges = [
+        {
+            "from": f"n{i}",
+            "to": goal_id,
+            "exists_probability": 0.9,
+            "strength": {"mean": 0.2 + 0.05 * (i % 7), "std": 0.1},
+        }
+        for i in range(n_drivers)
+    ]
+    # Optional densification: driver -> driver edges would REMOVE roots, so extra
+    # edges are hung off the goal's own upstream instead, keeping every driver a root.
+    for i in range(min(n_extra_edges, n_drivers)):
+        edges.append(
+            {
+                "from": f"n{i}",
+                "to": goal_id,
+                "exists_probability": 0.85,
+                "strength": {"mean": 0.15, "std": 0.05},
+            }
+        )
+    return {"nodes": nodes, "edges": edges}
+
+
+def _eligible_driver_ids(body: dict) -> List[str]:
+    """The flip-eligible set, DERIVED from the request rather than hand-listed.
+
+    Mirrors `_compute_factor_flip_values`'s own eligibility test: parentless, not
+    the goal, and carrying an observed value or a parameter_uncertainties entry.
+    Derived so this helper cannot drift from the graph a test builds (trap 12).
+    """
+    parents: Dict[str, List[str]] = {n["id"]: [] for n in body["graph"]["nodes"]}
+    for e in body["graph"]["edges"]:
+        parents[e["to"]].append(e["from"])
+    uncertain = {u["node_id"] for u in body.get("parameter_uncertainties") or []}
+    return [
+        n["id"]
+        for n in body["graph"]["nodes"]
+        if n["id"] != body["goal_node_id"]
+        and not parents[n["id"]]
+        and (
+            (n.get("observed_state") or {}).get("value") is not None or n["id"] in uncertain
+        )
+    ]
+
+
+def _flip_body(n_drivers: int, n_samples: int, n_options: int) -> dict:
+    """`include_factor_flips` AS PLoT SENDS IT (unconditionally true), on a graph
+    that can actually exercise the phase.
+
+    Sharpness: sensitivity, VOI, e-values and paths are all OFF, so the advertised
+    total is exactly ``base_mc + factor_flips``. base_mc is EXACTLY tight (S*O
+    evaluations, priced S*O*W), so the whole inequality collapses to
+
+        factor_flips term  >=  the flip phase's real evaluate() count x W
+
+    with no other phase's headroom available to hide an undercharge behind. That
+    is the sharpest possible shape for this term, and it is the one the six
+    pre-existing shapes could not build.
+    """
+    graph = _root_factor_graph(n_drivers)
+    return {
+        "graph": graph,
+        "options": [
+            {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.1 * (k + 1)}}
+            for k in range(n_options)
+        ],
+        "goal_node_id": graph["nodes"][-1]["id"],
+        "n_samples": n_samples,
+        "seed": 7,
+        "analysis_types": ["comparison", "robustness"],
+        "include_factor_flips": True,
+    }
+
+
+#: The oracle's shapes, in ONE place so the run below and the term-coverage guard
+#: cannot disagree about what is actually exercised (trap 12 — derive, don't mirror).
+_ORACLE_SHAPES = [
+    ("representative_base", _request_dict(12, 20, 2000, 3, sensitivity=False)),
+    ("representative_sensitivity", _request_dict(12, 20, 2000, 3)),
+    ("representative_voi", _request_dict(12, 20, 2000, 3, evpi_factors=4)),
+    ("boundary_level_frame", _level_framed_body(12, 20, 400, 3)),
+    ("boundary_fragile_edges", _fragile_edge_body(14, 26, 1000, 4)),
+    ("boundary_many_options", _fragile_edge_body(10, 18, 1000, 8)),
+    # ROADMAP 2.745 — flips, the always-on zero-headroom term.
+    ("flips_sharp", _flip_body(9, 400, 3)),
+    # The candidate cap (10) binds here but not above, so the two shapes exercise
+    # DIFFERENT limbs of the term: below the cap every eligible factor is banded,
+    # above it the cap truncates the banding set.
+    ("flips_above_candidate_cap", _flip_body(16, 400, 3)),
+    # Options multiply the crossing-confirmation limb 2*C*(O-1).
+    ("flips_many_options", _flip_body(9, 400, 8)),
+]
+
+#: Priced terms that NO oracle shape currently runs, with the reason each is still
+#: open. ROADMAP 2.745 removed `factor_flips` from this list by adding the shapes
+#: above; the remaining four are rowed, not resolved.
+#:
+#: ⚠ THIS IS A RATCHET, NOT A MIRROR. The guard below compares it against the term
+#: set DERIVED from the sibling sufficiency grid and fails in BOTH directions:
+#: a newly-priced term that no shape runs is not in the list -> RED; a term that
+#: gains coverage is still in the list -> RED. So it cannot silently drift, and it
+#: can only ever shrink.
+_KNOWN_UNRUN_BY_ORACLE = {
+    # Charged flat and generously (200*E*O and 20*E*O), so they carry large
+    # headroom rather than zero — the opposite of the factor_flips hazard.
+    "bands",
+    "e_values",
+    # A do()-grid phase; needs a control_candidates shape of its own.
+    "evpc",
+    # Analytic, not an SCM evaluation, so this oracle's instrument (which counts
+    # evaluate() calls) is structurally blind to it — see HONEST SCOPE note 2.
+    "path_decomposition",
+}
+
+
+class TestPricedTermsAreActuallyRun:
+    """ROADMAP 2.745 — every priced term must be RUN by some oracle shape.
+
+    THE DEFECT THIS CLOSES. `factor_flips` was priced with W_FACTOR_FLIP_COEF = 1
+    (zero headroom) and sent by PLoT on EVERY live request, yet no oracle shape and
+    no calibration cell ever enabled it: the one always-on term with no slack was
+    the one term the oracle that exists to catch mis-pricing never executed. Nothing
+    failed, because nothing was checking that the priced set and the RUN set agree.
+
+    The check is DERIVED on both sides — the priced set from the sibling
+    sufficiency grid, the run set from `_ORACLE_SHAPES` — so adding a term to
+    `compute_weighted_cost` without a shape to run it turns this RED.
+    """
+
+    def test_every_priced_term_is_exercised_by_some_shape(self):
+        priced = set()
+        for body in _sufficiency_shape_grid().values():
+            priced |= set(compute_weighted_cost(RobustnessRequestV2(**body)).terms)
+
+        run = set()
+        for _label, body in _ORACLE_SHAPES:
+            run |= set(compute_weighted_cost(RobustnessRequestV2(**body)).terms)
+
+        unrun = priced - run
+        assert unrun <= _KNOWN_UNRUN_BY_ORACLE, (
+            f"priced term(s) {sorted(unrun - _KNOWN_UNRUN_BY_ORACLE)} are charged by "
+            f"compute_weighted_cost but RUN by no oracle shape, so nothing measures "
+            f"whether the charge is enough. Add a shape that exercises the phase "
+            f"(and check the phase actually runs on it — see "
+            f"TestFactorFlipShapeIsNotVacuous), or justify it in _KNOWN_UNRUN_BY_ORACLE."
+        )
+
+        stale = _KNOWN_UNRUN_BY_ORACLE & run
+        assert not stale, (
+            f"{sorted(stale)} now HAS oracle coverage but is still listed in "
+            f"_KNOWN_UNRUN_BY_ORACLE. Remove it — a stale exception list is exactly "
+            f"the hand-maintained mirror this guard exists to prevent."
+        )
+
+    def test_factor_flips_is_no_longer_exempt(self):
+        """The specific regression 2.745 closes: `factor_flips` must never go back
+        onto the exemption list."""
+        assert "factor_flips" not in _KNOWN_UNRUN_BY_ORACLE, (
+            "factor_flips was re-exempted. It is charged at W_FACTOR_FLIP_COEF = 1 "
+            "(zero pricing headroom) and PLoT sends include_factor_flips=true "
+            "unconditionally, so it must stay under the oracle."
+        )
+
+
+class TestFactorFlipShapeIsNotVacuous:
+    """POSITIVE CONTROL for every flips assertion below (trap 13 / trap 13b).
+
+    An upper-bound oracle on a phase that never runs is satisfied trivially. These
+    tests PIN THE PRECONDITION in-test, so a flips shape that silently stops
+    exercising the phase fails HERE rather than passing quietly downstream.
+    """
+
+    def test_flip_shape_screens_every_root_factor(self, count_evaluates):
+        """RED on the pre-existing fixture: `_graph` yields 0 eligible factors.
+
+        Binds by IDENTITY (the factor_id SET), never by a count or a value
+        predicate another object could satisfy (trap 19).
+        """
+        body = _flip_body(9, 400, 3)
+        eligible = _eligible_driver_ids(body)
+        assert len(eligible) == 9, (
+            f"the flips fixture must supply MANY root factors, got {len(eligible)}: "
+            f"{eligible}. A single-root graph (like `_graph`) makes every flips "
+            f"assertion in this file vacuous."
+        )
+
+        response = RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**body))
+        rows = response.factor_flip_values
+        assert rows is not None, (
+            "factor_flip_values is None — the phase declined (budget) or the flag "
+            "did not reach it; the flips oracle below would pass by testing nothing."
+        )
+        # Rows are dicts on the wire-building path (same access pattern as
+        # tests/unit/test_factor_flip_values.py), not FactorFlipValueV2 instances.
+        assert {r["factor_id"] for r in rows} == set(eligible), (
+            f"flip rows must cover exactly the eligible root factors. "
+            f"rows={sorted(r['factor_id'] for r in rows)} eligible={sorted(eligible)}"
+        )
+
+    def test_enabling_the_flag_costs_real_evaluations(self, count_evaluates):
+        """The flag must CHANGE the work done — a comparator, not an assertion
+        about an absolute number.
+
+        The screen alone is 2 evaluations per eligible factor per option, so the
+        delta cannot be smaller than that if the phase ran at all.
+        """
+        on = _flip_body(9, 400, 3)
+        off = {k: v for k, v in on.items() if k != "include_factor_flips"}
+
+        RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**off))
+        off_calls = count_evaluates.total
+
+        count_evaluates.evaluate = 0
+        count_evaluates.evaluate_multi = 0
+        RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**on))
+        on_calls = count_evaluates.total
+
+        n_eligible, n_options = len(_eligible_driver_ids(on)), len(on["options"])
+        screen_floor = 2 * n_eligible * n_options
+        assert on_calls - off_calls >= screen_floor, (
+            f"include_factor_flips added only {on_calls - off_calls} evaluations; the "
+            f"candidate screen alone is 2*{n_eligible}*{n_options}={screen_floor}. The "
+            f"phase did not run, so the flips oracle is VACUOUS — repair the shape, "
+            f"never relax the assertion."
+        )
+
+
 class TestEvaluatorCallCountOracle:
     """The advertised price must never be less than the work performed."""
+
+    def test_factor_flips_are_within_the_advertised_price(self, count_evaluates):
+        """ROADMAP 2.745 — the term with ZERO pricing headroom, under the oracle.
+
+        `W_FACTOR_FLIP_COEF = 1` charges the formula's own "1 evaluate = W units"
+        convention exactly, so an error in this term cannot be absorbed by slack —
+        and PLoT sends `include_factor_flips: true` UNCONDITIONALLY
+        (`translator-v3.ts:748`), so it is priced on every live request. Before this
+        test, it was the one always-on priced phase the oracle never ran.
+        """
+        body = _flip_body(9, 400, 3)
+        advertised, actual, W = _run(body, count_evaluates)
+        assert advertised >= actual, (
+            f"UNDER-PRICED by {actual - advertised} units "
+            f"({(actual / advertised - 1) * 100:.1f}%): advertised={advertised}, "
+            f"actual={actual} ({count_evaluates.total} evaluate() calls x W={W}). "
+            f"The factor-flip phase performs more evaluate() work than the "
+            f"factor_flips term charges for."
+        )
 
     def test_level_frame_shape_actually_runs_the_status_quo_evaluator(self, count_evaluates):
         """POSITIVE CONTROL (trap 13) — before asserting the level-framed shape is
@@ -211,17 +496,7 @@ class TestEvaluatorCallCountOracle:
             f"marginal-switch sweep per fragile edge."
         )
 
-    @pytest.mark.parametrize(
-        "label,body",
-        [
-            ("representative_base", _request_dict(12, 20, 2000, 3, sensitivity=False)),
-            ("representative_sensitivity", _request_dict(12, 20, 2000, 3)),
-            ("representative_voi", _request_dict(12, 20, 2000, 3, evpi_factors=4)),
-            ("boundary_level_frame", _level_framed_body(12, 20, 400, 3)),
-            ("boundary_fragile_edges", _fragile_edge_body(14, 26, 1000, 4)),
-            ("boundary_many_options", _fragile_edge_body(10, 18, 1000, 8)),
-        ],
-    )
+    @pytest.mark.parametrize("label,body", _ORACLE_SHAPES)
     def test_advertised_cost_upper_bounds_evaluator_calls(self, label, body, count_evaluates):
         """The oracle across representative AND boundary shapes."""
         advertised, actual, W = _run(body, count_evaluates)
