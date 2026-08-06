@@ -1,13 +1,22 @@
 """
 CEE Enhancement Endpoints (Phase 0).
 
-Provides endpoints for CEE decision reviews:
-- Detailed sensitivity analysis
-- Contrastive explanations
-- Conformal predictions
-- Validation strategies
+Three of the four routes here are WITHDRAWN (ROADMAP 2.704) and answer a typed
+501: ``/sensitivity/detailed``, ``/contrastive`` and ``/conformal``. They are
+retained as instrumented refusals rather than deleted, so mounting this router
+later still cannot serve a number. See ``src/api/withdrawn.py``.
 
-These endpoints enhance decision reviews with advanced causal insights.
+``/validation/strategies`` is UNCHANGED and is NOT withdrawn. Note this
+explicitly, because the 2026-08-07 triage recorded all four routes as
+fabrication traps: re-derived at the bytes for ROADMAP 2.704, that blanket
+verdict does not hold for this route. It delegates to a real
+``AdvancedValidationSuggester`` over a real NetworkX DAG, passes the
+suggester's own explanations through, and adds structural recommendations from
+genuine graph checks (weak connectivity, isolated nodes, belief and weight
+coverage). It emits only qualitative improvements — type, description,
+priority — and publishes no numeric estimate at all, so there is nothing here
+for a wiring job to serve as an invented number.
+
 CEE gracefully degrades if endpoints are unavailable or return 501.
 """
 
@@ -15,27 +24,23 @@ import logging
 import uuid
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
-from src.models.isl_metadata import MetadataBuilder
-from src.models.requests import (
-    ConformalRequest,
-    ContrastiveRequest,
-    SensitivityDetailedRequest,
-    ValidationStrategiesRequest,
+from src.api.withdrawn import (
+    ASSERTED_COVERAGE_REASON,
+    INVENTED_FEASIBILITY_REASON,
+    STAMPED_CONSTANTS_REASON,
+    refuse_withdrawn,
 )
+from src.models.isl_metadata import MetadataBuilder
+from src.models.requests import ValidationStrategiesRequest
 from src.models.responses import (
-    AssumptionSensitivity,
-    ConformalResponse,
-    ContrastiveAlternative,
-    ContrastiveResponse,
-    SensitivityDetailedResponse,
     ValidationImprovement,
     ValidationStrategiesResponse,
 )
 from src.services.advanced_validation_suggester import AdvancedValidationSuggester
 from src.services.cee_adapters import (
-    extract_assumptions,
     format_graph_summary,
     graph_v1_to_networkx,
     infer_outcome,
@@ -45,292 +50,105 @@ from src.services.cee_adapters import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+CEE_SENSITIVITY_DETAILED_ROUTE = "/api/v1/sensitivity/detailed"
+CEE_CONTRASTIVE_ROUTE = "/api/v1/contrastive"
+CEE_CONFORMAL_ROUTE = "/api/v1/conformal"
+
 # Initialize services
 validation_suggester = AdvancedValidationSuggester()
 
 
 @router.post(
     "/sensitivity/detailed",
-    response_model=SensitivityDetailedResponse,
-    summary="Detailed sensitivity analysis",
+    summary="[WITHDRAWN] Detailed assumption sensitivity",
     description="""
-    Identify which assumptions/variables have highest impact on outcomes.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Provides:
-    - Assumption sensitivity rankings
-    - Impact assessments
-    - Critical variable identification
-
-    **Use when:** Understanding which assumptions matter most for decision robustness.
+    It previously returned per-assumption "sensitivity" values with impact
+    descriptions. Those values were hardcoded constants anchored on 0.85/0.45/
+    0.5, selected by the assumption's position in the graph topology, and the
+    response was stamped `algorithm="topology_sensitivity"` — a name that
+    implied a computation that did not exist.
     """,
     responses={
-        200: {"description": "Sensitivity analysis completed successfully"},
-        400: {"description": "Invalid graph structure"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def analyze_sensitivity_detailed(
-    request: SensitivityDetailedRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> SensitivityDetailedResponse:
+async def analyze_sensitivity_detailed(request: Request) -> JSONResponse:
+    """Refuse: assumption sensitivity was a stamped constant.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist.
     """
-    Perform detailed sensitivity analysis on decision graph.
-
-    Args:
-        request: Sensitivity analysis request with GraphV1 structure
-        x_request_id: Optional request ID for tracing
-
-    Returns:
-        SensitivityDetailedResponse: Sensitivity analysis results
-    """
-    # Generate request ID if not provided
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    # Initialize metadata builder
-    metadata_builder = MetadataBuilder(request_id)
-
-    try:
-        logger.info(
-            "cee_sensitivity_detailed_request",
-            extra={
-                "request_id": request_id,
-                "graph_summary": format_graph_summary(request.graph),
-                "num_nodes": len(request.graph.nodes),
-                "num_edges": len(request.graph.edges),
-                "timeout": request.timeout,
-            },
-        )
-
-        # Extract assumptions from graph
-        assumptions = extract_assumptions(request.graph)
-
-        if not assumptions:
-            logger.warning("no_assumptions_found", extra={"request_id": request_id})
-            # Return empty result if no assumptions
-            response = SensitivityDetailedResponse(assumptions=[])
-            response.metadata = metadata_builder.build(algorithm="assumption_extraction")
-            return response
-
-        # Analyze each assumption
-        # For now, use simple heuristics based on graph structure
-        G = graph_v1_to_networkx(request.graph)
-        treatment = infer_treatment(request.graph)
-        outcome = infer_outcome(request.graph)
-
-        assumption_results = []
-
-        for assumption in assumptions:
-            # Calculate sensitivity based on graph topology
-            sensitivity = _calculate_assumption_sensitivity(assumption, G, treatment, outcome)
-
-            impact_desc = _format_impact_description(assumption, sensitivity)
-
-            assumption_results.append(
-                AssumptionSensitivity(
-                    variable=assumption["name"], sensitivity=sensitivity, impact=impact_desc
-                )
-            )
-
-        # Sort by sensitivity (highest first)
-        assumption_results.sort(key=lambda x: x.sensitivity, reverse=True)
-
-        logger.info(
-            "cee_sensitivity_completed",
-            extra={
-                "request_id": request_id,
-                "num_assumptions": len(assumption_results),
-                "top_sensitivity": assumption_results[0].sensitivity if assumption_results else 0,
-            },
-        )
-
-        response = SensitivityDetailedResponse(assumptions=assumption_results)
-        response.metadata = metadata_builder.build(algorithm="topology_sensitivity")
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "cee_sensitivity_error",
-            extra={"request_id": request_id, "error": str(e)},
-            exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail=f"Sensitivity analysis failed: {str(e)}")
+    return refuse_withdrawn(
+        route=CEE_SENSITIVITY_DETAILED_ROUTE,
+        reason=STAMPED_CONSTANTS_REASON,
+        request=request,
+    )
 
 
 @router.post(
     "/contrastive",
-    response_model=ContrastiveResponse,
-    summary="Contrastive explanations",
+    summary="[WITHDRAWN] Contrastive explanation",
     description="""
-    Generate actionable alternatives showing what changes would produce different outcomes.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Provides:
-    - Counterfactual scenarios
-    - Feasibility assessments
-    - Outcome comparisons
+    It previously returned "alternatives" with feasibility scores. The prose
+    was templated ("Strengthen X by increasing investment or focus") and the
+    feasibility numbers were invented constants (0.75 / 0.60 / 0.85).
 
-    **Use when:** Exploring "what if" alternatives and decision paths.
+    **Naming hazard:** this fake `/contrastive` sits beside the REAL
+    `explain/contrastive`, whose minimal-intervention search delegates outcome
+    simulation to the live counterfactual engine. Do not conflate them; if you
+    are looking for contrastive explanation, that is the one.
     """,
     responses={
-        200: {"description": "Contrastive explanation generated successfully"},
-        400: {"description": "Invalid graph structure or target outcome"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def generate_contrastive(
-    request: ContrastiveRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> ContrastiveResponse:
+async def generate_contrastive(request: Request) -> JSONResponse:
+    """Refuse: alternatives were template prose with invented feasibility.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist.
     """
-    Generate contrastive explanations for decision graph.
-
-    Args:
-        request: Contrastive request with GraphV1 structure and target outcome
-        x_request_id: Optional request ID for tracing
-
-    Returns:
-        ContrastiveResponse: List of actionable alternatives
-    """
-    # Generate request ID if not provided
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    # Initialize metadata builder
-    metadata_builder = MetadataBuilder(request_id)
-
-    try:
-        logger.info(
-            "cee_contrastive_request",
-            extra={
-                "request_id": request_id,
-                "graph_summary": format_graph_summary(request.graph),
-                "target_outcome": request.target_outcome,
-                "timeout": request.timeout,
-            },
-        )
-
-        # Validate target outcome exists in graph
-        node_ids = [node.id for node in request.graph.nodes]
-        if request.target_outcome not in node_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Target outcome '{request.target_outcome}' not found in graph",
-            )
-
-        # Generate contrastive alternatives
-        G = graph_v1_to_networkx(request.graph)
-        alternatives = _generate_alternatives(G, request.target_outcome, request.graph)
-
-        logger.info(
-            "cee_contrastive_completed",
-            extra={
-                "request_id": request_id,
-                "num_alternatives": len(alternatives),
-            },
-        )
-
-        response = ContrastiveResponse(alternatives=alternatives)
-        response.metadata = metadata_builder.build(algorithm="contrastive_explanation")
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "cee_contrastive_error",
-            extra={"request_id": request_id, "error": str(e)},
-            exc_info=True,
-        )
-        raise HTTPException(status_code=500, detail=f"Contrastive explanation failed: {str(e)}")
+    return refuse_withdrawn(
+        route=CEE_CONTRASTIVE_ROUTE,
+        reason=INVENTED_FEASIBILITY_REASON,
+        request=request,
+    )
 
 
 @router.post(
     "/conformal",
-    response_model=ConformalResponse,
-    summary="Conformal prediction",
+    summary="[WITHDRAWN] Conformal prediction interval",
     description="""
-    Provide calibrated confidence intervals for predictions.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Provides:
-    - Prediction intervals
-    - Confidence levels
-    - Uncertainty sources
-
-    **Use when:** Quantifying prediction uncertainty with calibrated bounds.
+    It previously returned a `prediction_interval` with
+    `confidence_level=0.90`, stamped `algorithm="conformal_prediction"`.
+    No conformal prediction took place: the bounds were
+    `belief*100 +/- (1-belief)*50`, widened by `1 + in_degree*0.1`, with a
+    fallback of centre 50 / width 30 when the node carried no belief. There was
+    no calibration set, no nonconformity score and no quantile — so the 0.90
+    coverage was **asserted, not achieved**, which is the specific claim
+    conformal prediction exists to make good on.
     """,
     responses={
-        200: {"description": "Conformal prediction completed successfully"},
-        400: {"description": "Invalid graph structure or variable"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def predict_conformal(
-    request: ConformalRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> ConformalResponse:
+async def predict_conformal(request: Request) -> JSONResponse:
+    """Refuse: the interval was arithmetic over belief and in-degree.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist.
     """
-    Generate conformal prediction intervals for decision graph.
-
-    Args:
-        request: Conformal request with GraphV1 structure and variable
-        x_request_id: Optional request ID for tracing
-
-    Returns:
-        ConformalResponse: Calibrated confidence intervals
-    """
-    # Generate request ID if not provided
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    # Initialize metadata builder
-    metadata_builder = MetadataBuilder(request_id)
-
-    try:
-        logger.info(
-            "cee_conformal_request",
-            extra={
-                "request_id": request_id,
-                "graph_summary": format_graph_summary(request.graph),
-                "variable": request.variable,
-                "timeout": request.timeout,
-            },
-        )
-
-        # Validate variable exists in graph
-        node_ids = [node.id for node in request.graph.nodes]
-        if request.variable not in node_ids:
-            raise HTTPException(
-                status_code=400, detail=f"Variable '{request.variable}' not found in graph"
-            )
-
-        # Generate conformal prediction interval
-        G = graph_v1_to_networkx(request.graph)
-        interval, uncertainty_source = _generate_conformal_interval(
-            G, request.variable, request.graph
-        )
-
-        logger.info(
-            "cee_conformal_completed",
-            extra={
-                "request_id": request_id,
-                "interval_width": interval[1] - interval[0],
-            },
-        )
-
-        response = ConformalResponse(
-            prediction_interval=interval,
-            confidence_level=0.90,
-            uncertainty_source=uncertainty_source,
-        )
-        response.metadata = metadata_builder.build(algorithm="conformal_prediction")
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "cee_conformal_error", extra={"request_id": request_id, "error": str(e)}, exc_info=True
-        )
-        raise HTTPException(status_code=500, detail=f"Conformal prediction failed: {str(e)}")
+    return refuse_withdrawn(
+        route=CEE_CONFORMAL_ROUTE,
+        reason=ASSERTED_COVERAGE_REASON,
+        request=request,
+    )
 
 
 @router.post(
@@ -439,147 +257,15 @@ async def suggest_validation_strategies(
 
 
 # Helper functions
-
-
-def _calculate_assumption_sensitivity(
-    assumption: dict, G: Any, treatment: str, outcome: str
-) -> float:
-    """
-    Calculate sensitivity score for an assumption.
-
-    Uses graph topology to estimate impact.
-    """
-    import networkx as nx
-
-    # Extract node/edge from assumption name
-    if "_to_" in assumption["name"]:
-        # Edge weight assumption
-        parts = assumption["name"].replace("_weight", "").split("_to_")
-        if len(parts) == 2:
-            from_node, to_node = parts
-
-            # Check if edge is on path from treatment to outcome
-            if nx.has_path(G, treatment, outcome):
-                paths = list(nx.all_simple_paths(G, treatment, outcome, cutoff=10))
-                on_critical_path = any(
-                    from_node in path
-                    and to_node in path
-                    and path.index(from_node) + 1 == path.index(to_node)
-                    for path in paths
-                )
-
-                if on_critical_path:
-                    return float(0.85 + (abs(assumption.get("current_value", 1.0)) / 3.0) * 0.15)
-                else:
-                    return 0.45
-    elif "_belief" in assumption["name"]:
-        # Node belief assumption
-        node = assumption["name"].replace("_belief", "")
-
-        # Check centrality
-        try:
-            degree_centrality = nx.degree_centrality(G).get(node, 0)
-            return float(0.5 + (degree_centrality * 0.5))
-        except:
-            return 0.5
-
-    return 0.5  # Default medium sensitivity
-
-
-def _format_impact_description(assumption: dict, sensitivity: float) -> str:
-    """Format impact description for assumption."""
-    if sensitivity > 0.8:
-        magnitude = "significant"
-    elif sensitivity > 0.6:
-        magnitude = "moderate"
-    else:
-        magnitude = "minor"
-
-    if "_to_" in assumption["name"]:
-        return f"Changes to this relationship have {magnitude} impact on outcomes"
-    else:
-        return f"Uncertainty in this variable creates {magnitude} outcome variance"
-
-
-def _generate_alternatives(G: Any, target_outcome: str, graph: Any) -> List[ContrastiveAlternative]:
-    """Generate contrastive alternatives."""
-    import networkx as nx
-
-    alternatives = []
-
-    # Find predecessors of target outcome
-    predecessors = list(G.predecessors(target_outcome))
-
-    if predecessors:
-        # Suggest strengthening key influences
-        for pred in predecessors[:2]:
-            pred_node = next((n for n in graph.nodes if n.id == pred), None)
-            if pred_node:
-                alternatives.append(
-                    ContrastiveAlternative(
-                        change=f"Strengthen {pred_node.label} by increasing investment or focus",
-                        outcome_diff=f"Would increase likelihood of achieving {target_outcome}",
-                        feasibility=0.75,
-                    )
-                )
-
-    # Suggest alternative paths
-    outcome_node = next((n for n in graph.nodes if n.id == target_outcome), None)
-    if outcome_node:
-        alternatives.append(
-            ContrastiveAlternative(
-                change="Add additional supporting factors or enablers",
-                outcome_diff=f"Would provide alternative pathways to {outcome_node.label}",
-                feasibility=0.60,
-            )
-        )
-
-    # Add mitigation suggestion
-    if len(alternatives) < 3:
-        alternatives.append(
-            ContrastiveAlternative(
-                change="Reduce uncertainty by gathering more data on key assumptions",
-                outcome_diff="Would narrow confidence intervals and improve decision quality",
-                feasibility=0.85,
-            )
-        )
-
-    return alternatives[:3]  # Top 3
-
-
-def _generate_conformal_interval(G: Any, variable: str, graph: Any) -> tuple:
-    """Generate conformal prediction interval."""
-    import networkx as nx
-
-    # Calculate interval width based on uncertainty
-    node = next((n for n in graph.nodes if n.id == variable), None)
-
-    # Base interval on node properties
-    if node and node.belief is not None:
-        # Use belief to center interval
-        center = node.belief * 100
-        width = (1 - node.belief) * 50  # Higher belief = narrower interval
-    else:
-        center = 50
-        width = 30
-
-    # Adjust based on graph complexity
-    in_degree = G.in_degree(variable)
-    complexity_factor = 1 + (in_degree * 0.1)
-    width *= complexity_factor
-
-    interval = [max(0, center - width), min(100, center + width)]
-
-    # Identify uncertainty source
-    if in_degree > 2:
-        uncertainty_source = "Multiple causal factors create compounding uncertainty"
-    elif in_degree > 0:
-        preds = list(G.predecessors(variable))
-        uncertainty_source = f"Uncertainty propagates from upstream factors: {', '.join(preds[:2])}"
-    else:
-        uncertainty_source = "Limited observational data for this variable"
-
-    return interval, uncertainty_source
+#
+# Only the helpers used by /validation/strategies survive. The fabricating
+# helpers that served the three withdrawn routes are deleted outright:
+# _calculate_assumption_sensitivity (0.85/0.45/0.5 constants),
+# _format_impact_description, _generate_alternatives (template prose with
+# invented feasibility 0.75/0.60/0.85) and _generate_conformal_interval
+# (belief/in-degree arithmetic published as a conformal interval). Deleting
+# them, rather than leaving them beside a refusing handler, is the point: a
+# future wiring job cannot re-wire what is not there.
 
 
 def _map_strategy_type(strategy_type: str) -> str:

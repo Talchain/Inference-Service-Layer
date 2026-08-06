@@ -1,4 +1,23 @@
 """
+⚠ WITHDRAWN — DO NOT WIRE (ROADMAP 2.704). This service has NO caller.
+
+Its only route, POST /api/v1/teaching/teach, now answers a typed 501. The
+citation below is real; the implementation does not implement it.
+
+Every generated example's scenario outcomes are ``np.random.uniform(0, 100)``
+— random numbers, redrawn per call — and the "teaching value"
+(0.4*novelty + 0.4*clarity + 0.2*relevance) is a heuristic computed over those
+random numbers. No learner model is maintained, no posterior is updated, and
+nothing is selected to maximise information gain.
+
+⚠ This module is a specific hazard for the COACHING roadmap. It is where a
+lane looking for dormant decision-science teaching code will land, its concepts
+("confounding", "trade-offs") read like a ready-made bias-education leg, and it
+carries a real citation. It must never be presented as one. Note also that its
+unit tests pass: they assert the SHAPE of the returned examples, which random
+outcomes satisfy perfectly. A green suite here is not evidence of pedagogy.
+
+--- original docstring ---
 Bayesian Teacher service implementing optimal teaching strategies.
 
 Selects pedagogically valuable examples that maximize learning efficiency

@@ -29,6 +29,16 @@ cache_fingerprint_matches = Counter(
     "isl_cache_fingerprint_matches_total", "Determinism verifications (fingerprint matches)"
 )
 
+# Withdrawn-capability refusals (ROADMAP 2.704).
+# Retaining caller telemetry is a reason these handlers were refused rather
+# than deleted: a 404 would answer the probe and record nothing, so we would
+# never learn that something upstream had started calling a withdrawn route.
+capability_withdrawn_refusals_total = Counter(
+    "isl_capability_withdrawn_refusals_total",
+    "Requests refused with 501 because the capability was withdrawn as fabricated",
+    ["route"],
+)
+
 # ActiVA preference learning metrics
 activa_queries_generated_total = Counter(
     "isl_activa_queries_generated_total", "Total preference queries generated"

@@ -1,4 +1,24 @@
 """
+⚠ WITHDRAWN — DO NOT WIRE (ROADMAP 2.704). This service has NO caller.
+
+Its only route, POST /api/v1/team/align, now answers a typed 501. The numbers
+here are not computed:
+
+- ``_calculate_satisfaction`` scores an option against a stakeholder's
+  priorities by testing whether the priority keyword appears as a SUBSTRING of
+  the option's attribute names or values, then multiplies the hit fraction by
+  100 and defaults to 50.0. A stakeholder who says "cost" and an option
+  labelled "low-cost" agree by string containment, not by preference.
+- ``_identify_tradeoff`` returns hardcoded prose ("Some priorities" /
+  "Alternative benefits") with a special case keyed on a literal "speed"
+  attribute value.
+
+It is retained only so the refusal's account of what was wrong can be checked
+against the code. If you are here because a collaboration or team-alignment
+roadmap item pointed you at "existing team code": this is not it, and building
+that capability honestly needs a real multi-stakeholder preference model.
+
+--- original docstring ---
 Team Aligner service for finding common ground across perspectives.
 
 Identifies shared goals, analyzes option satisfaction, and provides

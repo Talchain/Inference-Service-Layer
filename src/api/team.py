@@ -1,94 +1,61 @@
 """
-Team alignment endpoints.
+Team alignment endpoint — WITHDRAWN (ROADMAP 2.704).
 
-Provides endpoints for finding common ground and aligned options
-across different team perspectives.
+The route is retained as an instrumented typed 501 rather than deleted, so
+that mounting this router later still cannot serve a number, and so that any
+caller that appears is recorded. See ``src/api/withdrawn.py`` for the full
+rationale.
+
+What was wrong (confirmed at the handler bytes, science-expansion triage
+2026-08-07, re-verified at this tip): ``TeamAligner._calculate_satisfaction``
+scored an option against a stakeholder's priorities by checking whether the
+priority keyword appeared as a SUBSTRING of the option's attribute text,
+multiplied the hit fraction by 100, and defaulted to 50.0; ``_identify_tradeoff``
+returned hardcoded prose ("Some priorities" / "Alternative benefits") with a
+special case keyed on a literal "speed" attribute. The result was presented as
+team-alignment analysis with satisfaction scores and conflict resolutions.
 """
 
 import logging
-import uuid
-from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
-from src.models.metadata import create_response_metadata
-from src.models.requests import TeamAlignmentRequest
-from src.models.responses import TeamAlignmentResponse
-from src.services.team_aligner import TeamAligner
+from src.api.withdrawn import KEYWORD_MATCH_REASON, refuse_withdrawn
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Initialize service
-team_aligner = TeamAligner()
+TEAM_ALIGN_ROUTE = "/api/v1/team/align"
 
 
 @router.post(
     "/align",
-    response_model=TeamAlignmentResponse,
-    summary="Find team alignment",
+    summary="[WITHDRAWN] Find team alignment",
     description="""
-    Identifies common ground across team perspectives and recommends
-    options that best satisfy all stakeholders.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Provides:
-    - Shared goals and constraints
-    - Options ranked by satisfaction score
-    - Identified conflicts with resolutions
-    - Top recommendation with rationale
+    It previously reported stakeholder "satisfaction scores" and trade-offs.
+    Those scores were keyword substring matches against option attribute text
+    (x100, default 50.0) and the trade-off text was hardcoded. No alignment
+    analysis was performed.
 
-    **Use when:** Making decisions with multiple stakeholders.
+    Rebuilding this capability honestly requires a real preference model over
+    stakeholders and options — raise a ROADMAP row rather than re-mounting.
     """,
     responses={
-        200: {"description": "Team alignment analysis completed successfully"},
-        400: {"description": "Invalid input (e.g., no perspectives provided)"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def align_team(
-    request: TeamAlignmentRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> TeamAlignmentResponse:
+async def align_team(request: Request) -> JSONResponse:
+    """Refuse: team alignment was never computed.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist, and a 422 would imply a
+    well-formed body would have been answered.
     """
-    Find team alignment across perspectives.
-
-    Args:
-        request: Team alignment request with perspectives and options
-
-    Returns:
-        TeamAlignmentResponse: Alignment analysis with recommendations
-    """
-    # Generate request ID if not provided
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "team_alignment_request",
-            extra={
-                "num_perspectives": len(request.perspectives),
-                "num_options": len(request.options),
-                "roles": [p.role for p in request.perspectives],
-            },
-        )
-
-        result = team_aligner.align(request)
-
-        logger.info(
-            "team_alignment_completed",
-            extra={
-                "agreement_level": result.common_ground.agreement_level,
-                "recommended_option": result.recommendation.top_option,
-                "num_conflicts": len(result.conflicts),
-            },
-        )
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("team_alignment_error", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to perform team alignment. Check logs for details.",
-        )
+    return refuse_withdrawn(
+        route=TEAM_ALIGN_ROUTE,
+        reason=KEYWORD_MATCH_REASON,
+        request=request,
+    )

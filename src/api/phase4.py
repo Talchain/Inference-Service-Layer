@@ -1,144 +1,58 @@
 """
-Phase 4: Sequential Decisions & Conditional Recommendations API.
+Phase 4: Sequential Decisions API.
 
-Provides endpoints for:
-- Conditional recommendation generation
-- Sequential decision analysis (backward induction)
-- Policy tree retrieval
-- Stage sensitivity analysis
+Provides ONE endpoint: sequential decision analysis (backward induction), on
+``sequential_router``, which main.py mounts as POST /api/v1/analysis/sequential.
+
+RETIRED (ROADMAP 2.704): the dark ``router`` that carried
+``/conditional-recommend``, ``/policy-tree`` and ``/stage-sensitivity`` is
+DELETED, along with its handlers and their engine entry points. ROADMAP 2.363
+ruled all three RETIRE and the verdicts were re-confirmed at this tip:
+
+- ``/conditional-recommend``: the recommendation probability was a literal
+  ``0.15  # Arbitrary``.
+- ``/policy-tree``: the builder never recursed — children were flat edge dicts
+  and ``_count_tree_nodes`` was self-commented "Simplified - doesn't recurse
+  into children", so the "tree" was one level deep whatever the graph.
+- ``/stage-sensitivity``: the flip threshold was hardcoded
+  ``1.0 - variation_range`` and probability perturbation was un-renormalised.
+
+These were deleted rather than refused because there is nothing to preserve a
+route for: 2.363 already ruled them retired, and unlike the withdrawn routes in
+``src/api/withdrawn.py`` they have no integrator worth telling apart from a
+typo. The live sequential mount is deliberately untouched.
 """
 
 import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException
 
 from src.api.error_helpers import raise_invalid_input
 from src.models.metadata import create_response_metadata
-from src.models.requests import (
-    ConditionalRecommendRequest,
-    SequentialAnalysisRequest,
-    StageSensitivityRequest,
-)
-from src.models.responses import (
-    ConditionalRecommendResponse,
-    PolicyTreeResponse,
-    SequentialAnalysisResponse,
-    StageSensitivityResponse,
-)
-from src.services.conditional_recommender import ConditionalRecommendationEngine
+from src.models.requests import SequentialAnalysisRequest
+from src.models.responses import SequentialAnalysisResponse
 from src.services.sequential_decision import SequentialDecisionEngine
-
-router = APIRouter()
 
 # Selective mount (R-12): ONLY the sequential-analysis route is runtime-verified
 # (A2 flip: honest engine + served-path value pins + D-12 422 mapping) and goes
-# live. It lives on its OWN router so main.py can mount exactly
-# POST /api/v1/analysis/sequential while the rest of `router`
-# (conditional-recommend, policy-tree, stage-sensitivity) stays dark pending its
-# own runtime verification. Do NOT move other routes onto sequential_router.
+# live. It keeps its own router name so main.py mounts exactly
+# POST /api/v1/analysis/sequential. The sibling dark `router` that used to sit
+# here was retired under 2.704 — do NOT reintroduce one to hang new routes on
+# without its own runtime verification.
 sequential_router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
 # Initialize services
-conditional_engine = ConditionalRecommendationEngine()
 sequential_engine = SequentialDecisionEngine()
 
 # F-4: the former module-level `_policy_cache` was an unbounded, never-evicted,
 # write-only dict — populated on every live sequential request (key derived from a
 # client-controllable X-Request-Id), with zero readers (the dark policy-tree route
-# recomputes rather than reading it). With the mount that was a monotonic memory
-# leak. It is removed. When the policy-tree route is verified and mounted, it can
-# reintroduce a properly-bounded cache (TTL/LRU or Redis) as part of that change.
-
-
-@router.post(
-    "/conditional-recommend",
-    response_model=ConditionalRecommendResponse,
-    summary="Generate conditional recommendations",
-    description="""
-    Generate actionable conditions that qualify recommendations.
-
-    Real decisions aren't binary. Users need to know "Choose A if X, otherwise B"
-    rather than just "Choose A."
-
-    **Condition Types:**
-    - **threshold**: Parameter thresholds where ranking flips (e.g., "If ROI < 0.3, choose B")
-    - **dominance**: When weighting changes make one option dominate
-    - **risk_profile**: How recommendations change with risk tolerance
-    - **scenario**: Clustered parameter combinations (pessimistic/optimistic)
-
-    **Robustness Summary:**
-    - **robust**: Recommendation unlikely to change
-    - **moderate**: Some conditions could flip recommendation
-    - **fragile**: Many conditions could flip recommendation
-
-    **Use when:** Making strategic decisions that need qualification.
-    """,
-    responses={
-        200: {"description": "Conditional recommendations generated successfully"},
-        400: {"description": "Invalid input (e.g., fewer than 2 options)"},
-        500: {"description": "Internal computation error"},
-    },
-)
-async def generate_conditional_recommendations(
-    request: ConditionalRecommendRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> ConditionalRecommendResponse:
-    """
-    Generate conditional recommendations for ranked options.
-
-    Args:
-        request: Conditional recommendation request with ranked options
-
-    Returns:
-        ConditionalRecommendResponse with primary and conditional recommendations
-    """
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "conditional_recommend_request",
-            extra={
-                "request_id": request_id,
-                "run_id": request.run_id,
-                "num_options": len(request.ranked_options),
-                "condition_types": request.condition_types,
-                "max_conditions": request.max_conditions,
-            },
-        )
-
-        result = conditional_engine.generate_recommendations(request)
-
-        logger.info(
-            "conditional_recommend_completed",
-            extra={
-                "request_id": request_id,
-                "primary_option": result.primary_recommendation.option_id,
-                "num_conditions": len(result.conditional_recommendations),
-                "robustness": result.robustness_summary.recommendation_stability,
-            },
-        )
-
-        # Add metadata
-        result.metadata = create_response_metadata(request_id)
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "conditional_recommend_error",
-            extra={"request_id": request_id, "error": str(e)},
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate conditional recommendations. Check logs for details.",
-        )
+# recomputed rather than reading it). With the mount that was a monotonic memory
+# leak. It is removed, and with 2.704 its only would-be reader is gone too.
 
 
 @sequential_router.post(
@@ -248,156 +162,4 @@ async def analyze_sequential_decision(
         raise HTTPException(
             status_code=500,
             detail="Failed to analyze sequential decision. Check logs for details.",
-        )
-
-
-@router.post(
-    "/policy-tree",
-    response_model=PolicyTreeResponse,
-    summary="Get policy as decision tree",
-    description="""
-    Generate a decision tree representation of the optimal policy.
-
-    Returns a tree structure where:
-    - Decision nodes show optimal action
-    - Chance nodes show outcome probabilities
-    - Terminal nodes show payoffs
-
-    **Use when:** Visualizing or exporting the optimal policy.
-    """,
-    responses={
-        200: {"description": "Policy tree generated successfully"},
-        400: {"description": "Invalid input"},
-        500: {"description": "Internal computation error"},
-    },
-)
-async def get_policy_tree(
-    request: SequentialAnalysisRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> PolicyTreeResponse:
-    """
-    Generate policy tree from sequential analysis.
-
-    Args:
-        request: Sequential analysis request
-
-    Returns:
-        PolicyTreeResponse with tree structure
-    """
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "policy_tree_request",
-            extra={
-                "request_id": request_id,
-                "num_nodes": len(request.graph.nodes),
-                "num_stages": len(request.stages),
-            },
-        )
-
-        result = sequential_engine.get_policy_tree(request)
-
-        logger.info(
-            "policy_tree_completed",
-            extra={
-                "request_id": request_id,
-                "total_nodes": result.total_nodes,
-                "total_stages": result.total_stages,
-            },
-        )
-
-        # Add metadata
-        result.metadata = create_response_metadata(request_id)
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "policy_tree_error",
-            extra={"request_id": request_id, "error": str(e)},
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate policy tree. Check logs for details.",
-        )
-
-
-@router.post(
-    "/stage-sensitivity",
-    response_model=StageSensitivityResponse,
-    summary="Stage-by-stage sensitivity analysis",
-    description="""
-    Perform sensitivity analysis for each stage of a sequential decision.
-
-    Tests how robust the optimal policy is to parameter changes at each stage.
-
-    **Metrics:**
-    - **parameter_sensitivities**: How much each parameter affects stage value
-    - **policy_changes_at**: Parameter values where optimal action changes
-    - **robustness_score**: Overall robustness (0-1)
-
-    **Use when:** Understanding which parameters matter most at each stage.
-    """,
-    responses={
-        200: {"description": "Stage sensitivity analysis completed successfully"},
-        400: {"description": "Invalid input"},
-        500: {"description": "Internal computation error"},
-    },
-)
-async def analyze_stage_sensitivity(
-    request: StageSensitivityRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> StageSensitivityResponse:
-    """
-    Perform stage-by-stage sensitivity analysis.
-
-    Args:
-        request: Stage sensitivity request
-
-    Returns:
-        StageSensitivityResponse with per-stage results
-    """
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "stage_sensitivity_request",
-            extra={
-                "request_id": request_id,
-                "num_stages": len(request.stages),
-                "variation_range": request.variation_range,
-            },
-        )
-
-        result = sequential_engine.stage_sensitivity(request)
-
-        logger.info(
-            "stage_sensitivity_completed",
-            extra={
-                "request_id": request_id,
-                "overall_robustness": result.overall_robustness,
-                "most_sensitive": result.most_sensitive_parameters,
-            },
-        )
-
-        # Add metadata
-        result.metadata = create_response_metadata(request_id)
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "stage_sensitivity_error",
-            extra={"request_id": request_id, "error": str(e)},
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to analyze stage sensitivity. Check logs for details.",
         )

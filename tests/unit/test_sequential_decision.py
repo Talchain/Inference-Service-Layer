@@ -537,78 +537,8 @@ class TestRiskTolerance:
         assert result.optimal_policy is not None
 
 
-class TestPolicyTree:
-    """Tests for policy tree generation."""
-
-    def test_policy_tree_generation(self, engine, two_stage_simple_graph):
-        """Policy tree should be generated correctly."""
-        graph, stages = two_stage_simple_graph
-
-        request = SequentialAnalysisRequest(
-            graph=graph,
-            stages=stages,
-            discount_factor=0.95,
-            risk_tolerance="neutral"
-        )
-
-        result = engine.get_policy_tree(request)
-
-        assert result.root is not None
-        assert result.total_stages >= 1
-        assert result.total_nodes >= 1
-        assert result.root.node_id is not None
-
-    def test_policy_tree_has_expected_value(self, engine, two_stage_simple_graph):
-        """Tree nodes should have expected values."""
-        graph, stages = two_stage_simple_graph
-
-        request = SequentialAnalysisRequest(
-            graph=graph,
-            stages=stages,
-            discount_factor=0.95,
-            risk_tolerance="neutral"
-        )
-
-        result = engine.get_policy_tree(request)
-
-        assert result.root.expected_value is not None
 
 
-class TestStageSensitivity:
-    """Tests for stage sensitivity analysis."""
-
-    def test_stage_sensitivity_analysis(self, engine, two_stage_simple_graph):
-        """Stage sensitivity should be computed for each stage."""
-        graph, stages = two_stage_simple_graph
-
-        request = StageSensitivityRequest(
-            graph=graph,
-            stages=stages,
-            variation_range=0.2
-        )
-
-        result = engine.stage_sensitivity(request)
-
-        # Should have results for stages with decisions
-        assert len(result.stage_results) >= 0
-        assert result.overall_robustness >= 0
-        assert result.overall_robustness <= 1
-
-    def test_stage_sensitivity_identifies_parameters(self, engine, two_stage_simple_graph):
-        """Should identify most sensitive parameters."""
-        graph, stages = two_stage_simple_graph
-
-        request = StageSensitivityRequest(
-            graph=graph,
-            stages=stages,
-            variation_range=0.2
-        )
-
-        result = engine.stage_sensitivity(request)
-
-        # Should have explanation
-        assert result.explanation is not None
-        assert result.explanation.summary is not None
 
 
 class TestEdgeCases:

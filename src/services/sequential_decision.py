@@ -18,21 +18,16 @@ from src.models.requests import (
     SequentialGraph,
     SequentialGraphEdge,
     SequentialGraphNode,
-    StageSensitivityRequest,
 )
 from src.models.responses import (
     ConditionalAction,
     DecisionRule,
     ExplanationMetadata,
     Policy,
-    PolicyTreeNode,
-    PolicyTreeResponse,
     SequentialAnalysisResponse,
     StageAnalysis,
     StageOption,
     StagePolicy,
-    StageSensitivityResponse,
-    StageSensitivityResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -168,124 +163,7 @@ class SequentialDecisionEngine:
             stage_analyses=stage_analyses,
         )
 
-    def get_policy_tree(self, request: SequentialAnalysisRequest) -> PolicyTreeResponse:
-        """
-        Generate policy tree representation.
 
-        Args:
-            request: Sequential analysis request
-
-        Returns:
-            PolicyTreeResponse with tree structure
-        """
-        # Build internal representation
-        graph_data = self._build_graph_data(request.graph)
-
-        # Run backward induction
-        node_values, optimal_actions = self._backward_induction(
-            graph_data, request.stages, request.discount_factor, request.risk_tolerance or "neutral"
-        )
-
-        # Find root node (decision node at stage 0)
-        root_node_id = None
-        for node_id, stage in request.graph.stage_assignments.items():
-            if stage == 0:
-                node = graph_data["nodes"][node_id]
-                if node["type"] == "decision":
-                    root_node_id = node_id
-                    break
-
-        if root_node_id is None:
-            # Fallback to first node
-            root_node_id = list(graph_data["nodes"].keys())[0]
-
-        # Build tree recursively
-        root = self._build_tree_node(
-            root_node_id,
-            graph_data,
-            request.graph.stage_assignments,
-            node_values,
-            optimal_actions,
-            visited=set(),
-        )
-
-        # Count nodes
-        total_nodes = self._count_tree_nodes(root)
-
-        return PolicyTreeResponse(
-            root=root, total_stages=len(request.stages), total_nodes=total_nodes
-        )
-
-    def stage_sensitivity(self, request: StageSensitivityRequest) -> StageSensitivityResponse:
-        """
-        Perform stage-by-stage sensitivity analysis.
-
-        Args:
-            request: Stage sensitivity request
-
-        Returns:
-            StageSensitivityResponse with sensitivity results
-        """
-        # Build internal representation
-        graph_data = self._build_graph_data(request.graph)
-
-        # Get baseline policy
-        baseline_values, baseline_actions = self._backward_induction(
-            graph_data, request.stages, discount_factor=0.95, risk_tolerance="neutral"
-        )
-
-        # Identify parameters to vary
-        parameters = request.parameters_to_vary or self._auto_detect_parameters(graph_data)
-
-        # Analyze each stage
-        stage_results = []
-        all_sensitivities: Dict[str, List[float]] = {}
-
-        for stage in request.stages:
-            stage_result = self._analyze_stage_sensitivity(
-                graph_data,
-                stage,
-                request.stages,
-                parameters,
-                request.variation_range,
-                baseline_values,
-                baseline_actions,
-            )
-            stage_results.append(stage_result)
-
-            # Collect all sensitivities
-            for param, sens in stage_result.parameter_sensitivities.items():
-                if param not in all_sensitivities:
-                    all_sensitivities[param] = []
-                all_sensitivities[param].append(sens)
-
-        # Calculate overall robustness
-        if stage_results:
-            overall_robustness = float(np.mean([r.robustness_score for r in stage_results]))
-        else:
-            overall_robustness = 1.0
-
-        # Find most sensitive parameters
-        avg_sensitivities: Dict[str, float] = {
-            param: float(np.mean(values)) for param, values in all_sensitivities.items()
-        }
-        most_sensitive = sorted(
-            avg_sensitivities.keys(), key=lambda x: avg_sensitivities[x], reverse=True
-        )[:3]
-
-        explanation = ExplanationMetadata(
-            summary=f"Policy is {'robust' if overall_robustness > 0.7 else 'moderately robust' if overall_robustness > 0.4 else 'fragile'} to parameter changes",
-            reasoning=self._generate_sensitivity_reasoning(most_sensitive, avg_sensitivities),
-            technical_basis="One-at-a-time sensitivity analysis with backward induction",
-            assumptions=["Parameters vary independently", "Linear approximation to sensitivity"],
-        )
-
-        return StageSensitivityResponse(
-            stage_results=stage_results,
-            overall_robustness=round(overall_robustness, 3),
-            most_sensitive_parameters=most_sensitive,
-            explanation=explanation,
-        )
 
     def _build_graph_data(self, graph: SequentialGraph) -> Dict[str, Any]:
         """Build internal graph representation."""
@@ -437,14 +315,21 @@ class SequentialDecisionEngine:
                     # D-12). Omitted probabilities default to an equal split
                     # (mass == 1), so that path is unaffected.
                     #
-                    # A non-zero but non-unit sum is renormalised below (unchanged):
-                    # this is a deliberate, load-bearing behaviour — the internal
-                    # stage-sensitivity perturbation (_perturb_parameter) scales a
-                    # node's probabilities and re-runs induction, relying on this
-                    # renormalisation to keep the distribution proper. Rejecting a
-                    # non-unit sum here would break that (dark) path; tightening it
-                    # to a strict sum-to-1 check belongs with a rework of that
-                    # perturbation (currently a no-op under renormalisation).
+                    # A non-zero but non-unit sum is renormalised below. Behaviour
+                    # UNCHANGED by 2.704, but its justification has moved and the
+                    # note is corrected rather than left to rot: this leniency used
+                    # to be load-bearing for the dark stage-sensitivity perturbation
+                    # (`_perturb_parameter` scaled a node's probabilities and re-ran
+                    # induction, relying on renormalisation to keep the distribution
+                    # proper). That route and that helper were RETIRED in 2.704, so
+                    # nothing internal depends on the leniency any more.
+                    #
+                    # It is deliberately NOT tightened here: renormalising a
+                    # non-unit sum is caller-visible behaviour on the LIVE
+                    # /api/v1/analysis/sequential mount, and changing it is a
+                    # separate, testable decision — not a side effect of a
+                    # retirement. A future lane may now tighten to a strict
+                    # sum-to-1 check without the blocker this comment used to name.
                     if total_prob <= _PROB_SUM_TOLERANCE:
                         raise ValueError(
                             f"Chance node '{node_id}' has effectively zero total "
@@ -1231,224 +1116,8 @@ class SequentialDecisionEngine:
     # tests/unit/test_arch_step1_claims.py::
     # TestValueOfFlexibilityOmitted::test_no_future_choice_implies_zero_flexibility
 
-    def _build_tree_node(
-        self,
-        node_id: str,
-        graph_data: Dict[str, Any],
-        stage_assignments: Dict[str, int],
-        node_values: Dict[str, float],
-        optimal_actions: Dict[str, str],
-        visited: Set[str],
-    ) -> PolicyTreeNode:
-        """Recursively build a policy tree node."""
-        if node_id in visited:
-            # Prevent infinite loops
-            return PolicyTreeNode(
-                node_id=node_id,
-                stage=stage_assignments.get(node_id, 0),
-                node_type="terminal",
-                label="(cyclic reference)",
-                optimal_action=None,
-                expected_value=0,
-                children=[],
-            )
 
-        visited.add(node_id)
 
-        nodes = graph_data["nodes"]
-        edges = graph_data["edges"]
 
-        if node_id not in nodes:
-            return PolicyTreeNode(
-                node_id=node_id,
-                stage=0,
-                node_type="terminal",
-                label=node_id,
-                optimal_action=None,
-                expected_value=0,
-                children=[],
-            )
 
-        node = nodes[node_id]
-        stage = stage_assignments.get(node_id, 0)
-        node_type = node["type"]
-        label = node.get("label", node_id)
-        optimal_action = optimal_actions.get(node_id)
-        # TODO(A3 F4:990, pre-mount hardening): this is the absent-as-0 fabrication
-        # class — a node not valued by backward induction is reported with
-        # expected_value 0 rather than failing loud. The live paths (_build_policy
-        # :575-585, _generate_stage_analyses) direct-index node_values[...] and let
-        # a missing value raise. This method feeds ONLY the policy-tree route,
-        # which is DARK (not mounted; see main.py selective-mount note), so the
-        # blast radius is 0 today. Left as .get(...,0) deliberately: the route's
-        # fallback root (:164-166) can select an unvalued node, so a naive
-        # direct-index would raise on a legitimate-but-unmounted request; a proper
-        # fix (guarantee the chosen root is valued, then direct-index + fail-loud)
-        # is deferred to when policy-tree is runtime-verified and mounted.
-        expected_value = node_values.get(node_id, 0)
 
-        # Build children
-        children = []
-        outgoing = edges.get(node_id, [])
-
-        for edge in outgoing:
-            child_id = edge["to"]
-            action = edge.get("action")
-            outcome = edge.get("outcome")
-            probability = edge.get("probability")
-
-            child_info = {
-                "child_id": child_id,
-            }
-
-            if action:
-                child_info["action"] = action
-            if outcome:
-                child_info["outcome"] = outcome
-            if probability is not None:
-                child_info["probability"] = probability
-
-            children.append(child_info)
-
-        return PolicyTreeNode(
-            node_id=node_id,
-            stage=stage,
-            node_type=node_type,
-            label=label,
-            optimal_action=optimal_action,
-            expected_value=expected_value,
-            children=children,
-        )
-
-    def _count_tree_nodes(self, root: PolicyTreeNode) -> int:
-        """Count total nodes in tree."""
-        return 1 + len(root.children)  # Simplified - doesn't recurse into children
-
-    def _auto_detect_parameters(self, graph_data: Dict[str, Any]) -> List[str]:
-        """Auto-detect parameters to vary for sensitivity analysis."""
-        parameters = []
-
-        # Add probability parameters from chance edges
-        for node_id, node in graph_data["nodes"].items():
-            if node["type"] == "chance":
-                for edge in graph_data["edges"].get(node_id, []):
-                    if edge.get("probability") is not None:
-                        param_name = f"{node_id}_{edge.get('outcome', 'outcome')}_prob"
-                        parameters.append(param_name)
-
-        # Add payoff parameters from terminal nodes
-        for node_id, node in graph_data["nodes"].items():
-            if node["type"] == "terminal" and node.get("payoff") is not None:
-                parameters.append(f"{node_id}_payoff")
-
-        return parameters[:10]  # Limit
-
-    def _analyze_stage_sensitivity(
-        self,
-        graph_data: Dict[str, Any],
-        stage: DecisionStage,
-        all_stages: List[DecisionStage],
-        parameters: List[str],
-        variation_range: float,
-        baseline_values: Dict[str, float],
-        baseline_actions: Dict[str, str],
-    ) -> StageSensitivityResult:
-        """Analyze sensitivity for a single stage."""
-        sensitivities = {}
-        policy_changes = {}
-
-        # Get baseline value at this stage's decision nodes
-        baseline_stage_value: float = 0.0
-        for node_id in stage.decision_nodes:
-            if node_id in baseline_values:
-                baseline_stage_value = baseline_values[node_id]
-                break
-
-        # Test each parameter
-        for param in parameters:
-            # Perturb parameter and re-run backward induction
-            perturbed_graph = self._perturb_parameter(graph_data, param, variation_range)
-
-            perturbed_values, perturbed_actions = self._backward_induction(
-                perturbed_graph, all_stages, discount_factor=0.95, risk_tolerance="neutral"
-            )
-
-            # Calculate sensitivity
-            perturbed_stage_value: float = 0.0
-            for node_id in stage.decision_nodes:
-                if node_id in perturbed_values:
-                    perturbed_stage_value = perturbed_values[node_id]
-                    break
-
-            if baseline_stage_value != 0:
-                value_change = abs(perturbed_stage_value - baseline_stage_value)
-                sensitivity = value_change / abs(baseline_stage_value)
-            else:
-                sensitivity = 0
-
-            sensitivities[param] = round(min(1.0, sensitivity), 3)
-
-            # Check if policy changed
-            for node_id in stage.decision_nodes:
-                if baseline_actions.get(node_id) != perturbed_actions.get(node_id):
-                    # Policy changed - record threshold
-                    policy_changes[param] = 1.0 - variation_range
-
-        # Calculate robustness score
-        if sensitivities:
-            avg_sensitivity = float(np.mean(list(sensitivities.values())))
-            robustness = max(0.0, 1.0 - avg_sensitivity)
-        else:
-            robustness = 1.0
-
-        return StageSensitivityResult(
-            stage_index=stage.stage_index,
-            stage_label=stage.stage_label,
-            parameter_sensitivities=sensitivities,
-            policy_changes_at=policy_changes if policy_changes else None,
-            robustness_score=round(robustness, 3),
-        )
-
-    def _perturb_parameter(
-        self, graph_data: Dict[str, Any], param: str, variation: float
-    ) -> Dict[str, Any]:
-        """Create perturbed copy of graph data."""
-        import copy
-
-        perturbed = copy.deepcopy(graph_data)
-
-        # Parse parameter name to find what to perturb
-        parts = param.split("_")
-
-        if param.endswith("_payoff"):
-            # Perturb terminal payoff
-            node_id = param.replace("_payoff", "")
-            if node_id in perturbed["nodes"]:
-                original = perturbed["nodes"][node_id].get("payoff", 0) or 0
-                perturbed["nodes"][node_id]["payoff"] = original * (1 - variation)
-
-        elif "_prob" in param:
-            # Perturb probability
-            for node_id in perturbed["edges"]:
-                for edge in perturbed["edges"][node_id]:
-                    if edge.get("probability") is not None:
-                        edge["probability"] *= 1 - variation
-
-        return perturbed
-
-    def _generate_sensitivity_reasoning(
-        self, most_sensitive: List[str], sensitivities: Dict[str, float]
-    ) -> str:
-        """Generate reasoning text for sensitivity analysis."""
-        if not most_sensitive:
-            return "No significant parameter sensitivities detected."
-
-        top_param = most_sensitive[0]
-        top_sens = sensitivities.get(top_param, 0)
-
-        if top_sens > 0.5:
-            return f"{top_param} has high sensitivity ({top_sens:.2f}) - small changes could significantly affect optimal decisions."
-        elif top_sens > 0.2:
-            return f"{top_param} shows moderate sensitivity ({top_sens:.2f}) - changes may affect value but likely not optimal actions."
-        else:
-            return f"All parameters show low sensitivity - policy is robust to reasonable parameter variations."

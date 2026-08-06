@@ -42,24 +42,31 @@ from .causal import counterfactual_router as causal_counterfactual_router
 # Selective mount (R-12, 2026-07-22): ONLY the sequential-analysis route of phase4
 # is runtime-verified (A2 flip) and mounted live, via its own sequential_router.
 # The rest of the phase4 router (conditional-recommend, policy-tree,
-# stage-sensitivity) stays dark — see the commented phase4 include below.
+# stage-sensitivity) was RETIRED under ROADMAP 2.704 — that router no longer
+# exists, so this is now the module's only route.
 from .phase4 import sequential_router as phase4_sequential_router
 from .robustness import router as robustness_router
 
 # === Disabled for pilot — orphaned endpoints not used by PLoT integration ===
 # Rollback: uncomment the relevant imports and include_router() lines to restore.
+#
+# RETIRED (ROADMAP 2.704) — deliberately absent from this list, do not re-add:
+#   decision_robustness  (multi-goal theatre superseded by robustness_analyzer_v2)
+#   deliberation         (its orchestrator lives only in src/services/_archived/)
+#   phase4 `router`      (conditional-recommend / policy-tree / stage-sensitivity)
+# Their modules are deleted; a commented include for them would be an
+# instruction to reintroduce a crash. The phase4 SEQUENTIAL mount above is
+# unaffected. Several routers still listed below are mounted-dark but their
+# handlers now REFUSE with a typed 501 — see src/api/withdrawn.py.
 # from .aggregation import router as aggregation_router
 # from .analysis import router as analysis_router
 # from .batch import router as batch_router
 # from .causal import router as causal_router
 # from .cee import router as cee_router
-# from .decision_robustness import router as decision_robustness_router
-# from .deliberation import router as deliberation_router
 # from .dominance import router as dominance_router
 # from .explain import router as explain_router
 # from .identifiability import router as identifiability_router
 # from .outcomes import router as outcomes_router
-# from .phase4 import router as phase4_router
 # from .preferences import router as preferences_router
 # from .risk import router as risk_router
 # from .teaching import router as teaching_router
@@ -747,8 +754,9 @@ app.include_router(
 )
 # Selective mount (R-12, 2026-07-22): ONLY POST /api/v1/analysis/sequential goes
 # live (A2 flip — honest engine + served-path value pins + D-12 422 mapping). The
-# other phase4 routes (conditional-recommend, policy-tree, stage-sensitivity) stay
-# dark on the unmounted phase4 `router` below, pending their own verification.
+# other phase4 routes (conditional-recommend, policy-tree, stage-sensitivity) were
+# RETIRED under ROADMAP 2.704 (2.363's verdicts: an "Arbitrary" 0.15 constant, a
+# policy tree that never recursed, a hardcoded flip threshold) and are deleted.
 app.include_router(
     phase4_sequential_router,
     prefix=f"{settings.API_V1_PREFIX}/analysis",
@@ -773,13 +781,10 @@ app.include_router(
 # app.include_router(batch_router, prefix=f"{settings.API_V1_PREFIX}/batch", tags=["Batch Processing"])
 # app.include_router(causal_router, prefix=f"{settings.API_V1_PREFIX}/causal", tags=["Causal Inference"])
 # app.include_router(cee_router, prefix=f"{settings.API_V1_PREFIX}", tags=["CEE Enhancement"])
-# app.include_router(decision_robustness_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Decision Robustness Suite"])
-# app.include_router(deliberation_router, prefix=f"{settings.API_V1_PREFIX}/deliberation", tags=["Habermas Machine"])
 # app.include_router(dominance_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Multi-Criteria Analysis"])
 # app.include_router(explain_router, prefix=f"{settings.API_V1_PREFIX}/explain", tags=["Contrastive Explanations"])
 # app.include_router(identifiability_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Y₀ Identifiability"])
 # app.include_router(outcomes_router, prefix=f"{settings.API_V1_PREFIX}/outcomes", tags=["Outcome Logging"])
-# app.include_router(phase4_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Phase 4: Sequential Decisions"])
 # app.include_router(preferences_router, prefix=f"{settings.API_V1_PREFIX}/preferences", tags=["Preference Learning"])
 # app.include_router(risk_router, prefix=f"{settings.API_V1_PREFIX}/analysis", tags=["Multi-Criteria Analysis"])
 # app.include_router(teaching_router, prefix=f"{settings.API_V1_PREFIX}/teaching", tags=["Bayesian Teaching"])

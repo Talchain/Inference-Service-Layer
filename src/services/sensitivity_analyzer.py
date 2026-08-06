@@ -1,4 +1,25 @@
 """
+⚠ WITHDRAWN — DO NOT WIRE (ROADMAP 2.704). This service has NO caller.
+
+Both routes that reached it now answer a typed 501:
+POST /api/v1/analysis/sensitivity and POST /api/v1/causal/sensitivity/detailed.
+(It had two doors, which is why withdrawing the first alone was not enough.)
+
+Two fabrications, both on the main path through
+``analyze_assumption_sensitivity``:
+
+- ``_predict_outcome`` "evaluates" a model by string-splitting equation text
+  hunting for a ``coef * var`` pattern, and returns a hardcoded **50000.0**
+  whenever that parsing finds nothing — which is also the baseline every
+  elasticity and deviation percentage is then computed against.
+- The per-assumption exception handler reports analysis FAILURE as maximal
+  robustness: ``robustness_score=1.0``, ``"Analysis failed - assuming robust"``.
+  A crash and a robust result are indistinguishable in the output.
+
+The live robustness surface is ``robustness_analyzer_v2`` behind
+/api/v1/robustness/*; it is unrelated to this file.
+
+--- original docstring ---
 Enhanced sensitivity analysis service for quantifying assumption robustness.
 
 Implements continuous sensitivity metrics instead of discrete robustness scores.

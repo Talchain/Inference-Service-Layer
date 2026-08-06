@@ -78,6 +78,13 @@ class ErrorCode(str, Enum):
     CACHE_ERROR = "ISL_CACHE_ERROR"
     REDIS_ERROR = "ISL_REDIS_ERROR"
 
+    # Withdrawn-capability refusals (ROADMAP 2.704).
+    # Served as a typed 501 by src/api/withdrawn.py for routes whose published
+    # numbers were fabricated rather than computed. Distinct from every code
+    # above: those describe a request that failed, this describes a capability
+    # that was never honestly implemented and will not be retried into working.
+    CAPABILITY_WITHDRAWN = "ISL_CAPABILITY_WITHDRAWN"
+
 
 class RecoveryHints(BaseModel):
     """Recovery hints for error resolution."""

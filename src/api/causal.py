@@ -9,11 +9,16 @@ Provides endpoints for:
 import logging
 import uuid
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from typing import Any, Optional, Union
 
 from src.api.error_helpers import raise_invalid_input
+from src.api.withdrawn import (
+    DEFAULT_OUTCOME_REASON,
+    INDEX_DIRECTION_REASON,
+    refuse_withdrawn,
+)
 from src.models.metadata import create_response_metadata
 from src.models.requests import (
     BatchCounterfactualRequest,
@@ -51,7 +56,6 @@ from src.services.causal_validator import CausalValidator
 from src.services.conformal_predictor import ConformalPredictor
 from src.services.counterfactual_engine import CounterfactualEngine, _hash_client_text
 from src.services.parameter_recommender import generate_parameter_recommendations
-from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 from src.services.sequential_optimizer import SequentialOptimizer
 
 router = APIRouter()
@@ -67,6 +71,11 @@ router = APIRouter()
 counterfactual_router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+# Withdrawn routes on this router (ROADMAP 2.704). Both are dark; the
+# refusals live in the handlers so a later mount still cannot serve a number.
+CAUSAL_DISCOVER_FROM_DATA_ROUTE = "/api/v1/causal/discover/from-data"
+CAUSAL_SENSITIVITY_DETAILED_ROUTE = "/api/v1/causal/sensitivity/detailed"
 
 
 def _is_intervention_valid(intervention: dict) -> bool:
@@ -89,7 +98,6 @@ causal_transporter = CausalTransporter()
 conformal_predictor = ConformalPredictor(counterfactual_engine)
 advanced_validation_suggester = AdvancedValidationSuggester()
 causal_discovery_engine = CausalDiscoveryEngine()
-sensitivity_analyzer = EnhancedSensitivityAnalyzer()
 sequential_optimizer = SequentialOptimizer()
 
 # Request size limits
@@ -804,133 +812,42 @@ async def get_validation_strategies(
 
 @router.post(
     "/discover/from-data",
-    response_model=DiscoveryResponse,
-    summary="Discover causal structure from data",
+    summary="[WITHDRAWN] Discover causal structure from data",
     description="""
-    Automatically discovers DAG structures from observational data.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Uses correlation-based structure learning to suggest plausible
-    causal graphs based on statistical relationships in the data.
+    It previously returned discovered DAGs with a confidence score. Edge
+    DIRECTION was assigned by variable INDEX: for every pair whose absolute
+    correlation exceeded the threshold, the engine added an edge from the
+    earlier to the later entry of `variable_names`. Reordering the columns of
+    the same dataset therefore reversed the arrows, while the response
+    described itself as "Correlation-based structure learning" with
+    assumptions "Linear relationships, No hidden confounders, Stationarity".
 
-    **Features:**
-    - Correlation-based edge detection
-    - Prior knowledge integration (required/forbidden edges)
-    - Confidence scoring for discovered structures
-    - Automatic cycle detection and acyclicity enforcement
+    Real NOTEARS and PC implementations do exist in
+    `advanced_discovery_algorithms.py`, but they were **unreachable from this
+    route**: the engine is constructed with `enable_advanced=False` and
+    `DiscoveryFromDataRequest` exposes no field to turn it on. There was no
+    request that reached them.
 
-    **Use when:** You have observational data but no clear causal model,
-    or want to validate your domain knowledge against data.
-
-    **Requirements:**
-    - At least 10 observations (more is better)
-    - 2-50 variables
-    - Data should be roughly stationary
+    Causal discovery from data also has no product channel today — nothing
+    upstream can supply the required n x d observation matrix.
     """,
     responses={
-        200: {"description": "Discovery completed successfully"},
-        400: {"description": "Invalid input or insufficient data"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def discover_from_data(
-    request: DiscoveryFromDataRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> DiscoveryResponse:
+async def discover_from_data(request: Request) -> JSONResponse:
+    """Refuse: edge direction was column order, not a causal criterion.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist.
     """
-    Discover causal structure from data.
-
-    Args:
-        request: Discovery request with observational data
-        x_request_id: Optional request ID for tracing
-
-    Returns:
-        DiscoveryResponse: Discovered DAG structures with confidence
-    """
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        # Validate request size
-        if len(request.data) > MAX_DATA_SAMPLES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Too many data samples: {len(request.data)} exceeds limit of {MAX_DATA_SAMPLES}",
-            )
-
-        if len(request.variable_names) > MAX_DATA_VARIABLES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Too many variables: {len(request.variable_names)} exceeds limit of {MAX_DATA_VARIABLES}",
-            )
-
-        logger.info(
-            "discovery_from_data_request",
-            extra={
-                "request_id": request_id,
-                "num_samples": len(request.data),
-                "num_variables": len(request.variable_names),
-                "threshold": request.threshold,
-            },
-        )
-
-        # Convert data to numpy array
-        import numpy as np
-
-        data_array = np.array(request.data)
-
-        # Discover DAG
-        dag, confidence = causal_discovery_engine.discover_from_data(
-            data=data_array,
-            variable_names=request.variable_names,
-            prior_knowledge=request.prior_knowledge,
-            threshold=request.threshold,
-            seed=request.seed,
-        )
-
-        # Convert to response
-        from src.models.responses import DiscoveredDAG, ExplanationMetadata
-        from src.models.shared import ExplanationMetadata as ExplanationMetadataShared
-
-        discovered_dag = DiscoveredDAG(
-            nodes=list(dag.nodes()),
-            edges=list(dag.edges()),
-            confidence=confidence,
-            method="correlation",
-        )
-
-        explanation = ExplanationMetadataShared(
-            summary=f"Discovered DAG structure from data with {confidence:.0%} confidence",
-            reasoning=f"Found {len(dag.edges())} edges using correlation threshold {request.threshold}",
-            technical_basis="Correlation-based structure learning",
-            assumptions=["Linear relationships", "No hidden confounders", "Stationarity"],
-        )
-
-        result = DiscoveryResponse(
-            discovered_dags=[discovered_dag],
-            explanation=explanation,
-        )
-
-        # Inject metadata
-        result.metadata = create_response_metadata(request_id)
-
-        logger.info(
-            "discovery_from_data_completed",
-            extra={
-                "request_id": request_id,
-                "num_edges": len(dag.edges()),
-                "confidence": confidence,
-            },
-        )
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("discovery_from_data_error", extra={"request_id": request_id}, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to discover causal structure from data. Check logs for details.",
-        )
+    return refuse_withdrawn(
+        route=CAUSAL_DISCOVER_FROM_DATA_ROUTE,
+        reason=INDEX_DIRECTION_REASON,
+        request=request,
+    )
 
 
 @router.post(
@@ -1293,92 +1210,36 @@ async def recommend_parameters(
 
 @router.post(
     "/sensitivity/detailed",
-    response_model=SensitivityReport,
-    summary="Detailed sensitivity analysis for causal assumptions",
+    summary="[WITHDRAWN] Detailed sensitivity analysis for causal assumptions",
     description="""
-    Quantifies how sensitive causal estimates are to assumption violations.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Moves beyond discrete robustness categories (robust/moderate/fragile)
-    to continuous sensitivity metrics with elasticity calculations.
+    It called `EnhancedSensitivityAnalyzer.analyze_assumption_sensitivity`,
+    which is the SAME fabricating code path behind the withdrawn
+    `/api/v1/analysis/sensitivity`: the baseline outcome comes from
+    `_predict_outcome`, which string-splits equation text hunting for a
+    `coef * var` pattern and returns a hardcoded **50000.0** when that fails;
+    and the per-assumption exception path reports analysis FAILURE as maximal
+    robustness (`robustness_score=1.0`, "Analysis failed - assuming robust").
 
-    **Features:**
-    - Quantitative sensitivity metrics (elasticity, outcome ranges)
-    - Critical assumption identification
-    - Elasticity: % change in outcome per % change in assumption violation
-    - Robustness scores (0=fragile, 1=robust)
-    - Recommendations for strengthening assumptions
-
-    **Tested Assumptions:**
-    - No unobserved confounding
-    - Linear effects
-    - No selection bias
-    - Causal sufficiency
-    - Positivity
-    - Consistency
-
-    **Use when:** You need to understand which assumptions matter most
-    for your causal estimates and how robust your results are.
-
-    **Example:** "If unobserved confounding increases by 10%, how much
-    does my outcome estimate change?"
+    This route is why withdrawing `/analysis/sensitivity` alone was not enough:
+    the identical fabrication had a second door.
     """,
     responses={
-        200: {"description": "Sensitivity analysis completed successfully"},
-        400: {"description": "Invalid input"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def analyze_detailed_sensitivity(
-    request: SensitivityRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> SensitivityReport:
+async def analyze_detailed_sensitivity(request: Request) -> JSONResponse:
+    """Refuse: shares the 50000.0 / "assuming robust" analyzer.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist.
     """
-    Analyze sensitivity to causal assumptions.
-
-    Args:
-        request: Sensitivity analysis request with model and assumptions
-        x_request_id: Optional request ID for tracing
-
-    Returns:
-        SensitivityReport: Detailed sensitivity metrics for each assumption
-    """
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "sensitivity_analysis_request",
-            extra={
-                "request_id": request_id,
-                "num_assumptions": len(request.assumptions),
-                "num_violation_levels": len(request.violation_levels),
-            },
-        )
-
-        # Perform sensitivity analysis
-        result = sensitivity_analyzer.analyze_assumption_sensitivity(request)
-
-        # Inject metadata
-        result.metadata = create_response_metadata(request_id)
-
-        logger.info(
-            "sensitivity_analysis_completed",
-            extra={
-                "request_id": request_id,
-                "overall_robustness": result.overall_robustness_score,
-                "num_critical": len(result.most_critical),
-            },
-        )
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("sensitivity_analysis_error", extra={"request_id": request_id}, exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to perform sensitivity analysis. Check logs for details.",
-        )
+    return refuse_withdrawn(
+        route=CAUSAL_SENSITIVITY_DETAILED_ROUTE,
+        reason=DEFAULT_OUTCOME_REASON,
+        request=request,
+    )
 
 
 @router.post(

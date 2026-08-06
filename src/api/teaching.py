@@ -1,159 +1,66 @@
 """
-Bayesian teaching endpoints.
+Bayesian teaching endpoint — WITHDRAWN (ROADMAP 2.704).
 
-Provides endpoints for pedagogically optimized teaching examples.
+The route is retained as an instrumented typed 501 rather than deleted, so
+that mounting this router later still cannot serve a number, and so that any
+caller that appears is recorded. See ``src/api/withdrawn.py`` for the full
+rationale.
+
+What was wrong (confirmed at the handler bytes, science-expansion triage
+2026-08-07, re-verified at this tip): ``BayesianTeacher`` generated its
+teaching examples from templates whose scenario outcomes were
+``np.random.uniform(0, 100)`` — random numbers — and then scored each example's
+"teaching value" as ``0.4*novelty + 0.4*clarity + 0.2*relevance`` over those
+random outcomes. All of it was presented behind a docstring citing "Optimal
+Bayesian Teaching (Zhu et al.)".
+
+This route is a particular hazard for the coaching roadmap: it is exactly where
+a lane looking for dormant decision-science teaching code would land, and its
+"concepts" (confounding, trade-offs) read as a ready-made bias-education leg.
+It must never be presented as one.
 """
 
 import logging
-import uuid
-from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
-from src.models.metadata import create_response_metadata
-from src.models.phase1_models import (
-    BayesianTeachingRequest,
-    BayesianTeachingResponse,
-)
-from src.services.bayesian_teacher import BayesianTeacher
+from src.api.withdrawn import RANDOM_OUTCOMES_REASON, refuse_withdrawn
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Initialize service
-bayesian_teacher = BayesianTeacher()
+TEACHING_TEACH_ROUTE = "/api/v1/teaching/teach"
 
 
 @router.post(
     "/teach",
-    response_model=BayesianTeachingResponse,
-    summary="Generate teaching examples",
+    summary="[WITHDRAWN] Generate teaching examples",
     description="""
-    Generates pedagogically optimized teaching examples using Bayesian teaching.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Selects examples that maximize learning efficiency given user's current
-    understanding. Uses information theory to choose examples that most
-    efficiently teach the target concept.
+    It previously returned "pedagogically optimized" teaching examples with
+    scenario outcomes and teaching-value scores. The scenario outcomes were
+    `np.random.uniform(0, 100)` draws and the scores were a heuristic over
+    those random numbers, published under a "Bayesian Teaching (Zhu et al.)"
+    model card.
 
-    **Algorithm:** Bayesian Teaching (Zhu et al.)
-    - Selects examples that maximize: P(understanding | example, current_beliefs)
-    - Considers novelty, clarity, and relevance
-    - Adapts to user's knowledge state
-
-    **Supported Concepts:**
-    - `confounding`: Understanding confounding variables and spurious correlations
-    - `trade_offs`: Understanding trade-offs between competing objectives
-    - `causal_mechanism`: Understanding causal mechanisms and pathways
-    - `uncertainty`: Understanding uncertainty and risk
-    - `optimization`: Understanding optimization under constraints
-
-    **Use when:**
-    - User needs to learn a specific concept
-    - Want to provide pedagogically optimal examples
-    - Need to adapt teaching to user's current understanding
-
-    **Returns:**
-    - Ranked teaching examples with pedagogical rationale
-    - Learning objectives
-    - Expected learning time
-    - Overall teaching strategy explanation
+    Do not treat this as a dormant coaching or bias-education capability.
+    Building one honestly is a new piece of work — raise a ROADMAP row.
     """,
     responses={
-        200: {"description": "Teaching examples generated successfully"},
-        400: {"description": "Invalid input (e.g., unknown concept)"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def generate_teaching_examples(
-    request: BayesianTeachingRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> BayesianTeachingResponse:
+async def generate_teaching_examples(request: Request) -> JSONResponse:
+    """Refuse: teaching examples were random draws, not computed pedagogy.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist, and a 422 would imply a
+    well-formed body would have been answered.
     """
-    Generate teaching examples using Bayesian teaching.
-
-    Args:
-        request: Teaching request with concept and beliefs
-        x_request_id: Optional request ID for tracing
-
-    Returns:
-        BayesianTeachingResponse: Teaching examples and strategy
-    """
-    # Generate request ID if not provided
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "teaching_request",
-            extra={
-                "request_id": request_id,
-                "user_id": _hash_user_id(request.user_id),
-                "concept": request.target_concept,
-                "max_examples": request.max_examples,
-                "domain": request.context.domain,
-            },
-        )
-
-        # Generate teaching examples
-        examples, explanation, objectives, time = bayesian_teacher.generate_teaching_examples(
-            target_concept=request.target_concept,
-            current_beliefs=request.current_beliefs,
-            context=request.context,
-            max_examples=request.max_examples,
-        )
-
-        logger.info(
-            "teaching_completed",
-            extra={
-                "request_id": request_id,
-                "user_id": _hash_user_id(request.user_id),
-                "concept": request.target_concept,
-                "num_examples": len(examples),
-                "avg_teaching_value": sum(ex.information_value for ex in examples) / len(examples)
-                if examples
-                else 0,
-            },
-        )
-
-        response = BayesianTeachingResponse(
-            examples=examples,
-            explanation=explanation,
-            learning_objectives=objectives,
-            expected_learning_time=time,
-        )
-
-        # Inject metadata
-        response.metadata = create_response_metadata(request_id)
-
-        return response
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(
-            "teaching_error",
-            extra={
-                "user_id": _hash_user_id(request.user_id),
-                "concept": request.target_concept,
-                "error": str(e),
-            },
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to generate teaching examples. Check logs for details.",
-        )
-
-
-def _hash_user_id(user_id: str) -> str:
-    """
-    Hash user ID for privacy in logs.
-
-    Args:
-        user_id: User identifier
-
-    Returns:
-        Hashed user ID (first 16 chars of SHA256)
-    """
-    import hashlib
-
-    return hashlib.sha256(user_id.encode()).hexdigest()[:16]
+    return refuse_withdrawn(
+        route=TEACHING_TEACH_ROUTE,
+        reason=RANDOM_OUTCOMES_REASON,
+        request=request,
+    )

@@ -1,102 +1,70 @@
 """
 Sensitivity analysis and optimization endpoints.
 
-Provides endpoints for testing assumption robustness, identifying
-critical factors, and optimizing continuous decision variables.
+``/sensitivity`` is WITHDRAWN (ROADMAP 2.704) — see the route docstring and
+``src/api/withdrawn.py``. ``/optimise`` is untouched: it is an honest linear
+grid search with disclosed limitations, dark only for want of a producer.
 """
 
 import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
+from src.api.withdrawn import DEFAULT_OUTCOME_REASON, refuse_withdrawn
 from src.models.isl_metadata import create_isl_metadata
 from src.models.metadata import create_response_metadata
-from src.models.requests import OptimisationRequest, SensitivityAnalysisRequest
-from src.models.responses import OptimisationResponse, SensitivityAnalysisResponse
+from src.models.requests import OptimisationRequest
+from src.models.responses import OptimisationResponse
 from src.services.continuous_optimizer import ContinuousOptimizer
-from src.services.sensitivity_analyzer import EnhancedSensitivityAnalyzer
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+ANALYSIS_SENSITIVITY_ROUTE = "/api/v1/analysis/sensitivity"
+
 # Initialize services
-# Using EnhancedSensitivityAnalyzer (aliased for compatibility)
-sensitivity_analyzer = EnhancedSensitivityAnalyzer()
 continuous_optimizer = ContinuousOptimizer()
 
 
 @router.post(
     "/sensitivity",
-    response_model=SensitivityAnalysisResponse,
-    summary="Perform sensitivity analysis",
+    summary="[WITHDRAWN] Perform sensitivity analysis",
     description="""
-    Tests how robust conclusions are to changes in assumptions.
+    **WITHDRAWN (ROADMAP 2.704) — this route answers 501 and computes nothing.**
 
-    Provides:
-    - Assumption importance ranking
-    - Impact assessment for each assumption
-    - Overall robustness score
-    - Critical breakpoints where conclusions flip
+    It previously reported assumption importance, robustness scores and
+    breakpoints. The underlying analyzer string-split equation text hunting for
+    a `coef * var` pattern and returned a hardcoded **50000.0** outcome whenever
+    that parsing failed, and its per-assumption error path reported analysis
+    FAILURE as maximal robustness (`robustness_score=1.0`, "Analysis failed -
+    assuming robust").
 
-    **Use when:** Understanding which assumptions matter most.
+    The seam was broken as well: this handler called `sensitivity_analyzer
+    .analyze(...)`, a method that does not exist on the analyzer, so every call
+    would have 500'd even if the router were mounted.
+
+    The live robustness surface is `/api/v1/robustness/*`.
     """,
     responses={
-        200: {"description": "Sensitivity analysis completed successfully"},
-        400: {"description": "Invalid input (e.g., no assumptions provided)"},
-        500: {"description": "Internal computation error"},
+        501: {"description": "Capability withdrawn — output was fabricated, not computed"},
     },
 )
-async def analyze_sensitivity(
-    request: SensitivityAnalysisRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
-) -> SensitivityAnalysisResponse:
+async def analyze_sensitivity(request: Request) -> JSONResponse:
+    """Refuse: sensitivity analysis defaulted to a constant and called a
+    method that does not exist.
+
+    Takes the raw request rather than a validated model on purpose — no input
+    is "valid" for a capability that does not exist, and a 422 would imply a
+    well-formed body would have been answered.
     """
-    Perform sensitivity analysis on assumptions.
-
-    Args:
-        request: Sensitivity analysis request with model and assumptions
-
-    Returns:
-        SensitivityAnalysisResponse: Sensitivity analysis results
-    """
-    # Generate request ID if not provided
-    request_id = x_request_id or f"req_{uuid.uuid4().hex[:12]}"
-
-    try:
-        logger.info(
-            "sensitivity_analysis_request",
-            extra={
-                "baseline_result": request.baseline_result,
-                "num_assumptions": len(request.assumptions),
-                "assumption_names": [a.name for a in request.assumptions],
-            },
-        )
-
-        result = sensitivity_analyzer.analyze(request)  # type: ignore[attr-defined]
-
-        logger.info(
-            "sensitivity_analysis_completed",
-            extra={
-                "robustness": result.robustness.overall,
-                "num_breakpoints": len(result.robustness.breakpoints),
-                "critical_assumptions": [
-                    a.name for a in result.assumptions if a.importance == "critical"
-                ],
-            },
-        )
-
-        return result  # type: ignore[no-any-return]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("sensitivity_analysis_error", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to perform sensitivity analysis. Check logs for details.",
-        )
+    return refuse_withdrawn(
+        route=ANALYSIS_SENSITIVITY_ROUTE,
+        reason=DEFAULT_OUTCOME_REASON,
+        request=request,
+    )
 
 
 @router.post(

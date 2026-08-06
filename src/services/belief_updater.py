@@ -1,6 +1,17 @@
 """
 Belief Updater service for Bayesian preference learning.
 
+NOTE (ROADMAP 2.704): this service currently has NO caller — but unlike its
+withdrawn neighbours it is NOT a fabrication. The posterior machinery below is
+real. What was withdrawn is the ROUTE that fed it:
+POST /api/v1/preferences/update built a placeholder ``CounterfactualQuery``
+with EMPTY scenarios and passed it here, and ``update_beliefs`` computes its
+likelihood FROM those scenarios — so the posterior could not reflect the
+question the user answered. The defect was the missing query-storage seam, not
+this arithmetic.
+
+Keep it: it is the substrate an honestly-fed belief-update route would use.
+
 Updates user belief models based on preference responses using
 Bayesian inference.
 
