@@ -86,8 +86,8 @@ def _layered_graph(n_nodes: int, n_edges: int, evpi_factors: int = 0) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
-def _root_factor_graph(n_drivers: int, n_edges: int) -> dict:
-    """A fan-in decision graph: ``n_drivers`` PARENTLESS factors feeding one outcome.
+def _root_factor_graph(n_drivers: int, n_mediators: int) -> dict:
+    """``n_drivers`` PARENTLESS factors -> ``n_mediators`` mediators -> one outcome.
 
     ⚠ WHY THE FLIPS CELLS NEED THEIR OWN TOPOLOGY (ROADMAP 2.745).
 
@@ -99,13 +99,21 @@ def _root_factor_graph(n_drivers: int, n_edges: int) -> dict:
     charging ~25k units for ~3 evaluations — a WORSE calibration than not measuring
     it at all. The flag alone is not the fix; the topology is half of it.
 
+    ⚠ AND A PLAIN FAN-IN IS STILL NOT ENOUGH. A candidate is a screened factor
+    whose SLOPE SPREAD across options exceeds epsilon. Wire every driver straight
+    to the goal and have every option intervene on the same node, and each driver
+    transmits IDENTICALLY under every option: spread 0, exactly ONE candidate
+    however many drivers there are, and the candidate cap / crossing / banding
+    limbs never run. Routing drivers through mediators that the options pin one
+    apiece gives each driver a real slope difference under the option that blocks
+    its path, so candidates scale with the driver count and the cap binds.
+
     Every driver carries an ``observed_state.value`` (the other half of the phase's
-    eligibility test), so eligible == every driver. Extra edge budget is spent on
-    duplicate driver->goal edges, never driver->driver, because a driver that gains
-    a parent stops being a root and silently shrinks the phase.
+    eligibility test), so eligible == every driver; mediators have parents and are
+    correctly never eligible. Kept in step with the identically-named builder in
+    tests/unit/test_admission_evaluator_oracle.py.
     """
-    goal_id = f"n{n_drivers}"
-    nodes = [
+    nodes: List[dict] = [
         {
             "id": f"n{i}",
             "kind": "factor",
@@ -114,26 +122,26 @@ def _root_factor_graph(n_drivers: int, n_edges: int) -> dict:
         }
         for i in range(n_drivers)
     ]
-    nodes.append({"id": goal_id, "kind": "outcome", "label": "GOAL"})
+    nodes += [{"id": f"m{j}", "kind": "factor", "label": f"M{j}"} for j in range(n_mediators)]
+    nodes.append({"id": "goal", "kind": "outcome", "label": "GOAL"})
     edges: List[dict] = [
         {
             "from": f"n{i}",
-            "to": goal_id,
+            "to": f"m{i % n_mediators}",
             "exists_probability": 0.9,
             "strength": {"mean": 0.2 + 0.05 * (i % 7), "std": 0.1},
         }
         for i in range(n_drivers)
     ]
-    while len(edges) < n_edges:
-        i = len(edges) % n_drivers
-        edges.append(
-            {
-                "from": f"n{i}",
-                "to": goal_id,
-                "exists_probability": 0.85,
-                "strength": {"mean": 0.15, "std": 0.05},
-            }
-        )
+    edges += [
+        {
+            "from": f"m{j}",
+            "to": "goal",
+            "exists_probability": 0.9,
+            "strength": {"mean": 0.3 + 0.03 * j, "std": 0.1},
+        }
+        for j in range(n_mediators)
+    ]
     return {"nodes": nodes, "edges": edges}
 
 
@@ -149,18 +157,30 @@ def build_request(
     sensitivity: bool = True,
     include_factor_flips: bool = False,
     root_factors: int = 0,
+    mediators: int = 0,
 ) -> RobustnessRequestV2:
-    # ROADMAP 2.745: flips cells opt into the fan-in topology. `root_factors == 0`
-    # leaves every pre-existing cell on the layered graph BYTE-IDENTICALLY, so the
-    # historical fit is unchanged and the new cells are additive.
+    # ROADMAP 2.745: flips cells opt into the driver/mediator topology.
+    # `root_factors == 0` leaves every pre-existing cell on the layered graph
+    # BYTE-IDENTICALLY, so the historical fit is unchanged and the cells are additive.
     if root_factors:
-        graph = _root_factor_graph(root_factors, n_edges)
+        n_mediators = mediators or max(2, min(n_options, 6))
+        graph = _root_factor_graph(root_factors, n_mediators)
+        # Each option pins ONE mediator — this is what gives the drivers behind it
+        # a different slope under that option and makes them real candidates.
+        options = [
+            {
+                "id": f"o{k}",
+                "label": f"O{k}",
+                "interventions": {f"m{k % n_mediators}": 0.2 + 0.1 * k},
+            }
+            for k in range(n_options)
+        ]
     else:
         graph = _layered_graph(n_nodes, n_edges, evpi_factors)
-    options = [
-        {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.1 * (k + 1)}}
-        for k in range(n_options)
-    ]
+        options = [
+            {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.1 * (k + 1)}}
+            for k in range(n_options)
+        ]
     analysis_types = ["comparison", "robustness"] + (["sensitivity"] if sensitivity else [])
     body: dict = {
         "graph": graph,
@@ -197,6 +217,7 @@ class Cell:
     include_path: bool = False
     include_factor_flips: bool = False
     root_factors: int = 0
+    mediators: int = 0
     cost_units: int = 0
     dominant: str = ""
     t_ms: float = 0.0
@@ -207,8 +228,8 @@ def default_grid(quick: bool) -> List[Cell]:
     """Representative cells spanning the realistic cost range."""
     cells: List[Cell] = []
 
-    def add(label, N, E, S, O, evpi=0, ev=False, path=False, flips=False, roots=0):
-        cells.append(Cell(label, N, E, S, O, evpi, ev, path, flips, roots))
+    def add(label, N, E, S, O, evpi=0, ev=False, path=False, flips=False, roots=0, med=0):
+        cells.append(Cell(label, N, E, S, O, evpi, ev, path, flips, roots, med))
 
     # base MC scaling (samples x options)
     add("pilot", 5, 8, 1000, 2)
@@ -236,9 +257,9 @@ def default_grid(quick: bool) -> List[Cell]:
     # never once seen it run. `roots=` selects the fan-in topology — without it the
     # phase finds no eligible factor and the cell would time nothing (see
     # _root_factor_graph).
-    add("flips-mid", 12, 12, 2000, 3, flips=True, roots=11)
-    add("flips-10opt", 12, 12, 2000, 10, flips=True, roots=11)
-    add("flips-dense", 40, 120, 5000, 4, flips=True, roots=39)
+    add("flips-mid", 0, 0, 2000, 3, flips=True, roots=9, med=3)
+    add("flips-10opt", 0, 0, 2000, 10, flips=True, roots=16, med=6)
+    add("flips-dense", 0, 0, 5000, 4, flips=True, roots=39, med=4)
     if not quick:
         add("upper-poc", 12, 100, 5000, 3)
         add("dense-mid-10opt", 40, 120, 10000, 10)
@@ -249,7 +270,7 @@ def default_grid(quick: bool) -> List[Cell]:
         # PLoT's live posture: e-values + VOI + flips together on one request
         # (captured egress carries include_e_values, include_voi,
         # include_factor_flips on every base call).
-        add("flips-full-load", 40, 120, 5000, 4, evpi=4, ev=True, flips=True, roots=39)
+        add("flips-full-load", 0, 0, 5000, 4, evpi=4, ev=True, flips=True, roots=39, med=4)
     return cells
 
 
@@ -270,6 +291,7 @@ def measure(cell: Cell, runs: int) -> Cell:
         include_path=cell.include_path,
         include_factor_flips=cell.include_factor_flips,
         root_factors=cell.root_factors,
+        mediators=cell.mediators,
     )
     wc = compute_weighted_cost(req)
     cell.cost_units = wc.total
