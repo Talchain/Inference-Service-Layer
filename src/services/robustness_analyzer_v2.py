@@ -86,6 +86,7 @@ from src.models.critique import (
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueV2
+from src.services.range_fit import resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
 from src.utils.evppi import (
@@ -606,9 +607,7 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
             # across options (v4 recalibration, see W_EVPPI_COEF). Uses the same
             # defensive unique factor count u (an over-count vs the analyzer's
             # lever-suppressed set — conservative).
-            terms["evppi_full"] = (
-                W_EVPPI_COEF * u * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * S
-            )
+            terms["evppi_full"] = W_EVPPI_COEF * u * (1 + REGRESSION_EVPPI_NULL_PERMUTATIONS) * S
 
     # EVPC (S4 value-of-control) — grid do() over every (candidate, value) pair on
     # the FULL retained population, each a full SCM evaluate() (cost ~W). Gated on
@@ -622,10 +621,7 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
     # Edge sensitivity — reference option only (not multiplied by O).
     if "sensitivity" in request.analysis_types:
         terms["sensitivity"] = (
-            W_SENS_COEF
-            * E
-            * min(SENSITIVITY_SUBSAMPLE_CAP, S // SENSITIVITY_SUBSAMPLE_DIVISOR)
-            * W
+            W_SENS_COEF * E * min(SENSITIVITY_SUBSAMPLE_CAP, S // SENSITIVITY_SUBSAMPLE_DIVISOR) * W
         )
         # Structural influence (factor-sensitivity child; N2, D-23.19): charged at
         # the request-wide walk-pool ceiling (1 walk call ≈ 1 unit at the ceiling
@@ -2030,9 +2026,7 @@ class RobustnessAnalyzerV2:
         if (
             request.include_voi and factor_sampler.has_uncertainties()
         ) or request.control_candidates:
-            pre_noise_option_outcomes = {
-                oid: list(vals) for oid, vals in option_outcomes.items()
-            }
+            pre_noise_option_outcomes = {oid: list(vals) for oid, vals in option_outcomes.items()}
 
         # Disable epsilon noise for post-MC structural analyses
         # (sensitivity, counterfactual, robustness) — these compare structural
@@ -2649,6 +2643,15 @@ class RobustnessAnalyzerV2:
             else None
         )
 
+        # ROADMAP 2.720 (2.521 Q1): resolve user-stated ranges to fit-or-refusal
+        # disclosures. Pure and RNG-free (zero draws — tested), placed AFTER all
+        # sampling so byte-identity of compute is structural as well as tested.
+        # Refusal codes ride inference_warnings at severity 'warning' (the
+        # degradation-disclosure class): a refusal the user never sees is a
+        # silent default with extra steps.
+        range_fit_disclosures, range_fit_warnings = resolve_range_fits(request.user_stated_ranges)
+        inference_warnings.extend(range_fit_warnings)
+
         response = RobustnessResponseV2(
             request_id=request_id,
             results=results,
@@ -2683,6 +2686,7 @@ class RobustnessAnalyzerV2:
             factor_evpc=factor_evpc,
             path_decomposition=path_decomposition,
             correlation_model=correlation_model,
+            range_fit_disclosures=range_fit_disclosures,
         )
 
         self.logger.info(
@@ -3553,9 +3557,9 @@ class RobustnessAnalyzerV2:
         goal_id = request.goal_node_id
         frame = request.goal_threshold_frame
 
-        def refuse(reason: str, field: str, message: str, **extra: Any) -> Tuple[
-            Optional["GoalThresholdPlan"], Optional[InferenceWarning]
-        ]:
+        def refuse(
+            reason: str, field: str, message: str, **extra: Any
+        ) -> Tuple[Optional["GoalThresholdPlan"], Optional[InferenceWarning]]:
             detail: Dict[str, Any] = {
                 "goal_node_id": goal_id,
                 "goal_threshold": threshold,
@@ -4242,9 +4246,7 @@ class RobustnessAnalyzerV2:
         membership tests only, so element order is irrelevant to determinism.
         """
         return {
-            factor_id
-            for option in request.options
-            for factor_id in (option.interventions or {})
+            factor_id for option in request.options for factor_id in (option.interventions or {})
         }
 
     @staticmethod
@@ -5839,9 +5841,7 @@ class RobustnessAnalyzerV2:
         n_seeds = FLIP_STABILITY_N_SEEDS
 
         # One sampled background per child seed, shared across all edges.
-        backgrounds = self._sample_flip_backgrounds(
-            request, master_seed, n_seeds, "flip_stability"
-        )
+        backgrounds = self._sample_flip_backgrounds(request, master_seed, n_seeds, "flip_stability")
 
         edges_by_key = {(e.from_, e.to): e for e in request.graph.edges}
 
@@ -6263,8 +6263,7 @@ class RobustnessAnalyzerV2:
                     "spread": max(slopes.values()) - min(slopes.values()),
                     "current_value": (
                         node.observed_state.value
-                        if node.observed_state is not None
-                        and node.observed_state.value is not None
+                        if node.observed_state is not None and node.observed_state.value is not None
                         else 0.0
                     ),
                 }
@@ -6316,9 +6315,7 @@ class RobustnessAnalyzerV2:
                 entry["slopes"],
                 baseline_winner,
                 entry["current_value"],
-                confirm=self._evaluated_argmax_probe(
-                    request, evaluator, baseline_config, node.id
-                ),
+                confirm=self._evaluated_argmax_probe(request, evaluator, baseline_config, node.id),
             )
             if confirmed is None:
                 row["flip_reason"] = "no_effect_within_bounds"
@@ -6603,9 +6600,7 @@ class RobustnessAnalyzerV2:
                     # Pre-clamp raw estimate + audit components (mirrors
                     # p_win_sensitivity's current_metric/perfect_metric auditability).
                     "evppi_raw": round(est.evppi_raw, 6),
-                    "baseline_max_expected_utility": round(
-                        est.baseline_max_expected_utility, 6
-                    ),
+                    "baseline_max_expected_utility": round(est.baseline_max_expected_utility, 6),
                     "conditional_max_expected_utility": round(
                         est.conditional_max_expected_utility, 6
                     ),

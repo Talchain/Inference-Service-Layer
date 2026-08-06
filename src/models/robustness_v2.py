@@ -36,6 +36,9 @@ from src.models.response_v2 import (
     ZeroSensitivityReason,
 )
 
+# Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
+from src.models.range_fit import RangeFitDisclosure, UserStatedRange
+
 # Pure-numpy correlation helpers (no circular import — correlation.py imports nothing
 # from the model layer). Used to reject HARD-INVALID correlation matrices at request
 # validation, BEFORE any Higham projection reaches the sampler (F4, D-23.13).
@@ -954,6 +957,28 @@ class RobustnessRequestV2(BaseModel):
         "node, and may appear at most once. Independent of include_voi.",
     )
 
+    # ROADMAP 2.720 (2.521 Q1, Neil-ratified): user-stated ranges — the S3
+    # transport for the range→distribution converter. Additive + Optional; a
+    # DECLARED field, never a passthrough (every ISL request model is
+    # extra="ignore", so an undeclared field dies silently at parse with a
+    # 200 — ground-truth correction 1). Carries the user's RAW (lower, upper)
+    # plus provenance; the interquartile fit happens at the resolution seam
+    # and ships only in the response's range_fit_disclosures echo. When absent
+    # OR present, compute is BYTE-IDENTICAL in S3 (carried, not applied —
+    # application waits on 2.521 Q2 + the combination ruling); when present,
+    # the fitted distribution (or its typed refusal) is disclosed.
+    user_stated_ranges: Optional[List[UserStatedRange]] = Field(
+        None,
+        max_length=MAX_PARAMETER_UNCERTAINTIES,
+        description="User-stated ranges for factor values, treated as ≈50% "
+        "credible intervals (2.521 Q1): the response echoes the interquartile-"
+        "fitted distribution (beta for unit_interval domains, normal for "
+        "unbounded) in range_fit_disclosures, or a typed refusal. S3: fit-and-"
+        "disclose only — compute is byte-identical whether or not this field "
+        "is present. Each node_id may appear at most once and must exist in "
+        "the graph.",
+    )
+
     @field_validator("options")
     @classmethod
     def validate_unique_option_ids(cls, v: List[InterventionOption]) -> List[InterventionOption]:
@@ -1023,6 +1048,35 @@ class RobustnessRequestV2(BaseModel):
             if duplicates:
                 raise ValueError(
                     "Duplicate parameter_uncertainties node_ids (each node may appear "
+                    f"at most once): {sorted(set(duplicates))}"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def validate_user_stated_ranges_reference_nodes(self) -> "RobustnessRequestV2":
+        """Validate user_stated_ranges: node existence AND uniqueness.
+
+        The estate's parse-time posture (matches parameter_uncertainties):
+        a range for a node not in the graph, or two ranges for one node, is a
+        MALFORMED REQUEST (typed 422 before any compute) — transport validity,
+        not part of the §3 refusal taxonomy, which judges the STATEMENT's
+        semantics, not the envelope's coherence.
+        """
+        if self.user_stated_ranges:
+            node_ids = {node.id for node in self.graph.nodes}
+            seen: set[str] = set()
+            duplicates: list[str] = []
+            for stated in self.user_stated_ranges:
+                if stated.node_id not in node_ids:
+                    raise ValueError(
+                        f"UserStatedRange references non-existent node: {stated.node_id}"
+                    )
+                if stated.node_id in seen:
+                    duplicates.append(stated.node_id)
+                seen.add(stated.node_id)
+            if duplicates:
+                raise ValueError(
+                    "Duplicate user_stated_ranges node_ids (each node may appear "
                     f"at most once): {sorted(set(duplicates))}"
                 )
         return self
@@ -1979,6 +2033,19 @@ class RobustnessResponseV2(BaseModel):
         None,
         description="Disclosure of the active factor-correlation (Gaussian copula) model. "
         "Absent when correlation is inactive (independent-factor default).",
+    )
+
+    # Range-fit disclosures (ROADMAP 2.720). Present only when the request
+    # supplied user_stated_ranges: one entry per stated range — the raw bounds
+    # echoed as said, plus EITHER the interquartile-fitted distribution OR its
+    # typed refusal (whose code is also surfaced as a 'warning'-severity
+    # inference warning). Echo only in S3: compute never reads these.
+    range_fit_disclosures: Optional[List[RangeFitDisclosure]] = Field(
+        None,
+        description="Per-range fit disclosures for user_stated_ranges (2.521 Q1 "
+        "interquartile fit): fitted parameters for display, or the typed refusal. "
+        "Absent when no ranges were stated. Carried, not applied — compute is "
+        "byte-identical (S3).",
     )
 
     model_config = {

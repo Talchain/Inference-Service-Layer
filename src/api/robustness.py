@@ -1453,6 +1453,11 @@ async def _analyze_robustness_v2_enhanced(
         # attribution manifest). None when correlation is inactive → absent on wire.
         builder.set_correlation_model(v1_response.correlation_model)
 
+        # ROADMAP 2.720: surface the range-fit disclosures (interquartile fit of
+        # user_stated_ranges, or their typed refusals). None when no ranges were
+        # stated → absent on wire. Echo only — compute never reads these (S3).
+        builder.set_range_fit_disclosures(v1_response.range_fit_disclosures)
+
         # T1-6: Path decomposition passthrough (additive; request-gated by
         # include_path_decomposition so it only appears when asked for).
         # Previously computed by the analyzer on request but dropped from the

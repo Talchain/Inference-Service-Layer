@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.30.0",
     "omission_count": 44,
-    "superset_count": 76
+    "superset_count": 77
   },
   "omissions": [
     {
@@ -579,6 +579,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "processing_time_ms",
       "reason": "ISL superset — ISLResponseV2.processing_time_ms is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "range_fit_disclosures",
+      "reason": "ISL superset — ISLResponseV2.range_fit_disclosures is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",

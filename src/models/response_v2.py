@@ -21,6 +21,9 @@ from pydantic import BaseModel, Field, computed_field, model_validator
 from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
 from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
+# Range→distribution disclosure model (ROADMAP 2.720; pure Pydantic, no cycle)
+from src.models.range_fit import RangeFitDisclosure
+
 
 class InferenceWarning(BaseModel):
     """
@@ -1889,6 +1892,20 @@ class ISLResponseV2(BaseModel):
         "correlation is inactive (the independent-factor default).",
     )
 
+    # Range-fit disclosures (ROADMAP 2.720 — additive optional). Present only
+    # when the request supplied user_stated_ranges: the raw stated bounds plus
+    # EITHER the interquartile-fitted distribution (2.521 Q1: quartiles on the
+    # stated bounds; beta for unit_interval, normal for unbounded) OR the typed
+    # refusal, whose code also rides inference_warnings at severity 'warning'.
+    # S3: echo/disclosure only — compute is byte-identical, carried not applied.
+    range_fit_disclosures: Optional[List[RangeFitDisclosure]] = Field(
+        None,
+        description="Per-range interquartile-fit disclosures for the request's "
+        "user_stated_ranges: fitted parameters for display (or a typed refusal). "
+        "Absent when no ranges were stated. Carried, not applied — compute is "
+        "byte-identical in S3.",
+    )
+
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can
     # surface the disclosure without reading the internal V1 metadata envelope.
     # None when the analyser cannot determine the flag (e.g. error or partial responses
@@ -1971,9 +1988,7 @@ class ISLResponseV2(BaseModel):
         and never did.)
         """
         regrets = [
-            o.downside.expected_regret
-            for o in (self.options or [])
-            if o.downside is not None
+            o.downside.expected_regret for o in (self.options or []) if o.downside is not None
         ]
         population_incomplete = any(
             o.downside is None and o.outcome.percentiles_source == "samples"

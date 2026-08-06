@@ -3037,6 +3037,114 @@
         "title": "FactorSensitivityV2",
         "type": "object"
       },
+      "FittedDistribution": {
+        "description": "The fitted user-reading distribution (spec \u00a72.1).\n\nFamily parameters are the source of truth; ``mean``/``std``/``q25``/``q75``\nare derived read-only disclosure conveniences recomputed from them. The raw\n``(lower, upper)`` remain the stored source of truth upstream \u2014 this object\nis derived at the resolver, never persisted as if elicited.",
+        "properties": {
+          "alpha": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Beta shape \u03b1 > 0",
+            "title": "Alpha"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Beta shape \u03b2 > 0",
+            "title": "Beta"
+          },
+          "coverage": {
+            "description": "Credible-interval coverage the fit targeted (ratified 0.5: the stated bounds are the fitted QUARTILES, equal 25% tails)",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Coverage",
+            "type": "number"
+          },
+          "family": {
+            "description": "Fitted family",
+            "enum": [
+              "normal",
+              "beta"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "mean": {
+            "description": "Distribution mean (derived)",
+            "title": "Mean",
+            "type": "number"
+          },
+          "method_version": {
+            "description": "Fit method provenance, e.g. 'range-iq-fit-v1'",
+            "title": "Method Version",
+            "type": "string"
+          },
+          "mu": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Normal location \u03bc",
+            "title": "Mu"
+          },
+          "q25": {
+            "description": "First quartile (derived; = stated lower)",
+            "title": "Q25",
+            "type": "number"
+          },
+          "q75": {
+            "description": "Third quartile (derived; = stated upper)",
+            "title": "Q75",
+            "type": "number"
+          },
+          "sigma": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Normal scale \u03c3 > 0",
+            "title": "Sigma"
+          },
+          "std": {
+            "description": "Distribution std (derived)",
+            "title": "Std",
+            "type": "number"
+          }
+        },
+        "required": [
+          "family",
+          "mean",
+          "std",
+          "q25",
+          "q75",
+          "coverage",
+          "method_version"
+        ],
+        "title": "FittedDistribution",
+        "type": "object"
+      },
       "FlipStabilityBandV2": {
         "description": "Seed-sweep stability band for one edge's flip threshold (Track S Phase 1).\n\nDEFAULT-ON and ADDITIVE (env gating removed 2026-07-17): present on every\nedge_e_values entry whenever e-values are computed. Absent only when the\nall-or-nothing band budget (FLIP_STABILITY_BUDGET_MS) trips \u2014 then NO\nentry carries a band and the degradation is disclosed via the\nflip_stability_budget_exceeded structured log event.\n\nThe single-point flip_mean is searched against ONE background (all other\nedges at expected value) and is therefore presented with false stability.\nThis band shows how the flip point moves across N backgrounds sampled\nfrom the graph's own joint uncertainty \u2014 child seeds are SHA-256-derived\nfrom the request seed, so the band is deterministic per request+seed.\nPer the 2026-06-10 science-performance report, flip confidence should be\nbased on band_width, not on the single-point value alone.\n\nMEMBERSHIP: the base flip_mean is NOT a member of the sweep (it is\nsearched against the expected-value background, which is never one of\nthe sampled backgrounds), so flip_mean MAY legitimately lie outside\n[band_min, band_max] \u2014 observed live on low-flip-participation edges.\nConsumers must NOT assume flip_mean \u2208 band (bytes-checked 2026-07-17;\nproducer-side detail on RobustnessAnalyzerV2._attach_flip_stability_bands).",
         "properties": {
@@ -3739,6 +3847,21 @@
             "description": "Processing time in milliseconds",
             "title": "Processing Time Ms",
             "type": "integer"
+          },
+          "range_fit_disclosures": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RangeFitDisclosure"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-range interquartile-fit disclosures for the request's user_stated_ranges: fitted parameters for display (or a typed refusal). Absent when no ranges were stated. Carried, not applied \u2014 compute is byte-identical in S3.",
+            "title": "Range Fit Disclosures"
           },
           "request_echo": {
             "allOf": [
@@ -5070,6 +5193,153 @@
         "title": "PredictionResults",
         "type": "object"
       },
+      "RangeFitDisclosure": {
+        "description": "Echo/disclosure entry for one stated range (spec \u00a74.3): raw bounds as\nsaid, plus EITHER the fitted distribution OR the typed refusal \u2014 exactly\none, enforced both ways.",
+        "properties": {
+          "domain": {
+            "description": "Declared domain the family came from",
+            "enum": [
+              "unit_interval",
+              "unbounded"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "fitted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FittedDistribution"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The fitted distribution (present iff the fit was accepted)"
+          },
+          "lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stated lower bound, echoed raw",
+            "title": "Lower"
+          },
+          "node_id": {
+            "description": "Factor node the range was stated for",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeFitRefusalPayload"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The typed refusal (present iff the fit was refused)"
+          },
+          "upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stated upper bound, echoed raw",
+            "title": "Upper"
+          }
+        },
+        "required": [
+          "node_id",
+          "domain"
+        ],
+        "title": "RangeFitDisclosure",
+        "type": "object"
+      },
+      "RangeFitRefusalPayload": {
+        "description": "Typed payload of a range-fit refusal (spec \u00a73).\n\nA refusal always means: the value stays disclosed as confirmed, NO\ndistribution is produced, compute is untouched. Never a fallback \u2014 a\nBeta(1,1) minted on solver failure is a fabricated value wearing real\nprovenance, this estate's dominant defect.",
+        "properties": {
+          "code": {
+            "description": "Closed refusal vocabulary",
+            "enum": [
+              "RANGE_ZERO_WIDTH",
+              "RANGE_INVALID_ORDER",
+              "RANGE_NON_FINITE",
+              "RANGE_OUT_OF_DOMAIN",
+              "RANGE_AT_DOMAIN_EDGE",
+              "RANGE_OPEN_ENDED",
+              "RANGE_FIT_NONCONVERGENT"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "domain": {
+            "description": "The declared domain the fit was asked for",
+            "enum": [
+              "unit_interval",
+              "unbounded"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stated lower bound, echoed raw",
+            "title": "Lower"
+          },
+          "message": {
+            "description": "Human-readable reason (sanitised)",
+            "title": "Message",
+            "type": "string"
+          },
+          "starts_tried": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For RANGE_FIT_NONCONVERGENT: how many starts of the deterministic two-start ladder were tried before refusing",
+            "title": "Starts Tried"
+          },
+          "upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stated upper bound, echoed raw",
+            "title": "Upper"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "domain"
+        ],
+        "title": "RangeFitRefusalPayload",
+        "type": "object"
+      },
       "RecoveryHints": {
         "description": "Recovery hints for error resolution.",
         "properties": {
@@ -5691,6 +5961,22 @@
             ],
             "description": "Random seed for reproducibility; if None, computed from graph. Accepts int or string. Numeric strings are converted via int(); non-numeric strings are hashed deterministically.",
             "title": "Seed"
+          },
+          "user_stated_ranges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UserStatedRange"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User-stated ranges for factor values, treated as \u224850% credible intervals (2.521 Q1): the response echoes the interquartile-fitted distribution (beta for unit_interval domains, normal for unbounded) in range_fit_disclosures, or a typed refusal. S3: fit-and-disclose only \u2014 compute is byte-identical whether or not this field is present. Each node_id may appear at most once and must exist in the graph.",
+            "title": "User Stated Ranges"
           }
         },
         "required": [
@@ -5926,6 +6212,21 @@
               }
             ],
             "description": "Structural pathway decomposition for the recommended option's retained intervention targets: top-3 simple directed paths to the goal with signed structural contributions. Structural decomposition of the modelled effect, not a causal claim about realised outcomes. Gated by include_path_decomposition."
+          },
+          "range_fit_disclosures": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RangeFitDisclosure"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-range fit disclosures for user_stated_ranges (2.521 Q1 interquartile fit): fitted parameters for display, or the typed refusal. Absent when no ranges were stated. Carried, not applied \u2014 compute is byte-identical (S3).",
+            "title": "Range Fit Disclosures"
           },
           "recommendation_confidence": {
             "description": "Confidence in recommendation",
@@ -7341,6 +7642,100 @@
         ],
         "title": "UncertaintyLevel",
         "type": "string"
+      },
+      "UserStatedRange": {
+        "description": "One user-stated range for a factor's value \u2014 the RAW statement.\n\nS3 transport (spec \u00a74.2): a DECLARED additive Optional field on the\nanalyze request. Declared, never passed through \u2014 every ISL request model\nis ``extra=\"ignore\"``, so an undeclared field dies silently at parse with\na 200 (ground-truth correction 1). The presence test goes through the real\nendpoint for exactly that reason.",
+        "example": {
+          "domain": "unit_interval",
+          "lower": 0.2,
+          "node_id": "marketing_spend",
+          "source": "user",
+          "stated_at": "2026-08-06T00:00:00Z",
+          "upper": 0.6
+        },
+        "properties": {
+          "domain": {
+            "description": "DECLARED domain of the quantity \u2014 determines the fitted family (unit_interval \u2192 beta, unbounded \u2192 normal). Required: family selection never infers from whether the values happen to lie in [0,1].",
+            "enum": [
+              "unit_interval",
+              "unbounded"
+            ],
+            "title": "Domain",
+            "type": "string"
+          },
+          "lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user's stated lower bound, raw, as said. Absent = open-ended below ('no more than X'), which is refused RANGE_OPEN_ENDED \u2014 expressible so the refusal is loud, never silently reshaped.",
+            "title": "Lower"
+          },
+          "method_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Elicitation method version stamped by the producer (NOT the fit method \u2014 that ships in the disclosure echo).",
+            "title": "Method Version"
+          },
+          "node_id": {
+            "description": "ID of the factor node the user stated this range for",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who stated the range (provenance, e.g. 'user')",
+            "title": "Source"
+          },
+          "stated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the range was stated (ISO 8601, producer-stamped)",
+            "title": "Stated At"
+          },
+          "upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user's stated upper bound, raw, as said. Absent = open-ended above ('at least X') \u2014 refused RANGE_OPEN_ENDED.",
+            "title": "Upper"
+          }
+        },
+        "required": [
+          "node_id",
+          "domain"
+        ],
+        "title": "UserStatedRange",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {

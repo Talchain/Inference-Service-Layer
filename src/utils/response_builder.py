@@ -20,6 +20,7 @@ from typing import List, Literal, Optional
 from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
 from src.models.critique import INTERNAL_ERROR
+from src.models.range_fit import RangeFitDisclosure
 from src.models.response_v2 import (
     SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
     ConditionalWinnerV2,
@@ -171,6 +172,9 @@ class ResponseBuilder:
         self.sensitivity_reference_option_id: Optional[str] = None
         # B3-S1: correlated-factors disclosure (present iff correlation active)
         self.correlation_model: Optional[CorrelationModelV2] = None
+        # ROADMAP 2.720: range-fit disclosures (present iff user_stated_ranges
+        # was supplied). Echo only — never read by compute (S3).
+        self.range_fit_disclosures: Optional[List[RangeFitDisclosure]] = None
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -266,6 +270,12 @@ class ResponseBuilder:
         """Set the correlated-factors disclosure block (B3-S1)."""
         self.correlation_model = correlation_model
 
+    def set_range_fit_disclosures(
+        self, range_fit_disclosures: Optional[List[RangeFitDisclosure]]
+    ) -> None:
+        """Set the range-fit disclosure block (ROADMAP 2.720)."""
+        self.range_fit_disclosures = range_fit_disclosures
+
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
         has_blockers = any(c.severity == "blocker" for c in self.critiques)
@@ -327,8 +337,7 @@ class ResponseBuilder:
             factor_sensitivity_status = "unavailable"
         elif (
             self.correlation_model is not None
-            and SUPPRESSED_ATTR_FACTOR_SENSITIVITY
-            in self.correlation_model.suppressed_attributions
+            and SUPPRESSED_ATTR_FACTOR_SENSITIVITY in self.correlation_model.suppressed_attributions
         ):
             # B3-S1: active correlation deliberately WITHHELD factor_sensitivity
             # because per-factor OAT attributions are non-separable when factors
@@ -371,6 +380,7 @@ class ResponseBuilder:
             factor_flip_values=self.factor_flip_values,  # ROADMAP 2.228-F3
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
             correlation_model=self.correlation_model,  # B3-S1
+            range_fit_disclosures=self.range_fit_disclosures,  # ROADMAP 2.720
             auto_noise_applied=self.auto_noise_applied,
             sample_population_provenance=self.sample_population_provenance,
             request_id=self.request_id,
