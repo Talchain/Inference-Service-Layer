@@ -157,8 +157,8 @@ def _fragile_edge_body(n_nodes: int, n_edges: int, n_samples: int, n_options: in
     return body
 
 
-def _root_factor_graph(n_drivers: int, n_extra_edges: int = 0) -> dict:
-    """A fan-in decision graph: ``n_drivers`` PARENTLESS factors feeding one outcome.
+def _root_factor_graph(n_drivers: int, n_mediators: int) -> dict:
+    """``n_drivers`` PARENTLESS factors -> ``n_mediators`` mediators -> one outcome.
 
     ⚠ WHY THIS EXISTS, AND WHY `_graph` CANNOT BE USED FOR A FLIPS SHAPE.
 
@@ -176,10 +176,25 @@ def _root_factor_graph(n_drivers: int, n_extra_edges: int = 0) -> dict:
     fixtures would have priced a phase that never runs — the oracle would pass by
     testing nothing (trap 13). The topology, not just the flag, is the fix.
 
+    ⚠ WHY THE MEDIATORS, AND WHY A PLAIN FAN-IN IS NOT ENOUGH. A candidate is a
+    screened factor whose SLOPE SPREAD across options exceeds epsilon. With every
+    driver wired straight to the goal and every option intervening on the same
+    node, each driver transmits IDENTICALLY under every option, so the spread is 0
+    and the phase yields exactly ONE candidate however many drivers you add: the
+    candidate cap, the crossing confirmations and the stability bands never run.
+    Measured — that fixture made "remove the candidate cap" an EQUIVALENT mutant.
+
+    Routing drivers through mediators that the options pin one apiece gives each
+    driver a genuinely different slope under the option that blocks its path, so
+    the spread is real, candidates scale with the driver count, and the cap binds.
+    Measured on this shape: the advertised/actual ratio tightens from ~13.7x to
+    ~1.3x, i.e. the oracle can now see a ~30% under-charge instead of needing 13x.
+
     Every driver carries an `observed_state.value`, which is the other half of the
-    eligibility test, so eligible == every driver.
+    eligibility test, so eligible == every driver; mediators have parents and are
+    correctly never eligible.
     """
-    nodes = [
+    nodes: List[dict] = [
         {
             "id": f"n{i}",
             "kind": "factor",
@@ -188,30 +203,28 @@ def _root_factor_graph(n_drivers: int, n_extra_edges: int = 0) -> dict:
         }
         for i in range(n_drivers)
     ]
-    goal_id = f"n{n_drivers}"
-    nodes.append({"id": goal_id, "kind": "outcome", "label": "GOAL"})
+    nodes += [{"id": f"m{j}", "kind": "factor", "label": f"M{j}"} for j in range(n_mediators)]
+    nodes.append({"id": "goal", "kind": "outcome", "label": "GOAL"})
     # Varied strengths so the slope spreads differ and the candidate ranking is a
-    # real ordering rather than an arbitrary tie-break.
+    # real ordering rather than an arbitrary tie-break on id.
     edges = [
         {
             "from": f"n{i}",
-            "to": goal_id,
+            "to": f"m{i % n_mediators}",
             "exists_probability": 0.9,
             "strength": {"mean": 0.2 + 0.05 * (i % 7), "std": 0.1},
         }
         for i in range(n_drivers)
     ]
-    # Optional densification: driver -> driver edges would REMOVE roots, so extra
-    # edges are hung off the goal's own upstream instead, keeping every driver a root.
-    for i in range(min(n_extra_edges, n_drivers)):
-        edges.append(
-            {
-                "from": f"n{i}",
-                "to": goal_id,
-                "exists_probability": 0.85,
-                "strength": {"mean": 0.15, "std": 0.05},
-            }
-        )
+    edges += [
+        {
+            "from": f"m{j}",
+            "to": "goal",
+            "exists_probability": 0.9,
+            "strength": {"mean": 0.3 + 0.03 * j, "std": 0.1},
+        }
+        for j in range(n_mediators)
+    ]
     return {"nodes": nodes, "edges": edges}
 
 
@@ -237,7 +250,7 @@ def _eligible_driver_ids(body: dict) -> List[str]:
     ]
 
 
-def _flip_body(n_drivers: int, n_samples: int, n_options: int) -> dict:
+def _flip_body(n_drivers: int, n_mediators: int, n_samples: int, n_options: int) -> dict:
     """`include_factor_flips` AS PLoT SENDS IT (unconditionally true), on a graph
     that can actually exercise the phase.
 
@@ -251,14 +264,16 @@ def _flip_body(n_drivers: int, n_samples: int, n_options: int) -> dict:
     is the sharpest possible shape for this term, and it is the one the six
     pre-existing shapes could not build.
     """
-    graph = _root_factor_graph(n_drivers)
+    graph = _root_factor_graph(n_drivers, n_mediators)
     return {
         "graph": graph,
+        # Each option pins ONE mediator, which is what gives the drivers behind it
+        # a different slope under that option and makes them real candidates.
         "options": [
-            {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.1 * (k + 1)}}
+            {"id": f"o{k}", "label": f"O{k}", "interventions": {f"m{k % n_mediators}": 0.2 + 0.1 * k}}
             for k in range(n_options)
         ],
-        "goal_node_id": graph["nodes"][-1]["id"],
+        "goal_node_id": "goal",
         "n_samples": n_samples,
         "seed": 7,
         "analysis_types": ["comparison", "robustness"],
@@ -276,13 +291,13 @@ _ORACLE_SHAPES = [
     ("boundary_fragile_edges", _fragile_edge_body(14, 26, 1000, 4)),
     ("boundary_many_options", _fragile_edge_body(10, 18, 1000, 8)),
     # ROADMAP 2.745 — flips, the always-on zero-headroom term.
-    ("flips_sharp", _flip_body(9, 400, 3)),
-    # The candidate cap (10) binds here but not above, so the two shapes exercise
-    # DIFFERENT limbs of the term: below the cap every eligible factor is banded,
-    # above it the cap truncates the banding set.
-    ("flips_above_candidate_cap", _flip_body(16, 400, 3)),
+    # 9 drivers < FACTOR_FLIP_MAX_CANDIDATES, so every candidate is banded.
+    ("flips_sharp", _flip_body(9, 3, 400, 3)),
+    # 16 drivers > the cap (10), so the cap TRUNCATES the banding set: a different
+    # limb of the closed form, and one that reads `candidate_cap_exceeded` rows.
+    ("flips_above_candidate_cap", _flip_body(16, 4, 400, 4)),
     # Options multiply the crossing-confirmation limb 2*C*(O-1).
-    ("flips_many_options", _flip_body(9, 400, 8)),
+    ("flips_many_options", _flip_body(16, 4, 400, 8)),
 ]
 
 #: Priced terms that NO oracle shape currently runs, with the reason each is still
@@ -370,7 +385,7 @@ class TestFactorFlipShapeIsNotVacuous:
         Binds by IDENTITY (the factor_id SET), never by a count or a value
         predicate another object could satisfy (trap 19).
         """
-        body = _flip_body(9, 400, 3)
+        body = _flip_body(9, 3, 400, 3)
         eligible = _eligible_driver_ids(body)
         assert len(eligible) == 9, (
             f"the flips fixture must supply MANY root factors, got {len(eligible)}: "
@@ -390,6 +405,35 @@ class TestFactorFlipShapeIsNotVacuous:
             f"flip rows must cover exactly the eligible root factors. "
             f"rows={sorted(r['factor_id'] for r in rows)} eligible={sorted(eligible)}"
         )
+        # The factors must not be provably inert, or the phase stops after the
+        # screen and the crossing/banding limbs of the term go unmeasured.
+        reasons = [r["flip_reason"] for r in rows]
+        assert reasons.count("structurally_invariant") < len(rows), (
+            f"every factor screened as structurally invariant, so no candidate was "
+            f"ever probed or banded: the flips shapes measure the SCREEN only. "
+            f"reasons={reasons}"
+        )
+
+    def test_candidate_cap_shape_actually_exceeds_the_cap(self, count_evaluates):
+        """PRECONDITION PIN for `flips_above_candidate_cap` (trap 13b).
+
+        That shape's whole purpose is to drive the phase PAST
+        FACTOR_FLIP_MAX_CANDIDATES so the cap-truncation limb of the closed form is
+        the one under test. If the fixture stops producing more candidates than the
+        cap — a strength tweak would do it — the shape silently degrades into a
+        duplicate of `flips_sharp` and nothing says so.
+        """
+        body = _flip_body(16, 4, 400, 4)
+        rows = RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**body)).factor_flip_values
+        assert rows is not None
+        capped = [r for r in rows if r["flip_reason"] == "candidate_cap_exceeded"]
+        assert capped, (
+            f"no row reported `candidate_cap_exceeded`, so the candidate cap "
+            f"(FACTOR_FLIP_MAX_CANDIDATES="
+            f"{RobustnessAnalyzerV2.FACTOR_FLIP_MAX_CANDIDATES}) never bound and this "
+            f"shape is a duplicate of flips_sharp. "
+            f"reasons={[r['flip_reason'] for r in rows]}"
+        )
 
     def test_enabling_the_flag_costs_real_evaluations(self, count_evaluates):
         """The flag must CHANGE the work done — a comparator, not an assertion
@@ -398,7 +442,7 @@ class TestFactorFlipShapeIsNotVacuous:
         The screen alone is 2 evaluations per eligible factor per option, so the
         delta cannot be smaller than that if the phase ran at all.
         """
-        on = _flip_body(9, 400, 3)
+        on = _flip_body(9, 3, 400, 3)
         off = {k: v for k, v in on.items() if k != "include_factor_flips"}
 
         RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**off))
@@ -431,7 +475,7 @@ class TestEvaluatorCallCountOracle:
         (`translator-v3.ts:748`), so it is priced on every live request. Before this
         test, it was the one always-on priced phase the oracle never ran.
         """
-        body = _flip_body(9, 400, 3)
+        body = _flip_body(9, 3, 400, 3)
         advertised, actual, W = _run(body, count_evaluates)
         assert advertised >= actual, (
             f"UNDER-PRICED by {actual - advertised} units "
