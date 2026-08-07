@@ -6,6 +6,9 @@ updates:
   # Python dependencies (Poetry)
   - package-ecosystem: "pip"
     directory: "/"
+    # Target the integration branch: `main` is frozen (deploys run off
+    # `staging`), so PRs against `main` change nothing the product runs.
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -47,6 +50,9 @@ updates:
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
+    # Target the integration branch: `main` is frozen (deploys run off
+    # `staging`), so PRs against `main` change nothing the product runs.
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -65,6 +71,9 @@ updates:
   # Docker dependencies
   - package-ecosystem: "docker"
     directory: "/"
+    # Target the integration branch: `main` is frozen (deploys run off
+    # `staging`), so PRs against `main` change nothing the product runs.
+    target-branch: "staging"
     schedule:
       interval: "weekly"
       day: "monday"
