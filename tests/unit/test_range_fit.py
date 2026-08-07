@@ -447,6 +447,174 @@ class TestT7ZeroRNG:
 
 
 # ---------------------------------------------------------------------------
+# ROADMAP 2.916 — the fitter's NUMERIC error path.
+#
+# THE DEFECT (measured at staging tip fcba3754, scipy 1.16.3): `math.exp` RAISES
+# `OverflowError` where numpy would return `inf`, and the moment-matched start's
+# own arithmetic can divide by an `s²` that underflowed to zero. Both escaped
+# `_fit_beta` as RAW exceptions, breaking the module's whole contract — spec
+# §2.4/§3: fit, or typed refusal, never anything else.
+#
+# THE CLASS, not the instance (the property sweep found ONE input; this battery
+# pins the family it belongs to). Two disjoint OverflowError sub-families plus a
+# ZeroDivisionError family, each measured at pristine:
+#
+#  (a) WIDE near-uniform ranges — the moment-match guard `s² < m(1−m)` tests
+#      FEASIBILITY (ν₀ > 0) and says nothing about CONDITIONING. As s² → m(1−m)
+#      from below, ν₀ → 0⁺, so ln ν₀ is large-negative and hybr's Powell step
+#      overshoots ln ν past ln(DBL_MAX) = 709.782713. Measured θ₁ reached: 762.7,
+#      795.9, 1039.3, 13573.9. 18 of 79,401 grid pairs (grid 1/400).
+#  (b) NARROW ranges — ν₀ already astronomical, hybr steps further up. At m = 0.5
+#      centred, EVERY width from 1e−5 to 1e−15 raised.
+#  (c) DENORMAL-magnitude bounds — s² underflows to exactly 0.0, so the ν₀
+#      division raises ZeroDivisionError before any solve begins.
+#
+# WHY (a) MUST FIT AND (b)/(c) MUST REFUSE — measured, not decreed. The raw
+# exception escaped the start-ladder loop, so the ladder's SECOND start was never
+# reached: the module's own designed recovery was bypassed by the crash. Driving
+# the fallback start directly at pristine, every (a) row converges to residual
+# 1.1e−16 … 3.2e−15 — seven-plus orders INSIDE the 1e−8 acceptance bound. So the
+# honest outcome for (a) is a real fit, and the fix's job is to let the ladder do
+# what it was built to do. For (b)/(c) the fallback start also fails, so the
+# honest outcome is the typed refusal.
+#
+# WHY `RANGE_FIT_NONCONVERGENT` AND NOT `RANGE_AT_DOMAIN_EDGE`: the edge code
+# asserts unsatisfiability for EVERY (α, β) — a mathematical claim that is FALSE
+# here, since a beta distribution demonstrably exists (the fallback start finds
+# it for family (a)). Borrowing that code would ship a fabricated derivation
+# wearing a real refusal type. E8 is the spec's exact member for "both starts
+# failed acceptance", and it alone carries `starts_tried`.
+# ---------------------------------------------------------------------------
+
+# The exact input the 2.916 property run falsified, at full double precision.
+FALSIFYING_INPUT_2916: Tuple[float, float] = (0.12758646191766157, 0.8000422250461583)
+
+# Family (a) representatives, measured raw-raising at pristine. Identity-keyed so
+# an assertion binds to the row it names, never to a value another row satisfies.
+WIDE_NEAR_UNIFORM_OVERFLOW: Dict[str, Tuple[float, float]] = {
+    "falsifier": FALSIFYING_INPUT_2916,
+    "band_low": (0.0225, 0.6625),
+    "band_mid": (0.085, 0.75),
+    "band_high": (0.1075, 0.7775),
+}
+
+# Family (b): narrow. Family (c): denormal-magnitude bounds.
+NARROW_OVERFLOW: Dict[str, Tuple[float, float]] = {
+    "centred_1e5": (0.5 - 5e-6, 0.5 + 5e-6),
+    "centred_1e8": (0.5 - 5e-9, 0.5 + 5e-9),
+    "centred_1e13": (0.5 - 5e-14, 0.5 + 5e-14),
+}
+DENORMAL_WIDTH: Dict[str, Tuple[float, float]] = {
+    "denormal_tiny": (1e-320, 2e-320),
+    "denormal_min": (5e-324, 1e-323),
+    "subnormal_square": (1e-200, 2e-200),
+}
+
+
+def _residual_of(fitted: FittedDistribution, a: float, b: float) -> float:
+    """The spec §2.4 measurement: both CDF residuals recomputed at the RETURNED
+    parameters, independent of the solver's own success flag."""
+    return max(abs(_cdf(fitted, a) - 0.25), abs(_cdf(fitted, b) - 0.75))
+
+
+class TestR2916NumericErrorPath:
+    """Every member of the numeric-failure class resolves to fit-or-typed-refusal.
+
+    A raw exception is asserted against BY TYPE here, not merely "did not raise":
+    `pytest.raises(RangeFitRefusal)` would pass on a crash in a suite that only
+    counted errors, so each case names what escaped.
+    """
+
+    @pytest.mark.parametrize("key", sorted(WIDE_NEAR_UNIFORM_OVERFLOW))
+    def test_wide_near_uniform_band_fits_via_the_fallback_start(self, key: str) -> None:
+        """Family (a): the ladder recovers and returns a REAL fit.
+
+        Precondition PINNED IN-TEST (trap 13b — a guard whose discrimination
+        rests on an unpinned fixture decays silently): this asserts the row is
+        genuinely in the ill-conditioned moment-match regime — the moment start
+        is FEASIBLE (so it is constructed and attempted) yet ν₀ is small enough
+        that ln ν₀ sits deep in negative log-space. If a future edit moved these
+        rows out of that regime the test would still pass while testing nothing,
+        so the regime itself is asserted, not assumed.
+        """
+        a, b = WIDE_NEAR_UNIFORM_OVERFLOW[key]
+        m = (a + b) / 2.0
+        s = (b - a) / (2.0 * Z75)
+        assert s * s < m * (1.0 - m), f"{key}: moment start must be FEASIBLE to be attempted"
+        nu0 = m * (1.0 - m) / (s * s) - 1.0
+        assert 0.0 < nu0 < 1e-2, f"{key}: must be the ill-conditioned regime, got nu0={nu0}"
+
+        fitted = fit_range_distribution(lower=a, upper=b, domain="unit_interval")
+
+        assert fitted.family == "beta"
+        assert fitted.alpha is not None and fitted.alpha > 0 and math.isfinite(fitted.alpha)
+        assert fitted.beta is not None and fitted.beta > 0 and math.isfinite(fitted.beta)
+        assert _residual_of(fitted, a, b) <= ACCEPTANCE_RESIDUAL_TOLERANCE
+        assert abs(_cdf(fitted, b) - _cdf(fitted, a) - 0.5) <= MIDDLE_MASS_TOL
+        assert a < _ppf(fitted, 0.5) < b
+
+    def test_the_exact_falsifying_input_is_pinned_by_value(self) -> None:
+        """The 2.916 regression pin: the precise double pair the property run
+        falsified, asserted at full precision so a re-rounding cannot quietly
+        retire it."""
+        a, b = FALSIFYING_INPUT_2916
+        assert (a, b) == (0.12758646191766157, 0.8000422250461583)
+        fitted = fit_range_distribution(lower=a, upper=b, domain="unit_interval")
+        assert fitted.family == "beta"
+        assert _residual_of(fitted, a, b) <= ACCEPTANCE_RESIDUAL_TOLERANCE
+
+    @pytest.mark.parametrize("key", sorted(NARROW_OVERFLOW))
+    def test_narrow_overflow_refuses_in_type(self, key: str, spy_fitted: type) -> None:
+        """Family (b): both starts blow up ⇒ typed E8 refusal carrying the ladder
+        provenance, and NO FittedDistribution is constructed (constructor spy,
+        not absence-of-return)."""
+        a, b = NARROW_OVERFLOW[key]
+        payload = _assert_refuses("RANGE_FIT_NONCONVERGENT", a, b, "unit_interval", spy_fitted)
+        assert payload.lower == a and payload.upper == b  # raw bounds echoed
+        assert payload.starts_tried is not None and payload.starts_tried >= 1
+
+    @pytest.mark.parametrize("key", sorted(DENORMAL_WIDTH))
+    def test_denormal_width_refuses_in_type(self, key: str, spy_fitted: type) -> None:
+        """Family (c): s² underflows to 0.0 and the ν₀ division raised
+        ZeroDivisionError before any solve. These are IN-CONTRACT inputs — spec
+        §3 E6 forbids an epsilon floor, so tiny-but-interior bounds must be
+        answered, not crashed on."""
+        a, b = DENORMAL_WIDTH[key]
+        assert 0.0 < a < b < 1.0, f"{key} must be interior to the declared domain"
+        _assert_refuses("RANGE_FIT_NONCONVERGENT", a, b, "unit_interval", spy_fitted)
+
+    @pytest.mark.parametrize("key", sorted(BETA_CORPUS))
+    def test_positive_control_healthy_fits_keep_their_residual(self, key: str) -> None:
+        """POSITIVE CONTROL for the fix: the ratified corpus must still fit, and
+        still fit WELL. Without this, the numeric error path could be 'fixed' by
+        refusing everything and the class tests above would all pass.
+
+        The bound is 1e−9 — a full order TIGHTER than the module's 1e−8
+        acceptance — for every row except `hairline`, whose looser bound is not a
+        concession to this change but the documented scipy-1.16.3 `beta.cdf`
+        evaluation floor at α = β ≈ 2.27e11 (see ACCEPTANCE_RESIDUAL_TOLERANCE's
+        premise-correction note). Binding by corpus KEY, never by magnitude.
+        """
+        a, b = BETA_CORPUS[key]
+        fitted = _fit_beta(key)
+        bound = ACCEPTANCE_RESIDUAL_TOLERANCE if key == "hairline" else 1e-9
+        assert _residual_of(fitted, a, b) <= bound
+
+    def test_normal_path_is_unaffected_by_extreme_magnitudes(self) -> None:
+        """The class audit swept the normal path for the same failure and found
+        it CLEAN — its closed form has no `exp` and its existing finiteness guard
+        already refuses. Pinned so a later 'symmetry' edit cannot regress it into
+        the beta path's shape."""
+        for a, b in [(-1.5e308, 1.5e308), (1e-320, 2e-320), (-1e300, 1e300), (0.0, 1.7e308)]:
+            try:
+                fitted = fit_range_distribution(lower=a, upper=b, domain="unbounded")
+                assert fitted.family == "normal"
+                assert fitted.sigma is not None and fitted.sigma > 0
+            except RangeFitRefusal as refusal:
+                assert refusal.payload.code == "RANGE_FIT_NONCONVERGENT"
+
+
+# ---------------------------------------------------------------------------
 # Hypothesis property sweeps (spec §5 T1: hypothesis-generated interior pairs).
 # The GUARANTEE under test is acceptance-or-refusal (spec §2.4 relies on no
 # existence theorem): every generated pair must either fit correctly or refuse
@@ -505,6 +673,23 @@ class TestPropertySweeps:
             # Honest refusal is spec-conformant; a WRONG code is not.
             assert refusal.payload.code == "RANGE_FIT_NONCONVERGENT"
             return
+        except Exception as raw:  # noqa: BLE001 — see ROADMAP 2.916
+            # A RAW escape is the 2.916 defect itself, and it gets its OWN named
+            # failure here rather than arriving as an anonymous hypothesis error.
+            # This matters for diagnosis, not decoration: an uncaught OverflowError
+            # surfaces as a bare "math range error" whose traceback points at
+            # `math.exp` inside the residual — which reads like a solver problem
+            # and hides both the contract that was broken (fit-or-typed-refusal)
+            # and the input that broke it. `raise ... from raw` keeps the original
+            # traceback attached while putting the contract violation in the
+            # headline.
+            raise AssertionError(
+                f"RAW {type(raw).__name__} escaped fit_range_distribution for "
+                f"(a={a!r}, b={b!r}, domain='unit_interval'): {raw}. The converter's "
+                f"contract is fit-or-typed-refusal (spec §2.4/§3) — a numeric "
+                f"failure must surface as RangeFitRefusal, never as an exception "
+                f"the product would render as a 500."
+            ) from raw
         assert fitted.alpha > 0 and math.isfinite(fitted.alpha)
         assert fitted.beta > 0 and math.isfinite(fitted.beta)
         assert abs(_cdf(fitted, b) - _cdf(fitted, a) - 0.5) <= MIDDLE_MASS_TOL
