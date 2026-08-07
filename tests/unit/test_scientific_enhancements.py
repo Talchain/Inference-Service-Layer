@@ -949,7 +949,10 @@ class TestEVPIMetricType:
             ],
             include_voi=True,
             goal_constraints=[
-                GoalConstraint(node_id="outcome", operator=">=", value=0.3),
+                # ROADMAP 2.798: stated in the samples' own frame, which is what
+                # 'delta' attests. Unstamped, the metric would have nothing honest
+                # to compute and the whole phase would be withheld.
+                GoalConstraint(node_id="outcome", operator=">=", value=0.3, value_frame="delta"),
             ],
         )
         analyzer = RobustnessAnalyzerV2()

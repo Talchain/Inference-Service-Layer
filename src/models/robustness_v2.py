@@ -670,6 +670,49 @@ class GoalConstraint(BaseModel):
         max_length=200,
         description="Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')",
     )
+    # ROADMAP 2.798 — the READER half of `value_frame` adoption, and the reason
+    # this half must land FIRST.
+    #
+    # WHY THIS EXISTS. This is `goal_threshold_frame`'s twin for the CONSTRAINT
+    # channel, and it closes the same defect one channel later. A non-root target
+    # node's samples are, per doctrine B, the forward-propagated composition of
+    # its parents: the evaluator uses a base offset of 0.0 for non-root nodes, so
+    #     sample = intercept + SUM(parent_value * strength)
+    # while producers mint a constraint `value` as a LEVEL of the user's own
+    # quantity ("gross margin above 80%" -> 0.8) or, worse, as a COUNT ("at most
+    # 2 account executives"). Comparing either verbatim against change-from-origin
+    # samples is a category error that yields a STRUCTURAL zero — measured on two
+    # unrelated real decisions, where EVERY joint-goal probability came back ~0
+    # and no option could have scored above it whatever the user chose.
+    #
+    # WHY THE READER GOES FIRST. `value_frame` is declared in @talchain/schemas
+    # 0.38.0 with a written adoption order — CEE stamps, PLoT forwards, ISL
+    # declares — but this model is `extra: "ignore"`. Until ISL declares the
+    # field, a CEE stamp and a PLoT forward are GUARANTEED NO-OPS: the value dies
+    # silently at parse and the comparison is unchanged. So the producer trains
+    # cannot ship anything but dark until this line exists. Same reader-first
+    # discipline as `constraint_id` above; an optional field cannot regress a
+    # live producer that does not send it.
+    #
+    # Absent = NOT STAMPED, which is REFUSED (fail-closed), never assumed. A
+    # defaulted frame is a manufactured attestation — the exact fabrication class
+    # 2.258 / 2.286 exist to kill.
+    value_frame: Optional[Literal["level", "delta"]] = Field(
+        None,
+        description=(
+            "Declares which frame this constraint's `value` is expressed in. "
+            "'delta' = already in the target node's SAMPLE frame (change from the "
+            "model's origin); compared as-is, on the caller's attestation. "
+            "'level' = an absolute level of the target quantity, which MUST share "
+            "the domain of the graph's observed_state values; ISL recovers the "
+            "target's level per draw against a status-quo reference before "
+            "comparing. When absent, or when a 'level' value cannot be converted, "
+            "the ENTIRE constraint_analysis block is OMITTED and a structured "
+            "inference warning names what was missing — ISL never guesses a frame "
+            "and never emits a fabricated or clamped probability. Mirrors "
+            "@talchain/schemas 0.38.0 DraftGoalConstraint.value_frame."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod

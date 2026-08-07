@@ -73,7 +73,16 @@ def make_request(
         kwargs["goal_threshold"] = 100.0
     if constraints:
         kwargs["goal_constraints"] = [
-            {"node_id": "revenue", "operator": ">=", "value": 50.0, "label": "Revenue floor"}
+            {
+                "node_id": "revenue",
+                "operator": ">=",
+                "value": 50.0,
+                "label": "Revenue floor",
+                # ROADMAP 2.798: sample-frame threshold; without the attestation
+                # the constraint block is refused and there is nothing to
+                # round-trip across the offload boundary.
+                "value_frame": "delta",
+            }
         ]
     return RobustnessRequestV2(**kwargs)
 

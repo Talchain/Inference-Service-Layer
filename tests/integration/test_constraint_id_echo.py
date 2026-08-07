@@ -44,9 +44,25 @@ def _build_request(constraint_ids=None):
     """Two goal constraints on 'revenue'. When `constraint_ids` is None the
     request omits `constraint_id` entirely — the pre-adoption shape, and the
     positive control for "nothing changes when the field is not sent"."""
+    # ROADMAP 2.798: `value_frame` is the TRUTHFUL attestation for these
+    # thresholds — they are stated in the samples' own frame, which is exactly
+    # what 'delta' declares. Without it the constraint block is refused outright
+    # and there would be no results for an id to be echoed onto.
     constraints = [
-        {"node_id": "revenue", "operator": ">=", "value": 40.0, "label": "Revenue floor"},
-        {"node_id": "revenue", "operator": ">=", "value": 90.0, "label": "Revenue stretch"},
+        {
+            "node_id": "revenue",
+            "operator": ">=",
+            "value": 40.0,
+            "label": "Revenue floor",
+            "value_frame": "delta",
+        },
+        {
+            "node_id": "revenue",
+            "operator": ">=",
+            "value": 90.0,
+            "label": "Revenue stretch",
+            "value_frame": "delta",
+        },
     ]
     if constraint_ids is not None:
         for constraint, cid in zip(constraints, constraint_ids):
@@ -89,17 +105,13 @@ class TestConstraintIdEcho:
 
     def test_constraint_id_echoed_on_each_result(self, v2_client):
         """1. RED-first core: the supplied ids come back on the results, in order."""
-        constraints = _constraints_for_first_option(
-            v2_client, _build_request([CID_LOW, CID_HIGH])
-        )
+        constraints = _constraints_for_first_option(v2_client, _build_request([CID_LOW, CID_HIGH]))
         assert [c.get("constraint_id") for c in constraints] == [CID_LOW, CID_HIGH]
 
     def test_echo_disambiguates_same_node_same_operator(self, v2_client):
         """2. The point of the field: two constraints identical but for their
         threshold get DISTINCT ids, which (node_id, operator) cannot supply."""
-        constraints = _constraints_for_first_option(
-            v2_client, _build_request([CID_LOW, CID_HIGH])
-        )
+        constraints = _constraints_for_first_option(v2_client, _build_request([CID_LOW, CID_HIGH]))
         reconstructed = {(c["node_id"], c["operator"]) for c in constraints}
         echoed = {c["constraint_id"] for c in constraints}
         assert len(reconstructed) == 1, "precondition: positional key collapses these two"
@@ -110,9 +122,7 @@ class TestConstraintIdEcho:
         or otherwise 'cleaned'. PLoT mints ids like `compiled:<nodeId>` and CEE
         supplies arbitrary caller ids; any normalisation breaks the join."""
         weird = "C:Revenue_Floor-2026/Q3 (ratified)"
-        constraints = _constraints_for_first_option(
-            v2_client, _build_request([weird, CID_HIGH])
-        )
+        constraints = _constraints_for_first_option(v2_client, _build_request([weird, CID_HIGH]))
         assert constraints[0]["constraint_id"] == weird
 
     def test_echo_survives_every_option(self, v2_client):

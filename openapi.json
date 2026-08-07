@@ -3419,6 +3419,22 @@
             "description": "Threshold value for the constraint (v2.7 contract field name)",
             "title": "Value",
             "type": "number"
+          },
+          "value_frame": {
+            "anyOf": [
+              {
+                "enum": [
+                  "level",
+                  "delta"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Declares which frame this constraint's `value` is expressed in. 'delta' = already in the target node's SAMPLE frame (change from the model's origin); compared as-is, on the caller's attestation. 'level' = an absolute level of the target quantity, which MUST share the domain of the graph's observed_state values; ISL recovers the target's level per draw against a status-quo reference before comparing. When absent, or when a 'level' value cannot be converted, the ENTIRE constraint_analysis block is OMITTED and a structured inference warning names what was missing \u2014 ISL never guesses a frame and never emits a fabricated or clamped probability. Mirrors @talchain/schemas 0.38.0 DraftGoalConstraint.value_frame.",
+            "title": "Value Frame"
           }
         },
         "required": [
