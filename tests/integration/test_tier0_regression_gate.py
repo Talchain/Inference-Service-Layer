@@ -155,7 +155,18 @@ class TestGoalConstraintConsistency:
             # the goal_constraint below must agree EXACTLY on the same samples, so
             # the threshold is definitionally in the sample frame.
             goal_threshold_frame="delta",
-            goal_constraints=[{"node_id": "revenue", "operator": ">=", "value": self.THRESHOLD}],
+            # ROADMAP 2.798: the constraint carries the SAME frame attestation as
+            # goal_threshold above, for the same reason — this gate's subject is
+            # that the two channels agree exactly on the same samples, which is
+            # only a meaningful claim when both are stated in the sample frame.
+            goal_constraints=[
+                {
+                    "node_id": "revenue",
+                    "operator": ">=",
+                    "value": self.THRESHOLD,
+                    "value_frame": "delta",
+                }
+            ],
             **overrides,
         )
 
@@ -215,7 +226,9 @@ class TestGoalConstraintConsistency:
         below are unchanged.
         """
         request = self._request_with_goal_constraint()
-        request["goal_constraints"].append({"node_id": "demand", "operator": "<=", "value": 5.0})
+        request["goal_constraints"].append(
+            {"node_id": "demand", "operator": "<=", "value": 5.0, "value_frame": "delta"}
+        )
         response = client.post(f"{V2_URL}?response_version=2", json=request)
         assert response.status_code == 200
         body = response.json()
@@ -465,7 +478,9 @@ class TestDeterminismAndAnalytics:
         request = outcome_goal_request(
             request_id="tier0-determinism",  # pin: generated IDs differ per call
             goal_threshold=0.1,
-            goal_constraints=[{"node_id": "revenue", "operator": ">=", "value": 0.1}],
+            goal_constraints=[
+                {"node_id": "revenue", "operator": ">=", "value": 0.1, "value_frame": "delta"}
+            ],
         )
         first = client.post(f"{V2_URL}?response_version=2", json=request).json()
         second = client.post(f"{V2_URL}?response_version=2", json=request).json()

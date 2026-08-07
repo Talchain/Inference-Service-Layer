@@ -8,6 +8,18 @@ Tests:
 - Pairwise conditional probabilities
 - Near-miss diagnostics
 - Integration with RobustnessAnalyzerV2
+
+ROADMAP 2.798 MIGRATION NOTE. Every constraint below now stamps
+``value_frame="delta"``. That is not a workaround for a stricter gate — it is the
+TRUTHFUL attestation for these fixtures. The pre-2.798 comparison was
+"compare the threshold against the raw samples", and ``delta`` is exactly the
+attestation that a threshold is already in the samples' own frame. These
+thresholds were all chosen against sample-space values, so ``delta`` states what
+they always meant and every number in this module is unchanged by the fix.
+
+An UNSTAMPED constraint is now refused outright (the block is omitted and a
+warning names it) — that path is pinned in tests/unit/test_constraint_value_frame.py,
+not here.
 """
 
 import numpy as np
@@ -120,7 +132,9 @@ class TestGoalConstraintModel:
 
     def test_valid_ge_constraint(self):
         """Test valid >= constraint."""
-        gc = GoalConstraint(node_id="revenue", operator=">=", value=100.0, label="Min Revenue")
+        gc = GoalConstraint(
+            value_frame="delta", node_id="revenue", operator=">=", value=100.0, label="Min Revenue"
+        )
         assert gc.node_id == "revenue"
         assert gc.operator == ">="
         assert gc.value == 100.0
@@ -129,45 +143,51 @@ class TestGoalConstraintModel:
 
     def test_valid_le_constraint(self):
         """Test valid <= constraint."""
-        gc = GoalConstraint(node_id="cost", operator="<=", value=50.0, label="Max Cost")
+        gc = GoalConstraint(
+            value_frame="delta", node_id="cost", operator="<=", value=50.0, label="Max Cost"
+        )
         assert gc.node_id == "cost"
         assert gc.operator == "<="
         assert gc.value == 50.0
 
     def test_constraint_without_label(self):
         """Test constraint without optional label."""
-        gc = GoalConstraint(node_id="revenue", operator=">=", value=100.0)
+        gc = GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=100.0)
         assert gc.label is None
 
     def test_invalid_operator_rejected(self):
         """Test that invalid operators are rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(node_id="revenue", operator=">", value=100.0)
+            GoalConstraint(value_frame="delta", node_id="revenue", operator=">", value=100.0)
 
     def test_invalid_operator_less_than(self):
         """Test that < operator is rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(node_id="revenue", operator="<", value=100.0)
+            GoalConstraint(value_frame="delta", node_id="revenue", operator="<", value=100.0)
 
     def test_nan_threshold_rejected(self):
         """Test that NaN value is rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(node_id="revenue", operator=">=", value=float("nan"))
+            GoalConstraint(
+                value_frame="delta", node_id="revenue", operator=">=", value=float("nan")
+            )
 
     def test_inf_threshold_rejected(self):
         """Test that infinite value is rejected."""
         with pytest.raises(ValueError):
-            GoalConstraint(node_id="revenue", operator=">=", value=float("inf"))
+            GoalConstraint(
+                value_frame="delta", node_id="revenue", operator=">=", value=float("inf")
+            )
 
     def test_negative_threshold_allowed(self):
         """Test that negative values are allowed."""
-        gc = GoalConstraint(node_id="profit", operator=">=", value=-10.0)
+        gc = GoalConstraint(value_frame="delta", node_id="profit", operator=">=", value=-10.0)
         assert gc.value == -10.0
         assert gc.threshold == -10.0  # property alias
 
     def test_zero_threshold_allowed(self):
         """Test that zero value is allowed."""
-        gc = GoalConstraint(node_id="balance", operator=">=", value=0.0)
+        gc = GoalConstraint(value_frame="delta", node_id="balance", operator=">=", value=0.0)
         assert gc.value == 0.0
 
     def test_value_field_matches_v27_contract(self):
@@ -177,6 +197,7 @@ class TestGoalConstraintModel:
         at the API boundary without requiring 'threshold'.
         """
         gc = GoalConstraint(
+            value_frame="delta",
             node_id="fac_logo_churn",
             operator="<=",
             value=0.04,
@@ -193,6 +214,7 @@ class TestGoalConstraintModel:
         The model_validator(mode='before') maps it to 'value' transparently.
         """
         gc = GoalConstraint(
+            value_frame="delta",
             node_id="revenue",
             operator=">=",
             threshold=100.0,  # type: ignore[call-arg]
@@ -206,6 +228,7 @@ class TestGoalConstraintModel:
         The pre-validator only maps threshold→value when value is absent.
         """
         gc = GoalConstraint(
+            value_frame="delta",
             node_id="revenue",
             operator=">=",
             value=42.0,
@@ -225,8 +248,8 @@ class TestRequestWithGoalConstraints:
             goal_node_id="revenue",
             n_samples=100,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=50.0),
-                GoalConstraint(node_id="cost", operator="<=", value=100.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=50.0),
+                GoalConstraint(value_frame="delta", node_id="cost", operator="<=", value=100.0),
             ],
         )
         assert len(request.goal_constraints) == 2
@@ -256,7 +279,9 @@ class TestRequestWithGoalConstraints:
                 goal_node_id="revenue",
                 n_samples=100,
                 goal_constraints=[
-                    GoalConstraint(node_id="nonexistent", operator=">=", value=50.0),
+                    GoalConstraint(
+                        value_frame="delta", node_id="nonexistent", operator=">=", value=50.0
+                    ),
                 ],
             )
 
@@ -280,7 +305,7 @@ class TestConstraintProbabilityComputation:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=10.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=10.0),
             ],
         )
 
@@ -309,8 +334,20 @@ class TestConstraintProbabilityComputation:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=10.0, label="Min Revenue"),
-                GoalConstraint(node_id="cost", operator="<=", value=200.0, label="Max Cost"),
+                GoalConstraint(
+                    value_frame="delta",
+                    node_id="revenue",
+                    operator=">=",
+                    value=10.0,
+                    label="Min Revenue",
+                ),
+                GoalConstraint(
+                    value_frame="delta",
+                    node_id="cost",
+                    operator="<=",
+                    value=200.0,
+                    label="Max Cost",
+                ),
             ],
         )
 
@@ -344,7 +381,9 @@ class TestConstraintProbabilityComputation:
             seed=42,
             goal_constraints=[
                 # Extremely high threshold that can't be met
-                GoalConstraint(node_id="revenue", operator=">=", value=1000000.0),
+                GoalConstraint(
+                    value_frame="delta", node_id="revenue", operator=">=", value=1000000.0
+                ),
             ],
         )
 
@@ -368,7 +407,9 @@ class TestConstraintProbabilityComputation:
             seed=42,
             goal_constraints=[
                 # Very low value that's always met
-                GoalConstraint(node_id="revenue", operator=">=", value=-1000000.0),
+                GoalConstraint(
+                    value_frame="delta", node_id="revenue", operator=">=", value=-1000000.0
+                ),
             ],
         )
 
@@ -400,8 +441,8 @@ class TestConditionalProbabilities:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=10.0),
-                GoalConstraint(node_id="cost", operator="<=", value=200.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=10.0),
+                GoalConstraint(value_frame="delta", node_id="cost", operator="<=", value=200.0),
             ],
         )
 
@@ -434,7 +475,7 @@ class TestConditionalProbabilities:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=10.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=10.0),
             ],
         )
 
@@ -461,9 +502,11 @@ class TestConditionalProbabilities:
             seed=42,
             goal_constraints=[
                 # Constraint 0: Impossible to satisfy (very high value)
-                GoalConstraint(node_id="revenue", operator=">=", value=1000000.0),
+                GoalConstraint(
+                    value_frame="delta", node_id="revenue", operator=">=", value=1000000.0
+                ),
                 # Constraint 1: Easy to satisfy
-                GoalConstraint(node_id="cost", operator="<=", value=1000000.0),
+                GoalConstraint(value_frame="delta", node_id="cost", operator="<=", value=1000000.0),
             ],
         )
 
@@ -510,7 +553,7 @@ class TestNearMissDiagnostics:
             n_samples=1000,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=30.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=30.0),
             ],
         )
 
@@ -536,7 +579,7 @@ class TestNearMissDiagnostics:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=50.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=50.0),
             ],
         )
 
@@ -563,7 +606,7 @@ class TestNearMissDiagnostics:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=50.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=50.0),
             ],
         )
 
@@ -608,7 +651,7 @@ class TestConstraintAnalysisIntegration:
             # samples — so this threshold is definitionally in the sample frame.
             goal_threshold_frame="delta",
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=25.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=25.0),
             ],
         )
 
@@ -644,8 +687,8 @@ class TestConstraintAnalysisIntegration:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=30.0),
-                GoalConstraint(node_id="cost", operator="<=", value=100.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=30.0),
+                GoalConstraint(value_frame="delta", node_id="cost", operator="<=", value=100.0),
             ],
         )
 
@@ -672,7 +715,7 @@ class TestConstraintAnalysisIntegration:
             seed=42,
             goal_constraints=[
                 # Cost constraint - high_marketing should have higher cost
-                GoalConstraint(node_id="cost", operator="<=", value=60.0),
+                GoalConstraint(value_frame="delta", node_id="cost", operator="<=", value=60.0),
             ],
         )
 
@@ -731,7 +774,7 @@ class TestConstraintAnalysisEdgeCases:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="cost", operator="<=", value=100.0),
+                GoalConstraint(value_frame="delta", node_id="cost", operator="<=", value=100.0),
             ],
         )
 
@@ -754,8 +797,12 @@ class TestConstraintAnalysisEdgeCases:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=10.0, label="Min"),
-                GoalConstraint(node_id="revenue", operator="<=", value=100.0, label="Max"),
+                GoalConstraint(
+                    value_frame="delta", node_id="revenue", operator=">=", value=10.0, label="Min"
+                ),
+                GoalConstraint(
+                    value_frame="delta", node_id="revenue", operator="<=", value=100.0, label="Max"
+                ),
             ],
         )
 
@@ -781,7 +828,7 @@ class TestConstraintAnalysisEdgeCases:
             n_samples=500,
             seed=42,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=20.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=20.0),
             ],
         )
 
@@ -851,7 +898,7 @@ class TestInferenceWarningsDefaultBase:
             n_samples=100,
             seed=1,
             goal_constraints=[
-                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+                GoalConstraint(value_frame="delta", node_id="fac_churn", operator="<=", value=0.04),
             ],
             # No parameter_uncertainties for fac_churn
         )
@@ -914,7 +961,7 @@ class TestInferenceWarningsDefaultBase:
             n_samples=100,
             seed=1,
             goal_constraints=[
-                GoalConstraint(node_id="revenue", operator=">=", value=20.0),
+                GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=20.0),
             ],
             # No parameter_uncertainties for revenue (the goal node) — revenue
             # is non-root (demand -> revenue, price -> revenue) so this is the
@@ -963,7 +1010,7 @@ class TestInferenceWarningsDefaultBase:
             n_samples=100,
             seed=1,
             goal_constraints=[
-                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+                GoalConstraint(value_frame="delta", node_id="fac_churn", operator="<=", value=0.04),
             ],
             parameter_uncertainties=[
                 ParameterUncertainty(
@@ -1015,7 +1062,7 @@ class TestInferenceWarningsDefaultBase:
             n_samples=100,
             seed=1,
             goal_constraints=[
-                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
+                GoalConstraint(value_frame="delta", node_id="fac_churn", operator="<=", value=0.04),
             ],
         )
 
@@ -1091,8 +1138,8 @@ class TestInferenceWarningsDefaultBase:
             n_samples=100,
             seed=1,
             goal_constraints=[
-                GoalConstraint(node_id="fac_churn", operator="<=", value=0.04),
-                GoalConstraint(node_id="fac_nps", operator=">=", value=0.5),
+                GoalConstraint(value_frame="delta", node_id="fac_churn", operator="<=", value=0.04),
+                GoalConstraint(value_frame="delta", node_id="fac_nps", operator=">=", value=0.5),
             ],
         )
 
