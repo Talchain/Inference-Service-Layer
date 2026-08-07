@@ -65,6 +65,7 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple, Type
 
 from pydantic import BaseModel
 
+from src.models.robustness_v2 import GoalConstraint
 from src.models.response_v2 import (
     ConstraintAnalysisV2,
     ConstraintResultV2,
@@ -91,8 +92,9 @@ PIN_PATH = FIXTURE_DIR / "PIN.json"
 # ---------------------------------------------------------------------------
 # Model ↔ contract pairing
 # ---------------------------------------------------------------------------
-# The ISL compute-seam response family, paired with the contract schema that
-# corresponds to it on the live wire. ``None`` = the contract has no
+# The ISL compute-seam response family — plus, since 2.798, the request-side
+# ``GoalConstraint`` (see its entry below) — paired with the contract schema
+# that corresponds to it on the live wire. ``None`` = the contract has no
 # counterpart today (pure ISL superset; still swept by the cross-model
 # collision scan). Pairing choices are documented in the draft PR / evidence
 # notes; the CONTRACT side of every comparison is derived from the artifact,
@@ -115,6 +117,30 @@ PAIRINGS: Dict[Type[BaseModel], Optional[Tuple[str, str]]] = {
     InferenceWarning: ("boundary", "EnrichmentInferenceWarningSchema"),
     CritiqueV2: ("boundary", "EnrichmentCritiqueSchema"),
     ConstraintResultV2: ("boundary", "EnrichmentConstraintResultSchema"),
+    # ---------------------------------------------------------------------
+    # REQUEST-side pairing (ROADMAP 2.798). The only member of this table that
+    # is not a response model, and it is here deliberately.
+    #
+    # WHY A REQUEST MODEL IS IN A RESPONSE-FAMILY TABLE. `GoalConstraint` is an
+    # INGRESS model: it types what CEE/PLoT send ISL, so its mirror-partner is
+    # the contract's `DraftGoalConstraintSchema` rather than an `Enrichment*`
+    # projection. The drift risk is identical in kind to the egress models' —
+    # a hand-maintained Pydantic mirror of a TS source of truth — and the check
+    # is direction-agnostic, so it polices ingress exactly as well.
+    #
+    # WHY IT WAS ADDED. ISL declared `value_frame` (2.798) describing itself as
+    # mirroring `@talchain/schemas` 0.38.0 `DraftGoalConstraint.value_frame`,
+    # while the pin sat at 0.30.0 — a contract with no such field. The pin bump
+    # alone would have been THEATRE: it puts `value_frame` in the artifact, but
+    # an unpaired model is never compared, so the field would sit in the fixture
+    # unread behind a green gate. This line is what makes the comparison run.
+    # It is also what makes a FUTURE divergence bite: widen ISL's Literal beyond
+    # the contract's enum and this pairing turns it into a fail-loud collision.
+    #
+    # `GoalConstraint` reads a strict subset of the contract's declared fields;
+    # the six it does not consume ride the omission baseline as OPTIONAL, which
+    # is the intended visibility, not a defect.
+    GoalConstraint: ("boundary", "DraftGoalConstraintSchema"),
     # No contract counterpart today:
     ConstraintAnalysisV2: None,
     DownsideV2: None,  # B2 downside/tail-risk — ISL emits ahead of contract adoption

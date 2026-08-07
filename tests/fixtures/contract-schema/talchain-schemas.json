@@ -3,8 +3,8 @@
     "determinism": "sorted-keys, no timestamps — byte-comparable by the CI freshness gate",
     "generator": "Inference-Service-Layer/scripts/contract_schema/generate_contract_schema.mjs",
     "package_name": "@talchain/schemas",
-    "package_version": "0.30.0",
-    "source_ref": "v0.30.0",
+    "package_version": "0.38.0",
+    "source_ref": "v0.38.0",
     "source_repo": "Talchain/olumi-schemas",
     "zod-to-json-schema": "3.22.5"
   },
@@ -219,52 +219,100 @@
           },
           "critiques": {
             "items": {
-              "additionalProperties": true,
-              "properties": {
-                "affected_node_ids": {
-                  "items": {
-                    "type": "string"
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "affected_node_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "affected_option_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "blocks_analysis": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "suggestion": {
+                      "type": "string"
+                    },
+                    "user_message": {
+                      "type": "string"
+                    }
                   },
-                  "type": "array"
+                  "required": [
+                    "code",
+                    "severity",
+                    "message"
+                  ],
+                  "type": "object"
                 },
-                "affected_option_ids": {
-                  "items": {
-                    "type": "string"
+                {
+                  "additionalProperties": true,
+                  "properties": {
+                    "affected_node_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "affected_option_ids": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "blocks_analysis": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "severity": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "suggestion": {
+                      "type": "string"
+                    },
+                    "user_message": {
+                      "type": "string"
+                    }
                   },
-                  "type": "array"
-                },
-                "blocks_analysis": {
-                  "type": "boolean"
-                },
-                "code": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "message": {
-                  "type": "string"
-                },
-                "severity": {
-                  "type": "string"
-                },
-                "source": {
-                  "type": "string"
-                },
-                "suggestion": {
-                  "type": "string"
-                },
-                "user_message": {
-                  "type": "string"
+                  "required": [
+                    "code",
+                    "user_message"
+                  ],
+                  "type": "object"
                 }
-              },
-              "required": [
-                "code",
-                "severity",
-                "message"
-              ],
-              "type": "object"
+              ]
             },
             "type": "array"
           },
@@ -676,6 +724,9 @@
                   "properties": {},
                   "type": "object"
                 },
+                "no_flip_in_range": {
+                  "type": "boolean"
+                },
                 "probes_used": {
                   "type": "number"
                 },
@@ -688,7 +739,6 @@
                 "factor_label",
                 "current_value",
                 "flip_value",
-                "direction",
                 "flip_reason"
               ],
               "type": "object"
@@ -992,6 +1042,14 @@
                     "p90": {
                       "type": "number"
                     },
+                    "percentiles_source": {
+                      "description": "'samples' when p10/p50/p90 were computed from actual MC samples; 'unavailable' when no valid samples exist (the stats are then absent). Absence means the producer did not state provenance — consumers MUST NOT assume 'samples'. Never defaulted at any hop, by contract.",
+                      "enum": [
+                        "samples",
+                        "unavailable"
+                      ],
+                      "type": "string"
+                    },
                     "std": {
                       "type": "number"
                     },
@@ -999,12 +1057,6 @@
                       "type": "number"
                     }
                   },
-                  "required": [
-                    "mean",
-                    "p10",
-                    "p50",
-                    "p90"
-                  ],
                   "type": "object"
                 },
                 "probability_of_goal": {
@@ -1743,6 +1795,13 @@
                     },
                     "value": {
                       "type": "number"
+                    },
+                    "value_frame": {
+                      "enum": [
+                        "level",
+                        "delta"
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1972,6 +2031,11 @@
               },
               "action_label": {
                 "maxLength": 40,
+                "minLength": 1,
+                "type": "string"
+              },
+              "action_prompt": {
+                "maxLength": 300,
                 "minLength": 1,
                 "type": "string"
               },
@@ -2335,12 +2399,42 @@
                 "format": "date-time",
                 "type": "string"
               },
+              "dsk_provenance": {
+                "additionalProperties": false,
+                "properties": {
+                  "evidence_strength": {
+                    "enum": [
+                      "strong",
+                      "medium",
+                      "weak",
+                      "mixed"
+                    ],
+                    "type": "string"
+                  },
+                  "protocol_id": {
+                    "pattern": "^DSK-P-\\d{3}$",
+                    "type": "string"
+                  },
+                  "protocol_title": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "protocol_id",
+                  "protocol_title",
+                  "evidence_strength"
+                ],
+                "type": "object"
+              },
               "exercise_kind": {
                 "enum": [
                   "pre_mortem",
                   "outside_view",
                   "devils_advocacy",
-                  "consider_opposite"
+                  "consider_opposite",
+                  "opportunity_cost",
+                  "implementation_intentions"
                 ],
                 "type": "string"
               },
@@ -2589,11 +2683,65 @@
                 "const": "ui_directive",
                 "type": "string"
               },
+              "ui_target": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "enum": [
+                          "results",
+                          "compare",
+                          "diagnostics",
+                          "journey",
+                          "olumi"
+                        ],
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "tab",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "enum": [
+                          "options",
+                          "factors",
+                          "relationships",
+                          "risks",
+                          "modelcard"
+                        ],
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "model_section",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "id"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
               "verb": {
                 "enum": [
                   "highlight",
                   "focus",
-                  "open_inspector"
+                  "open_inspector",
+                  "open_panel",
+                  "open_section"
                 ],
                 "type": "string"
               }
@@ -2974,6 +3122,11 @@
           },
           "action_label": {
             "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "action_prompt": {
+            "maxLength": 300,
             "minLength": 1,
             "type": "string"
           },
@@ -3933,6 +4086,14 @@
         ],
         "type": "object"
       },
+      "DeclaredScale": {
+        "enum": [
+          "unit_interval",
+          "ratio",
+          "raw_count"
+        ],
+        "type": "string"
+      },
       "DirectEffectClaimSchema": {
         "additionalProperties": false,
         "properties": {
@@ -4043,6 +4204,13 @@
           },
           "value": {
             "type": "number"
+          },
+          "value_frame": {
+            "enum": [
+              "level",
+              "delta"
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -4142,6 +4310,13 @@
                 },
                 "value": {
                   "type": "number"
+                },
+                "value_frame": {
+                  "enum": [
+                    "level",
+                    "delta"
+                  ],
+                  "type": "string"
                 }
               },
               "required": [
@@ -4175,6 +4350,43 @@
           "edge_count"
         ],
         "type": "object"
+      },
+      "DskProtocolProvenanceSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_strength": {
+            "enum": [
+              "strong",
+              "medium",
+              "weak",
+              "mixed"
+            ],
+            "type": "string"
+          },
+          "protocol_id": {
+            "pattern": "^DSK-P-\\d{3}$",
+            "type": "string"
+          },
+          "protocol_title": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_id",
+          "protocol_title",
+          "evidence_strength"
+        ],
+        "type": "object"
+      },
+      "EdgeAdjudicationVerdict": {
+        "enum": [
+          "accepted_pass1",
+          "accepted_pass2",
+          "overridden",
+          "dismissed"
+        ],
+        "type": "string"
       },
       "EdgeV3Schema": {
         "additionalProperties": true,
@@ -4854,6 +5066,9 @@
             "properties": {},
             "type": "object"
           },
+          "no_flip_in_range": {
+            "type": "boolean"
+          },
           "probes_used": {
             "type": "number"
           },
@@ -4866,7 +5081,6 @@
           "factor_label",
           "current_value",
           "flip_value",
-          "direction",
           "flip_reason"
         ],
         "type": "object"
@@ -5214,6 +5428,14 @@
               "p90": {
                 "type": "number"
               },
+              "percentiles_source": {
+                "description": "'samples' when p10/p50/p90 were computed from actual MC samples; 'unavailable' when no valid samples exist (the stats are then absent). Absence means the producer did not state provenance — consumers MUST NOT assume 'samples'. Never defaulted at any hop, by contract.",
+                "enum": [
+                  "samples",
+                  "unavailable"
+                ],
+                "type": "string"
+              },
               "std": {
                 "type": "number"
               },
@@ -5221,12 +5443,6 @@
                 "type": "number"
               }
             },
-            "required": [
-              "mean",
-              "p10",
-              "p50",
-              "p90"
-            ],
             "type": "object"
           },
           "probability_of_goal": {
@@ -5271,6 +5487,14 @@
           "p90": {
             "type": "number"
           },
+          "percentiles_source": {
+            "description": "'samples' when p10/p50/p90 were computed from actual MC samples; 'unavailable' when no valid samples exist (the stats are then absent). Absence means the producer did not state provenance — consumers MUST NOT assume 'samples'. Never defaulted at any hop, by contract.",
+            "enum": [
+              "samples",
+              "unavailable"
+            ],
+            "type": "string"
+          },
           "std": {
             "type": "number"
           },
@@ -5278,12 +5502,6 @@
             "type": "number"
           }
         },
-        "required": [
-          "mean",
-          "p10",
-          "p50",
-          "p90"
-        ],
         "type": "object"
       },
       "EnrichmentRobustnessEdgeSchema": {
@@ -5828,12 +6046,42 @@
             "format": "date-time",
             "type": "string"
           },
+          "dsk_provenance": {
+            "additionalProperties": false,
+            "properties": {
+              "evidence_strength": {
+                "enum": [
+                  "strong",
+                  "medium",
+                  "weak",
+                  "mixed"
+                ],
+                "type": "string"
+              },
+              "protocol_id": {
+                "pattern": "^DSK-P-\\d{3}$",
+                "type": "string"
+              },
+              "protocol_title": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "protocol_id",
+              "protocol_title",
+              "evidence_strength"
+            ],
+            "type": "object"
+          },
           "exercise_kind": {
             "enum": [
               "pre_mortem",
               "outside_view",
               "devils_advocacy",
-              "consider_opposite"
+              "consider_opposite",
+              "opportunity_cost",
+              "implementation_intentions"
             ],
             "type": "string"
           },
@@ -6130,6 +6378,13 @@
         ],
         "type": "string"
       },
+      "GoalThresholdFrame": {
+        "enum": [
+          "level",
+          "delta"
+        ],
+        "type": "string"
+      },
       "GraphPatchBlockSchema": {
         "additionalProperties": false,
         "properties": {
@@ -6285,6 +6540,13 @@
                 "goal_threshold": {
                   "type": "number"
                 },
+                "goal_threshold_frame": {
+                  "enum": [
+                    "level",
+                    "delta"
+                  ],
+                  "type": "string"
+                },
                 "id": {
                   "maxLength": 100,
                   "minLength": 1,
@@ -6314,6 +6576,14 @@
                   "properties": {
                     "baseline": {
                       "type": "number"
+                    },
+                    "declared_scale": {
+                      "enum": [
+                        "unit_interval",
+                        "ratio",
+                        "raw_count"
+                      ],
+                      "type": "string"
                     },
                     "source": {
                       "type": "string"
@@ -6711,6 +6981,13 @@
                     "goal_threshold": {
                       "type": "number"
                     },
+                    "goal_threshold_frame": {
+                      "enum": [
+                        "level",
+                        "delta"
+                      ],
+                      "type": "string"
+                    },
                     "id": {
                       "maxLength": 100,
                       "minLength": 1,
@@ -6740,6 +7017,14 @@
                       "properties": {
                         "baseline": {
                           "type": "number"
+                        },
+                        "declared_scale": {
+                          "enum": [
+                            "unit_interval",
+                            "ratio",
+                            "raw_count"
+                          ],
+                          "type": "string"
                         },
                         "source": {
                           "type": "string"
@@ -6955,6 +7240,13 @@
           "goal_threshold": {
             "type": "number"
           },
+          "goal_threshold_frame": {
+            "enum": [
+              "level",
+              "delta"
+            ],
+            "type": "string"
+          },
           "id": {
             "maxLength": 100,
             "minLength": 1,
@@ -6984,6 +7276,14 @@
             "properties": {
               "baseline": {
                 "type": "number"
+              },
+              "declared_scale": {
+                "enum": [
+                  "unit_interval",
+                  "ratio",
+                  "raw_count"
+                ],
+                "type": "string"
               },
               "source": {
                 "type": "string"
@@ -7462,6 +7762,13 @@
                           },
                           "value": {
                             "type": "number"
+                          },
+                          "value_frame": {
+                            "enum": [
+                              "level",
+                              "delta"
+                            ],
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -7691,6 +7998,11 @@
                     },
                     "action_label": {
                       "maxLength": 40,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "action_prompt": {
+                      "maxLength": 300,
                       "minLength": 1,
                       "type": "string"
                     },
@@ -8054,12 +8366,42 @@
                       "format": "date-time",
                       "type": "string"
                     },
+                    "dsk_provenance": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "evidence_strength": {
+                          "enum": [
+                            "strong",
+                            "medium",
+                            "weak",
+                            "mixed"
+                          ],
+                          "type": "string"
+                        },
+                        "protocol_id": {
+                          "pattern": "^DSK-P-\\d{3}$",
+                          "type": "string"
+                        },
+                        "protocol_title": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "protocol_id",
+                        "protocol_title",
+                        "evidence_strength"
+                      ],
+                      "type": "object"
+                    },
                     "exercise_kind": {
                       "enum": [
                         "pre_mortem",
                         "outside_view",
                         "devils_advocacy",
-                        "consider_opposite"
+                        "consider_opposite",
+                        "opportunity_cost",
+                        "implementation_intentions"
                       ],
                       "type": "string"
                     },
@@ -8308,11 +8650,65 @@
                       "const": "ui_directive",
                       "type": "string"
                     },
+                    "ui_target": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "enum": [
+                                "results",
+                                "compare",
+                                "diagnostics",
+                                "journey",
+                                "olumi"
+                              ],
+                              "type": "string"
+                            },
+                            "kind": {
+                              "const": "tab",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "id": {
+                              "enum": [
+                                "options",
+                                "factors",
+                                "relationships",
+                                "risks",
+                                "modelcard"
+                              ],
+                              "type": "string"
+                            },
+                            "kind": {
+                              "const": "model_section",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "id"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
                     "verb": {
                       "enum": [
                         "highlight",
                         "focus",
-                        "open_inspector"
+                        "open_inspector",
+                        "open_panel",
+                        "open_section"
                       ],
                       "type": "string"
                     }
@@ -8452,6 +8848,13 @@
                     },
                     "value": {
                       "type": "number"
+                    },
+                    "value_frame": {
+                      "enum": [
+                        "level",
+                        "delta"
+                      ],
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -8864,6 +9267,13 @@
                         "goal_threshold": {
                           "type": "number"
                         },
+                        "goal_threshold_frame": {
+                          "enum": [
+                            "level",
+                            "delta"
+                          ],
+                          "type": "string"
+                        },
                         "id": {
                           "maxLength": 100,
                           "minLength": 1,
@@ -8893,6 +9303,14 @@
                           "properties": {
                             "baseline": {
                               "type": "number"
+                            },
+                            "declared_scale": {
+                              "enum": [
+                                "unit_interval",
+                                "ratio",
+                                "raw_count"
+                              ],
+                              "type": "string"
                             },
                             "source": {
                               "type": "string"
@@ -9318,6 +9736,76 @@
                       "kind",
                       "rating",
                       "target"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "edge_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "from": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "edge_adjudication",
+                        "type": "string"
+                      },
+                      "resolved_strength_mean": {
+                        "type": "number"
+                      },
+                      "to": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "verdict": {
+                        "enum": [
+                          "accepted_pass1",
+                          "accepted_pass2",
+                          "overridden",
+                          "dismissed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "from",
+                      "to",
+                      "verdict"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "distribution": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "kind": {
+                        "const": "prior_range_edit",
+                        "type": "string"
+                      },
+                      "range_max": {
+                        "type": "number"
+                      },
+                      "range_min": {
+                        "type": "number"
+                      },
+                      "target_id": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "target_id",
+                      "range_min",
+                      "range_max"
                     ],
                     "type": "object"
                   }
@@ -9897,7 +10385,9 @@
           "undo",
           "redo",
           "selection_change",
-          "feedback"
+          "feedback",
+          "edge_adjudication",
+          "prior_range_edit"
         ],
         "type": "string"
       },
@@ -10168,6 +10658,76 @@
               "kind",
               "rating",
               "target"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "edge_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "from": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "edge_adjudication",
+                "type": "string"
+              },
+              "resolved_strength_mean": {
+                "type": "number"
+              },
+              "to": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "verdict": {
+                "enum": [
+                  "accepted_pass1",
+                  "accepted_pass2",
+                  "overridden",
+                  "dismissed"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "from",
+              "to",
+              "verdict"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "distribution": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "prior_range_edit",
+                "type": "string"
+              },
+              "range_max": {
+                "type": "number"
+              },
+              "range_min": {
+                "type": "number"
+              },
+              "target_id": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "target_id",
+              "range_min",
+              "range_max"
             ],
             "type": "object"
           }
@@ -10445,6 +11005,76 @@
                   "target"
                 ],
                 "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "edge_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "from": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "edge_adjudication",
+                    "type": "string"
+                  },
+                  "resolved_strength_mean": {
+                    "type": "number"
+                  },
+                  "to": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "verdict": {
+                    "enum": [
+                      "accepted_pass1",
+                      "accepted_pass2",
+                      "overridden",
+                      "dismissed"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "from",
+                  "to",
+                  "verdict"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "distribution": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "prior_range_edit",
+                    "type": "string"
+                  },
+                  "range_max": {
+                    "type": "number"
+                  },
+                  "range_min": {
+                    "type": "number"
+                  },
+                  "target_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "target_id",
+                  "range_min",
+                  "range_max"
+                ],
+                "type": "object"
               }
             ]
           },
@@ -10545,6 +11175,50 @@
         },
         "type": "array"
       },
+      "TransportedCritiqueSchema": {
+        "additionalProperties": true,
+        "properties": {
+          "affected_node_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "affected_option_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "blocks_analysis": {
+            "type": "boolean"
+          },
+          "code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "suggestion": {
+            "type": "string"
+          },
+          "user_message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "user_message"
+        ],
+        "type": "object"
+      },
       "TurnClass": {
         "enum": [
           "frame",
@@ -10615,11 +11289,65 @@
             "const": "ui_directive",
             "type": "string"
           },
+          "ui_target": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "enum": [
+                      "results",
+                      "compare",
+                      "diagnostics",
+                      "journey",
+                      "olumi"
+                    ],
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "tab",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "enum": [
+                      "options",
+                      "factors",
+                      "relationships",
+                      "risks",
+                      "modelcard"
+                    ],
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "model_section",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ],
+                "type": "object"
+              }
+            ]
+          },
           "verb": {
             "enum": [
               "highlight",
               "focus",
-              "open_inspector"
+              "open_inspector",
+              "open_panel",
+              "open_section"
             ],
             "type": "string"
           }
@@ -10631,11 +11359,85 @@
         ],
         "type": "object"
       },
+      "UiDirectiveModelSectionId": {
+        "enum": [
+          "options",
+          "factors",
+          "relationships",
+          "risks",
+          "modelcard"
+        ],
+        "type": "string"
+      },
+      "UiDirectivePanelTabId": {
+        "enum": [
+          "results",
+          "compare",
+          "diagnostics",
+          "journey",
+          "olumi"
+        ],
+        "type": "string"
+      },
+      "UiDirectiveUiTargetSchema": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "enum": [
+                  "results",
+                  "compare",
+                  "diagnostics",
+                  "journey",
+                  "olumi"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "const": "tab",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "enum": [
+                  "options",
+                  "factors",
+                  "relationships",
+                  "risks",
+                  "modelcard"
+                ],
+                "type": "string"
+              },
+              "kind": {
+                "const": "model_section",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "id"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "UiDirectiveVerb": {
         "enum": [
           "highlight",
           "focus",
-          "open_inspector"
+          "open_inspector",
+          "open_panel",
+          "open_section"
         ],
         "type": "string"
       },
@@ -10847,6 +11649,13 @@
                     "goal_threshold": {
                       "type": "number"
                     },
+                    "goal_threshold_frame": {
+                      "enum": [
+                        "level",
+                        "delta"
+                      ],
+                      "type": "string"
+                    },
                     "id": {
                       "maxLength": 100,
                       "minLength": 1,
@@ -10876,6 +11685,14 @@
                       "properties": {
                         "baseline": {
                           "type": "number"
+                        },
+                        "declared_scale": {
+                          "enum": [
+                            "unit_interval",
+                            "ratio",
+                            "raw_count"
+                          ],
+                          "type": "string"
                         },
                         "source": {
                           "type": "string"
@@ -11142,6 +11959,13 @@
                     "goal_threshold": {
                       "type": "number"
                     },
+                    "goal_threshold_frame": {
+                      "enum": [
+                        "level",
+                        "delta"
+                      ],
+                      "type": "string"
+                    },
                     "id": {
                       "maxLength": 100,
                       "minLength": 1,
@@ -11171,6 +11995,14 @@
                       "properties": {
                         "baseline": {
                           "type": "number"
+                        },
+                        "declared_scale": {
+                          "enum": [
+                            "unit_interval",
+                            "ratio",
+                            "raw_count"
+                          ],
+                          "type": "string"
                         },
                         "source": {
                           "type": "string"
@@ -12538,6 +13370,14 @@
         ],
         "type": "string"
       },
+      "DeclaredScale": {
+        "enum": [
+          "unit_interval",
+          "ratio",
+          "raw_count"
+        ],
+        "type": "string"
+      },
       "DetailLevel": {
         "enum": [
           "quick",
@@ -12799,6 +13639,13 @@
         ],
         "type": "object"
       },
+      "GoalThresholdFrame": {
+        "enum": [
+          "level",
+          "delta"
+        ],
+        "type": "string"
+      },
       "GraphV3Schema": {
         "additionalProperties": true,
         "properties": {
@@ -12895,6 +13742,13 @@
                 "goal_threshold": {
                   "type": "number"
                 },
+                "goal_threshold_frame": {
+                  "enum": [
+                    "level",
+                    "delta"
+                  ],
+                  "type": "string"
+                },
                 "id": {
                   "maxLength": 100,
                   "minLength": 1,
@@ -12924,6 +13778,14 @@
                   "properties": {
                     "baseline": {
                       "type": "number"
+                    },
+                    "declared_scale": {
+                      "enum": [
+                        "unit_interval",
+                        "ratio",
+                        "raw_count"
+                      ],
+                      "type": "string"
                     },
                     "source": {
                       "type": "string"
@@ -13120,6 +13982,13 @@
           "goal_threshold": {
             "type": "number"
           },
+          "goal_threshold_frame": {
+            "enum": [
+              "level",
+              "delta"
+            ],
+            "type": "string"
+          },
           "id": {
             "maxLength": 100,
             "minLength": 1,
@@ -13149,6 +14018,14 @@
             "properties": {
               "baseline": {
                 "type": "number"
+              },
+              "declared_scale": {
+                "enum": [
+                  "unit_interval",
+                  "ratio",
+                  "raw_count"
+                ],
+                "type": "string"
               },
               "source": {
                 "type": "string"
@@ -13213,6 +14090,14 @@
         "properties": {
           "baseline": {
             "type": "number"
+          },
+          "declared_scale": {
+            "enum": [
+              "unit_interval",
+              "ratio",
+              "raw_count"
+            ],
+            "type": "string"
           },
           "source": {
             "type": "string"
