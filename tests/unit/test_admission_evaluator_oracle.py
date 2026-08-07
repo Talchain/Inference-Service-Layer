@@ -193,6 +193,29 @@ def _root_factor_graph(n_drivers: int, n_mediators: int) -> dict:
     Every driver carries an `observed_state.value`, which is the other half of the
     eligibility test, so eligible == every driver; mediators have parents and are
     correctly never eligible.
+
+    ⚠ AND `m0` CARRIES AN OBSERVED VALUE ON PURPOSE — it is the NEGATIVE CONTROL
+    for the producer's ROOT conjunct. Without it, no node in this file satisfies
+    "observed value AND not the goal AND has a parent", i.e. the fixture contains
+    no member of the class the root rule exists to EXCLUDE, so deleting
+    `and not evaluator._parents.get(node.id)` from `_compute_factor_flip_values`
+    is an EQUIVALENT mutant: measured at ad6651c3, that deletion left 73/73 GREEN
+    across this file, `test_factor_flip_values.py` and `test_flip_stability_bands.py`.
+    A predicate can be true as stated and have its BREADTH untested (trap 13b —
+    a guard agreeing with itself).
+
+    Giving `m0` an observed value costs nothing and changes nothing NUMERICALLY:
+    the evaluator seeds `observed_state.value` as a node's base for ROOT nodes
+    only (`robustness_analyzer_v2.py`, `is_root` gate in `_evaluate`), so a
+    mediator's observed value is never read by the SCM. Verified empirically —
+    every flip shape's eligible set, row ids, flip reasons, evaluate() count and
+    advertised total are BYTE-IDENTICAL before and after this line. What it does
+    change is that `m0` now satisfies every eligibility conjunct EXCEPT
+    parentlessness, so the root conjunct becomes observable and its deletion REDs
+    `test_flip_shape_screens_every_root_factor` on the set equality.
+    `test_the_fixture_can_observe_the_root_conjunct` PINS this precondition, so
+    a tidy-up that drops the observed value fails loudly instead of silently
+    restoring the blind spot.
     """
     nodes: List[dict] = [
         {
@@ -203,7 +226,17 @@ def _root_factor_graph(n_drivers: int, n_mediators: int) -> dict:
         }
         for i in range(n_drivers)
     ]
-    nodes += [{"id": f"m{j}", "kind": "factor", "label": f"M{j}"} for j in range(n_mediators)]
+    mediators: List[dict] = [
+        {"id": f"m{j}", "kind": "factor", "label": f"M{j}"} for j in range(n_mediators)
+    ]
+    # NEGATIVE CONTROL — see the docstring. `m0` always has at least one parent
+    # (driver n0 wires to `m{0 % n_mediators}` == m0 for every n_drivers >= 1),
+    # so it is a non-root, non-goal node WITH an observed value: exactly the
+    # class the producer's root conjunct exists to exclude, and the only thing
+    # that makes deleting that conjunct a biting mutant rather than an
+    # equivalent one.
+    mediators[0]["observed_state"] = {"value": 0.5, "std": 0.1}
+    nodes += mediators
     nodes.append({"id": "goal", "kind": "outcome", "label": "GOAL"})
     # Varied strengths so the slope spreads differ and the candidate ranking is a
     # real ordering rather than an arbitrary tie-break on id.
@@ -300,15 +333,20 @@ _ORACLE_SHAPES = [
     ("flips_many_options", _flip_body(16, 4, 400, 8)),
 ]
 
-#: Priced terms that NO oracle shape currently runs, with the reason each is still
-#: open. ROADMAP 2.745 removed `factor_flips` from this list by adding the shapes
-#: above; the remaining four are rowed, not resolved.
+#: Priced terms that NO oracle shape currently CHARGES, with the reason each is
+#: still open. ROADMAP 2.745 removed `factor_flips` from this list by adding the
+#: shapes above; the remaining four are rowed, not resolved.
 #:
 #: ⚠ THIS IS A RATCHET, NOT A MIRROR. The guard below compares it against the term
 #: set DERIVED from the sibling sufficiency grid and fails in BOTH directions:
-#: a newly-priced term that no shape runs is not in the list -> RED; a term that
+#: a newly-priced term that no shape charges is not in the list -> RED; a term that
 #: gains coverage is still in the list -> RED. So it cannot silently drift, and it
 #: can only ever shrink.
+#:
+#: ⚠ AND THE RATCHET IS ABOUT FLAGS, NOT EXECUTION — retiring an entry here
+#: requires a precondition pin proving the phase actually runs on the new shape,
+#: or 2.745's defect recurs under a green suite. See
+#: `TestPricedTermsAreChargedBySomeShape`.
 _KNOWN_UNRUN_BY_ORACLE = {
     # Charged flat and generously (200*E*O and 20*E*O), so they carry large
     # headroom rather than zero — the opposite of the factor_flips hazard.
@@ -322,18 +360,38 @@ _KNOWN_UNRUN_BY_ORACLE = {
 }
 
 
-class TestPricedTermsAreActuallyRun:
-    """ROADMAP 2.745 — every priced term must be RUN by some oracle shape.
+class TestPricedTermsAreChargedBySomeShape:
+    """ROADMAP 2.745 — every priced term must be CHARGED by some oracle shape.
 
-    THE DEFECT THIS CLOSES. `factor_flips` was priced with W_FACTOR_FLIP_COEF = 1
+    ⚠ READ THE NAME LITERALLY: this proves FLAG REACHABILITY, NOT EXECUTION.
+    Both sides of the comparison are derived from `compute_weighted_cost`, which
+    gates on request FLAGS and cannot know whether a phase ever ran. A shape that
+    charges a term while the phase does nothing scores as covered. Measured at
+    ad6651c3: the pre-existing `_graph` shape plus `include_factor_flips` charges
+    `factor_flips` 25,440 units and produces **0** flip rows (eligible == []), and
+    this guard would count that as `factor_flips` being covered.
+
+    That is the exact vacuity 2.745 exists to close, so DO NOT read a green here
+    as evidence a phase executes. Execution is pinned ONLY by the hand-written
+    preconditions in `TestFactorFlipShapeIsNotVacuous`. **Retiring any of the four
+    remaining entries from `_KNOWN_UNRUN_BY_ORACLE` therefore requires shipping a
+    matching precondition pin alongside the new shape** — `evpc` in particular is
+    a do()-grid gated on `control_candidates` presence, so a shape can carry
+    `control_candidates`, charge the term, exercise nothing, and drop the
+    exemption with a fully green suite. Without the pin, 2.745's defect recurs
+    under a green ratchet.
+
+    WHAT IT DOES CLOSE. `factor_flips` was priced with W_FACTOR_FLIP_COEF = 1
     (zero headroom) and sent by PLoT on EVERY live request, yet no oracle shape and
-    no calibration cell ever enabled it: the one always-on term with no slack was
-    the one term the oracle that exists to catch mis-pricing never executed. Nothing
-    failed, because nothing was checking that the priced set and the RUN set agree.
+    no calibration cell ever ENABLED it: the one always-on term with no slack was
+    the one term the oracle that exists to catch mis-pricing never charged. Nothing
+    failed, because nothing was checking that the priced set and the charged set
+    agree. That flag-absent class is now non-recurring; the
+    charged-but-not-executed class is not, and is the reason the pins exist.
 
     The check is DERIVED on both sides — the priced set from the sibling
-    sufficiency grid, the run set from `_ORACLE_SHAPES` — so adding a term to
-    `compute_weighted_cost` without a shape to run it turns this RED.
+    sufficiency grid, the charged set from `_ORACLE_SHAPES` — so adding a term to
+    `compute_weighted_cost` without a shape that enables it turns this RED.
     """
 
     def test_every_priced_term_is_exercised_by_some_shape(self):
@@ -341,24 +399,30 @@ class TestPricedTermsAreActuallyRun:
         for body in _sufficiency_shape_grid().values():
             priced |= set(compute_weighted_cost(RobustnessRequestV2(**body)).terms)
 
-        run = set()
+        # NOT "run" — `compute_weighted_cost` gates on FLAGS, so this is the set of
+        # terms some oracle shape CHARGES. See the class docstring.
+        charged = set()
         for _label, body in _ORACLE_SHAPES:
-            run |= set(compute_weighted_cost(RobustnessRequestV2(**body)).terms)
+            charged |= set(compute_weighted_cost(RobustnessRequestV2(**body)).terms)
 
-        unrun = priced - run
-        assert unrun <= _KNOWN_UNRUN_BY_ORACLE, (
-            f"priced term(s) {sorted(unrun - _KNOWN_UNRUN_BY_ORACLE)} are charged by "
-            f"compute_weighted_cost but RUN by no oracle shape, so nothing measures "
-            f"whether the charge is enough. Add a shape that exercises the phase "
-            f"(and check the phase actually runs on it — see "
-            f"TestFactorFlipShapeIsNotVacuous), or justify it in _KNOWN_UNRUN_BY_ORACLE."
+        uncharged = priced - charged
+        assert uncharged <= _KNOWN_UNRUN_BY_ORACLE, (
+            f"priced term(s) {sorted(uncharged - _KNOWN_UNRUN_BY_ORACLE)} are charged "
+            f"by compute_weighted_cost on the sufficiency grid but by NO oracle shape, "
+            f"so nothing measures whether the charge is enough. Add a shape that "
+            f"enables the phase — AND a precondition pin proving the phase actually "
+            f"executes on it (see TestFactorFlipShapeIsNotVacuous), because THIS guard "
+            f"cannot tell execution from a flag — or justify it in "
+            f"_KNOWN_UNRUN_BY_ORACLE."
         )
 
-        stale = _KNOWN_UNRUN_BY_ORACLE & run
+        stale = _KNOWN_UNRUN_BY_ORACLE & charged
         assert not stale, (
             f"{sorted(stale)} now HAS oracle coverage but is still listed in "
             f"_KNOWN_UNRUN_BY_ORACLE. Remove it — a stale exception list is exactly "
-            f"the hand-maintained mirror this guard exists to prevent."
+            f"the hand-maintained mirror this guard exists to prevent. Removing an "
+            f"entry also requires the precondition pin described in the class "
+            f"docstring; a charged term is not a run phase."
         )
 
     def test_factor_flips_is_no_longer_exempt(self):
@@ -378,6 +442,53 @@ class TestFactorFlipShapeIsNotVacuous:
     tests PIN THE PRECONDITION in-test, so a flips shape that silently stops
     exercising the phase fails HERE rather than passing quietly downstream.
     """
+
+    def test_the_fixture_can_observe_the_root_conjunct(self):
+        """PRECONDITION PIN for the ROOT half of the eligibility rule (trap 13b).
+
+        `test_flip_shape_screens_every_root_factor` asserts a SET EQUALITY against
+        the producer's eligible set, but that equality can only DISCRIMINATE the
+        root conjunct if the fixture contains a node that would become eligible
+        without it — a non-goal node that has a parent AND carries an observed
+        value. Nothing in the graph builder forces such a node to exist, and its
+        absence is invisible: every test stays green while the conjunct goes
+        unobserved. Measured at ad6651c3, before `m0` was given an observed value,
+        deleting `and not evaluator._parents.get(node.id)` from
+        `_compute_factor_flip_values` left 73/73 GREEN across this file,
+        `test_factor_flip_values.py` and `test_flip_stability_bands.py`.
+
+        So this pins the fixture's discriminating power itself, rather than
+        trusting it to survive a tidy-up.
+        """
+        body = _flip_body(9, 3, 400, 3)
+        parents: Dict[str, List[str]] = {n["id"]: [] for n in body["graph"]["nodes"]}
+        for e in body["graph"]["edges"]:
+            parents[e["to"]].append(e["from"])
+
+        excluded_only_by_the_root_rule = [
+            n["id"]
+            for n in body["graph"]["nodes"]
+            if n["id"] != body["goal_node_id"]
+            and parents[n["id"]]
+            and (n.get("observed_state") or {}).get("value") is not None
+        ]
+        assert excluded_only_by_the_root_rule, (
+            "no node in the flips fixture is a non-goal node that HAS a parent and "
+            "carries observed_state.value, so nothing in this file belongs to the "
+            "class `_compute_factor_flip_values`'s root conjunct exists to exclude. "
+            "Deleting that conjunct from the producer would be an EQUIVALENT mutant "
+            "and the flip corpus would stay green. Restore an observed_state on a "
+            "mediator in `_root_factor_graph` — never relax this assertion."
+        )
+
+        # ...and the derived mirror must still exclude it, or the sibling set
+        # equality would pass for the wrong reason.
+        eligible = set(_eligible_driver_ids(body))
+        assert not (set(excluded_only_by_the_root_rule) & eligible), (
+            f"{sorted(set(excluded_only_by_the_root_rule) & eligible)} is parented "
+            f"yet _eligible_driver_ids returned it: the helper has stopped mirroring "
+            f"the producer's parentless test."
+        )
 
     def test_flip_shape_screens_every_root_factor(self, count_evaluates):
         """RED on the pre-existing fixture: `_graph` yields 0 eligible factors.
@@ -472,8 +583,10 @@ class TestEvaluatorCallCountOracle:
         `W_FACTOR_FLIP_COEF = 1` charges the formula's own "1 evaluate = W units"
         convention exactly, so an error in this term cannot be absorbed by slack —
         and PLoT sends `include_factor_flips: true` UNCONDITIONALLY
-        (`translator-v3.ts:748`), so it is priced on every live request. Before this
-        test, it was the one always-on priced phase the oracle never ran.
+        (`plot-lite-service` `src/integrations/isl/translator-v3.ts:913`, verified at
+        `staging` 38bc3826 on 2026-08-07 — `:295` is only the optional interface
+        field), so it is priced on every live request. Before this test, it was the
+        one always-on priced phase the oracle never ran.
         """
         body = _flip_body(9, 3, 400, 3)
         advertised, actual, W = _run(body, count_evaluates)

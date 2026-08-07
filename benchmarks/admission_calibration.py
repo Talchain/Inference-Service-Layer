@@ -251,7 +251,8 @@ def default_grid(quick: bool) -> List[Cell]:
     add("evalues", 12, 40, 3000, 3, ev=True)
     add("path", 20, 60, 3000, 3, path=True)
     # ROADMAP 2.745 — factor flips. PLoT sends `include_factor_flips: true`
-    # UNCONDITIONALLY (translator-v3.ts:748), so this term is priced on EVERY live
+    # UNCONDITIONALLY (plot-lite-service src/integrations/isl/translator-v3.ts:913,
+    # verified at staging 38bc3826 on 2026-08-07), so this term is priced on EVERY live
     # request, and W_FACTOR_FLIP_COEF = 1 gives it ZERO pricing headroom. Until
     # these cells existed, the k_ms_per_unit fit behind the admission ceiling had
     # never once seen it run. `roots=` selects the fan-in topology — without it the
