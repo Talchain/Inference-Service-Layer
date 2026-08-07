@@ -86,6 +86,65 @@ def _layered_graph(n_nodes: int, n_edges: int, evpi_factors: int = 0) -> dict:
     return {"nodes": nodes, "edges": edges}
 
 
+def _root_factor_graph(n_drivers: int, n_mediators: int) -> dict:
+    """``n_drivers`` PARENTLESS factors -> ``n_mediators`` mediators -> one outcome.
+
+    ⚠ WHY THE FLIPS CELLS NEED THEIR OWN TOPOLOGY (ROADMAP 2.745).
+
+    ``_layered_graph`` lays a n0->n1->...->n_last chain FIRST, so every node except
+    n0 has a parent: it has exactly ONE root. The factor-flip phase screens only
+    ROOT factors, so on a layered graph it finds 0 eligible factors and returns
+    immediately. Adding ``include_factor_flips`` to a layered cell would therefore
+    time a phase that never runs, and the k_ms_per_unit fit would absorb a term
+    charging ~25k units for ~3 evaluations — a WORSE calibration than not measuring
+    it at all. The flag alone is not the fix; the topology is half of it.
+
+    ⚠ AND A PLAIN FAN-IN IS STILL NOT ENOUGH. A candidate is a screened factor
+    whose SLOPE SPREAD across options exceeds epsilon. Wire every driver straight
+    to the goal and have every option intervene on the same node, and each driver
+    transmits IDENTICALLY under every option: spread 0, exactly ONE candidate
+    however many drivers there are, and the candidate cap / crossing / banding
+    limbs never run. Routing drivers through mediators that the options pin one
+    apiece gives each driver a real slope difference under the option that blocks
+    its path, so candidates scale with the driver count and the cap binds.
+
+    Every driver carries an ``observed_state.value`` (the other half of the phase's
+    eligibility test), so eligible == every driver; mediators have parents and are
+    correctly never eligible. Kept in step with the identically-named builder in
+    tests/unit/test_admission_evaluator_oracle.py.
+    """
+    nodes: List[dict] = [
+        {
+            "id": f"n{i}",
+            "kind": "factor",
+            "label": f"N{i}",
+            "observed_state": {"value": 0.5, "std": 0.1},
+        }
+        for i in range(n_drivers)
+    ]
+    nodes += [{"id": f"m{j}", "kind": "factor", "label": f"M{j}"} for j in range(n_mediators)]
+    nodes.append({"id": "goal", "kind": "outcome", "label": "GOAL"})
+    edges: List[dict] = [
+        {
+            "from": f"n{i}",
+            "to": f"m{i % n_mediators}",
+            "exists_probability": 0.9,
+            "strength": {"mean": 0.2 + 0.05 * (i % 7), "std": 0.1},
+        }
+        for i in range(n_drivers)
+    ]
+    edges += [
+        {
+            "from": f"m{j}",
+            "to": "goal",
+            "exists_probability": 0.9,
+            "strength": {"mean": 0.3 + 0.03 * j, "std": 0.1},
+        }
+        for j in range(n_mediators)
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
 def build_request(
     n_nodes: int,
     n_edges: int,
@@ -96,23 +155,48 @@ def build_request(
     include_e_values: bool = False,
     include_path: bool = False,
     sensitivity: bool = True,
+    include_factor_flips: bool = False,
+    root_factors: int = 0,
+    mediators: int = 0,
 ) -> RobustnessRequestV2:
-    graph = _layered_graph(n_nodes, n_edges, evpi_factors)
-    options = [
-        {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.1 * (k + 1)}}
-        for k in range(n_options)
-    ]
+    # ROADMAP 2.745: flips cells opt into the driver/mediator topology.
+    # `root_factors == 0` leaves every pre-existing cell on the layered graph
+    # BYTE-IDENTICALLY, so the historical fit is unchanged and the cells are additive.
+    if root_factors:
+        n_mediators = mediators or max(2, min(n_options, 6))
+        graph = _root_factor_graph(root_factors, n_mediators)
+        # Each option pins ONE mediator — this is what gives the drivers behind it
+        # a different slope under that option and makes them real candidates.
+        options = [
+            {
+                "id": f"o{k}",
+                "label": f"O{k}",
+                "interventions": {f"m{k % n_mediators}": 0.2 + 0.1 * k},
+            }
+            for k in range(n_options)
+        ]
+    else:
+        graph = _layered_graph(n_nodes, n_edges, evpi_factors)
+        options = [
+            {"id": f"o{k}", "label": f"O{k}", "interventions": {"n0": 0.1 * (k + 1)}}
+            for k in range(n_options)
+        ]
     analysis_types = ["comparison", "robustness"] + (["sensitivity"] if sensitivity else [])
     body: dict = {
         "graph": graph,
         "options": options,
-        "goal_node_id": f"n{n_nodes - 1}",
+        # Derived from the graph, not recomputed from n_nodes: identical to the
+        # previous `f"n{n_nodes - 1}"` for the layered builder (whose last node IS
+        # the outcome), and correct for the fan-in builder too.
+        "goal_node_id": graph["nodes"][-1]["id"],
         "n_samples": n_samples,
         "seed": 7,
         "analysis_types": analysis_types,
         "include_e_values": include_e_values,
         "include_path_decomposition": include_path,
     }
+    if include_factor_flips:
+        body["include_factor_flips"] = True
     if evpi_factors:
         body["include_voi"] = True
         body["parameter_uncertainties"] = [
@@ -131,6 +215,9 @@ class Cell:
     evpi_factors: int = 0
     include_e_values: bool = False
     include_path: bool = False
+    include_factor_flips: bool = False
+    root_factors: int = 0
+    mediators: int = 0
     cost_units: int = 0
     dominant: str = ""
     t_ms: float = 0.0
@@ -141,8 +228,8 @@ def default_grid(quick: bool) -> List[Cell]:
     """Representative cells spanning the realistic cost range."""
     cells: List[Cell] = []
 
-    def add(label, N, E, S, O, evpi=0, ev=False, path=False):
-        cells.append(Cell(label, N, E, S, O, evpi, ev, path))
+    def add(label, N, E, S, O, evpi=0, ev=False, path=False, flips=False, roots=0, med=0):
+        cells.append(Cell(label, N, E, S, O, evpi, ev, path, flips, roots, med))
 
     # base MC scaling (samples x options)
     add("pilot", 5, 8, 1000, 2)
@@ -163,6 +250,17 @@ def default_grid(quick: bool) -> List[Cell]:
     # optional phases
     add("evalues", 12, 40, 3000, 3, ev=True)
     add("path", 20, 60, 3000, 3, path=True)
+    # ROADMAP 2.745 — factor flips. PLoT sends `include_factor_flips: true`
+    # UNCONDITIONALLY (plot-lite-service src/integrations/isl/translator-v3.ts:913,
+    # verified at staging 38bc3826 on 2026-08-07), so this term is priced on EVERY live
+    # request, and W_FACTOR_FLIP_COEF = 1 gives it ZERO pricing headroom. Until
+    # these cells existed, the k_ms_per_unit fit behind the admission ceiling had
+    # never once seen it run. `roots=` selects the fan-in topology — without it the
+    # phase finds no eligible factor and the cell would time nothing (see
+    # _root_factor_graph).
+    add("flips-mid", 0, 0, 2000, 3, flips=True, roots=9, med=3)
+    add("flips-10opt", 0, 0, 2000, 10, flips=True, roots=16, med=6)
+    add("flips-dense", 0, 0, 5000, 4, flips=True, roots=39, med=4)
     if not quick:
         add("upper-poc", 12, 100, 5000, 3)
         add("dense-mid-10opt", 40, 120, 10000, 10)
@@ -170,6 +268,10 @@ def default_grid(quick: bool) -> List[Cell]:
         add("evpi-8f", 20, 60, 5000, 4, evpi=8)
         add("evalues+path", 20, 60, 5000, 3, ev=True, path=True)
         add("full-load", 30, 90, 5000, 4, evpi=4, ev=True, path=True)
+        # PLoT's live posture: e-values + VOI + flips together on one request
+        # (captured egress carries include_e_values, include_voi,
+        # include_factor_flips on every base call).
+        add("flips-full-load", 0, 0, 5000, 4, evpi=4, ev=True, flips=True, roots=39, med=4)
     return cells
 
 
@@ -188,6 +290,9 @@ def measure(cell: Cell, runs: int) -> Cell:
         evpi_factors=cell.evpi_factors,
         include_e_values=cell.include_e_values,
         include_path=cell.include_path,
+        include_factor_flips=cell.include_factor_flips,
+        root_factors=cell.root_factors,
+        mediators=cell.mediators,
     )
     wc = compute_weighted_cost(req)
     cell.cost_units = wc.total
