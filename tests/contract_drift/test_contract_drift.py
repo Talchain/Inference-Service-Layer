@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from src.models.response_v2 import ISLResponseV2
+from src.models.robustness_v2 import GoalConstraint
 from tests.contract_drift.allowlist import ALLOWLIST, ALLOWLISTED_KEYS
 from tests.contract_drift.drift_baseline import (
     BASELINE_PATH,
@@ -556,4 +557,140 @@ def test_voi_family_domains_are_accepted_by_the_contract() -> None:
     assert rejected == [], (
         "ISL emits a VOI shape the contract would REJECT — a consumer "
         "validating the ISL value against the contract fails:\n  " + "\n  ".join(rejected)
+    )
+
+
+# ============================================================================
+# ROADMAP 2.798 — `GoalConstraint.value_frame` is ACTUALLY COMPARED against the
+# contract, not merely present in the fixture.
+#
+# WHAT WENT WRONG, AND WHY A PIN BUMP ALONE WOULD NOT HAVE FIXED IT.
+# ISL declared `GoalConstraint.value_frame: Optional[Literal['level','delta']]`
+# with a docstring stating it mirrors `@talchain/schemas` 0.38.0
+# `DraftGoalConstraint.value_frame`, while the contract pin sat at 0.30.0 — a
+# contract in which the field does not exist (measured: 0 occurrences). The
+# freshness gate re-derived from that contract and passed the change without
+# ever checking name, enum domain or optionality against the TS source of truth.
+#
+# Bumping the pin puts `value_frame` into the artifact. It does NOT by itself
+# cause anything to look at it: the differ only compares models listed in
+# drift_core.PAIRINGS, and `GoalConstraint` was in no pairing. A bump without
+# the pairing therefore produces the most convincing possible failure — a
+# fresher artifact that carries the field, sitting behind a green gate that
+# never reads it. These tests pin the pairing itself, so that a later tidy-up
+# which drops the `GoalConstraint` entry REDs here instead of silently
+# restoring the unpoliced state.
+#
+# TRAP 13b — each assertion below pins its own precondition rather than
+# agreeing with itself: presence is asserted on BOTH sides (a field absent from
+# ISL cannot be a superset, and a field absent from the contract cannot be
+# rejected), so none of these can pass vacuously.
+# ============================================================================
+
+VALUE_FRAME = "value_frame"
+VALUE_FRAME_DOMAIN = frozenset({"level", "delta"})
+
+
+def test_goal_constraint_is_paired_with_the_contract_constraint_schema() -> None:
+    """The pairing IS the policing. Without it `value_frame` is in the artifact
+    and compared against nothing — the exact state 2.798 shipped in."""
+    pair = PAIRINGS.get(GoalConstraint)
+    assert pair == ("boundary", "DraftGoalConstraintSchema"), (
+        "GoalConstraint is no longer paired with boundary.DraftGoalConstraintSchema "
+        f"(got {pair!r}). Its fields — value_frame among them — are then compared "
+        "against nothing, and the Pydantic model becomes an unpoliced "
+        "hand-maintained mirror of the TS contract again."
+    )
+
+
+def test_value_frame_is_declared_on_both_sides_of_the_pair() -> None:
+    """POSITIVE CONTROL for the two assertions below (trap 13 — an absence or
+    acceptance claim is vacuous until it can see a presence).
+
+    A field ISL does not emit cannot be rejected by the contract, and a field
+    the contract does not declare cannot reject anything. Both would leave the
+    domain test below GREEN while nothing whatsoever was being compared."""
+    artifact = load_artifact()
+    module, export = PAIRINGS[GoalConstraint]  # type: ignore[index]
+
+    contract_props = contract_properties(artifact, module, export)
+    assert VALUE_FRAME in contract_props, (
+        f"the paired contract schema {module}.{export} does not declare "
+        f"{VALUE_FRAME} — the pin has regressed below 0.38.0, or the contract "
+        "dropped the field. Either way ISL's declaration is mirroring nothing."
+    )
+
+    isl_props = pydantic_properties(GoalConstraint)
+    assert VALUE_FRAME in isl_props, (
+        f"GoalConstraint no longer declares {VALUE_FRAME}. The domain test below "
+        "would have stayed GREEN on this — that is the vacuity this control "
+        "exists to catch."
+    )
+
+
+def test_value_frame_domain_is_accepted_by_the_contract() -> None:
+    """The comparison the pairing exists to run: everything ISL can emit for
+    `value_frame` must be accepted by the contract's declared domain.
+
+    This is what REDs if ISL widens the Literal (e.g. adding a third frame)
+    without the contract adopting it — the divergence that shipped unobserved
+    because nothing compared the two sides."""
+    artifact = load_artifact()
+    module, export = PAIRINGS[GoalConstraint]  # type: ignore[index]
+    contract_summary = contract_properties(artifact, module, export)[VALUE_FRAME]
+    isl_summary = pydantic_properties(GoalConstraint)[VALUE_FRAME]
+
+    # Pin the precondition: both sides must be CLOSED enums, or "accepted"
+    # would be true for reasons that have nothing to do with the domains.
+    assert isl_summary.enum is not None, (
+        f"ISL {VALUE_FRAME} is an OPEN string ({isl_summary.describe()}); ISL "
+        "could emit an out-of-domain frame. The Literal has been loosened."
+    )
+    assert contract_summary.enum is not None, (
+        f"contract {module}.{export}.{VALUE_FRAME} is an OPEN string "
+        f"({contract_summary.describe()}) — it no longer constrains anything, so "
+        "acceptance below would be trivially true."
+    )
+
+    assert isl_accepted_by_contract(isl_summary, contract_summary), (
+        f"ISL emits a {VALUE_FRAME} shape the contract would REJECT: "
+        f"ISL {isl_summary.describe()} vs contract {contract_summary.describe()}"
+    )
+
+
+def test_value_frame_domain_is_exactly_the_contract_frame_vocabulary() -> None:
+    """Acceptance is a SUBSET rule, so it stays green if ISL silently NARROWS
+    the domain (dropping 'level' would still be accepted). The frames are a
+    fixed, shared vocabulary — assert equality on both sides so a narrowing on
+    either side is visible."""
+    artifact = load_artifact()
+    module, export = PAIRINGS[GoalConstraint]  # type: ignore[index]
+    contract_enum = contract_properties(artifact, module, export)[VALUE_FRAME].enum
+    isl_enum = pydantic_properties(GoalConstraint)[VALUE_FRAME].enum
+
+    assert contract_enum == VALUE_FRAME_DOMAIN, (
+        f"contract {module}.{export}.{VALUE_FRAME} domain is {sorted(contract_enum or [])}, "
+        f"expected {sorted(VALUE_FRAME_DOMAIN)}. The contract changed the frame "
+        "vocabulary; ISL's conversion logic must be reviewed before re-pinning."
+    )
+    assert isl_enum == VALUE_FRAME_DOMAIN, (
+        f"ISL GoalConstraint.{VALUE_FRAME} domain is {sorted(isl_enum or [])}, "
+        f"expected {sorted(VALUE_FRAME_DOMAIN)}."
+    )
+
+
+def test_value_frame_is_not_carried_as_a_superset_exception() -> None:
+    """While a key sits in the superset baseline the check records only 'the
+    contract lacks this' and never compares domains — the adopted-field-as-
+    exception defect (trap 12). `value_frame` IS contract-declared at 0.38.0, so
+    it must not be carried as one."""
+    carried = sorted(
+        (model, prop) for (model, prop) in SUPERSET_BASELINE_KEYS if prop == VALUE_FRAME
+    )
+    assert carried == [], (
+        f"{VALUE_FRAME} is carried as an ACCEPTED-SUPERSET exception ({carried}), so its "
+        "domain is NOT compared against the contract. The contract declares it on "
+        "boundary.DraftGoalConstraintSchema. Re-run "
+        "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline; "
+        "do not hand-edit."
     )
