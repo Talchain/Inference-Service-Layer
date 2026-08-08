@@ -2,9 +2,9 @@ name: Configuration Validation
 
 on:
   push:
-    branches: [main, staging, develop]
+    branches: [main, staging]
   pull_request:
-    branches: [main, staging, develop]
+    branches: [main, staging]
   workflow_dispatch:
 
 jobs:

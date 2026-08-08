@@ -2,7 +2,7 @@ name: OpenAPI Specification Validation
 
 on:
   push:
-    branches: [main, staging, develop]
+    branches: [main, staging]
     paths:
       - 'src/api/**'
       - 'src/models/**'
@@ -12,7 +12,7 @@ on:
       - 'poetry.lock'
       - '.github/workflows/openapi-validation.yml'
   pull_request:
-    branches: [main, staging, develop]
+    branches: [main, staging]
     paths:
       - 'src/api/**'
       - 'src/models/**'
