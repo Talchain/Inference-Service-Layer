@@ -469,14 +469,23 @@ class TestT7ZeroRNG:
 #  (c) DENORMAL-magnitude bounds — s² underflows to exactly 0.0, so the ν₀
 #      division raises ZeroDivisionError before any solve begins.
 #
-# WHY (a) MUST FIT AND (b)/(c) MUST REFUSE — measured, not decreed. The raw
-# exception escaped the start-ladder loop, so the ladder's SECOND start was never
-# reached: the module's own designed recovery was bypassed by the crash. Driving
-# the fallback start directly at pristine, every (a) row converges to residual
-# 1.1e−16 … 3.2e−15 — seven-plus orders INSIDE the 1e−8 acceptance bound. So the
-# honest outcome for (a) is a real fit, and the fix's job is to let the ladder do
-# what it was built to do. For (b)/(c) the fallback start also fails, so the
-# honest outcome is the typed refusal.
+# WHY (a) MUST FIT — measured, not decreed. The raw exception escaped the
+# start-ladder loop, so the ladder's SECOND start was never reached: the module's
+# own designed recovery was bypassed by the crash. Driving the fallback start
+# directly at pristine, every (a) row converges to residual 1.1e−16 … 3.2e−15 —
+# seven-plus orders INSIDE the 1e−8 acceptance bound, on both platforms measured.
+# So the honest outcome for (a) is a real fit, and the fix's job is to let the
+# ladder do what it was built to do.
+#
+# WHY (b) AND (c) ASSERT THE DISJUNCTION AND NOT "MUST REFUSE" — a correction
+# this battery earned the hard way. Its first version pinned "narrow ⇒ refuse"
+# from a macOS/arm64 sweep; CI's Linux/x86-64 runner FITTED `(0.5 ± 5e−9)` and
+# went red. The fit-vs-refuse outcome at the numerical margin belongs to the
+# platform's libm/BLAS, not to the spec — so the invariant is the one the module
+# actually promises (fit OR typed refusal, never a raw escape), with each branch
+# carrying its own full invariant. A mutant kit could never have caught this: it
+# measures whether a test can DETECT a change, never whether the EXPECTATION is
+# right (trap 13c). Only running on a second machine could, and did.
 #
 # WHY `RANGE_FIT_NONCONVERGENT` AND NOT `RANGE_AT_DOMAIN_EDGE`: the edge code
 # asserts unsatisfiability for EVERY (α, β) — a mathematical claim that is FALSE
@@ -564,24 +573,80 @@ class TestR2916NumericErrorPath:
         assert _residual_of(fitted, a, b) <= ACCEPTANCE_RESIDUAL_TOLERANCE
 
     @pytest.mark.parametrize("key", sorted(NARROW_OVERFLOW))
-    def test_narrow_overflow_refuses_in_type(self, key: str, spy_fitted: type) -> None:
-        """Family (b): both starts blow up ⇒ typed E8 refusal carrying the ladder
-        provenance, and NO FittedDistribution is constructed (constructor spy,
-        not absence-of-return)."""
+    def test_narrow_range_never_escapes_raw(self, key: str, spy_fitted: type) -> None:
+        """Family (b): the contract holds — fit, or typed E8 refusal, never a raw
+        exception.
+
+        ⚠ ORACLE CORRECTED BY MEASUREMENT (trap 13c — a mutant kit validates a
+        test's SENSITIVITY, never the truth of its EXPECTATION). This assertion
+        was first written as "the narrow family must REFUSE", derived from a
+        macOS/arm64 sweep. CI's Linux/x86-64 runner then FITTED `(0.5 ± 5e−9)`
+        and the test went red — correctly. Whether a given narrow range
+        converges is a property of the platform's libm/BLAS, NOT a promise this
+        module makes; the promise is the DISJUNCTION (spec §2.4/§3), and pinning
+        one branch of it pinned an accident of one machine.
+
+        The disjunction is not a licence for "anything goes": the defect under
+        test is the RAW ESCAPE, and each branch below carries the full invariant
+        for that branch. Mutation-checked — reverting the fix REDs this on the
+        raw-escape assertion, and `continue`→`break` leaves it green while REDing
+        the wide family, so the two tests discriminate different properties.
+        """
         a, b = NARROW_OVERFLOW[key]
-        payload = _assert_refuses("RANGE_FIT_NONCONVERGENT", a, b, "unit_interval", spy_fitted)
-        assert payload.lower == a and payload.upper == b  # raw bounds echoed
-        assert payload.starts_tried is not None and payload.starts_tried >= 1
+        before = spy_fitted.constructions
+        try:
+            fitted = fit_range_distribution(lower=a, upper=b, domain="unit_interval")
+        except RangeFitRefusal as refusal:
+            payload = refusal.payload
+            assert payload.code == "RANGE_FIT_NONCONVERGENT", payload
+            assert payload.lower == a and payload.upper == b  # raw bounds echoed
+            assert payload.starts_tried is not None and payload.starts_tried >= 1
+            assert (
+                spy_fitted.constructions == before
+            ), "a FittedDistribution was constructed on a refusal path"
+            return
+        except Exception as raw:  # noqa: BLE001 — this IS the 2.916 defect
+            raise AssertionError(
+                f"RAW {type(raw).__name__} escaped for {key} (a={a!r}, b={b!r}): {raw}. "
+                f"The contract is fit-or-typed-refusal; a numeric failure must never "
+                f"reach the product as an exception."
+            ) from raw
+        # Fit branch: a fit is only acceptable if it is a GOOD fit.
+        assert fitted.family == "beta"
+        assert fitted.alpha is not None and fitted.alpha > 0 and math.isfinite(fitted.alpha)
+        assert fitted.beta is not None and fitted.beta > 0 and math.isfinite(fitted.beta)
+        assert _residual_of(fitted, a, b) <= ACCEPTANCE_RESIDUAL_TOLERANCE
 
     @pytest.mark.parametrize("key", sorted(DENORMAL_WIDTH))
-    def test_denormal_width_refuses_in_type(self, key: str, spy_fitted: type) -> None:
+    def test_denormal_width_never_escapes_raw(self, key: str, spy_fitted: type) -> None:
         """Family (c): s² underflows to 0.0 and the ν₀ division raised
         ZeroDivisionError before any solve. These are IN-CONTRACT inputs — spec
         §3 E6 forbids an epsilon floor, so tiny-but-interior bounds must be
-        answered, not crashed on."""
+        answered, not crashed on.
+
+        Same disjunction as family (b), for the same measured reason: the
+        underflow itself is IEEE-754 deterministic, but what the fallback start
+        then does with the range is the platform's business, not the spec's.
+        """
         a, b = DENORMAL_WIDTH[key]
         assert 0.0 < a < b < 1.0, f"{key} must be interior to the declared domain"
-        _assert_refuses("RANGE_FIT_NONCONVERGENT", a, b, "unit_interval", spy_fitted)
+        before = spy_fitted.constructions
+        try:
+            fitted = fit_range_distribution(lower=a, upper=b, domain="unit_interval")
+        except RangeFitRefusal as refusal:
+            assert refusal.payload.code == "RANGE_FIT_NONCONVERGENT", refusal.payload
+            assert (
+                spy_fitted.constructions == before
+            ), "a FittedDistribution was constructed on a refusal path"
+            return
+        except Exception as raw:  # noqa: BLE001 — this IS the 2.916 defect
+            raise AssertionError(
+                f"RAW {type(raw).__name__} escaped for {key} (a={a!r}, b={b!r}): {raw}. "
+                f"The contract is fit-or-typed-refusal; a numeric failure must never "
+                f"reach the product as an exception."
+            ) from raw
+        assert fitted.alpha is not None and fitted.alpha > 0 and math.isfinite(fitted.alpha)
+        assert _residual_of(fitted, a, b) <= ACCEPTANCE_RESIDUAL_TOLERANCE
 
     @pytest.mark.parametrize("key", sorted(BETA_CORPUS))
     def test_positive_control_healthy_fits_keep_their_residual(self, key: str) -> None:
