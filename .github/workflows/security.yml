@@ -2,9 +2,9 @@ name: Security Scan
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   schedule:
     # Run weekly on Sundays at midnight UTC
     - cron: '0 0 * * 0'
@@ -74,8 +74,13 @@ jobs:
         run: |
           # Generate JSON report for artifact
           bandit -r src/ -f json -o bandit-report.json || true
-          # BLOCKING: Fail on medium+ severity issues
-          bandit -r src/ -f txt --severity-level medium --exit-zero-if-skipped
+          # BLOCKING: Fail on medium+ severity issues.
+          # bandit exits non-zero when it reports issues at/above the severity
+          # threshold and 0 otherwise, which is exactly the blocking behaviour we
+          # want. The previous `--exit-zero-if-skipped` flag does not exist in any
+          # bandit release (only `--exit-zero`), so this step exited 2 (argparse
+          # error) on every run and NEVER executed a scan (ROADMAP 2.913).
+          bandit -r src/ -f txt --severity-level medium
 
       - name: Upload bandit report
         uses: actions/upload-artifact@v4
