@@ -21,9 +21,10 @@ name: Performance Tests
 
 on:
   workflow_dispatch:
-  schedule:
-    # Nightly, off-peak, off-minute
-    - cron: '23 3 * * *'
+  # NOTE (8 Aug 2026, ROADMAP 2.920): the nightly `schedule:` cron was removed - it
+  # had structurally NEVER fired (GitHub runs `schedule:` only from the DEFAULT
+  # branch, main, and this file exists only on `staging`; the note below always said
+  # so). Re-add the cron when this file reaches the default branch (rides row 2.904).
 
 jobs:
   perf:
