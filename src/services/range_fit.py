@@ -71,6 +71,25 @@ RATIFIED_COVERAGE = 0.5
 # constant.
 ACCEPTANCE_RESIDUAL_TOLERANCE = 1e-8
 
+# Numeric blow-ups that can escape one attempt of the beta start-ladder
+# (ROADMAP 2.916). Named ONCE, caught only at the start-attempt boundary in
+# ``_fit_beta`` — never around a model construction, so a pydantic
+# ``ValidationError`` (itself a ``ValueError`` subclass) can never be laundered
+# into a refusal by this tuple.
+#
+# WHY THESE THREE, derived from the arithmetic rather than guessed:
+# - ``OverflowError``   — ``math.exp`` RAISES past ln(DBL_MAX) = 709.782713
+#                         where numpy would quietly return ``inf``. Reached
+#                         inside the residual when hybr's Powell step overshoots
+#                         in log-concentration space.
+# - ``ZeroDivisionError`` — the moment-match's ``m(1−m)/s²`` when ``s²``
+#                         underflows to exactly 0.0 on denormal-magnitude bounds.
+# - ``ValueError``      — ``math.log`` of a non-positive ν₀. Not observed in the
+#                         2.916 sweep; included because it is the same
+#                         start-construction arithmetic and cannot mask product
+#                         logic where it is caught (no model is built there).
+_NUMERIC_FAILURE = (OverflowError, ZeroDivisionError, ValueError)
+
 
 def _quantile_targets(coverage: float) -> Tuple[float, float]:
     """Quantile targets derived from coverage, never written twice (spec §2.1):
@@ -298,9 +317,21 @@ def _fit_beta(
     s = (b - a) / (z_hi - z_lo)  # the §2.3 σ, moment-matched into (0, 1)
 
     starts: List[Tuple[float, float]] = []
-    if s * s < m * (1.0 - m):
-        nu0 = m * (1.0 - m) / (s * s) - 1.0
-        starts.append((float(logit(m)), math.log(nu0)))
+    # The moment-matched start is admitted on FEASIBILITY (ν₀ > 0) — which says
+    # nothing about whether it is COMPUTABLE. On denormal-magnitude bounds s²
+    # underflows to exactly 0.0 and this division raises before any solve begins
+    # (ROADMAP 2.916, family (c)). A start that cannot be constructed is an
+    # infeasible start, and the ladder already has a meaning for that: omit it
+    # and fall through to the concentration-1 start below. No new concept, no
+    # new refusal code.
+    try:
+        if s * s < m * (1.0 - m):
+            nu0 = m * (1.0 - m) / (s * s) - 1.0
+            theta_moment = (float(logit(m)), math.log(nu0))
+            if math.isfinite(theta_moment[0]) and math.isfinite(theta_moment[1]):
+                starts.append(theta_moment)
+    except _NUMERIC_FAILURE:
+        pass
     # Fallback start (also the ONLY start when moment-match is infeasible for
     # a very wide range): concentration 1 at the midpoint.
     starts.append((float(logit(m)), 0.0))
@@ -308,9 +339,30 @@ def _fit_beta(
     starts_tried = 0
     for theta0 in starts:
         starts_tried += 1
-        solution = scipy_optimize.root(residual, list(theta0), method="hybr")
-        alpha, beta_p = recover(solution.x)
-        if accepted(alpha, beta_p):
+        # THE FIT BOUNDARY (ROADMAP 2.916). The guard sits around the whole
+        # ATTEMPT — solve, recover, accept — and deliberately NOT inside
+        # ``residual``: a residual that swallowed its own overflow would hand
+        # hybr a fabricated finite value, changing the solver's trajectory and
+        # therefore the parameters returned for ranges that fit correctly today.
+        # That would trade a loud crash for a quiet numerical difference across
+        # the whole ratified corpus. Here, the arithmetic of every fit that
+        # currently succeeds is untouched: this path engages only where the
+        # module previously raised.
+        #
+        # An attempt that blows up numerically is an attempt that FAILED, which
+        # is exactly what the two-start ladder exists to absorb. Note what the
+        # raw exception used to cost: it escaped this loop, so the second start
+        # was never reached — the module's own designed recovery was bypassed by
+        # the crash. For the wide near-uniform family that second start
+        # converges to residual ~1e−16, so letting the ladder run is not
+        # error-swallowing; it is the difference between a 500 and a real fit.
+        try:
+            solution = scipy_optimize.root(residual, list(theta0), method="hybr")
+            alpha, beta_p = recover(solution.x)
+            is_accepted = accepted(alpha, beta_p)
+        except _NUMERIC_FAILURE:
+            continue
+        if is_accepted:
             # Legitimate fits can carry very large concentrations (the
             # 1e−6-width corpus row fits α = β ≈ 2.27e11): large is not wrong,
             # and no cap is applied — a cap is an undisclosed constant.
