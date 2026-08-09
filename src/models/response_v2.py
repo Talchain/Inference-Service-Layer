@@ -801,9 +801,15 @@ class FactorFlipValueV2(BaseModel):
     current_value: float = Field(
         ...,
         description="The factor's current value, in the NORMALISED [0, 1] domain of "
-        "observed_state.value (0.0 when the factor carries only a "
-        "parameter_uncertainties entry). Denormalisation to user units is PLoT's "
-        "responsibility — ISL never mixes a normalised number with a display unit.",
+        "observed_state.value. When the factor carries only a parameter_uncertainties "
+        "entry, this is the CENTRE OF ITS DECLARED PRIOR (for a uniform prior, the "
+        "midpoint of [range_min, range_max]) — the same value the sampler centres it "
+        "on and the same value the sensitivity probe perturbs around. It was 0.0 "
+        "until ROADMAP 2.1020, which stated a current value outside the factor's own "
+        "declared support. 0.0 remains the value only when there is genuinely nothing "
+        "to go on: no observed value and no prior range. Denormalisation to user "
+        "units is PLoT's responsibility — ISL never mixes a normalised number with a "
+        "display unit.",
     )
     flip_value: Optional[float] = Field(
         None,
@@ -1094,7 +1100,14 @@ class FactorSensitivityV2(BaseModel):
         None, ge=1, description="Rank by importance (1 = most important)"
     )
     observed_value: Optional[float] = Field(
-        None, description="Factor's current value used in calculation"
+        None,
+        description="The factor's OBSERVED value (observed_state.value), or null when the "
+        "factor carries only a declared prior. This is deliberately NOT the central value "
+        "the engine computed with: since ROADMAP 2.1020 a prior-only factor is centred on "
+        "its prior's midpoint, and publishing that number in a field named 'observed' "
+        "would present a derived value as a measured one. Use value_defaulted to tell the "
+        "two apart; the centre itself is published per factor on factor_flip_values."
+        "current_value.",
     )
     interpretation: Optional[str] = Field(
         None, description="Human-readable explanation of sensitivity"
@@ -1115,9 +1128,12 @@ class FactorSensitivityV2(BaseModel):
     )
     value_defaulted: Optional[bool] = Field(
         None,
-        description="True when the factor's value was defaulted (no observed value was "
-        "provided, so it fell back to 0.0). Omitted when an observed value was supplied. "
-        "Derived from the same observed-value check as the ROOT_NODE_DEFAULT_VALUE warning.",
+        description="True when the factor's value was genuinely defaulted — no observed "
+        "value AND no declared prior range to centre on, so it fell back to 0.0. Omitted "
+        "when an observed value was supplied, and (since ROADMAP 2.1020) also omitted when "
+        "the factor is centred on its declared prior: that value is derived, not defaulted. "
+        "Derived from the single central-value resolver, so it cannot drift from the number "
+        "the engine used.",
     )
     # Debug fields (always serialised for debugging)
     zero_reason: Optional[ZeroSensitivityReason] = Field(

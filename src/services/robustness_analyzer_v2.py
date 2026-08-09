@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Tuple
 
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
@@ -997,6 +997,91 @@ class DualUncertaintySampler:
 
 
 # =============================================================================
+# Factor central value (ROADMAP 2.1020) — ONE resolver, every site
+# =============================================================================
+
+# Provenance of a resolved central value. On the wire only as the derived
+# `value_defaulted` flag; kept as an explicit token so no consumer has to
+# re-infer "was this defaulted?" from the number itself (0.0 is a legitimate
+# observed value, so the number can never carry that answer).
+FACTOR_VALUE_SOURCE_OBSERVED = "observed_state"
+FACTOR_VALUE_SOURCE_PRIOR_MIDPOINT = "prior_midpoint"
+FACTOR_VALUE_SOURCE_DEFAULT_ZERO = "default_zero"
+
+
+class ResolvedFactorValue(NamedTuple):
+    """A factor's central value plus where it came from."""
+
+    value: float
+    source: str
+
+
+def resolve_factor_central_value(
+    node: Optional[NodeV2], uncertainty: Optional[ParameterUncertainty]
+) -> ResolvedFactorValue:
+    """THE single definition of "this factor's central value" (ROADMAP 2.1020).
+
+    Defined as **the expectation of the distribution FactorSampler actually
+    draws from**, so that a factor's central value can never disagree with the
+    factor's own samples. Every site that needs a single number for a factor
+    calls this; none derives its own (enforced by
+    ``tests/unit/test_factor_central_value_resolver.py``).
+
+    Derived from the sampler at the bytes, NOT from an opinion about what the
+    fields ought to mean:
+
+    * ``uniform``    — ``_sample_from_distribution`` draws
+      ``rng.uniform(range_min, range_max)`` and IGNORES ``mean`` entirely
+      (``_copula_transform`` likewise, via the Phi coupling). So the centre is
+      the midpoint, and ``observed_state`` does NOT enter: the sampler never
+      consulted it either. ``ParameterUncertainty``'s validator guarantees
+      both bounds are present and ``range_min < range_max`` for this family.
+    * ``normal``     — draws ``rng.normal(mean, std)``. E = mean.
+    * ``point_mass`` — returns ``mean`` exactly. E = mean.
+    * no uncertainty — the factor is never sampled at all; its value is
+      ``observed_state.value`` else 0.0.
+
+    THE DEFECT THIS CLOSES. ``_compute_factor_sensitivity`` and its bootstrap
+    twin previously used ``observed_value if observed_value is not None else
+    0.0`` and never consumed the draws. For a PRIOR-ONLY factor (a stated
+    prior range, no observed value) that is 0.0 — so a stated
+    ``Uniform[0.6, 1.0]`` was probed at -0.04 / +0.04, BOTH outside its own
+    declared support, and normalised by ``max(|0.0|, 0.01) = 0.01`` instead of
+    0.8. The factor's elasticity came out ~80x suppressed: it read as
+    near-zero influence in "what matters most" and fell below the
+    ``|elasticity| >= 0.01`` flip-candidate filter.
+
+    NOT IN SCOPE, DELIBERATELY. ``SCMEvaluatorV2.evaluate`` seeds a ROOT
+    node's BASE from ``observed_state.value`` else 0.0. That answers a
+    different question — "what exogenous base does one deterministic
+    evaluation use" — and carries its own published doctrine (:3615, :3770).
+    Folding it in here would silently move every structural analysis, so the
+    two concepts are named apart rather than having their defaults aligned
+    (CLAUDE.md trap 21). It does not affect the elasticity: the SCM is affine
+    in a root factor's value, so a non-probed factor's base cancels out of
+    ``outcome_high - outcome_low``.
+    """
+    observed: Optional[float] = None
+    if node is not None and node.observed_state and node.observed_state.value is not None:
+        observed = node.observed_state.value
+
+    if uncertainty is not None and uncertainty.distribution == "uniform":
+        range_min = uncertainty.range_min
+        range_max = uncertainty.range_max
+        if range_min is not None and range_max is not None:
+            # E[U(a, b)]. The sampler ignores observed_state for this family,
+            # so the central value must ignore it too, or the two disagree.
+            return ResolvedFactorValue(
+                (range_min + range_max) / 2.0, FACTOR_VALUE_SOURCE_PRIOR_MIDPOINT
+            )
+
+    if observed is not None:
+        return ResolvedFactorValue(observed, FACTOR_VALUE_SOURCE_OBSERVED)
+
+    return ResolvedFactorValue(0.0, FACTOR_VALUE_SOURCE_DEFAULT_ZERO)
+
+
+# =============================================================================
 # Factor Sampler (Phase 2A Part 2)
 # =============================================================================
 
@@ -1077,10 +1162,11 @@ class FactorSampler:
                 # Node doesn't exist - skip (should have been caught by validation)
                 continue
 
-            # Get mean from observed_state.value, default to 0
-            mean = 0.0
-            if node.observed_state and node.observed_state.value is not None:
-                mean = node.observed_state.value
+            # Central value via the ONE resolver (2.1020). Behaviour-identical
+            # to the previous inline read at this site: for normal/point_mass
+            # the resolver returns exactly `observed_state.value else 0.0`, and
+            # the uniform branch below ignores `mean` altogether.
+            mean = resolve_factor_central_value(node, uncertainty).value
 
             # Sample from specified distribution
             sampled_value = self._sample_from_distribution(uncertainty, mean, node_id)
@@ -1115,9 +1201,10 @@ class FactorSampler:
             if uncertainty is None or node is None:
                 # Guarded upstream by validation; skip defensively.
                 continue
-            mean = 0.0
-            if node.observed_state and node.observed_state.value is not None:
-                mean = node.observed_state.value
+            # Same single resolver as the independent path (2.1020), and
+            # likewise behaviour-identical here: `_copula_transform` uses
+            # `mean` only for the normal marginal.
+            mean = resolve_factor_central_value(node, uncertainty).value
             value = self._copula_transform(uncertainty, mean, float(y[i]))
             factor_values[node_id] = value
             self._value_sums[node_id] += value
@@ -4772,12 +4859,18 @@ class RobustnessAnalyzerV2:
             if not node:
                 continue
 
-            # Get observed value
-            observed_value = None
-            if node.observed_state and node.observed_state.value is not None:
-                observed_value = node.observed_state.value
-
-            mean_value = observed_value if observed_value is not None else 0.0
+            # THE FIX (2.1020). Perturb around, and normalise by, the value the
+            # SAMPLER centres this factor on — not `observed_state.value else
+            # 0.0`, which put a prior-only factor's probes outside its own
+            # declared support and divided by the 0.01 epsilon.
+            resolved = resolve_factor_central_value(node, uncertainty)
+            mean_value = resolved.value
+            # `observed_value` stays strictly the OBSERVED value: it is a
+            # different question, and publishing a prior midpoint in a field
+            # named "observed" would be a new fabrication (trap 21).
+            observed_value = (
+                resolved.value if resolved.source == FACTOR_VALUE_SOURCE_OBSERVED else None
+            )
 
             # Determine perturbation amount based on distribution
             if uncertainty.distribution == "normal":
@@ -5427,10 +5520,11 @@ class RobustnessAnalyzerV2:
                 if not node:
                     continue
 
-                observed_value = None
-                if node.observed_state and node.observed_state.value is not None:
-                    observed_value = node.observed_state.value
-                mean_value = observed_value if observed_value is not None else 0.0
+                # Same resolver as `_compute_factor_sensitivity` (2.1020) — the
+                # bootstrap twin must centre and normalise identically or the
+                # elasticity band would describe a different quantity from the
+                # point estimate it bands.
+                mean_value = resolve_factor_central_value(node, uncertainty).value
 
                 if uncertainty.distribution == "normal":
                     delta = uncertainty.std or 0.0
@@ -6632,7 +6726,8 @@ class RobustnessAnalyzerV2:
             self._option_goals(request, evaluator, baseline_config)
         )
 
-        uncertainty_ids = {u.node_id for u in (request.parameter_uncertainties or [])}
+        uncertainty_by_id = {u.node_id: u for u in (request.parameter_uncertainties or [])}
+        uncertainty_ids = set(uncertainty_by_id)
         eligible = [
             node
             for node in request.graph.nodes
@@ -6666,11 +6761,14 @@ class RobustnessAnalyzerV2:
                     "intercepts": intercepts,
                     "slopes": slopes,
                     "spread": max(slopes.values()) - min(slopes.values()),
-                    "current_value": (
-                        node.observed_state.value
-                        if node.observed_state is not None and node.observed_state.value is not None
-                        else 0.0
-                    ),
+                    # 2.1020: the SAME central value the sensitivity probe and
+                    # the sampler use. Publishing 0.0 for a factor whose own
+                    # declared prior is [0.6, 1.0] stated a current value
+                    # outside its support — and would now contradict the
+                    # elasticity in the same response.
+                    "current_value": resolve_factor_central_value(
+                        node, uncertainty_by_id.get(node.id)
+                    ).value,
                 }
             )
 
