@@ -72,11 +72,13 @@ from src.services.compute_governor import RETRY_AFTER_SECONDS, ComputeGovernor, 
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import (
     COMPLEXITY_FORMULA_VERSION,
+    FACTOR_VALUE_SOURCE_DEFAULT_ZERO,
     RobustnessAnalyzerV2,
     WeightedCost,
     compute_effective_seed,
     compute_weighted_cost,
     get_max_cost_units,
+    resolve_factor_central_value,
 )
 from src.utils.business_metrics import track_robustness_analysis
 from src.utils.downside import cvar_from_samples
@@ -1348,6 +1350,10 @@ async def _analyze_robustness_v2_enhanced(
             # surface where each factor's value came from. Echo-only — not consumed
             # in inference.
             nodes_by_id = {n.id: n for n in request.graph.nodes}
+            # 2.1020: needed to resolve each factor's central value the same way
+            # the analyzer did, so `value_defaulted` describes the number the
+            # engine actually used.
+            uncertainty_by_id = {u.node_id: u for u in (request.parameter_uncertainties or [])}
 
             # S2/F-1: bootstrap-blend method_version resolved ONCE per request. It
             # gains a "+env-override" suffix when the STABILITY_CV_* env levers have
@@ -1370,12 +1376,19 @@ async def _analyze_robustness_v2_enhanced(
                 obs = node.observed_state if node is not None else None
                 value_source = obs.source if obs is not None else None
                 value_extraction_type = obs.extractionType if obs is not None else None
-                # Defaulted when no observed value was supplied (mean falls back to 0.0).
-                # Same observed-value check as the ROOT_NODE_DEFAULT_VALUE warning logic.
-                has_observed_value = obs is not None and obs.value is not None
-                value_defaulted: Optional[bool] = (
-                    True if (node is not None and not has_observed_value) else None
-                )
+                # `value_defaulted` claims "no observed value was provided, so it
+                # fell back to 0.0". Since ROADMAP 2.1020 that is no longer the
+                # same question as "was an observed value supplied": a prior-only
+                # factor is centred on its DECLARED PRIOR, not defaulted. Derived
+                # from the one central-value resolver so the flag can never drift
+                # from the number it describes (CLAUDE.md trap 12).
+                value_defaulted: Optional[bool] = None
+                if node is not None:
+                    resolved_value = resolve_factor_central_value(
+                        node, uncertainty_by_id.get(fs.node_id)
+                    )
+                    if resolved_value.source == FACTOR_VALUE_SOURCE_DEFAULT_ZERO:
+                        value_defaulted = True
 
                 factor_sensitivity.append(
                     FactorSensitivityV2(
