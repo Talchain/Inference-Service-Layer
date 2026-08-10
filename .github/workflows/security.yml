@@ -78,7 +78,7 @@ jobs:
           bandit -r src/ -f txt --severity-level medium --exit-zero-if-skipped
 
       - name: Upload bandit report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: bandit-report
@@ -118,7 +118,7 @@ jobs:
             --error src/
 
       - name: Upload Semgrep results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: semgrep-results
