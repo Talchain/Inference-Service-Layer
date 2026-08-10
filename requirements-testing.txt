@@ -1,7 +1,7 @@
 # Performance profiling and load testing requirements
 
 # Load testing
-locust>=2.15.0
+locust>=2.46.3
 
 # Profiling
 psutil>=5.9.0
