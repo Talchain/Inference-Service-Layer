@@ -3168,6 +3168,20 @@ class RobustnessAnalyzerV2:
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
         factor_values_per_sample: List[Dict[str, float]] = []
         tie_count = 0
+        # Representative tie labels are bookkeeping, never scientific draws.
+        # Their frequency depends on the objective, so consuming the edge RNG
+        # here would let an objective change alter later raw model samples.
+        # Streams seed..seed+3 already own edge/factor/output/epsilon sampling.
+        tie_rng = SeededRNG(sampler.rng.seed + 4)
+        # Epsilon is drawn independently for each evaluated option. Bind that
+        # existing stream's allocation to option identity, not request order,
+        # so rearranging options cannot change their samples or comparison.
+        # Keep the zero-epsilon schedule untouched for historical parity.
+        evaluation_options = request.options
+        if evaluator._epsilon_rng is not None and any(
+            node.epsilon_std > 0 for node in request.graph.nodes
+        ):
+            evaluation_options = sorted(request.options, key=lambda option: option.id)
 
         # Initialize constraint node values tracking if needed
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]] = None
@@ -3228,7 +3242,7 @@ class RobustnessAnalyzerV2:
 
             # Evaluate each option
             sample_outcomes = {}
-            for option in request.options:
+            for option in evaluation_options:
                 if constraint_target_nodes:
                     # Use evaluate_multi to get both goal and constraint node values
                     all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
@@ -3325,12 +3339,9 @@ class RobustnessAnalyzerV2:
                 split_value = 1.0 / len(winners)
                 for winner in winners:
                     option_wins[winner] += split_value
-                # Use deterministic random tie-breaking via the existing sampler RNG.
-                # This preserves full determinism (same seed = same tie-break result)
-                # while eliminating insertion-order bias that arises from always
-                # picking winners[0].  We reuse sampler.rng so the RNG stream
-                # remains a single deterministic sequence — no new sub-seed needed.
-                winner_per_sample.append(str(sampler.rng.choice(winners)))
+                # This representative is separate from exact fractional credit.
+                # Stable ID order avoids request-order-dependent tie labels.
+                winner_per_sample.append(str(tie_rng.choice(sorted(winners))))
 
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
@@ -3964,8 +3975,18 @@ class RobustnessAnalyzerV2:
                 opt_id: abs(val - objective.target_delta) for opt_id, val in finite_outcomes.items()
             }
 
-        best_distance = min(distances.values())
-        return [opt_id for opt_id, dist in distances.items() if dist == best_distance]
+        # Finite outcomes can still overflow during frame conversion or distance
+        # subtraction. An unrepresentable score earns no comparison credit;
+        # all-overflow draws must not fabricate an all-option tie.
+        finite_distances = {
+            option_id: distance
+            for option_id, distance in distances.items()
+            if math.isfinite(distance)
+        }
+        if not finite_distances:
+            return []
+        best_distance = min(finite_distances.values())
+        return [opt_id for opt_id, dist in finite_distances.items() if dist == best_distance]
 
     @staticmethod
     def _resolve_objective_plan(

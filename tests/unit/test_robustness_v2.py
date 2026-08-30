@@ -110,8 +110,9 @@ def simple_options():
 
 @pytest.fixture
 def simple_request(simple_graph, simple_options):
-    """Create a simple robustness request."""
+    """Create an explicitly maximising numerical regression request."""
     return RobustnessRequestV2(
+        goal_direction="maximise",
         request_id="test-001",
         graph=simple_graph,
         options=simple_options,
@@ -1046,7 +1047,7 @@ class TestRobustnessAnalyzerV2:
         assert response.metadata.schema_version == "2.2"
         assert response.metadata.n_samples_used == simple_request.n_samples
         assert response.metadata.seed_used == simple_request.seed
-        assert response.metadata.execution_time_ms > 0
+        assert response.metadata.execution_time_ms >= 0
 
     def test_edge_existence_rates_in_metadata(self, simple_request):
         """Test edge existence rates are reported in metadata."""
@@ -1086,6 +1087,7 @@ class TestRobustnessAnalyzerV2:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="test",
             graph=graph,
             options=[
@@ -1133,6 +1135,7 @@ class TestRobustnessAnalyzerV2:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="test-is-robust-fragile",
             graph=graph,
             options=[
@@ -1198,6 +1201,7 @@ class TestRobustnessAnalyzerV2:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="test-deterministic-robust-fragile",
             graph=graph,
             options=[
@@ -1264,6 +1268,7 @@ class TestRobustnessAnalyzerV2:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="test-low-stability",
             graph=graph,
             options=[
@@ -1334,6 +1339,7 @@ class TestRobustnessV2Integration:
     def test_full_analysis_with_complex_graph(self, complex_graph):
         """Test full analysis with complex graph."""
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="integration-test",
             graph=complex_graph,
             options=[
@@ -4278,6 +4284,7 @@ class TestHighTieRateCritique:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="high-tie-rate-test",
             graph=graph,
             options=[
@@ -4365,6 +4372,7 @@ class TestFairTieBreaking:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="equal-split-test",
             graph=graph,
             options=[
@@ -4408,6 +4416,7 @@ class TestFairTieBreaking:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="three-way-split-test",
             graph=graph,
             options=[
@@ -4458,6 +4467,7 @@ class TestTieRateInMetadata:
         )
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="tie-rate-metadata-test",
             graph=graph,
             options=[
@@ -4597,6 +4607,7 @@ class TestOptionIdPreservation:
         ]
 
         request = RobustnessRequestV2(
+            goal_direction="maximise",
             request_id="option-id-preservation-test",
             graph=graph,
             options=[

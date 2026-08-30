@@ -4,7 +4,7 @@
     "generator": "Inference-Service-Layer/scripts/contract_schema/generate_contract_schema.mjs",
     "package_name": "@talchain/schemas",
     "package_version": "0.52.0",
-    "source_ref": "f72c336f8f4b27f15f9096e883917bab22751998",
+    "source_ref": "f152a388c3fe323da52cdb5d52b4d234458865e0",
     "source_repo": "Talchain/olumi-schemas",
     "zod-to-json-schema": "3.22.5"
   },

@@ -3,7 +3,7 @@
     "purpose": "Ratchet baseline of KNOWN two-way drift (omissions + supersets) between ISL V2 response models and @talchain/schemas. Any drift NOT listed here fails CI loud. Add a new entry ONLY with a decision ref by re-running the refresh script on an intentional change; otherwise fix the drift.",
     "generated_by": "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline",
     "source_repo": "Talchain/olumi-schemas",
-    "source_ref": "f72c336f8f4b27f15f9096e883917bab22751998",
+    "source_ref": "f152a388c3fe323da52cdb5d52b4d234458865e0",
     "package_name": "@talchain/schemas",
     "package_version": "0.52.0",
     "omission_count": 50,

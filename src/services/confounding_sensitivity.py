@@ -16,7 +16,7 @@ import copy
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from src.models.robustness_v2 import (
     EdgeV2,
@@ -172,21 +172,9 @@ def _build_intervention_options(
 
 def _get_baseline_winner(
     analyzer: RobustnessAnalyzerV2,
-    graph: GraphV2,
-    options: List[InterventionOption],
-    goal_node_id: str,
-    seed: int,
-    n_samples: int,
+    request: RobustnessRequestV2,
 ) -> Optional[str]:
     """Run baseline analysis; absence never licenses an invented winner."""
-    request = RobustnessRequestV2(
-        request_id="confounding-baseline",
-        graph=graph,
-        options=options,
-        goal_node_id=goal_node_id,
-        n_samples=n_samples,
-        seed=seed,
-    )
     response = analyzer.analyze(request)
     return response.recommended_option_id
 
@@ -198,6 +186,9 @@ def analyze_confounding_sensitivity(
     bidirected_pairs: List[Tuple[str, str]],
     seed: int = 42,
     n_samples: int = 1000,
+    goal_direction: Optional[Literal["maximise", "minimise", "target"]] = None,
+    goal_threshold: Optional[float] = None,
+    goal_threshold_frame: Optional[Literal["level", "delta"]] = None,
 ) -> Optional[ConfoundingSensitivityResult]:
     """Run confounding sensitivity analysis for non-identifiable bidirected pairs.
 
@@ -213,9 +204,12 @@ def analyze_confounding_sensitivity(
         bidirected_pairs: Pairs from identifiability analysis.
         seed: RNG seed (same for all sweeps).
         n_samples: MC samples per simulation run.
+        goal_direction: Explicit caller objective; absence withholds comparison.
+        goal_threshold: Existing target/threshold value, forwarded unchanged.
+        goal_threshold_frame: Existing target/threshold frame, forwarded unchanged.
 
     Returns:
-        ConfoundingSensitivityResult with per-pair sensitivity and aggregate.
+        ConfoundingSensitivityResult, or None without a unique objective winner.
     """
     t0 = time.time()
 
@@ -231,10 +225,19 @@ def analyze_confounding_sensitivity(
     median_strength = _compute_median_edge_strength(graph)
     analyzer = RobustnessAnalyzerV2()
 
-    # Compute baseline winner (confounder strength = 0)
-    baseline_winner = _get_baseline_winner(
-        analyzer, graph, intervention_options, goal_node_id, seed, n_samples
+    # Build one objective-bearing request and retain it unchanged across sweeps.
+    baseline_request = RobustnessRequestV2(
+        request_id="confounding-baseline",
+        graph=graph,
+        options=intervention_options,
+        goal_node_id=goal_node_id,
+        n_samples=n_samples,
+        seed=seed,
+        goal_direction=goal_direction,
+        goal_threshold=goal_threshold,
+        goal_threshold_frame=goal_threshold_frame,
     )
+    baseline_winner = _get_baseline_winner(analyzer, baseline_request)
     if baseline_winner is None:
         # This endpoint's current request has no objective carrier. Preserve the
         # structural identifiability result, but withhold recommendation sensitivity.
@@ -252,13 +255,11 @@ def analyze_confounding_sensitivity(
             confounder_strength = multiple * median_strength
             modified_graph = _inject_confounder(graph, node_a, node_b, confounder_strength)
 
-            request = RobustnessRequestV2(
-                request_id=f"confounding-{node_a}-{node_b}-{multiple}x",
-                graph=modified_graph,
-                options=intervention_options,
-                goal_node_id=goal_node_id,
-                n_samples=n_samples,
-                seed=seed,
+            request = baseline_request.model_copy(
+                update={
+                    "request_id": f"confounding-{node_a}-{node_b}-{multiple}x",
+                    "graph": modified_graph,
+                }
             )
             response = analyzer.analyze(request)
             current_winner = response.recommended_option_id

@@ -9,10 +9,11 @@ from pydantic import ValidationError
 
 from src.api.main import app
 from src.api import robustness as api
-from src.models.robustness_v2 import RobustnessRequestV2, RobustnessResponseV2
+from src.models.robustness_v2 import RobustnessRequestV2
 from src.models.robustness_v2 import ObjectiveRanking
 from src.models.response_v2 import ObjectiveRankingV2
 from src.services import robustness_analyzer_v2 as science
+from src.services import robustness_worker as worker
 
 
 @pytest.fixture
@@ -20,13 +21,14 @@ def client(monkeypatch):
     root = Path(__file__).resolve().parents[2]
     assert Path(science.__file__).resolve() == root / "src/services/robustness_analyzer_v2.py"
     assert Path(api.__file__).resolve() == root / "src/api/robustness.py"
+    assert Path(worker.__file__).resolve() == root / "src/services/robustness_worker.py"
 
     async def run(_app, request, request_id, _key, _cost):
         result = science.RobustnessAnalyzerV2().analyze(
             request.model_copy(update={"request_id": request_id})
         )
         # Exercise the same dump/validate boundary as the process worker.
-        return RobustnessResponseV2.model_validate_json(result.model_dump_json()), None
+        return worker.decode_analysis_response(worker.encode_analysis_response(result)), None
 
     monkeypatch.setattr(api, "_admit_and_run", run)
     return TestClient(app)
@@ -202,6 +204,36 @@ def test_unrelated_metadata_does_not_move_science(client):
     ]
 
 
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("epsilon", [0.0, 1.0])
+def test_option_reordering_cannot_reallocate_epsilon_draws(client, version, epsilon):
+    data = payload()
+    data["graph"]["nodes"][1]["epsilon_std"] = epsilon
+    for option, value in zip(data["options"], [0.49, 0.5, 0.51]):
+        option["interventions"]["driver"] = value
+    left = post(client, data, version)
+    data["options"].reverse()
+    right = post(client, data, version)
+    assert left["objective_ranking"] == right["objective_ranking"]
+    assert options(left, version) == options(right, version)
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_objective_tie_frequency_cannot_change_raw_outcomes(client, version):
+    data = payload()
+    data["graph"]["nodes"][1]["epsilon_std"] = 1.0
+    for option, value in zip(data["options"], [0.49, 0.5, 0.51]):
+        option["interventions"]["driver"] = value
+    outcomes = []
+    for direction in ("maximise", "minimise", "target", None):
+        data["goal_direction"] = direction
+        data.update(goal_threshold=0.5, goal_threshold_frame="delta")
+        result = post(client, data, version)
+        field = "outcome" if version == 2 else "outcome_distribution"
+        outcomes.append({key: row[field] for key, row in options(result, version).items()})
+    assert all(value == outcomes[0] for value in outcomes[1:])
+
+
 def test_no_informative_draws_withholds_instead_of_zero_tie(client, monkeypatch):
     monkeypatch.setattr(
         science.RobustnessAnalyzerV2, "_winners_for_draw", staticmethod(lambda *args: [])
@@ -209,6 +241,23 @@ def test_no_informative_draws_withholds_instead_of_zero_tie(client, monkeypatch)
     result = post(client, payload())
     assert result["objective_ranking"]["withheld_reason"] == "no_informative_draws"
     assert result["objective_ranking"]["ranked_options"] == []
+    assert all("win_probability" not in row for row in result["options"])
+
+
+def test_real_all_nonfinite_draws_withhold_through_worker_codec(client):
+    from tests.integration.test_numerics_honesty_batch import _aggregator_all_nan_request
+
+    data = _aggregator_all_nan_request()
+    data["goal_direction"] = "maximise"
+    result = post(client, data)
+    assert result["objective_ranking"] == {
+        "direction": "maximise",
+        "attested": True,
+        "status": "withheld",
+        "withheld_reason": "no_informative_draws",
+        "ranked_options": [],
+    }
+    assert all(row["status"] == "failed" for row in result["options"])
     assert all("win_probability" not in row for row in result["options"])
 
 

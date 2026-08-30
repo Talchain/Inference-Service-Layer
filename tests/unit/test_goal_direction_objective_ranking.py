@@ -462,3 +462,24 @@ class TestOneWinnerRule:
         assert (
             RobustnessAnalyzerV2._winners_for_draw({"a": 0.1, "b": 0.9}, plan, float("nan")) == []
         )
+
+
+@pytest.mark.parametrize(
+    "objective,reference",
+    [
+        (ObjectivePlan(sense="target", attested=True, target_delta=-1e308), None),
+        (
+            ObjectivePlan(sense="target", attested=True, target_level=-1e308, goal_baseline=1e308),
+            0.0,
+        ),
+    ],
+)
+def test_target_distance_overflow_does_not_fabricate_tie(objective, reference):
+    # Finite goal outcomes do not guarantee representable target distances.
+    assert (
+        RobustnessAnalyzerV2._winners_for_draw({"a": 1e308, "b": 1.1e308}, objective, reference)
+        == []
+    )
+    assert RobustnessAnalyzerV2._winners_for_draw(
+        {"a": -1e308, "b": 1.1e308}, objective, reference
+    ) == ["a"]

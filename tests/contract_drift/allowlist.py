@@ -123,7 +123,7 @@ _REF_ANALYSIS_FACT_STATUS = (
 
 _REF_OBJECTIVE_AUTHORITY = (
     "Science objective authority reconciliation 2026-08-30; companion schemas "
-    "f72c336f8f4b27f15f9096e883917bab22751998 (0.52.0). Objective direction "
+    "f152a388c3fe323da52cdb5d52b4d234458865e0 (0.52.0). Objective direction "
     "means maximise/minimise/target, not an influence sign or ingress/egress. "
     "Objective status means comparison availability, not option compute status, "
     "UI command application, elicitation lifecycle, disagreement lifecycle or "

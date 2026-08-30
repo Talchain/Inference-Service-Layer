@@ -261,6 +261,7 @@ class TestSinglePairFlips:
         bidirected_pairs = [("a", "y")]
 
         result = analyze_confounding_sensitivity(
+            goal_direction="maximise",
             graph=graph,
             options=options,
             goal_node_id=goal,
@@ -299,6 +300,7 @@ class TestSinglePairHolds:
         bidirected_pairs = [("a", "y")]
 
         result = analyze_confounding_sensitivity(
+            goal_direction="maximise",
             graph=graph,
             options=options,
             goal_node_id=goal,
@@ -330,6 +332,7 @@ class TestMultipleBidirectedPairs:
         graph, options, goal, bidirected_pairs = _make_multi_bidirected_graph()
 
         result = analyze_confounding_sensitivity(
+            goal_direction="maximise",
             graph=graph,
             options=options,
             goal_node_id=goal,
@@ -367,6 +370,7 @@ class TestDeterminism:
         bidirected_pairs = [("a", "y")]
 
         r1 = analyze_confounding_sensitivity(
+            goal_direction="maximise",
             graph=graph,
             options=options,
             goal_node_id=goal,
@@ -375,6 +379,7 @@ class TestDeterminism:
             n_samples=500,
         )
         r2 = analyze_confounding_sensitivity(
+            goal_direction="maximise",
             graph=graph,
             options=options,
             goal_node_id=goal,
@@ -459,6 +464,7 @@ class TestLatencyBudget:
 
         t0 = time.time()
         result = analyze_confounding_sensitivity(
+            goal_direction="maximise",
             graph=graph,
             options=options,
             goal_node_id=goal,
