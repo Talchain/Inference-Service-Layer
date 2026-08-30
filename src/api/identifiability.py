@@ -453,32 +453,33 @@ async def analyze_identifiability_v2(
                     n_samples=request.n_samples or 1000,
                 )
 
-                confounding_response = ConfoundingSensitivityResponse(
-                    pairs=[
-                        ConfoundingPairResponse(
-                            node_a=p.node_a,
-                            node_b=p.node_b,
-                            flip_threshold_raw=p.flip_threshold_raw,
-                            flip_threshold_relative=p.flip_threshold_relative,
-                            baseline_winner=p.baseline_winner,
-                            flipped_winner=p.flipped_winner,
-                            interpretation=p.interpretation,
-                        )
-                        for p in sensitivity_result.pairs
-                    ],
-                    overall_robust=sensitivity_result.overall_robust,
-                    median_edge_strength=sensitivity_result.median_edge_strength,
-                )
+                if sensitivity_result is not None:
+                    confounding_response = ConfoundingSensitivityResponse(
+                        pairs=[
+                            ConfoundingPairResponse(
+                                node_a=p.node_a,
+                                node_b=p.node_b,
+                                flip_threshold_raw=p.flip_threshold_raw,
+                                flip_threshold_relative=p.flip_threshold_relative,
+                                baseline_winner=p.baseline_winner,
+                                flipped_winner=p.flipped_winner,
+                                interpretation=p.interpretation,
+                            )
+                            for p in sensitivity_result.pairs
+                        ],
+                        overall_robust=sensitivity_result.overall_robust,
+                        median_edge_strength=sensitivity_result.median_edge_strength,
+                    )
 
-                logger.info(
-                    "confounding_sensitivity_completed",
-                    extra={
-                        "request_id": request_id,
-                        "n_bidirected_pairs": len(bidirected_pairs),
-                        "overall_robust": sensitivity_result.overall_robust,
-                        "latency_ms": sensitivity_result.latency_ms,
-                    },
-                )
+                    logger.info(
+                        "confounding_sensitivity_completed",
+                        extra={
+                            "request_id": request_id,
+                            "n_bidirected_pairs": len(bidirected_pairs),
+                            "overall_robust": sensitivity_result.overall_robust,
+                            "latency_ms": sensitivity_result.latency_ms,
+                        },
+                    )
 
         logger.info(
             "identifiability_v2_analysis_completed",

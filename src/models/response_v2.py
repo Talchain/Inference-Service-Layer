@@ -390,7 +390,8 @@ class OptionResultV2(BaseModel):
         None,
         ge=0,
         le=1,
-        description="P(this option is best) - fraction of samples where this option had highest outcome",
+        description="Tie-split winning credit divided by requested model draws under the "
+        "stated objective, before output-only noise. Not calibrated confidence.",
     )
     probability_of_goal: Optional[float] = Field(
         None,
@@ -1669,43 +1670,63 @@ class SamplePopulationProvenanceV2(BaseModel):
 # =============================================================================
 
 
+class ObjectiveRankedOptionV2(BaseModel):
+    """Producer order and share; equal dense ranks do not license a unique crown."""
+
+    option_id: str = Field(..., min_length=1)
+    rank: int = Field(..., ge=1)
+    win_probability: float = Field(..., ge=0, le=1)
+
+
 class ObjectiveRankingV2(BaseModel):
-    """What the ranking on this response optimised (ROADMAP 2.1192).
+    """Authoritative objective comparison for this scientific run.
 
-    ``win_probability`` is the fraction of Monte Carlo draws on which an option
-    scored best under the request's objective sense. Until 2.1192 that sense was
-    hardcoded to "largest goal-node value" and nothing on the wire said so, so a
-    consumer rendering "which option wins" was making a claim the number did not
-    support: measured at 28fe0c95, the crowned option could carry
-    ``probability_of_goal = 0.0``, and supplying the user's target moved the
-    ranking by exactly nothing.
-
-    This block is the provenance of the single ranking, not a rival to it.
+    win_probability is tie-split winning credit / requested joint draws,
+    before output-only noise, not calibrated confidence. Consumers retain this
+    order and its shares when filtering eligibility; equal ranks remain tied.
     """
 
-    direction: Literal["maximise", "minimise", "target"] = Field(
-        ...,
-        description="The objective sense the winner rule applied. Under "
-        "status='withheld' this is the sense that was REQUESTED and refused, "
-        "which is what a surface needs in order to say what could not be done.",
-    )
-    attested: bool = Field(
-        ...,
-        description="True when the caller stated the objective. FALSE means "
-        "'maximise' is ISL's disclosed default and the team's aim was never "
-        "supplied — a ranking a surface should present as an assumption, or ask "
-        "about, rather than as the answer to their goal.",
-    )
-    status: Literal["computed", "withheld"] = Field(
-        ...,
-        description="'withheld' means NO ranking exists in this response: "
-        "win_probability is omitted on every option and the robustness block "
-        "(whose confidence IS the recommended option's win share) is omitted "
-        "too. It is the absence of a ranking, never a flat one.",
-    )
-    withheld_reason: Optional[str] = Field(
-        None, description="Machine-readable reason when status='withheld'."
-    )
+    direction: Optional[Literal["maximise", "minimise", "target"]] = None
+    attested: bool
+    status: Literal["computed", "withheld"]
+    withheld_reason: Optional[str] = Field(None, min_length=1)
+    ranked_options: List[ObjectiveRankedOptionV2]
+
+    @model_validator(mode="after")
+    def validate_ranking_state(self) -> "ObjectiveRankingV2":
+        if self.status == "withheld":
+            if self.ranked_options or not self.withheld_reason:
+                raise ValueError("Withheld ranking requires a reason and no ranked options")
+        elif (
+            not self.attested
+            or self.direction is None
+            or self.withheld_reason is not None
+            or not self.ranked_options
+            or not any(row.win_probability > 0 for row in self.ranked_options)
+        ):
+            raise ValueError("Computed ranking requires a stated objective and informative draws")
+        ids = set()
+        dense_rank = 1
+        for index, row in enumerate(self.ranked_options):
+            if row.option_id in ids:
+                raise ValueError("Duplicate ranked option identity")
+            ids.add(row.option_id)
+            if index:
+                previous = self.ranked_options[index - 1]
+                if row.win_probability > previous.win_probability or (
+                    row.win_probability == previous.win_probability
+                    and row.option_id < previous.option_id
+                ):
+                    raise ValueError(
+                        "Ranked options must retain share order and stable ID tie order"
+                    )
+                if row.win_probability < previous.win_probability:
+                    dense_rank += 1
+            if row.rank != dense_rank:
+                raise ValueError("Equal shares require equal dense ranks")
+        if sum(row.win_probability for row in self.ranked_options) > 1 + 1e-12:
+            raise ValueError("Tie-split winning shares cannot total more than one")
+        return self
 
 
 class ISLResponseV2(BaseModel):

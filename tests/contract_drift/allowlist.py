@@ -121,6 +121,18 @@ _REF_ANALYSIS_FACT_STATUS = (
     "re-vendor in its train), or if ISL ever emits an analysis_fact directly."
 )
 
+_REF_OBJECTIVE_AUTHORITY = (
+    "Science objective authority reconciliation 2026-08-30; companion schemas "
+    "f72c336f8f4b27f15f9096e883917bab22751998 (0.52.0). Objective direction "
+    "means maximise/minimise/target, not an influence sign or ingress/egress. "
+    "Objective status means comparison availability, not option compute status, "
+    "UI command application, elicitation lifecycle, disagreement lifecycle or "
+    "analysis-fact availability. UiDirective.source is command origin, not "
+    "critique provenance. These exact cross-model pairs have distinct enclosing "
+    "contracts; ObjectiveRankingV2 is separately paired with its own schema so "
+    "same-seam drift still fails. This enumeration requires independent review."
+)
+
 ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
     {
         # ------------------------------------------------------------------
@@ -296,6 +308,147 @@ ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
             "index.UnavailableFactSchema.status",
             "ACCEPTED-UNRELATED-SEAM",
             _REF_ANALYSIS_FACT_STATUS,
+        ),
+        # Exact unrelated-seam collisions introduced by the 0.52.0 pin/pairing.
+        AllowlistEntry(
+            "CritiqueV2",
+            "source",
+            "boundary.UiDirectiveBlockSchema.source",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "EdgeSensitivityV2",
+            "direction",
+            "boundary.AnalysisEnrichmentSchema.objective_ranking.direction",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "EdgeSensitivityV2",
+            "direction",
+            "boundary.EnrichmentObjectiveRankingSchema.direction",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "FactorSensitivityV2",
+            "direction",
+            "boundary.AnalysisEnrichmentSchema.objective_ranking.direction",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "FactorSensitivityV2",
+            "direction",
+            "boundary.EnrichmentObjectiveRankingSchema.direction",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "direction",
+            "boundary.BoundaryErrorSchema.direction",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "direction",
+            "index.FactorSensitivitySchema.direction",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "boundary.BlockSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "boundary.DisagreementSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "boundary.ElicitationRoundSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "boundary.GraphPatchBlockSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "boundary.OlumiResponseSchema.blocks[].status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "index.AnalysisFactSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "index.AnalysisReadyV3Schema.options[].status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "index.AnalysisReadyV3Schema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "index.OptionForAnalysisSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "index.SuppressedFactSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "ObjectiveRankingV2",
+            "status",
+            "index.UnavailableFactSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "boundary.DisagreementSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
+        ),
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "boundary.ElicitationRoundSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_OBJECTIVE_AUTHORITY,
         ),
     }
 )

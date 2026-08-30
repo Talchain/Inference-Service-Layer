@@ -38,6 +38,7 @@ EVERY assertion below binds to its option by IDENTITY (``option_id``), never by
 a value predicate another option could satisfy.
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -55,9 +56,9 @@ import src.services.robustness_analyzer_v2 as _analyzer_module
 
 
 def test_module_under_test_is_this_worktree() -> None:
-    assert _analyzer_module.__file__.endswith(
-        "src/services/robustness_analyzer_v2.py"
-    ), _analyzer_module.__file__
+    assert Path(_analyzer_module.__file__).resolve() == (
+        Path(__file__).resolve().parents[2] / "src/services/robustness_analyzer_v2.py"
+    )
 
 
 N_SAMPLES = 400
@@ -107,7 +108,7 @@ def _request(**overrides: Any) -> RobustnessRequestV2:
     return RobustnessRequestV2(**payload)
 
 
-def _wins(response: Any) -> Dict[str, float]:
+def _wins(response: Any) -> Dict[str, Optional[float]]:
     """Win probability keyed by option IDENTITY, never by position or value."""
     return {r.option_id: r.win_probability for r in response.results}
 
@@ -309,14 +310,11 @@ class TestUndeterminableDirectionWithholdsTheRanking:
         )
         assert "OBJECTIVE_RANKING_WITHHELD" in _warning_codes(response)
 
-        # NO ranking: every option's win share is zero because no draw was
-        # awarded to anyone, and the wire omits the field entirely (see the
-        # api-layer test below). A zero here is the analyzer's internal record
-        # of "no draw had a winner", not a measured comparison.
-        wins = _wins(response)
-        assert wins["modest"] == 0.0, wins
-        assert wins["aggressive"] == 0.0, wins
-        assert response.recommendation_confidence == 0.0
+        # Absence survives internal serialization too; zero would imply a comparison.
+        assert _wins(response) == {"modest": None, "aggressive": None}
+        assert response.recommendation_confidence is None
+        assert response.recommended_option_id is None
+        assert response.robustness is None
 
         # And nothing may restate the ranking through a side channel.
         assert response.conditional_winners is None
@@ -375,44 +373,27 @@ class TestUndeterminableDirectionWithholdsTheRanking:
 
 
 class TestAbsentDirectionIsDisclosedNotAssumedSilently:
-    """A KNOWN, DELIBERATE gap, pinned to EXACTLY its current shape.
-
-    An absent ``goal_direction`` still ranks by ``max()``: ISL declares this
-    field before any producer stamps it, and withholding every ranking in the
-    window between the two halves would take a journey-witnessed capability dark
-    for a contract that has not landed. The cost is stated on the wire rather
-    than hidden. These tests RED if the behaviour changes in EITHER direction —
-    if the disclosure disappears, and if the default silently becomes something
-    other than an unattested maximise.
-    """
-
-    def test_absent_direction_ranks_by_maximise_and_says_so(self) -> None:
+    def test_absent_direction_withholds_without_inventing_direction(self) -> None:
         response = RobustnessAnalyzerV2().analyze(_request())
-        assert _wins(response)["aggressive"] > 0.99
-        assert response.objective_ranking.direction == "maximise"
+        assert _wins(response) == {"modest": None, "aggressive": None}
+        assert response.objective_ranking.direction is None
         assert response.objective_ranking.attested is False
-        assert response.objective_ranking.status == "computed"
+        assert response.objective_ranking.status == "withheld"
+        assert response.objective_ranking.ranked_options == []
         assert "GOAL_DIRECTION_UNATTESTED" in _warning_codes(response)
 
     def test_an_attested_maximise_carries_no_unattested_warning(self) -> None:
-        """The discrimination: the warning tracks ATTESTATION, not the sense.
-
-        Without this pair, a warning emitted unconditionally would pass the test
-        above while telling every consumer that every ranking is an assumption.
-        """
         response = RobustnessAnalyzerV2().analyze(_request(goal_direction="maximise"))
         assert response.objective_ranking.attested is True
         assert "GOAL_DIRECTION_UNATTESTED" not in _warning_codes(response)
+        assert _wins(response) == {"modest": 0.0, "aggressive": 1.0}
 
-    def test_absent_direction_is_numerically_identical_to_attested_maximise(self) -> None:
-        """No-regression, by execution rather than by assertion.
-
-        Every deployed request today omits ``goal_direction``. If this pair ever
-        diverges, the field changed a number it promised not to.
-        """
-        assert _wins(RobustnessAnalyzerV2().analyze(_request())) == _wins(
-            RobustnessAnalyzerV2().analyze(_request(goal_direction="maximise"))
-        )
+    def test_missing_direction_does_not_discard_marginal_outcomes(self) -> None:
+        missing = RobustnessAnalyzerV2().analyze(_request())
+        explicit = RobustnessAnalyzerV2().analyze(_request(goal_direction="maximise"))
+        assert [r.outcome_distribution for r in missing.results] == [
+            r.outcome_distribution for r in explicit.results
+        ]
 
 
 # ==========================================================================
@@ -476,11 +457,8 @@ class TestOneWinnerRule:
         whole draw rather than one option — recorded uninformative, exactly as a
         draw with no finite option already is.
         """
-        plan = ObjectivePlan(
-            sense="target", attested=True, target_level=0.6, goal_baseline=0.5
-        )
+        plan = ObjectivePlan(sense="target", attested=True, target_level=0.6, goal_baseline=0.5)
         assert RobustnessAnalyzerV2._winners_for_draw({"a": 0.1, "b": 0.9}, plan, None) == []
         assert (
-            RobustnessAnalyzerV2._winners_for_draw({"a": 0.1, "b": 0.9}, plan, float("nan"))
-            == []
+            RobustnessAnalyzerV2._winners_for_draw({"a": 0.1, "b": 0.9}, plan, float("nan")) == []
         )

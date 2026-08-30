@@ -4304,26 +4304,94 @@
         "title": "NodeV2",
         "type": "object"
       },
+      "ObjectiveRankedOption": {
+        "description": "One entry in the producer's ordered, tie-aware comparative result.",
+        "properties": {
+          "option_id": {
+            "minLength": 1,
+            "title": "Option Id",
+            "type": "string"
+          },
+          "rank": {
+            "description": "Dense rank; equal shares have equal rank.",
+            "minimum": 1.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "win_probability": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Win Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "option_id",
+          "rank",
+          "win_probability"
+        ],
+        "title": "ObjectiveRankedOption",
+        "type": "object"
+      },
+      "ObjectiveRankedOptionV2": {
+        "description": "Producer order and share; equal dense ranks do not license a unique crown.",
+        "properties": {
+          "option_id": {
+            "minLength": 1,
+            "title": "Option Id",
+            "type": "string"
+          },
+          "rank": {
+            "minimum": 1.0,
+            "title": "Rank",
+            "type": "integer"
+          },
+          "win_probability": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Win Probability",
+            "type": "number"
+          }
+        },
+        "required": [
+          "option_id",
+          "rank",
+          "win_probability"
+        ],
+        "title": "ObjectiveRankedOptionV2",
+        "type": "object"
+      },
       "ObjectiveRanking": {
-        "description": "WHAT the ranking in this response actually optimised (ROADMAP 2.1192).\n\nTHE FIELD THAT MAKES ``win_probability`` READABLE. That number has always\nbeen \"the fraction of draws on which this option produced the largest\ngoal-node value\". Every surface in the estate rendered it as \"which option\nis best\". Those are different sentences, and nothing on the wire said which\none the number supported \u2014 so a leader could be crowned at 70.67% while\ncarrying ``probability_of_goal = 0.0``, and no consumer had any way to tell.\n\nThis block is not a second score. It is the PROVENANCE of the only score,\nso a surface can say what the ranking answers and, when the aim was never\nstated, ASK for it instead of implying it was honoured.",
+        "description": "Objective and authoritative ordering from one scientific run.\n\nShares divide tie-split winning credit by ALL requested joint model draws,\nbefore output-only noise. They are not calibrated confidence. Equal ranks\ndo not license a unique recommendation. Consumers may filter eligibility,\nbut must retain this producer order and the corresponding shares.",
         "properties": {
           "attested": {
-            "description": "True when the request stated goal_direction. FALSE means no aim was supplied and 'maximise' is this service's DISCLOSED DEFAULT, not a claim about what the team wants. A surface that presents an unattested ranking as 'the best option for your goal' is overstating what was computed; the honest move is to ask.",
             "title": "Attested",
             "type": "boolean"
           },
           "direction": {
-            "description": "The objective sense the winner rule applied. Always the sense that actually ran \u2014 never the sense that was requested but refused (a refusal sets status='withheld' and reports the sense that was asked for in the accompanying inference warning).",
-            "enum": [
-              "maximise",
-              "minimise",
-              "target"
+            "anyOf": [
+              {
+                "enum": [
+                  "maximise",
+                  "minimise",
+                  "target"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Direction",
-            "type": "string"
+            "title": "Direction"
+          },
+          "ranked_options": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectiveRankedOption"
+            },
+            "title": "Ranked Options",
+            "type": "array"
           },
           "status": {
-            "description": "'withheld' means NO ranking was produced: win_probability is omitted for every option and no option is recommended, because the requested objective could not be scored on this graph. It is never a flat or tied ranking \u2014 it is the absence of one.",
             "enum": [
               "computed",
               "withheld"
@@ -4334,44 +4402,55 @@
           "withheld_reason": {
             "anyOf": [
               {
+                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Machine-readable reason when status='withheld'. Omitted otherwise.",
             "title": "Withheld Reason"
           }
         },
         "required": [
-          "direction",
           "attested",
-          "status"
+          "status",
+          "ranked_options"
         ],
         "title": "ObjectiveRanking",
         "type": "object"
       },
       "ObjectiveRankingV2": {
-        "description": "What the ranking on this response optimised (ROADMAP 2.1192).\n\n``win_probability`` is the fraction of Monte Carlo draws on which an option\nscored best under the request's objective sense. Until 2.1192 that sense was\nhardcoded to \"largest goal-node value\" and nothing on the wire said so, so a\nconsumer rendering \"which option wins\" was making a claim the number did not\nsupport: measured at 28fe0c95, the crowned option could carry\n``probability_of_goal = 0.0``, and supplying the user's target moved the\nranking by exactly nothing.\n\nThis block is the provenance of the single ranking, not a rival to it.",
+        "description": "Authoritative objective comparison for this scientific run.\n\nwin_probability is tie-split winning credit / requested joint draws,\nbefore output-only noise, not calibrated confidence. Consumers retain this\norder and its shares when filtering eligibility; equal ranks remain tied.",
         "properties": {
           "attested": {
-            "description": "True when the caller stated the objective. FALSE means 'maximise' is ISL's disclosed default and the team's aim was never supplied \u2014 a ranking a surface should present as an assumption, or ask about, rather than as the answer to their goal.",
             "title": "Attested",
             "type": "boolean"
           },
           "direction": {
-            "description": "The objective sense the winner rule applied. Under status='withheld' this is the sense that was REQUESTED and refused, which is what a surface needs in order to say what could not be done.",
-            "enum": [
-              "maximise",
-              "minimise",
-              "target"
+            "anyOf": [
+              {
+                "enum": [
+                  "maximise",
+                  "minimise",
+                  "target"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
-            "title": "Direction",
-            "type": "string"
+            "title": "Direction"
+          },
+          "ranked_options": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectiveRankedOptionV2"
+            },
+            "title": "Ranked Options",
+            "type": "array"
           },
           "status": {
-            "description": "'withheld' means NO ranking exists in this response: win_probability is omitted on every option and the robustness block (whose confidence IS the recommended option's win share) is omitted too. It is the absence of a ranking, never a flat one.",
             "enum": [
               "computed",
               "withheld"
@@ -4382,20 +4461,20 @@
           "withheld_reason": {
             "anyOf": [
               {
+                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Machine-readable reason when status='withheld'.",
             "title": "Withheld Reason"
           }
         },
         "required": [
-          "direction",
           "attested",
-          "status"
+          "status",
+          "ranked_options"
         ],
         "title": "ObjectiveRankingV2",
         "type": "object"
@@ -4654,17 +4733,23 @@
             "title": "Probability Of Goal"
           },
           "win_probability": {
-            "description": "P(this option is best)",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Win Probability",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tie-split share of requested model draws won under the stated objective. Absent when comparative ranking is withheld; not calibrated confidence.",
+            "title": "Win Probability"
           }
         },
         "required": [
           "option_id",
-          "outcome_distribution",
-          "win_probability"
+          "outcome_distribution"
         ],
         "title": "OptionResult",
         "type": "object"
@@ -4766,7 +4851,7 @@
                 "type": "null"
               }
             ],
-            "description": "P(this option is best) - fraction of samples where this option had highest outcome",
+            "description": "Tie-split winning credit divided by requested model draws under the stated objective, before output-only noise. Not calibrated confidence.",
             "title": "Win Probability"
           }
         },
@@ -5973,7 +6058,7 @@
                 "type": "null"
               }
             ],
-            "description": "The user's objective sense for the goal node, which decides what 'this option wins this draw' MEANS. 'maximise' = largest goal value wins (the historical rule). 'minimise' = smallest wins \u2014 required whenever the goal is a quantity to reduce (cost, churn, risk), where the historical rule crowned the worst option. 'target' = closest to goal_threshold wins, which is the only sense under which a moderate option can win at all; it REQUIRES goal_threshold and goal_threshold_frame (a target sense with no target is refused at parse, never silently downgraded to maximise). When absent, the maximiser runs UNATTESTED and the response says so \u2014 ISL never infers the user's aim from a node label.",
+            "description": "Stated objective: maximise the goal, minimise it, or approach goal_threshold. Target requires goal_threshold and goal_threshold_frame. Missing direction withholds ranking; ISL never infers intent from labels.",
             "title": "Goal Direction"
           },
           "goal_node_id": {
@@ -6377,16 +6462,30 @@
             "title": "Range Fit Disclosures"
           },
           "recommendation_confidence": {
-            "description": "Confidence in recommendation",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Recommendation Confidence",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tie-split winning share of the unique leading option",
+            "title": "Recommendation Confidence"
           },
           "recommended_option_id": {
-            "description": "ID of recommended option",
-            "title": "Recommended Option Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unique leading option; absent when tied or ranking is withheld",
+            "title": "Recommended Option Id"
           },
           "request_id": {
             "description": "Request identifier for tracing",
@@ -6402,12 +6501,15 @@
             "type": "array"
           },
           "robustness": {
-            "allOf": [
+            "anyOf": [
               {
                 "$ref": "#/components/schemas/RobustnessResult"
+              },
+              {
+                "type": "null"
               }
             ],
-            "description": "Overall robustness assessment"
+            "description": "Overall robustness assessment when licensed by the objective"
           },
           "sensitivity": {
             "description": "Sensitivity results per edge",
@@ -6432,9 +6534,6 @@
         "required": [
           "request_id",
           "results",
-          "recommended_option_id",
-          "recommendation_confidence",
-          "robustness",
           "_metadata",
           "objective_ranking"
         ],

@@ -332,7 +332,7 @@ class ResponseBuilder:
         # Robustness status
         if self.robustness is not None:
             robustness_status = "computed"
-        elif has_blockers:
+        elif has_blockers or self.objective_ranking is not None:
             robustness_status = "unavailable"
         else:
             robustness_status = "skipped"

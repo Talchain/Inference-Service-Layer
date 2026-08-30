@@ -177,8 +177,8 @@ def _get_baseline_winner(
     goal_node_id: str,
     seed: int,
     n_samples: int,
-) -> str:
-    """Run baseline analysis (no confounder) and return the winner."""
+) -> Optional[str]:
+    """Run baseline analysis; absence never licenses an invented winner."""
     request = RobustnessRequestV2(
         request_id="confounding-baseline",
         graph=graph,
@@ -198,7 +198,7 @@ def analyze_confounding_sensitivity(
     bidirected_pairs: List[Tuple[str, str]],
     seed: int = 42,
     n_samples: int = 1000,
-) -> ConfoundingSensitivityResult:
+) -> Optional[ConfoundingSensitivityResult]:
     """Run confounding sensitivity analysis for non-identifiable bidirected pairs.
 
     For each bidirected pair, injects a synthetic confounder at normalised
@@ -235,6 +235,10 @@ def analyze_confounding_sensitivity(
     baseline_winner = _get_baseline_winner(
         analyzer, graph, intervention_options, goal_node_id, seed, n_samples
     )
+    if baseline_winner is None:
+        # This endpoint's current request has no objective carrier. Preserve the
+        # structural identifiability result, but withhold recommendation sensitivity.
+        return None
 
     pair_results: List[ConfoundingPairResult] = []
 
@@ -258,6 +262,8 @@ def analyze_confounding_sensitivity(
             )
             response = analyzer.analyze(request)
             current_winner = response.recommended_option_id
+            if current_winner is None:
+                return None
 
             if current_winner != baseline_winner:
                 flip_raw = round(confounder_strength, 6)

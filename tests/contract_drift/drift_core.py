@@ -78,6 +78,7 @@ from src.models.response_v2 import (
     FragileEdgeV2,
     InferenceWarning,
     ISLResponseV2,
+    ObjectiveRankingV2,
     OptionResultV2,
     OutcomeDistributionV2,
     RobustnessResultV2,
@@ -107,6 +108,7 @@ PIN_PATH = FIXTURE_DIR / "PIN.json"
 # the intended visibility, not a failure.
 PAIRINGS: Dict[Type[BaseModel], Optional[Tuple[str, str]]] = {
     ISLResponseV2: ("boundary", "AnalysisEnrichmentSchema"),
+    ObjectiveRankingV2: ("boundary", "EnrichmentObjectiveRankingSchema"),
     OptionResultV2: ("boundary", "EnrichmentOptionComparisonEntrySchema"),
     OutcomeDistributionV2: ("boundary", "EnrichmentOutcomeStatsSchema"),
     RobustnessResultV2: ("boundary", "EnrichmentRobustnessSchema"),

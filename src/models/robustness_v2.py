@@ -941,50 +941,12 @@ class RobustnessRequestV2(BaseModel):
         "never guesses a frame and never emits a fabricated or clamped probability.",
     )
 
-    # ROADMAP 2.1192. The user's OBJECTIVE SENSE for the goal node — the field
-    # whose absence made "which option wins?" answer a different question than
-    # the one the team asked.
-    #
-    # WHY THIS EXISTS. Measured at staging tip 28fe0c95 with a discriminating
-    # contrast control: supplying ``goal_threshold`` changed the ranking by
-    # EXACTLY NOTHING across four configurations, while flipping an edge sign
-    # moved it completely. "Wins" was ``max()`` over the propagated goal-node
-    # scalar and nothing else — no target, no direction, no constraint. So the
-    # leading option could carry ``probability_of_goal = 0.0`` and still be
-    # crowned: the threshold channel and the comparison channel never met. The
-    # nineteen fields of this request had ZERO direction-bearing members
-    # (contrast: goal_node_id / goal_threshold / goal_threshold_frame /
-    # goal_constraints, four present), so no upstream service could express
-    # "I want this to go UP" even if it wanted to.
-    #
-    # THREE SENSES, ONE RULE. This does not add a second score beside the
-    # maximiser — it PARAMETERISES the single per-sample winner rule that has
-    # always defined ``win_probability``. ``maximise`` IS the historical rule;
-    # ``minimise`` is the case where that rule was silently backwards (a goal
-    # node of churn or cost was crowned by whichever option made it worst);
-    # ``target`` is the case the linear SCM could not express at all, where
-    # argmax always lands on a corner and a moderate option is structurally
-    # incapable of winning.
-    #
-    # ABSENT MEANS UNATTESTED, NOT MAXIMISE. When this field is omitted the
-    # ranking is still produced by the historical maximiser — the deployed
-    # product must not go dark while the producer half lands — but the response
-    # carries ``objective_ranking.attested = False`` and a
-    # GOAL_DIRECTION_UNATTESTED inference warning naming that the team's aim was
-    # never supplied. That warning is the hook a coaching surface uses to ASK.
-    # It is pinned by a test so it cannot change silently.
+    # The stated objective governs comparison; no label-based inference or default.
     goal_direction: Optional[Literal["maximise", "minimise", "target"]] = Field(
         None,
-        description="The user's objective sense for the goal node, which decides "
-        "what 'this option wins this draw' MEANS. 'maximise' = largest goal value "
-        "wins (the historical rule). 'minimise' = smallest wins — required whenever "
-        "the goal is a quantity to reduce (cost, churn, risk), where the historical "
-        "rule crowned the worst option. 'target' = closest to goal_threshold wins, "
-        "which is the only sense under which a moderate option can win at all; it "
-        "REQUIRES goal_threshold and goal_threshold_frame (a target sense with no "
-        "target is refused at parse, never silently downgraded to maximise). When "
-        "absent, the maximiser runs UNATTESTED and the response says so — ISL never "
-        "infers the user's aim from a node label.",
+        description="Stated objective: maximise the goal, minimise it, or approach "
+        "goal_threshold. Target requires goal_threshold and goal_threshold_frame. "
+        "Missing direction withholds ranking; ISL never infers intent from labels.",
     )
 
     # Enhancement flags
@@ -1593,7 +1555,13 @@ class OptionResult(BaseModel):
 
     option_id: str = Field(..., description="Option identifier")
     outcome_distribution: OutcomeDistribution = Field(..., description="Distribution of outcomes")
-    win_probability: float = Field(..., ge=0, le=1, description="P(this option is best)")
+    win_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Tie-split share of requested model draws won under the stated objective. "
+        "Absent when comparative ranking is withheld; not calibrated confidence.",
+    )
     probability_of_goal: Optional[float] = Field(
         None,
         ge=0,
@@ -2035,48 +2003,64 @@ class PathDecomposition(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class ObjectiveRankedOption(BaseModel):
+    """One entry in the producer's ordered, tie-aware comparative result."""
+
+    option_id: str = Field(..., min_length=1)
+    rank: int = Field(..., ge=1, description="Dense rank; equal shares have equal rank.")
+    win_probability: float = Field(..., ge=0, le=1)
+
+
 class ObjectiveRanking(BaseModel):
-    """WHAT the ranking in this response actually optimised (ROADMAP 2.1192).
+    """Objective and authoritative ordering from one scientific run.
 
-    THE FIELD THAT MAKES ``win_probability`` READABLE. That number has always
-    been "the fraction of draws on which this option produced the largest
-    goal-node value". Every surface in the estate rendered it as "which option
-    is best". Those are different sentences, and nothing on the wire said which
-    one the number supported — so a leader could be crowned at 70.67% while
-    carrying ``probability_of_goal = 0.0``, and no consumer had any way to tell.
-
-    This block is not a second score. It is the PROVENANCE of the only score,
-    so a surface can say what the ranking answers and, when the aim was never
-    stated, ASK for it instead of implying it was honoured.
+    Shares divide tie-split winning credit by ALL requested joint model draws,
+    before output-only noise. They are not calibrated confidence. Equal ranks
+    do not license a unique recommendation. Consumers may filter eligibility,
+    but must retain this producer order and the corresponding shares.
     """
 
-    direction: Literal["maximise", "minimise", "target"] = Field(
-        ...,
-        description="The objective sense the winner rule applied. Always the "
-        "sense that actually ran — never the sense that was requested but "
-        "refused (a refusal sets status='withheld' and reports the sense that "
-        "was asked for in the accompanying inference warning).",
-    )
-    attested: bool = Field(
-        ...,
-        description="True when the request stated goal_direction. FALSE means "
-        "no aim was supplied and 'maximise' is this service's DISCLOSED DEFAULT, "
-        "not a claim about what the team wants. A surface that presents an "
-        "unattested ranking as 'the best option for your goal' is overstating "
-        "what was computed; the honest move is to ask.",
-    )
-    status: Literal["computed", "withheld"] = Field(
-        ...,
-        description="'withheld' means NO ranking was produced: win_probability "
-        "is omitted for every option and no option is recommended, because the "
-        "requested objective could not be scored on this graph. It is never a "
-        "flat or tied ranking — it is the absence of one.",
-    )
-    withheld_reason: Optional[str] = Field(
-        None,
-        description="Machine-readable reason when status='withheld'. Omitted "
-        "otherwise.",
-    )
+    direction: Optional[Literal["maximise", "minimise", "target"]] = None
+    attested: bool
+    status: Literal["computed", "withheld"]
+    withheld_reason: Optional[str] = Field(None, min_length=1)
+    ranked_options: List[ObjectiveRankedOption]
+
+    @model_validator(mode="after")
+    def validate_ranking_state(self) -> "ObjectiveRanking":
+        if self.status == "withheld":
+            if self.ranked_options or not self.withheld_reason:
+                raise ValueError("Withheld ranking requires a reason and no ranked options")
+        elif (
+            not self.attested
+            or self.direction is None
+            or self.withheld_reason is not None
+            or not self.ranked_options
+            or not any(row.win_probability > 0 for row in self.ranked_options)
+        ):
+            raise ValueError("Computed ranking requires a stated objective and informative draws")
+        ids = set()
+        dense_rank = 1
+        for index, row in enumerate(self.ranked_options):
+            if row.option_id in ids:
+                raise ValueError("Duplicate ranked option identity")
+            ids.add(row.option_id)
+            if index:
+                previous = self.ranked_options[index - 1]
+                if row.win_probability > previous.win_probability or (
+                    row.win_probability == previous.win_probability
+                    and row.option_id < previous.option_id
+                ):
+                    raise ValueError(
+                        "Ranked options must retain share order and stable ID tie order"
+                    )
+                if row.win_probability < previous.win_probability:
+                    dense_rank += 1
+            if row.rank != dense_rank:
+                raise ValueError("Equal shares require equal dense ranks")
+        if sum(row.win_probability for row in self.ranked_options) > 1 + 1e-12:
+            raise ValueError("Tie-split winning shares cannot total more than one")
+        return self
 
 
 class RobustnessResponseV2(BaseModel):
@@ -2086,9 +2070,11 @@ class RobustnessResponseV2(BaseModel):
 
     # Core results
     results: List[OptionResult] = Field(..., description="Results for each decision option")
-    recommended_option_id: str = Field(..., description="ID of recommended option")
-    recommendation_confidence: float = Field(
-        ..., ge=0, le=1, description="Confidence in recommendation"
+    recommended_option_id: Optional[str] = Field(
+        None, description="Unique leading option; absent when tied or ranking is withheld"
+    )
+    recommendation_confidence: Optional[float] = Field(
+        None, ge=0, le=1, description="Tie-split winning share of the unique leading option"
     )
 
     # Sensitivity analysis
@@ -2102,7 +2088,9 @@ class RobustnessResponseV2(BaseModel):
     )
 
     # Robustness analysis
-    robustness: RobustnessResult = Field(..., description="Overall robustness assessment")
+    robustness: Optional[RobustnessResult] = Field(
+        None, description="Overall robustness assessment when licensed by the objective"
+    )
 
     # Metadata
     metadata: ResponseMetadataV2 = Field(..., description="Execution metadata", alias="_metadata")

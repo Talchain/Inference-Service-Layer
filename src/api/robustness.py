@@ -53,6 +53,7 @@ from src.models.response_v2 import (
     FragileEdgeV2,
     ISLResponseV2,
     ISLV2Error422,
+    ObjectiveRankedOptionV2,
     ObjectiveRankingV2,
     OptionResultV2,
     OutcomeDistributionV2,
@@ -690,12 +691,13 @@ async def _analyze_robustness_v2_legacy(
         assert response is not None  # _admit_and_run returns exactly one non-None
 
         # Track metrics
-        track_robustness_analysis(
-            status="robust" if response.robustness.is_robust else "fragile",
-            robustness_score=response.recommendation_confidence,
-            is_fragile=not response.robustness.is_robust,
-            regions_found=0,
-        )
+        if response.robustness is not None and response.recommendation_confidence is not None:
+            track_robustness_analysis(
+                status="robust" if response.robustness.is_robust else "fragile",
+                robustness_score=response.recommendation_confidence,
+                is_fragile=not response.robustness.is_robust,
+                regions_found=0,
+            )
 
         logger.info(
             "robustness_v2_analysis_completed",
@@ -704,18 +706,22 @@ async def _analyze_robustness_v2_legacy(
                 "response_version": 1,
                 "recommended_option": response.recommended_option_id,
                 "confidence": response.recommendation_confidence,
-                "is_robust": response.robustness.is_robust,
+                "is_robust": response.robustness.is_robust if response.robustness else None,
                 "execution_time_ms": response.metadata.execution_time_ms,
                 "has_sensitivity": len(response.sensitivity) > 0,
                 "n_sensitivity_results": len(response.sensitivity),
                 "has_factor_sensitivity": len(response.factor_sensitivity) > 0,
                 "n_factor_sensitivity_results": len(response.factor_sensitivity),
                 "has_robustness": response.robustness is not None,
-                "n_fragile_edges": len(response.robustness.fragile_edges),
+                "n_fragile_edges": len(response.robustness.fragile_edges)
+                if response.robustness
+                else 0,
             },
         )
 
-        return response
+        return JSONResponse(
+            content=response.model_dump(mode="json", by_alias=True, exclude_none=True)
+        )
 
     except ValidationError as e:
         logger.warning(
@@ -1473,6 +1479,14 @@ async def _analyze_robustness_v2_enhanced(
                 attested=v1_response.objective_ranking.attested,
                 status=v1_response.objective_ranking.status,
                 withheld_reason=v1_response.objective_ranking.withheld_reason,
+                ranked_options=[
+                    ObjectiveRankedOptionV2(
+                        option_id=row.option_id,
+                        rank=row.rank,
+                        win_probability=row.win_probability,
+                    )
+                    for row in v1_response.objective_ranking.ranked_options
+                ],
             ),
         )
 
@@ -1587,12 +1601,13 @@ async def _analyze_robustness_v2_enhanced(
             builder.diagnostics.n_samples_completed = request.n_samples
 
         # Track metrics
-        track_robustness_analysis(
-            status="robust" if v1_response.robustness.is_robust else "fragile",
-            robustness_score=v1_response.recommendation_confidence,
-            is_fragile=not v1_response.robustness.is_robust,
-            regions_found=0,
-        )
+        if v1_response.robustness is not None and v1_response.recommendation_confidence is not None:
+            track_robustness_analysis(
+                status="robust" if v1_response.robustness.is_robust else "fragile",
+                robustness_score=v1_response.recommendation_confidence,
+                is_fragile=not v1_response.robustness.is_robust,
+                regions_found=0,
+            )
 
         logger.info(
             "robustness_v2_analysis_completed",
