@@ -12,6 +12,7 @@ P2 Brief Alignment:
 
 import hashlib
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -41,6 +42,16 @@ from src.models.response_v2 import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_sampling_probability(value: object) -> bool:
+    """Validate optional diagnostic values without coercion or clamping."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and 0.0 <= value <= 1.0
+        and math.isfinite(value)
+    )
 
 
 # Arch step 1 (2026-07-26) — per-metric noise provenance.
@@ -205,6 +216,7 @@ class ResponseBuilder:
         factor_evpc: Optional[list] = None,
         tie_rate: Optional[float] = None,
         edge_existence_rates: Optional[Dict[str, float]] = None,
+        ambiguous_sampling_edge_keys: bool = False,
     ) -> None:
         """Set analysis results."""
         self.options = options
@@ -216,6 +228,44 @@ class ResponseBuilder:
         self.factor_evpc = factor_evpc
         self.tie_rate = tie_rate
         self.edge_existence_rates = edge_existence_rates
+        # Optional diagnostics must not make an otherwise completed analysis fail.
+        # In particular, the existing sampler can combine same-endpoint edges of
+        # different types into an out-of-range rate. Do not fix that statistic
+        # here: withhold the WHOLE map, retaining independently valid diagnostics.
+        invalid_fields = []
+        if tie_rate is not None and not _is_sampling_probability(tie_rate):
+            self.tie_rate = None
+            invalid_fields.append("tie_rate")
+        if edge_existence_rates is not None and (
+            ambiguous_sampling_edge_keys
+            or not isinstance(edge_existence_rates, dict)
+            or any(
+                not isinstance(edge_id, str) or not _is_sampling_probability(rate)
+                for edge_id, rate in edge_existence_rates.items()
+            )
+        ):
+            self.edge_existence_rates = None
+            invalid_fields.append("edge_existence_rates")
+        if invalid_fields:
+            # set_results runs after source warnings have been adopted. Allocate
+            # a new list so disclosure does not mutate the source warning list.
+            # One warning names ALL unavailable fields: PLoT deduplicates by code.
+            self.inference_warnings = [
+                *self.inference_warnings,
+                InferenceWarning(
+                    code="ISL_SAMPLING_DIAGNOSTICS_INVALID",
+                    field=invalid_fields[0],
+                    detail={
+                        "message": "ISL sampling measurements unavailable: invalid "
+                        + ", ".join(invalid_fields),
+                        "reason": "Sampling probabilities must be finite in [0, 1] "
+                        "and per-edge keys must be unambiguous",
+                        "invalid_fields": invalid_fields,
+                        "action": "omitted",
+                    },
+                    severity="warning",
+                ),
+            ]
 
     def set_conditional_winners(
         self, conditional_winners: Optional[List[ConditionalWinnerV2]]

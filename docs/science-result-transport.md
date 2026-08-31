@@ -20,6 +20,21 @@ No computed value means absence. A computed zero stays zero; an explicitly
 computed empty map stays empty. Blocked/error responses do not invent values.
 The existing internal/legacy response remains unchanged.
 
+Invalid optional diagnostics are withheld with the existing
+`ISL_SAMPLING_DIAGNOSTICS_INVALID` inference warning instead of failing completed
+computation. Each diagnostic is independent: a valid tie rate survives an invalid
+edge map, and vice versa. An invalid map is omitted as a whole, never clamped or
+partially salvaged. One warning message names every withheld diagnostic so a
+consumer that deduplicates warning codes does not hide a second invalid field.
+
+The existing sampler can aggregate directed and bidirected edges with the same
+encoded endpoint key, producing a value above one or a misleading in-range sum.
+The transport withholds that ambiguous map without changing the sampler, metric
+denominator or key scheme. Uniqueness is checked on the **same filtered inference
+graph** the analyzer samples, using its existing filter; discarded organisational
+edges cannot cause a valid sampled map to be withheld. The underlying sampler
+defect remains a separate scientific implementation issue.
+
 ## Compatibility and deployment
 
 The baseline enhanced Pydantic model at

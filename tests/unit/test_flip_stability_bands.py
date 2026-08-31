@@ -329,7 +329,8 @@ class TestAdditiveVsBase:
         self, no_env, client, auto_noise_enabled
     ):
         """Pin: the ONLY wire deltas vs origin/staging base are the additive
-        surfaces ``stability`` (flip bands) and ``downside`` (B2 tail-risk).
+        surfaces ``stability`` (flip bands), ``downside`` (B2 tail-risk), and
+        the existing Monte Carlo statistics now carried by the enhanced route.
 
         The golden was captured from UNMODIFIED pre-bands base code
         (e029cae2d); this test failing after a src change means the base wire
@@ -341,9 +342,20 @@ class TestAdditiveVsBase:
         )
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # Pin the exact additions BEFORE excluding them from the historical
+        # comparison; neither absence nor a changed statistic may hide here.
+        assert body["tie_rate"] == 0.0
+        assert body["edge_existence_rates"] == {
+            "demand->revenue": 1.0,
+            "price->demand": 0.94,
+            "price->revenue": 1.0,
+        }
+        body.pop("tie_rate")
+        body.pop("edge_existence_rates")
         golden = json.loads(GOLDEN_PATH.read_text())
         current = _strip_edge_e_value_additions(
-            _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+            _strip_additive_surfaces(normalize_v2_payload(body))
         )
         # See _CHANGED_WIRE_VALUES: one value deliberately moved; drop it from BOTH
         # sides so this pin keeps guarding everything else byte-for-byte.

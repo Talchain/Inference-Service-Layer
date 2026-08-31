@@ -1,0 +1,20 @@
+{
+  "goal_node_id": "goal",
+  "graph": {
+    "edges": [
+      {"edge_type": "directed", "exists_probability": 1.0, "from": "input", "strength": {"mean": 1, "std": 0.1}, "to": "goal"},
+      {"edge_type": "bidirected", "exists_probability": 1.0, "from": "input", "strength": {"mean": 1, "std": 0.1}, "to": "goal"}
+    ],
+    "nodes": [
+      {"id": "input", "kind": "factor", "label": "Input", "observed_state": {"value": 0.5}},
+      {"id": "goal", "kind": "outcome", "label": "Goal"}
+    ]
+  },
+  "n_samples": 100,
+  "options": [
+    {"id": "a", "interventions": {"input": 0.3}, "label": "A"},
+    {"id": "b", "interventions": {"input": 0.7}, "label": "B"}
+  ],
+  "request_id": "science-transport-mixed-edge-type-review",
+  "seed": 42
+}
