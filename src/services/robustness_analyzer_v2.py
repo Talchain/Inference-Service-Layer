@@ -4351,7 +4351,8 @@ class RobustnessAnalyzerV2:
             if goal_threshold_plan is not None:
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
-                    meets = samples_array >= goal_threshold_plan.delta_threshold
+                    compared = samples_array
+                    meets = compared >= goal_threshold_plan.delta_threshold
                 else:
                     # Level frame: recover the goal's LEVEL per draw by adding the
                     # option's causal effect to the level the goal is actually at.
@@ -4359,9 +4360,76 @@ class RobustnessAnalyzerV2:
                     # current values, the sampled strengths and the goal's intercept
                     # all cancel instead of being mistaken for progress.
                     effect = samples_array - np.array(status_quo_outcomes)
-                    levels = goal_threshold_plan.goal_baseline + effect
-                    meets = levels >= goal_threshold_plan.level_threshold
-                probability_of_goal = int(np.sum(meets)) / len(samples)
+                    compared = goal_threshold_plan.goal_baseline + effect
+                    meets = compared >= goal_threshold_plan.level_threshold
+
+                # 2.477(j) — FINITENESS GATE. This comparison used to run over the
+                # RAW array, and `+inf >= anything` is True. So the one shape that
+                # makes ISL classify an option `status: "failed"` (every draw
+                # non-finite) made every draw "meet" the goal, and the option
+                # shipped `win_probability: 0.0` beside `probability_of_goal: 1.0`
+                # — the option that wins NOTHING claiming a 100% chance of hitting
+                # the target, rendered to a user on the option's card. Reproduced
+                # by execution through the endpoint at 28fe0c95.
+                #
+                # This was the LAST statistic in the family still ungated: the
+                # winners loop got its `math.isfinite` filter in 2.477(c),
+                # mean/std at the emission boundary in 2.477(f)/(g), the
+                # percentile/downside family in 2.475+2.477(f), the auto-noise std
+                # its own finite_mask, the factor elasticities 2.514(a). Same
+                # per-index convention as all of them — nothing is inpainted,
+                # reordered or imputed; a draw is simply in or out.
+                #
+                # MASK THE COMPARED QUANTITY, NOT `samples_array`. In level frame
+                # the compared value is `baseline + (sample - status_quo)`, so a
+                # non-finite STATUS-QUO draw is equally uninformative — and it
+                # fails in the opposite direction, because `nan >= threshold` is
+                # False and silently UNDERSTATED the probability. One mask closes
+                # both directions.
+                #
+                # A non-finite draw is UNINFORMATIVE: excluded from the numerator
+                # AND the denominator.
+                #
+                # ⚠ THAT POPULATION IS NOT ALWAYS `n_valid_samples`, and saying so
+                # would be a comment this file's own tests disprove. In DELTA
+                # frame the two coincide: the compared array IS `samples_array`,
+                # so the informative count equals the finite-sample count that
+                # `n_valid_samples` reports and `validity_ratio` discloses — the
+                # same population p05/p10/p50/p90, mean, std and cvar_10 are
+                # reported over, and `probability_of_goal` is declared alongside
+                # them in POST_NOISE_METRICS.
+                #
+                # In LEVEL frame they DIVERGE, and the divergence is the whole
+                # reason this masks `compared`. The level folds in the STATUS-QUO
+                # draw, which is not this option's sample and is not counted by
+                # anything on the wire. Measured, and pinned by
+                # `test_non_finite_status_quo_draws_are_excluded_in_level_frame`:
+                # an option with 200/200 finite samples — `n_valid_samples: 200`,
+                # `validity_ratio: 1.0`, `status: "computed"` — has only 136
+                # informative draws, because the status quo overflowed on 64 of
+                # them. So this denominator is the count of draws whose COMPARED
+                # quantity is a real number, which is a strict subset of
+                # `n_valid_samples` and is NOT separately disclosed on the wire.
+                # (Rowed: the level-frame informative count has no wire field.)
+                #
+                # With NO informative draw there is no honest probability, so the
+                # field is OMITTED — `exclude_none` drops it from the wire
+                # entirely. Never 0.0: that would assert a MEASURED zero where
+                # nothing was measured, and this field's own resolver already
+                # states the rule ("FAIL CLOSED ... No fabricated number, no
+                # clamp, no silent default"), with 2.477(a) making the identical
+                # call for mean/std on this identical state. Absence is an
+                # existing, reachable wire state for this field — an unattested
+                # or unconvertible threshold already omits it for every option —
+                # so no consumer meets a new shape.
+                #
+                # NO-REGRESSION: on an all-finite population the mask is all-True,
+                # the denominator is unchanged and the arithmetic is
+                # byte-identical to pristine.
+                informative = np.isfinite(compared)
+                n_informative = int(np.count_nonzero(informative))
+                if n_informative > 0:
+                    probability_of_goal = int(np.sum(meets[informative])) / n_informative
 
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
