@@ -15,7 +15,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
@@ -143,6 +143,8 @@ class ResponseBuilder:
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
         self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
         self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
+        self.tie_rate: Optional[float] = None
+        self.edge_existence_rates: Optional[Dict[str, float]] = None
         # S2 (D-23.8) HONEST RELABEL: per-factor win-probability sensitivity (was
         # factor_evpi — NOT value-of-information). Enhancement passthrough.
         self.p_win_sensitivity: Optional[list] = None
@@ -201,6 +203,8 @@ class ResponseBuilder:
         p_win_sensitivity: Optional[list] = None,
         factor_evppi: Optional[list] = None,
         factor_evpc: Optional[list] = None,
+        tie_rate: Optional[float] = None,
+        edge_existence_rates: Optional[Dict[str, float]] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
@@ -210,6 +214,8 @@ class ResponseBuilder:
         self.p_win_sensitivity = p_win_sensitivity
         self.factor_evppi = factor_evppi
         self.factor_evpc = factor_evpc
+        self.tie_rate = tie_rate
+        self.edge_existence_rates = edge_existence_rates
 
     def set_conditional_winners(
         self, conditional_winners: Optional[List[ConditionalWinnerV2]]
@@ -371,6 +377,8 @@ class ResponseBuilder:
             robustness=self.robustness,
             factor_sensitivity=self.factor_sensitivity,
             conditional_winners=self.conditional_winners,
+            tie_rate=self.tie_rate,
+            edge_existence_rates=self.edge_existence_rates,
             stability_thresholds=self.stability_thresholds,  # 3C
             p_win_sensitivity=self.p_win_sensitivity,  # S2 — A3 VOI relabel (D-23.8)
             factor_evppi=self.factor_evppi,  # S2 — A3 VOI regression EVPPI (D-23.8)

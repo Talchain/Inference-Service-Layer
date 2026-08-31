@@ -1437,6 +1437,10 @@ async def _analyze_robustness_v2_enhanced(
             p_win_sensitivity=v1_response.p_win_sensitivity,  # S2 relabel (D-23.8)
             factor_evppi=v1_response.factor_evppi,  # S2 regression EVPPI (D-23.8)
             factor_evpc=v1_response.factor_evpc,  # S4 value-of-control (D-23.8)
+            # Preserve existing computed statistics without changing their population,
+            # denominator or interpretation. None stays absent; zero stays measured.
+            tie_rate=v1_response.metadata.tie_rate,
+            edge_existence_rates=v1_response.metadata.edge_existence_rates,
         )
 
         # B3: surface auto-noise disclosure on the V2 envelope so PLoT can read it

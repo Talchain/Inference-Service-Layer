@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 76
+    "superset_count": 78
   },
   "omissions": [
     {
@@ -584,6 +584,11 @@
     },
     {
       "isl_model": "ISLResponseV2",
+      "prop": "edge_existence_rates",
+      "reason": "ISL superset — ISLResponseV2.edge_existence_rates is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
       "prop": "endpoint_version",
       "reason": "ISL superset — ISLResponseV2.endpoint_version is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
@@ -661,6 +666,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "stability_thresholds",
       "reason": "ISL superset — ISLResponseV2.stability_thresholds is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "tie_rate",
+      "reason": "ISL superset — ISLResponseV2.tie_rate is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",
