@@ -17,7 +17,7 @@ pydantic-settings = "2.2.1"
 # Scientific dependencies
 y0 = "^0.2.4"
 networkx = "^3.2"
-numpy = "^1.26.0"
+numpy = ">=1.26,<3.0"
 scipy = "^1.11.0"
 # Logging and configuration
 python-json-logger = "2.0.7"
