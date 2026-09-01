@@ -1,0 +1,674 @@
+{
+  "cases": {
+    "frequent_ties": {
+      "enhanced_response": {
+        "analysis_status": "computed",
+        "auto_noise_applied": false,
+        "build": "dev",
+        "critiques": [
+          {
+            "code": "DEGENERATE_OUTCOMES",
+            "id": "critique_4032892324f5",
+            "message": "All options produce nearly identical outcomes",
+            "severity": "warning",
+            "source": "analysis",
+            "suggestion": "Check that options specify different intervention values and that intervention targets are connected to the goal with non-zero effect"
+          },
+          {
+            "code": "HIGH_TIE_RATE",
+            "id": "critique_be661d04b462",
+            "message": "91% of samples resulted in ties between options \u2014 win probabilities may be misleading",
+            "severity": "warning",
+            "source": "analysis",
+            "suggestion": "High tie rates often indicate sparse edge existence or interventions with no effective path to goal"
+          }
+        ],
+        "decision_evpi": 0.0,
+        "endpoint_version": "analyze/v2",
+        "engine_version": "1.0.0",
+        "factor_sensitivity_status": "skipped",
+        "inference_warnings": [],
+        "options": [
+          {
+            "downside": {
+              "cvar_10": 0.0,
+              "expected_regret": 0.03392684242386629,
+              "p05": 0.0
+            },
+            "id": "a",
+            "label": "A",
+            "outcome": {
+              "mean": 0.025445131817899716,
+              "n_samples": 100,
+              "n_valid_samples": 100,
+              "p10": 0.0,
+              "p50": 0.0,
+              "p90": 0.0,
+              "percentiles_source": "samples",
+              "std": 0.08100957472243658,
+              "validity_ratio": 1.0
+            },
+            "status": "computed",
+            "win_probability": 0.455
+          },
+          {
+            "downside": {
+              "cvar_10": 0.0,
+              "expected_regret": 0.0,
+              "p05": 0.0
+            },
+            "id": "b",
+            "label": "B",
+            "outcome": {
+              "mean": 0.059371974241766,
+              "n_samples": 100,
+              "n_valid_samples": 100,
+              "p10": 0.0,
+              "p50": 0.0,
+              "p90": 0.0,
+              "percentiles_source": "samples",
+              "std": 0.18902234101901869,
+              "validity_ratio": 1.0
+            },
+            "status": "computed",
+            "win_probability": 0.545
+          }
+        ],
+        "processing_time_ms": 10,
+        "request_echo": {
+          "goal_node_id_hash": "0304523efff5",
+          "graph_edge_count": 1,
+          "graph_node_count": 2,
+          "include_diagnostics": false,
+          "n_samples": 100,
+          "options_count": 2,
+          "response_version_requested": 2
+        },
+        "request_id": "science-transport-current-source",
+        "robustness": {
+          "confidence": 0.545,
+          "confidence_basis": "recommendation_stability_uncalibrated",
+          "edge_sensitivity": [
+            {
+              "direction": "positive",
+              "edge_id": "input->goal",
+              "elasticity": 11.027530605654208,
+              "from_id": "input",
+              "importance_rank": 1,
+              "interpretation": "Decision is highly sensitive to input->goal existence - consider validating this relationship",
+              "sensitivity_score": 1.0,
+              "sensitivity_type": "existence",
+              "to_id": "goal"
+            },
+            {
+              "direction": "positive",
+              "edge_id": "input->goal",
+              "elasticity": 0.6180180233189659,
+              "from_id": "input",
+              "importance_rank": 2,
+              "interpretation": "Decision is highly sensitive to input->goal effect size - consider narrowing uncertainty",
+              "sensitivity_score": 0.056043192752698964,
+              "sensitivity_type": "magnitude",
+              "to_id": "goal"
+            }
+          ],
+          "fragile_edges": [
+            {
+              "alternative_winner_id": "a",
+              "edge_id": "input->goal",
+              "from_id": "input",
+              "marginal_switch_probability": 0.92,
+              "switch_probability": 0.46153846153846156,
+              "to_id": "goal"
+            }
+          ],
+          "fragile_edges_v1": [
+            "input->goal"
+          ],
+          "is_robust": false,
+          "level": "low",
+          "recommendation_stability": 0.545,
+          "robust_edges": []
+        },
+        "robustness_status": "computed",
+        "sample_population_provenance": {
+          "auto_scaled_noise_applied": false,
+          "calibration_status": "uncalibrated_poc_heuristic",
+          "metric_populations": {
+            "cvar_10": "model_only",
+            "decision_evpi": "model_only",
+            "expected_regret": "model_only",
+            "factor_evpc": "model_only",
+            "factor_evppi": "model_only",
+            "mean": "model_only",
+            "p05": "model_only",
+            "p10": "model_only",
+            "p50": "model_only",
+            "p90": "model_only",
+            "probability_of_goal": "model_only",
+            "win_probability": "model_only"
+          },
+          "unnoised_constraint_node_ids": []
+        },
+        "seed_source": "client_provided",
+        "seed_used": "42",
+        "sensitivity_reference_option_id": "a",
+        "timestamp": "2026-08-31T13:05:45.740906Z",
+        "version": "2.0"
+      },
+      "request": {
+        "goal_node_id": "goal",
+        "graph": {
+          "edges": [
+            {
+              "exists_probability": 0.1,
+              "from": "input",
+              "strength": {
+                "mean": 1,
+                "std": 0.1
+              },
+              "to": "goal"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "input",
+              "kind": "factor",
+              "label": "Input",
+              "observed_state": {
+                "value": 0.5
+              }
+            },
+            {
+              "id": "goal",
+              "kind": "outcome",
+              "label": "Goal"
+            }
+          ]
+        },
+        "n_samples": 100,
+        "options": [
+          {
+            "id": "a",
+            "interventions": {
+              "input": 0.3
+            },
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "interventions": {
+              "input": 0.7
+            },
+            "label": "B"
+          }
+        ],
+        "request_id": "science-transport-current-source",
+        "seed": 42
+      },
+      "status": 200
+    },
+    "no_ties": {
+      "enhanced_response": {
+        "analysis_status": "computed",
+        "auto_noise_applied": false,
+        "build": "dev",
+        "critiques": [],
+        "decision_evpi": 0.0,
+        "endpoint_version": "analyze/v2",
+        "engine_version": "1.0.0",
+        "factor_sensitivity_status": "skipped",
+        "inference_warnings": [],
+        "options": [
+          {
+            "downside": {
+              "cvar_10": 0.24436343838855407,
+              "expected_regret": 0.3688353670566227,
+              "p05": 0.24815448895855677
+            },
+            "id": "a",
+            "label": "A",
+            "outcome": {
+              "mean": 0.276626525292467,
+              "n_samples": 100,
+              "n_valid_samples": 100,
+              "p10": 0.25608593021422793,
+              "p50": 0.2776178842884244,
+              "p90": 0.2953071883170251,
+              "percentiles_source": "samples",
+              "std": 0.015941737934630044,
+              "validity_ratio": 1.0
+            },
+            "status": "computed",
+            "win_probability": 0.0
+          },
+          {
+            "downside": {
+              "cvar_10": 0.5701813562399594,
+              "expected_regret": 0.0,
+              "p05": 0.5790271409032991
+            },
+            "id": "b",
+            "label": "B",
+            "outcome": {
+              "mean": 0.6454618923490898,
+              "n_samples": 100,
+              "n_valid_samples": 100,
+              "p10": 0.5975338371665319,
+              "p50": 0.6477750633396568,
+              "p90": 0.6890501060730587,
+              "percentiles_source": "samples",
+              "std": 0.03719738851413677,
+              "validity_ratio": 1.0
+            },
+            "status": "computed",
+            "win_probability": 1.0
+          }
+        ],
+        "processing_time_ms": 6,
+        "request_echo": {
+          "goal_node_id_hash": "0304523efff5",
+          "graph_edge_count": 1,
+          "graph_node_count": 2,
+          "include_diagnostics": false,
+          "n_samples": 100,
+          "options_count": 2,
+          "response_version_requested": 2
+        },
+        "request_id": "science-transport-current-source",
+        "robustness": {
+          "confidence": 1.0,
+          "confidence_basis": "recommendation_stability_uncalibrated",
+          "edge_sensitivity": [
+            {
+              "direction": "positive",
+              "edge_id": "input->goal",
+              "elasticity": 1.0218201536786728,
+              "from_id": "input",
+              "importance_rank": 1,
+              "interpretation": "Decision is highly sensitive to input->goal existence - consider validating this relationship",
+              "sensitivity_score": 1.0,
+              "sensitivity_type": "existence",
+              "to_id": "goal"
+            },
+            {
+              "direction": "positive",
+              "edge_id": "input->goal",
+              "elasticity": 0.05195732529678062,
+              "from_id": "input",
+              "importance_rank": 2,
+              "interpretation": "Decision is moderately sensitive to input->goal effect size",
+              "sensitivity_score": 0.05084781809179251,
+              "sensitivity_type": "magnitude",
+              "to_id": "goal"
+            }
+          ],
+          "fragile_edges": [
+            {
+              "edge_id": "input->goal",
+              "from_id": "input",
+              "marginal_switch_probability": 0.0,
+              "switch_probability": 0.0,
+              "to_id": "goal"
+            }
+          ],
+          "fragile_edges_v1": [
+            "input->goal"
+          ],
+          "is_robust": true,
+          "level": "high",
+          "recommendation_stability": 1.0,
+          "robust_edges": []
+        },
+        "robustness_status": "computed",
+        "sample_population_provenance": {
+          "auto_scaled_noise_applied": false,
+          "calibration_status": "uncalibrated_poc_heuristic",
+          "metric_populations": {
+            "cvar_10": "model_only",
+            "decision_evpi": "model_only",
+            "expected_regret": "model_only",
+            "factor_evpc": "model_only",
+            "factor_evppi": "model_only",
+            "mean": "model_only",
+            "p05": "model_only",
+            "p10": "model_only",
+            "p50": "model_only",
+            "p90": "model_only",
+            "probability_of_goal": "model_only",
+            "win_probability": "model_only"
+          },
+          "unnoised_constraint_node_ids": []
+        },
+        "seed_source": "client_provided",
+        "seed_used": "42",
+        "sensitivity_reference_option_id": "a",
+        "timestamp": "2026-08-31T13:05:45.889743Z",
+        "version": "2.0"
+      },
+      "request": {
+        "goal_node_id": "goal",
+        "graph": {
+          "edges": [
+            {
+              "exists_probability": 1.0,
+              "from": "input",
+              "strength": {
+                "mean": 1,
+                "std": 0.1
+              },
+              "to": "goal"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "input",
+              "kind": "factor",
+              "label": "Input",
+              "observed_state": {
+                "value": 0.5
+              }
+            },
+            {
+              "id": "goal",
+              "kind": "outcome",
+              "label": "Goal"
+            }
+          ]
+        },
+        "n_samples": 100,
+        "options": [
+          {
+            "id": "a",
+            "interventions": {
+              "input": 0.3
+            },
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "interventions": {
+              "input": 0.7
+            },
+            "label": "B"
+          }
+        ],
+        "request_id": "science-transport-current-source",
+        "seed": 42
+      },
+      "status": 200
+    },
+    "not_computed": {
+      "enhanced_response": {
+        "analysis_status": "blocked",
+        "critiques": [
+          {
+            "affected_node_ids": null,
+            "affected_option_ids": null,
+            "code": "GRAPH_CYCLE_DETECTED",
+            "id": "critique_37271f8999d4",
+            "message": "Graph contains a cycle",
+            "severity": "blocker",
+            "source": "validation",
+            "suggestion": "Remove cyclic dependencies from the causal graph"
+          }
+        ],
+        "request_id": "science-transport-current-source",
+        "status_reason": "Graph contains a cycle"
+      },
+      "request": {
+        "goal_node_id": "goal",
+        "graph": {
+          "edges": [
+            {
+              "exists_probability": 0.63,
+              "from": "input",
+              "strength": {
+                "mean": 1,
+                "std": 0.1
+              },
+              "to": "goal"
+            },
+            {
+              "exists_probability": 1,
+              "from": "goal",
+              "strength": {
+                "mean": 1,
+                "std": 0.1
+              },
+              "to": "input"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "input",
+              "kind": "factor",
+              "label": "Input",
+              "observed_state": {
+                "value": 0.5
+              }
+            },
+            {
+              "id": "goal",
+              "kind": "outcome",
+              "label": "Goal"
+            }
+          ]
+        },
+        "n_samples": 100,
+        "options": [
+          {
+            "id": "a",
+            "interventions": {
+              "input": 0.3
+            },
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "interventions": {
+              "input": 0.3
+            },
+            "label": "B"
+          }
+        ],
+        "request_id": "science-transport-current-source",
+        "seed": 42
+      },
+      "status": 422
+    },
+    "rare_ties": {
+      "enhanced_response": {
+        "analysis_status": "computed",
+        "auto_noise_applied": false,
+        "build": "dev",
+        "critiques": [],
+        "decision_evpi": 0.0,
+        "endpoint_version": "analyze/v2",
+        "engine_version": "1.0.0",
+        "factor_sensitivity_status": "skipped",
+        "inference_warnings": [],
+        "options": [
+          {
+            "downside": {
+              "cvar_10": 0.06970764128489708,
+              "expected_regret": 0.3429479724616197,
+              "p05": 0.0
+            },
+            "id": "a",
+            "label": "A",
+            "outcome": {
+              "mean": 0.25721097934621473,
+              "n_samples": 100,
+              "n_valid_samples": 100,
+              "p10": 0.24117153360325333,
+              "p50": 0.275472608887916,
+              "p90": 0.29530725972548183,
+              "percentiles_source": "samples",
+              "std": 0.07226963062935575,
+              "validity_ratio": 1.0
+            },
+            "status": "computed",
+            "win_probability": 0.035
+          },
+          {
+            "downside": {
+              "cvar_10": 0.16265116299809318,
+              "expected_regret": 0.0,
+              "p05": 0.0
+            },
+            "id": "b",
+            "label": "B",
+            "outcome": {
+              "mean": 0.6001589518078343,
+              "n_samples": 100,
+              "n_valid_samples": 100,
+              "p10": 0.5627335784075911,
+              "p50": 0.6427694207384707,
+              "p90": 0.689050272692791,
+              "percentiles_source": "samples",
+              "std": 0.1686291381351634,
+              "validity_ratio": 1.0
+            },
+            "status": "computed",
+            "win_probability": 0.965
+          }
+        ],
+        "processing_time_ms": 6,
+        "request_echo": {
+          "goal_node_id_hash": "0304523efff5",
+          "graph_edge_count": 1,
+          "graph_node_count": 2,
+          "include_diagnostics": false,
+          "n_samples": 100,
+          "options_count": 2,
+          "response_version_requested": 2
+        },
+        "request_id": "science-transport-current-source",
+        "robustness": {
+          "confidence": 0.965,
+          "confidence_basis": "recommendation_stability_uncalibrated",
+          "edge_sensitivity": [
+            {
+              "direction": "positive",
+              "edge_id": "input->goal",
+              "elasticity": 1.0885552379041696,
+              "from_id": "input",
+              "importance_rank": 1,
+              "interpretation": "Decision is highly sensitive to input->goal existence - consider validating this relationship",
+              "sensitivity_score": 1.0,
+              "sensitivity_type": "existence",
+              "to_id": "goal"
+            },
+            {
+              "direction": "positive",
+              "edge_id": "input->goal",
+              "elasticity": 0.061939413155502235,
+              "from_id": "input",
+              "importance_rank": 2,
+              "interpretation": "Decision is moderately sensitive to input->goal effect size",
+              "sensitivity_score": 0.05690056967137118,
+              "sensitivity_type": "magnitude",
+              "to_id": "goal"
+            }
+          ],
+          "fragile_edges": [
+            {
+              "alternative_winner_id": "a",
+              "edge_id": "input->goal",
+              "from_id": "input",
+              "marginal_switch_probability": 0.08,
+              "switch_probability": 0.16,
+              "to_id": "goal"
+            }
+          ],
+          "fragile_edges_v1": [
+            "input->goal"
+          ],
+          "is_robust": true,
+          "level": "high",
+          "recommendation_stability": 0.965,
+          "robust_edges": []
+        },
+        "robustness_status": "computed",
+        "sample_population_provenance": {
+          "auto_scaled_noise_applied": false,
+          "calibration_status": "uncalibrated_poc_heuristic",
+          "metric_populations": {
+            "cvar_10": "model_only",
+            "decision_evpi": "model_only",
+            "expected_regret": "model_only",
+            "factor_evpc": "model_only",
+            "factor_evppi": "model_only",
+            "mean": "model_only",
+            "p05": "model_only",
+            "p10": "model_only",
+            "p50": "model_only",
+            "p90": "model_only",
+            "probability_of_goal": "model_only",
+            "win_probability": "model_only"
+          },
+          "unnoised_constraint_node_ids": []
+        },
+        "seed_source": "client_provided",
+        "seed_used": "42",
+        "sensitivity_reference_option_id": "a",
+        "timestamp": "2026-08-31T13:05:45.811296Z",
+        "version": "2.0"
+      },
+      "request": {
+        "goal_node_id": "goal",
+        "graph": {
+          "edges": [
+            {
+              "exists_probability": 0.9,
+              "from": "input",
+              "strength": {
+                "mean": 1,
+                "std": 0.1
+              },
+              "to": "goal"
+            }
+          ],
+          "nodes": [
+            {
+              "id": "input",
+              "kind": "factor",
+              "label": "Input",
+              "observed_state": {
+                "value": 0.5
+              }
+            },
+            {
+              "id": "goal",
+              "kind": "outcome",
+              "label": "Goal"
+            }
+          ]
+        },
+        "n_samples": 100,
+        "options": [
+          {
+            "id": "a",
+            "interventions": {
+              "input": 0.3
+            },
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "interventions": {
+              "input": 0.7
+            },
+            "label": "B"
+          }
+        ],
+        "request_id": "science-transport-current-source",
+        "seed": 42
+      },
+      "status": 200
+    }
+  },
+  "description": "Full responses captured from the real unchanged enhanced FastAPI endpoint before science-statistic carriage. Tests exclude only timestamp and processing_time_ms when comparing responses.",
+  "source_head": "28fe0c950f6ca5737f4555c863353d37b734dddf"
+}

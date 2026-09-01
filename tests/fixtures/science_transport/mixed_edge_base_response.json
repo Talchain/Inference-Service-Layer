@@ -1,0 +1,163 @@
+{
+  "provenance": "Exact independently rerun raw HTTP response from science-pair-review/mixed-edge/raw-replay.json; original raw artifact banked by root.",
+  "response": {
+    "analysis_status": "computed",
+    "auto_noise_applied": false,
+    "build": "dev",
+    "critiques": [],
+    "decision_evpi": 0.0,
+    "endpoint_version": "analyze/v2",
+    "engine_version": "1.0.0",
+    "factor_sensitivity_status": "skipped",
+    "inference_warnings": [],
+    "options": [
+      {
+        "downside": {
+          "cvar_10": 0.4838867482883596,
+          "expected_regret": 0.7374103912921374,
+          "p05": 0.4897567476337764
+        },
+        "id": "a",
+        "label": "A",
+        "outcome": {
+          "mean": 0.5530577934691029,
+          "n_samples": 100,
+          "n_valid_samples": 100,
+          "p10": 0.4994699023562698,
+          "p50": 0.5592241804632265,
+          "p90": 0.5904238821709307,
+          "percentiles_source": "samples",
+          "std": 0.03321361742683638,
+          "validity_ratio": 1.0
+        },
+        "status": "computed",
+        "win_probability": 0.0
+      },
+      {
+        "downside": {
+          "cvar_10": 1.1290690793395057,
+          "expected_regret": 0.0,
+          "p05": 1.1427657444788115
+        },
+        "id": "b",
+        "label": "B",
+        "outcome": {
+          "mean": 1.29046818476124,
+          "n_samples": 100,
+          "n_valid_samples": 100,
+          "p10": 1.1654297721646296,
+          "p50": 1.3048564210808618,
+          "p90": 1.377655725065505,
+          "percentiles_source": "samples",
+          "std": 0.07749844066261821,
+          "validity_ratio": 1.0
+        },
+        "status": "computed",
+        "win_probability": 1.0
+      }
+    ],
+    "processing_time_ms": 9,
+    "request_echo": {
+      "goal_node_id_hash": "0304523efff5",
+      "graph_edge_count": 2,
+      "graph_node_count": 2,
+      "include_diagnostics": false,
+      "n_samples": 100,
+      "options_count": 2,
+      "response_version_requested": 2
+    },
+    "request_id": "science-transport-mixed-edge-type-review",
+    "robustness": {
+      "confidence": 1.0,
+      "confidence_basis": "recommendation_stability_uncalibrated",
+      "edge_sensitivity": [
+        {
+          "direction": "positive",
+          "edge_id": "input->goal",
+          "elasticity": 1.0060813383841771,
+          "from_id": "input",
+          "importance_rank": 1,
+          "interpretation": "Decision is highly sensitive to input->goal existence - consider validating this relationship",
+          "sensitivity_score": 1.0,
+          "sensitivity_type": "existence",
+          "to_id": "goal"
+        },
+        {
+          "direction": "positive",
+          "edge_id": "input->goal",
+          "elasticity": 0.9964412847042047,
+          "from_id": "input",
+          "importance_rank": 2,
+          "interpretation": "Decision is highly sensitive to input->goal existence - consider validating this relationship",
+          "sensitivity_score": 0.990418216388493,
+          "sensitivity_type": "existence",
+          "to_id": "goal"
+        },
+        {
+          "direction": "positive",
+          "edge_id": "input->goal",
+          "elasticity": 0.02215317970060015,
+          "from_id": "input",
+          "importance_rank": 3,
+          "interpretation": "Decision is robust to effect size variation in input->goal",
+          "sensitivity_score": 0.022019273050208243,
+          "sensitivity_type": "magnitude",
+          "to_id": "goal"
+        },
+        {
+          "direction": "positive",
+          "edge_id": "input->goal",
+          "elasticity": 0.020000452096658836,
+          "from_id": "input",
+          "importance_rank": 4,
+          "interpretation": "Decision is robust to effect size variation in input->goal",
+          "sensitivity_score": 0.01987955777887768,
+          "sensitivity_type": "magnitude",
+          "to_id": "goal"
+        }
+      ],
+      "fragile_edges": [
+        {
+          "edge_id": "input->goal",
+          "from_id": "input",
+          "marginal_switch_probability": 0.0,
+          "switch_probability": 0.0,
+          "to_id": "goal"
+        }
+      ],
+      "fragile_edges_v1": [
+        "input->goal"
+      ],
+      "is_robust": true,
+      "level": "high",
+      "recommendation_stability": 1.0,
+      "robust_edges": []
+    },
+    "robustness_status": "computed",
+    "sample_population_provenance": {
+      "auto_scaled_noise_applied": false,
+      "calibration_status": "uncalibrated_poc_heuristic",
+      "metric_populations": {
+        "cvar_10": "model_only",
+        "decision_evpi": "model_only",
+        "expected_regret": "model_only",
+        "factor_evpc": "model_only",
+        "factor_evppi": "model_only",
+        "mean": "model_only",
+        "p05": "model_only",
+        "p10": "model_only",
+        "p50": "model_only",
+        "p90": "model_only",
+        "probability_of_goal": "model_only",
+        "win_probability": "model_only"
+      },
+      "unnoised_constraint_node_ids": []
+    },
+    "seed_source": "client_provided",
+    "seed_used": "42",
+    "sensitivity_reference_option_id": "a",
+    "timestamp": "2026-08-31T15:28:22.363242Z",
+    "version": "2.0"
+  },
+  "source_head": "28fe0c950f6ca5737f4555c863353d37b734dddf"
+}

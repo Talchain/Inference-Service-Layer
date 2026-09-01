@@ -3728,6 +3728,23 @@
             ],
             "description": "Detailed diagnostics (when requested)"
           },
+          "edge_existence_rates": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "maximum": 1.0,
+                  "minimum": 0.0,
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Realised edge-existence sampling frequencies, keyed by the existing 'from->to' node-ID pair. Each value is that edge's sampled existence count divided by the edge sampler's draw count; it is not the configured probability, strength sensitivity, or evidence confidence. Absent when not computed; an explicitly computed empty map is preserved.",
+            "title": "Edge Existence Rates"
+          },
           "endpoint_version": {
             "description": "Endpoint version, e.g., 'analyze/v2'",
             "title": "Endpoint Version",
@@ -3987,6 +4004,20 @@
             ],
             "description": "Reason for non-computed status",
             "title": "Status Reason"
+          },
+          "tie_rate": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Fraction of requested Monte Carlo draws in which at least two finite option outcomes tie exactly for the maximum, before optional auto-scaled noise. Denominator: requested n_samples; a draw with no finite outcome is not a tie. Not a near-tie measure or confidence score. Absent when not computed; zero means computed with no ties.",
+            "title": "Tie Rate"
           },
           "timestamp": {
             "description": "Response timestamp in ISO 8601 format",

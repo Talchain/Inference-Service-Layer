@@ -12,10 +12,11 @@ P2 Brief Alignment:
 
 import hashlib
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
@@ -41,6 +42,16 @@ from src.models.response_v2 import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_sampling_probability(value: object) -> bool:
+    """Validate optional diagnostic values without coercion or clamping."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and 0.0 <= value <= 1.0
+        and math.isfinite(value)
+    )
 
 
 # Arch step 1 (2026-07-26) — per-metric noise provenance.
@@ -143,6 +154,8 @@ class ResponseBuilder:
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
         self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
         self.conditional_winners: Optional[List[ConditionalWinnerV2]] = None
+        self.tie_rate: Optional[float] = None
+        self.edge_existence_rates: Optional[Dict[str, float]] = None
         # S2 (D-23.8) HONEST RELABEL: per-factor win-probability sensitivity (was
         # factor_evpi — NOT value-of-information). Enhancement passthrough.
         self.p_win_sensitivity: Optional[list] = None
@@ -201,6 +214,9 @@ class ResponseBuilder:
         p_win_sensitivity: Optional[list] = None,
         factor_evppi: Optional[list] = None,
         factor_evpc: Optional[list] = None,
+        tie_rate: Optional[float] = None,
+        edge_existence_rates: Optional[Dict[str, float]] = None,
+        ambiguous_sampling_edge_keys: bool = False,
     ) -> None:
         """Set analysis results."""
         self.options = options
@@ -210,6 +226,46 @@ class ResponseBuilder:
         self.p_win_sensitivity = p_win_sensitivity
         self.factor_evppi = factor_evppi
         self.factor_evpc = factor_evpc
+        self.tie_rate = tie_rate
+        self.edge_existence_rates = edge_existence_rates
+        # Optional diagnostics must not make an otherwise completed analysis fail.
+        # In particular, the existing sampler can combine same-endpoint edges of
+        # different types into an out-of-range rate. Do not fix that statistic
+        # here: withhold the WHOLE map, retaining independently valid diagnostics.
+        invalid_fields = []
+        if tie_rate is not None and not _is_sampling_probability(tie_rate):
+            self.tie_rate = None
+            invalid_fields.append("tie_rate")
+        if edge_existence_rates is not None and (
+            ambiguous_sampling_edge_keys
+            or not isinstance(edge_existence_rates, dict)
+            or any(
+                not isinstance(edge_id, str) or not _is_sampling_probability(rate)
+                for edge_id, rate in edge_existence_rates.items()
+            )
+        ):
+            self.edge_existence_rates = None
+            invalid_fields.append("edge_existence_rates")
+        if invalid_fields:
+            # set_results runs after source warnings have been adopted. Allocate
+            # a new list so disclosure does not mutate the source warning list.
+            # One warning names ALL unavailable fields: PLoT deduplicates by code.
+            self.inference_warnings = [
+                *self.inference_warnings,
+                InferenceWarning(
+                    code="ISL_SAMPLING_DIAGNOSTICS_INVALID",
+                    field=invalid_fields[0],
+                    detail={
+                        "message": "ISL sampling measurements unavailable: invalid "
+                        + ", ".join(invalid_fields),
+                        "reason": "Sampling probabilities must be finite in [0, 1] "
+                        "and per-edge keys must be unambiguous",
+                        "invalid_fields": invalid_fields,
+                        "action": "omitted",
+                    },
+                    severity="warning",
+                ),
+            ]
 
     def set_conditional_winners(
         self, conditional_winners: Optional[List[ConditionalWinnerV2]]
@@ -371,6 +427,8 @@ class ResponseBuilder:
             robustness=self.robustness,
             factor_sensitivity=self.factor_sensitivity,
             conditional_winners=self.conditional_winners,
+            tie_rate=self.tie_rate,
+            edge_existence_rates=self.edge_existence_rates,
             stability_thresholds=self.stability_thresholds,  # 3C
             p_win_sensitivity=self.p_win_sensitivity,  # S2 — A3 VOI relabel (D-23.8)
             factor_evppi=self.factor_evppi,  # S2 — A3 VOI regression EVPPI (D-23.8)

@@ -77,6 +77,7 @@ from src.services.robustness_analyzer_v2 import (
     WeightedCost,
     compute_effective_seed,
     compute_weighted_cost,
+    filter_inference_graph,
     get_max_cost_units,
     resolve_factor_central_value,
 )
@@ -1429,6 +1430,13 @@ async def _analyze_robustness_v2_enhanced(
                     )
                 )
 
+        # The existing diagnostic map is keyed only by encoded endpoint pairs.
+        # Accepted directed/bidirected edges can share a key, even when their
+        # aggregated rate lies in [0,1]. Do not present it as a per-edge rate or
+        # change the sampler/key scheme here: withhold the whole optional map.
+        sampled_graph = filter_inference_graph(request.graph, log=False)
+        sampling_edge_keys = [f"{edge.from_}->{edge.to}" for edge in sampled_graph.edges]
+        ambiguous_sampling_edge_keys = len(sampling_edge_keys) != len(set(sampling_edge_keys))
         builder.set_results(
             options=option_results,
             robustness=robustness_result,
@@ -1437,6 +1445,11 @@ async def _analyze_robustness_v2_enhanced(
             p_win_sensitivity=v1_response.p_win_sensitivity,  # S2 relabel (D-23.8)
             factor_evppi=v1_response.factor_evppi,  # S2 regression EVPPI (D-23.8)
             factor_evpc=v1_response.factor_evpc,  # S4 value-of-control (D-23.8)
+            # Preserve existing computed statistics without changing their population,
+            # denominator or interpretation. None stays absent; zero stays measured.
+            tie_rate=v1_response.metadata.tie_rate,
+            edge_existence_rates=v1_response.metadata.edge_existence_rates,
+            ambiguous_sampling_edge_keys=ambiguous_sampling_edge_keys,
         )
 
         # B3: surface auto-noise disclosure on the V2 envelope so PLoT can read it

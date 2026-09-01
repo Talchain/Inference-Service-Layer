@@ -14,7 +14,7 @@ P2 Brief Alignment:
 import math
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
@@ -1732,6 +1732,27 @@ class ISLResponseV2(BaseModel):
     conditional_winners: Optional[List[ConditionalWinnerV2]] = Field(
         None,
         description="Factors where the winning option flips depending on factor value range.",
+    )
+
+    # Existing Monte Carlo diagnostics, copied from the internal response metadata.
+    # Optional covers paths where computation did not produce these statistics.
+    tie_rate: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description="Fraction of requested Monte Carlo draws in which at least two "
+        "finite option outcomes tie exactly for the maximum, before optional "
+        "auto-scaled noise. Denominator: requested n_samples; a draw with no finite "
+        "outcome is not a tie. Not a near-tie measure or confidence score. "
+        "Absent when not computed; zero means computed with no ties.",
+    )
+    edge_existence_rates: Optional[Dict[str, Annotated[float, Field(ge=0, le=1)]]] = Field(
+        None,
+        description="Realised edge-existence sampling frequencies, keyed by the "
+        "existing 'from->to' node-ID pair. Each value is that edge's sampled "
+        "existence count divided by the edge sampler's draw count; it is not "
+        "the configured probability, strength sensitivity, or evidence confidence. "
+        "Absent when not computed; an explicitly computed empty map is preserved.",
     )
 
     # Inference warnings (e.g. STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE).
