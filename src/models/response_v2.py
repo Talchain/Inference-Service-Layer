@@ -1669,6 +1669,45 @@ class SamplePopulationProvenanceV2(BaseModel):
 # =============================================================================
 
 
+class ObjectiveRankingV2(BaseModel):
+    """What the ranking on this response optimised (ROADMAP 2.1192).
+
+    ``win_probability`` is the fraction of Monte Carlo draws on which an option
+    scored best under the request's objective sense. Until 2.1192 that sense was
+    hardcoded to "largest goal-node value" and nothing on the wire said so, so a
+    consumer rendering "which option wins" was making a claim the number did not
+    support: measured at 28fe0c95, the crowned option could carry
+    ``probability_of_goal = 0.0``, and supplying the user's target moved the
+    ranking by exactly nothing.
+
+    This block is the provenance of the single ranking, not a rival to it.
+    """
+
+    direction: Literal["maximise", "minimise", "target"] = Field(
+        ...,
+        description="The objective sense the winner rule applied. Under "
+        "status='withheld' this is the sense that was REQUESTED and refused, "
+        "which is what a surface needs in order to say what could not be done.",
+    )
+    attested: bool = Field(
+        ...,
+        description="True when the caller stated the objective. FALSE means "
+        "'maximise' is ISL's disclosed default and the team's aim was never "
+        "supplied — a ranking a surface should present as an assumption, or ask "
+        "about, rather than as the answer to their goal.",
+    )
+    status: Literal["computed", "withheld"] = Field(
+        ...,
+        description="'withheld' means NO ranking exists in this response: "
+        "win_probability is omitted on every option and the robustness block "
+        "(whose confidence IS the recommended option's win share) is omitted "
+        "too. It is the absence of a ranking, never a flat one.",
+    )
+    withheld_reason: Optional[str] = Field(
+        None, description="Machine-readable reason when status='withheld'."
+    )
+
+
 class ISLResponseV2(BaseModel):
     """Enhanced response with explicit status fields and diagnostics."""
 
@@ -1721,6 +1760,20 @@ class ISLResponseV2(BaseModel):
     # Diagnostics (OPTIONAL - only when requested)
     diagnostics: Optional[DiagnosticsV2] = Field(
         None, description="Detailed diagnostics (when requested)"
+    )
+
+    # ROADMAP 2.1192. The ranking's provenance, on the CLIENT wire.
+    #
+    # Optional purely so error paths (where build() runs without results) stay
+    # constructible; it is populated on every analysis that produces options.
+    # Without it, `win_probability` crosses the boundary meaning "largest goal
+    # value" while every surface downstream renders it as "best option" — which
+    # is the defect this row exists to close, and it is not closed until the
+    # distinction can be READ by the consumer, not merely computed here.
+    objective_ranking: Optional[ObjectiveRankingV2] = Field(
+        None,
+        description="What this response's ranking optimised, and whether the "
+        "user's objective was actually stated. See ObjectiveRankingV2.",
     )
 
     # Analysis results (only if analysis_status in ["computed", "partial"])

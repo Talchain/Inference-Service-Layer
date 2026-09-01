@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 76
+    "superset_count": 77
   },
   "omissions": [
     {
@@ -606,6 +606,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "factor_sensitivity_status",
       "reason": "ISL superset — ISLResponseV2.factor_sensitivity_status is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "objective_ranking",
+      "reason": "ISL superset — ISLResponseV2.objective_ranking is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: ROADMAP 2.1192. Deliberately ISL-first: every ISL request model is extra=\"ignore\", so a contract-first field would die silently at parse with a 200 — the same ordering control_candidates used. The companion @talchain/schemas PR adds ObjectiveRankingSchema and the goal_direction request field; this entry is expected to be REMOVED when ISL's schemas pin picks that up."
     },
     {
       "isl_model": "ISLResponseV2",
