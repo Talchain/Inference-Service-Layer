@@ -840,3 +840,728 @@ class TestOutcomeSummaryStatsValidator:
                 p50=1.0,
                 p90=1.5,
             )
+
+
+# ================================================================ (j)
+#
+# ROADMAP 2.477(j) — probability_of_goal was the LAST statistic in the family
+# still computed over the UNFILTERED sample array.
+#
+# `int(np.sum(samples_array >= threshold)) / len(samples)` has no finiteness
+# gate, and `+inf >= anything` is True. So the one shape that makes ISL classify
+# an option `status: "failed"` — every draw non-finite — made every draw "meet"
+# the goal, and the option shipped:
+#
+#     status: "failed", n_valid_samples: 0, win_probability: 0.0,
+#     probability_of_goal: 1.0          <-- fabricated
+#
+# REPRODUCED BY EXECUTION at pristine 28fe0c95 through the real endpoint, and
+# the inversion is total: the option that wins NOTHING claims a 100% chance of
+# hitting the goal while the option that wins EVERY draw claims 0%.
+#
+# The sibling metrics were all gated years apart and this one was missed:
+# mean/std by 2.477(f)/(g) at the emission boundary, p05/p10/p50/p90 and the
+# whole downside block by 2.475/2.477(f), the winners loop by 2.477(c), the
+# auto-noise std by its own finite_mask, factor elasticities by 2.514(a).
+#
+# THE RULE APPLIED HERE is the one this field's own resolver already states
+# (`_resolve_goal_threshold_in_sample_frame`): "FAIL CLOSED ... No fabricated
+# number, no clamp, no silent default." A draw whose compared quantity is not a
+# real number is UNINFORMATIVE — it is excluded from both the numerator and the
+# denominator, exactly as `n_valid_samples` already counts and `validity_ratio`
+# already discloses. With no informative draw at all there is no honest
+# probability, so the field is OMITTED (`exclude_none` => absent, never null,
+# never a fabricated 0.0 — 0.0 would assert a measured zero where nothing was
+# measured).
+
+
+def _mixed_finite_and_infinite_request() -> dict:
+    """One option whose draws MIX small-finite, huge-finite and +inf.
+
+    A small always-present factor, plus TWO float-max factors on independent
+    coin-flip edges:
+      * neither edge present  -> a tiny finite outcome that does NOT meet 1.0;
+      * one edge present      -> ~1.7e308, finite, MEETS;
+      * both edges present    -> their sum overflows to +inf, which "meets" only
+                                 because `inf >= anything` is True.
+
+    This is the shape that discriminates the ARITHMETIC from the empty-guard:
+    the population is neither all-finite nor all-non-finite, so a fix that only
+    special-cased "zero valid samples" would leave it reporting the raw figure.
+    """
+    return {
+        "graph": {
+            "nodes": [
+                {
+                    "id": "f_small",
+                    "kind": "factor",
+                    "label": "Small",
+                    "observed_state": {"value": 0.2},
+                },
+                {
+                    "id": "f_a",
+                    "kind": "factor",
+                    "label": "A",
+                    "observed_state": {"value": HUGE_FINITE},
+                },
+                {
+                    "id": "f_b",
+                    "kind": "factor",
+                    "label": "B",
+                    "observed_state": {"value": HUGE_FINITE},
+                },
+                {"id": "d_lever", "kind": "decision", "label": "Lever"},
+                {"id": "goal_out", "kind": "outcome", "label": "Goal"},
+            ],
+            "edges": [
+                {
+                    "from": "f_small",
+                    "to": "goal_out",
+                    "exists_probability": 1.0,
+                    "strength": {"mean": 1.0, "std": 0.01},
+                },
+                {
+                    "from": "f_a",
+                    "to": "goal_out",
+                    "exists_probability": 0.5,
+                    "strength": {"mean": 1.0, "std": 0.05},
+                },
+                {
+                    "from": "f_b",
+                    "to": "goal_out",
+                    "exists_probability": 0.5,
+                    "strength": {"mean": 1.0, "std": 0.05},
+                },
+                {
+                    "from": "d_lever",
+                    "to": "goal_out",
+                    "exists_probability": 1.0,
+                    "strength": {"mean": 0.9, "std": 0.05},
+                },
+            ],
+        },
+        "options": [
+            {"id": "opt_mixed", "label": "Mixed", "interventions": {"d_lever": 0.7}},
+            {"id": "opt_healthy", "label": "Healthy", "interventions": {"f_a": 0.4, "f_b": 0.4}},
+        ],
+        "goal_node_id": "goal_out",
+        "n_samples": N_SAMPLES,
+        "seed": SEED,
+        "goal_threshold": 1.0,
+        "goal_threshold_frame": "delta",
+        "noise_multiplier": 0,
+    }
+
+
+def _goal_request(observed_value: float, coin_probability: float, threshold: float) -> dict:
+    payload = _request(observed_value, coin_probability)
+    payload["goal_threshold"] = threshold
+    payload["goal_threshold_frame"] = "delta"
+    return payload
+
+
+class TestProbabilityOfGoalIsGatedOnFiniteness:
+    """2.477(j) — probability_of_goal must be computed over the INFORMATIVE
+    draws only, and omitted when there are none."""
+
+    def test_all_non_finite_option_omits_probability_of_goal(self, client, auth_headers):
+        """THE DEFECT. `opt_degraded` has zero valid samples; at pristine it
+        shipped `probability_of_goal: 1.0`."""
+        resp = _post(client, auth_headers, _goal_request(HUGE_FINITE, 1.0, 1.0))
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        degraded = _option(body, "opt_degraded")
+
+        # PRECONDITION, pinned in-test (trap 13b): this assertion is only about
+        # the fabricated-probability defect if the option really does have an
+        # all-non-finite population. If the graph shape ever drifts, this fails
+        # FIRST and names the drift instead of silently passing on a healthy
+        # option that happens to have no goal probability.
+        assert degraded["status"] == "failed"
+        assert degraded["outcome"]["n_valid_samples"] == 0
+        assert degraded["outcome"]["validity_ratio"] == 0.0
+
+        assert "probability_of_goal" not in degraded, (
+            "an option with ZERO informative draws must OMIT probability_of_goal; "
+            f"got {degraded.get('probability_of_goal')!r} "
+            "(1.0 is the pristine fabrication: inf >= threshold on every draw)"
+        )
+
+    def test_win_probability_and_goal_probability_cannot_contradict(self, client, auth_headers):
+        """The user-visible shape of the defect, bound by identity to the two
+        options: at pristine the option that won NOTHING claimed a 100% chance
+        of hitting the goal while the option that won EVERY draw claimed 0%."""
+        resp = _post(client, auth_headers, _goal_request(HUGE_FINITE, 1.0, 1.0))
+        body = _strict_parse(resp)
+
+        degraded = _option(body, "opt_degraded")
+        healthy = _option(body, "opt_healthy")
+
+        # Precondition: this really is the "wins nothing / wins everything" pair.
+        assert degraded["win_probability"] == 0.0
+        assert healthy["win_probability"] == 1.0
+
+        assert degraded.get("probability_of_goal") is None, (
+            "the option that wins no draw must not claim a goal probability at "
+            f"all; got {degraded.get('probability_of_goal')!r}"
+        )
+
+    def test_mixed_population_counts_only_the_finite_draws(self, client, auth_headers):
+        """The ARITHMETIC, not the empty-guard: 64 of `opt_mixed`'s 200 draws
+        overflow to +inf and were being counted as goal-meeting."""
+        resp = _post(client, auth_headers, _mixed_finite_and_infinite_request())
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        mixed = _option(body, "opt_mixed")
+        outcome = mixed["outcome"]
+
+        # PRECONDITION: the population must genuinely be MIXED, or this test is
+        # measuring something else entirely.
+        n_valid = outcome["n_valid_samples"]
+        assert 0 < n_valid < N_SAMPLES, (
+            f"fixture no longer produces a mixed population (n_valid={n_valid} "
+            f"of {N_SAMPLES}) — the arithmetic claim below would be vacuous"
+        )
+        assert n_valid == 136, f"population shape drifted: n_valid={n_valid}, expected 136"
+
+        pog = mixed.get("probability_of_goal")
+        assert pog is not None, "a mixed population still has informative draws"
+
+        # 92 of the 136 FINITE draws meet the threshold.
+        assert pog == pytest.approx(92 / 136), (
+            f"probability_of_goal must be taken over the {n_valid} informative "
+            f"draws only; got {pog!r}"
+        )
+        # And it is NOT the pristine figure, which counted the 64 +inf draws as
+        # goal-meeting. Asserting the target value alone would pass if the two
+        # ever coincided.
+        assert pog != pytest.approx(
+            156 / N_SAMPLES
+        ), "probability_of_goal is still being taken over the raw array"
+
+    def test_healthy_option_keeps_its_genuine_probability_of_goal(self, client, auth_headers):
+        """OPPOSITE-DIRECTION TWIN / no-regression control. A fully finite
+        option must keep its real number — including a genuine 0.0, which is a
+        MEASURED zero and must not be suppressed into an absence. Green at
+        pristine by construction; its job is to RED if the gate over-suppresses,
+        which is what the over-suppression mutants prove."""
+        resp = _post(client, auth_headers, _goal_request(HUGE_FINITE, 1.0, 1.0))
+        body = _strict_parse(resp)
+
+        healthy = _option(body, "opt_healthy")
+
+        # Precondition: fully valid population, so there is nothing to gate.
+        assert healthy["status"] == "computed"
+        assert healthy["outcome"]["n_valid_samples"] == N_SAMPLES
+        assert healthy["outcome"]["validity_ratio"] == 1.0
+
+        assert "probability_of_goal" in healthy, (
+            "a fully-finite option must still report probability_of_goal — "
+            "trading the lie for a gap is not a fix"
+        )
+        assert healthy["probability_of_goal"] == pytest.approx(
+            0.0
+        ), "a measured zero must survive the finiteness gate unchanged"
+
+    def test_ordinary_run_probability_is_unchanged(self, client, auth_headers):
+        """Second twin, on an ordinary all-finite request with a NON-degenerate
+        probability — proves the gate is a no-op on the population every real
+        user has, and that it does not merely preserve the 0.0/1.0 endpoints."""
+        resp = _post(client, auth_headers, _goal_request(0.6, 0.5, 0.5))
+        body = _strict_parse(resp)
+
+        healthy = _option(body, "opt_healthy")
+        assert healthy["outcome"]["n_valid_samples"] == N_SAMPLES
+        assert healthy["probability_of_goal"] == pytest.approx(
+            0.53
+        ), "the all-finite path must be byte-identical to pristine"
+
+
+def _level_frame_non_finite_status_quo_request() -> dict:
+    """LEVEL frame, where the compared quantity is NOT the option's samples.
+
+    `level_i = goal_baseline + (option_sample_i - status_quo_sample_i)`, so a
+    non-finite STATUS-QUO draw makes the level non-finite even when the option's
+    own sample is perfectly finite.
+
+    `opt_pinned` pins both float-max factors, so ALL 200 of its own samples are
+    finite and its status is "computed" with `n_valid_samples == 200`. The
+    status quo pins nothing, so on 64 draws both coin edges fire and it
+    overflows to +inf — and those 64 levels are -inf.
+
+    This is the OPPOSITE-DIRECTION face of the same defect: `-inf >= threshold`
+    is False, so the raw computation silently UNDERSTATES the probability
+    instead of overstating it. It is also invisible to `n_valid_samples`, which
+    counts the option's own samples and reports a fully-valid 200.
+    """
+    return {
+        "graph": {
+            "nodes": [
+                {
+                    "id": "f_small",
+                    "kind": "factor",
+                    "label": "Small",
+                    "observed_state": {"value": 0.2},
+                },
+                {
+                    "id": "f_a",
+                    "kind": "factor",
+                    "label": "A",
+                    "observed_state": {"value": HUGE_FINITE},
+                },
+                {
+                    "id": "f_b",
+                    "kind": "factor",
+                    "label": "B",
+                    "observed_state": {"value": HUGE_FINITE},
+                },
+                {"id": "d_lever", "kind": "decision", "label": "Lever"},
+                {
+                    "id": "goal_out",
+                    "kind": "outcome",
+                    "label": "Goal",
+                    "observed_state": {"value": 0.5, "baseline": 0.5},
+                },
+            ],
+            "edges": [
+                {
+                    "from": "f_small",
+                    "to": "goal_out",
+                    "exists_probability": 1.0,
+                    "strength": {"mean": 1.0, "std": 0.01},
+                },
+                {
+                    "from": "f_a",
+                    "to": "goal_out",
+                    "exists_probability": 0.5,
+                    "strength": {"mean": 1.0, "std": 0.05},
+                },
+                {
+                    "from": "f_b",
+                    "to": "goal_out",
+                    "exists_probability": 0.5,
+                    "strength": {"mean": 1.0, "std": 0.05},
+                },
+                {
+                    "from": "d_lever",
+                    "to": "goal_out",
+                    "exists_probability": 1.0,
+                    "strength": {"mean": 0.9, "std": 0.05},
+                },
+            ],
+        },
+        "options": [
+            {"id": "opt_pinned", "label": "Pinned", "interventions": {"f_a": 0.4, "f_b": 0.4}},
+            {"id": "opt_lever", "label": "Lever", "interventions": {"d_lever": 0.7}},
+        ],
+        "goal_node_id": "goal_out",
+        "n_samples": N_SAMPLES,
+        "seed": SEED,
+        "goal_threshold": 0.5,
+        "goal_threshold_frame": "level",
+        "noise_multiplier": 0,
+    }
+
+
+class TestProbabilityOfGoalMasksTheComparedQuantityNotTheSamples:
+    """2.477(j), level frame — the gate must mask what is COMPARED.
+
+    Masking `samples_array` instead of the computed levels passes every
+    delta-frame test (there the two arrays are the same object) while leaving
+    this case wrong, which is exactly why this class exists: it is the
+    discriminating mutant pair for the choice of masked array.
+    """
+
+    def test_non_finite_status_quo_draws_are_excluded_in_level_frame(self, client, auth_headers):
+        resp = _post(client, auth_headers, _level_frame_non_finite_status_quo_request())
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        pinned = _option(body, "opt_pinned")
+
+        # PRECONDITION, pinned in-test: the option's OWN samples must be fully
+        # finite, or this test is just the delta-frame case again and proves
+        # nothing about which array is masked.
+        assert pinned["status"] == "computed"
+        assert pinned["outcome"]["n_valid_samples"] == N_SAMPLES, (
+            "opt_pinned must have a fully-finite sample population — the whole "
+            "point is that n_valid_samples cannot see this defect"
+        )
+        assert pinned["outcome"]["validity_ratio"] == 1.0
+
+        pog = pinned["probability_of_goal"]
+
+        # 44 of the 136 draws whose LEVEL is finite meet the threshold. The
+        # other 64 draws have a +inf status quo, so their level is -inf: not a
+        # real number, and therefore not an observation either way.
+        assert pog == pytest.approx(44 / 136), (
+            "probability_of_goal must be taken over the draws whose COMPARED "
+            f"quantity (the level) is finite; got {pog!r}"
+        )
+        # 44/200 is what masking the option's own samples — or masking nothing
+        # at all, as at pristine — produces. Asserting only the target value
+        # would pass if the two ever coincided.
+        assert pog != pytest.approx(44 / N_SAMPLES), (
+            "probability_of_goal is being masked on the option's samples "
+            "instead of on the computed levels (or not masked at all)"
+        )
+
+
+def _computed_status_inflated_request() -> dict:
+    """The case that defeats every DOWNSTREAM guard.
+
+    PLoT's `isCrownableCandidate` and CEE's `isComparable` both fail CLOSED on
+    an allowlist of `status === 'computed'` — so a "failed" or "partial" option
+    is already excluded from crowning and from goal-attainment coaching.
+
+    This option is `status: "computed"` with 91.5% validity. It passes both
+    allowlists, is crownable, is comparable, looks entirely ordinary — and at
+    pristine it still carried an inflated `probability_of_goal`, because 17 of
+    its 200 draws overflowed to +inf and every one of them was counted as
+    goal-meeting.
+
+    Same shape as the mixed fixture with the coin edges lowered to 0.30, so
+    P(both present) is small enough to leave validity above MIN_VALID_RATIO.
+    This is 2.477(f)'s lesson repeating one field along: gating on
+    `status == "partial"` was too narrow then, and keying a downstream guard on
+    `status == "computed"` cannot see this now.
+    """
+    payload = _mixed_finite_and_infinite_request()
+    payload["graph"]["edges"][1]["exists_probability"] = 0.30
+    payload["graph"]["edges"][2]["exists_probability"] = 0.30
+    payload["options"][0]["id"] = "opt_computed"
+    payload["options"][0]["label"] = "Computed but inflated"
+    return payload
+
+
+class TestProbabilityOfGoalOnACrownableComputedOption:
+    """2.477(j) — the defect is NOT confined to options a downstream allowlist
+    already refuses. It reaches a fully 'computed', crownable, comparable one."""
+
+    def test_computed_option_above_min_valid_ratio_is_still_gated(self, client, auth_headers):
+        resp = _post(client, auth_headers, _computed_status_inflated_request())
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        option = _option(body, "opt_computed")
+        outcome = option["outcome"]
+
+        # PRECONDITION, pinned in-test: the option must be BOTH 'computed' (so
+        # every downstream status allowlist admits it) AND carry non-finite
+        # draws (so there is something to gate). Lose either and this test
+        # stops being about the guard-defeating case.
+        assert option["status"] == "computed", (
+            "the whole point is an option the downstream allowlists ADMIT; "
+            f"got status={option['status']!r}"
+        )
+        assert (
+            outcome["n_valid_samples"] == 183
+        ), f"population drifted: n_valid={outcome['n_valid_samples']}, expected 183"
+        assert outcome["validity_ratio"] > 0.8, (
+            "must sit ABOVE MIN_VALID_RATIO, or the option would be 'partial' "
+            "and the downstream allowlists would already exclude it"
+        )
+
+        pog = option["probability_of_goal"]
+
+        # 96 of the 183 informative draws meet the threshold.
+        assert pog == pytest.approx(
+            96 / 183
+        ), f"probability_of_goal must be taken over the 183 informative draws; got {pog!r}"
+        # 113/200 is the pristine figure: the same 96 genuine draws PLUS the 17
+        # that merely overflowed. Asserting the target alone would pass if the
+        # two ever coincided.
+        assert pog != pytest.approx(
+            113 / N_SAMPLES
+        ), "probability_of_goal is still counting the +inf draws as goal-meeting"
+
+
+# ================================================================ (k)
+#
+# ROADMAP 2.477(k) — the CONSTRAINT channel, the sibling the (j) sweep missed.
+#
+# WHY IT WAS MISSED, because the miss is the lesson: (j)'s enumeration swept
+# NUMPY reductions and generalised that to "every statistic in this file". The
+# constraint channel counts in PLAIN PYTHON (`sum(1 for …)`), so the probe was
+# structurally unable to see it. A sweep that sees one SYNTAX is not a
+# population. Re-derived across three syntaxes with cross-syntax contrast
+# controls (numpy=25, plain-Python=8, bare predicates=2).
+#
+# THE DEFECT. `_check_constraint_satisfied` is a bare `value >= threshold` /
+# `value <= threshold` with no finiteness gate, and every count divided by the
+# FULL `n_samples`. It is SIGN-SYMMETRIC, unlike Channel A: `+inf >= t` is True
+# AND `-inf <= t` is True, so it could fabricate in both directions.
+#
+# WHY THE PRODUCER IS THE ONLY PLACE TO FIX IT. Every guard on the whole chain
+# tests the DELIVERED VALUE and none tests the SAMPLE POPULATION — PLoT
+# `prob01`, CEE's identical predicate and `z.number().min(0).max(1)`, UI
+# `safeFiniteNumber`. An inflated 0.565 is finite and inside [0, 1] and passes
+# all of them. `validity_ratio`/`n_valid_samples` exist but sit on the OUTCOME
+# block and the constraint mapping never consults them.
+#
+# THESE TESTS BIND THE CONSUMER-VISIBLE CLAIM, NOT THE FLOAT. The two predicates
+# below are the consumer's own, evaluated here against ISL's output:
+#   BADGE  — PLoT fires "met every limit you set, in all the scenarios we
+#            tested" on `values.every(p => p === 1)`.
+#   BREACH — the constraint-breach warning fires on `p === 0`.
+# ISL cannot render the badge; what it CAN do — and what these assert — is that
+# its output makes those predicates come out right, in BOTH directions. A guard
+# that only proved suppression would suppress everything and pass, so every
+# suppression case here is paired with a twin in which the badge must still be
+# EARNABLE and the warning must still FIRE.
+
+
+def _badge_earned(option: dict) -> bool:
+    """PLoT's crown-badge predicate, applied to ISL's output."""
+    ca = option.get("constraint_analysis")
+    if ca is None:
+        return False
+    return all(c["prob_satisfied"] == 1 for c in ca["constraints"])
+
+
+def _breach_flagged(option: dict) -> bool:
+    """The constraint-breach warning predicate, applied to ISL's output."""
+    ca = option.get("constraint_analysis")
+    if ca is None:
+        return False
+    return any(c["prob_satisfied"] == 0 for c in ca["constraints"])
+
+
+def _with_constraint(payload: dict, operator: str, threshold: float) -> dict:
+    payload["goal_constraints"] = [
+        {
+            "node_id": "goal_out",
+            "operator": operator,
+            "threshold": threshold,
+            "label": "Stated limit",
+            "value_frame": "delta",
+        }
+    ]
+    return payload
+
+
+def _all_finite_constraint_request(operator: str, threshold: float) -> dict:
+    """Healthy graph: every draw finite, so the gate is a pure no-op here."""
+    payload = _mixed_finite_and_infinite_request()
+    for node in payload["graph"]["nodes"]:
+        if node["id"] in ("f_a", "f_b"):
+            node["observed_state"]["value"] = 0.3
+    payload["graph"]["edges"][1]["exists_probability"] = 0.30
+    payload["graph"]["edges"][2]["exists_probability"] = 0.30
+    payload["options"][0]["id"] = "opt_x"
+    payload["options"][1]["id"] = "opt_y"
+    return _with_constraint(payload, operator, threshold)
+
+
+class TestConstraintChannelIsGatedOnFiniteness:
+    """2.477(k) — the constraint channel over the informative population."""
+
+    def test_all_non_finite_option_refuses_the_whole_constraint_block(self, client, auth_headers):
+        """No draw is informative, so the conjunction was never evaluated once.
+        `prob_satisfied`/`joint_probability` are REQUIRED wire floats — there is
+        no field to null — so per 2.798 the refusal unit is the BLOCK."""
+        payload = _with_constraint(_goal_request(HUGE_FINITE, 1.0, 1.0), ">=", 1.0)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        degraded = _option(body, "opt_degraded")
+        assert degraded["status"] == "failed"
+        assert degraded["outcome"]["n_valid_samples"] == 0
+
+        assert "constraint_analysis" not in degraded, (
+            "an option with zero informative draws must OMIT the constraint "
+            f"block, not fabricate one: {degraded.get('constraint_analysis')!r}"
+        )
+        # CONSUMER-VISIBLE: with no block there is nothing to badge.
+        assert _badge_earned(degraded) is False
+
+        # In-run control: the healthy sibling still gets a real block, so the
+        # refusal is specific to the option that earned it.
+        healthy = _option(body, "opt_healthy")
+        assert healthy["constraint_analysis"] is not None
+        assert _breach_flagged(healthy) is True
+
+    def test_crownable_computed_option_counts_only_informative_draws(self, client, auth_headers):
+        """The guard-defeating case: `status: "computed"`, 91.5% validity, so
+        every downstream status allowlist admits it."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.0)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        option = _option(body, "opt_computed")
+
+        # PRECONDITION: genuinely mixed, and genuinely 'computed'.
+        assert option["status"] == "computed"
+        assert option["outcome"]["n_valid_samples"] == 183
+        assert option["outcome"]["validity_ratio"] > 0.8
+
+        ca = option["constraint_analysis"]
+        prob = ca["constraints"][0]["prob_satisfied"]
+
+        assert prob == pytest.approx(
+            96 / 183
+        ), f"prob_satisfied must use the 183 informative draws; got {prob!r}"
+        assert prob != pytest.approx(
+            113 / N_SAMPLES
+        ), "prob_satisfied is still counting the +inf draws as satisfied"
+        assert ca["joint_probability"] == pytest.approx(96 / 183)
+
+        # CONSUMER-VISIBLE: neither badged nor breached, which is the truth.
+        assert _badge_earned(option) is False
+        assert _breach_flagged(option) is False
+
+    def test_zero_honest_satisfaction_is_not_lifted_above_zero_by_junk_draws(
+        self, client, auth_headers
+    ):
+        """THE BREACH-SILENCING DIRECTION — the harm the badge tests cannot see.
+
+        `_badge_earned` fires on `every(p === 1)` and the all-non-finite case
+        pins that. The OTHER consumer predicate is `p === 0`, the constraint
+        BREACH warning, and inflation is exactly what stops it firing: an option
+        that satisfies the limit on NO informative draw has an honest
+        `prob_satisfied` of exactly 0 — but the bare `value >= threshold`
+        admits every `+inf` draw, so the raw denominator lifts it off zero and
+        the warning goes quiet.
+
+        A user is then shown an option that breaches a limit they set on every
+        draw that could be evaluated, with no breach warning attached. That is
+        the claim this test binds, not the float.
+
+        The existing suite covers `p` inflated from 0.5246 to 0.565 (neither
+        badged nor breached, so no predicate flips) and the all-non-finite
+        refusal. Neither exercises a predicate CHANGING STATE because of the
+        inflation. This one does.
+        """
+        # A threshold above every finite draw, so no informative draw satisfies
+        # it and only the +inf draws could ever be counted as doing so.
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.7e308)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        option = _option(body, "opt_computed")
+
+        # PRECONDITION PINNED IN-TEST: the option must actually CARRY junk draws
+        # and must be `computed`, or this passes on a population that could not
+        # have inflated and asserts nothing (trap 13b — a guard agreeing with
+        # itself). 183 informative of 200 means 17 non-finite draws exist.
+        assert option["status"] == "computed"
+        assert (
+            option["outcome"]["n_valid_samples"] == 183
+        ), "fixture must carry the 17 non-finite draws, or inflation is impossible here"
+
+        ca = option["constraint_analysis"]
+        prob = ca["constraints"][0]["prob_satisfied"]
+
+        assert prob == 0.0, (
+            "no informative draw satisfies the limit, so the honest probability "
+            f"is exactly 0; got {prob!r}"
+        )
+        assert ca["joint_probability"] == 0.0
+
+        # CONSUMER-VISIBLE — the reason this test exists. The breach warning
+        # must FIRE. Pre-fix it did not, because the +inf draws lifted `p` off
+        # zero and `p === 0` is the predicate that drives it.
+        assert _breach_flagged(option) is True, (
+            "the constraint-breach warning must fire on an option that "
+            "satisfies the stated limit on no informative draw"
+        )
+        assert _badge_earned(option) is False
+
+    def test_constraint_and_goal_channels_agree_on_the_same_question(self, client, auth_headers):
+        """Same node, same threshold, same frame — so the two channels are
+        answering ONE question and must return ONE number. At pristine they
+        disagreed (0.565 vs 0.5246) and only the goal channel was fixed by (j);
+        this pins that (k) closed the gap rather than moving it."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.0)
+        body = _strict_parse(_post(client, auth_headers, payload))
+
+        option = _option(body, "opt_computed")
+        pog = option["probability_of_goal"]
+        prob_satisfied = option["constraint_analysis"]["constraints"][0]["prob_satisfied"]
+
+        assert prob_satisfied == pytest.approx(pog), (
+            "the constraint and goal channels ask the same question of the same "
+            f"samples and must agree; got {prob_satisfied!r} vs {pog!r}"
+        )
+
+    def test_badge_is_still_earnable_on_a_healthy_run(self, client, auth_headers):
+        """OPPOSITE-DIRECTION TWIN. A guard that only proved suppression would
+        suppress everything and pass. On an all-finite run whose every draw
+        satisfies the limit, the badge predicate must come out TRUE."""
+        resp = _post(client, auth_headers, _all_finite_constraint_request(">=", -100.0))
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        for option_id in ("opt_x", "opt_y"):
+            option = _option(body, option_id)
+            # PRECONDITION: fully finite, so the gate has nothing to remove.
+            assert option["outcome"]["n_valid_samples"] == N_SAMPLES
+            assert (
+                option["constraint_analysis"] is not None
+            ), "a healthy run must still get a constraint block"
+            assert option["constraint_analysis"]["constraints"][0][
+                "prob_satisfied"
+            ] == pytest.approx(1.0)
+            assert _badge_earned(option) is True, (
+                "the crown badge must remain EARNABLE — trading the lie for a " "gap is not a fix"
+            )
+            assert _breach_flagged(option) is False
+
+    def test_breach_warning_still_fires_on_a_healthy_run(self, client, auth_headers):
+        """OPPOSITE-DIRECTION TWIN. An unreachable limit on an all-finite run
+        must still drive `prob_satisfied` to exactly 0, so the breach warning
+        fires. Inflation is what used to lift it off zero and silence this."""
+        resp = _post(client, auth_headers, _all_finite_constraint_request(">=", 99.0))
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        option = _option(body, "opt_x")
+        assert option["outcome"]["n_valid_samples"] == N_SAMPLES
+        assert option["constraint_analysis"]["constraints"][0]["prob_satisfied"] == pytest.approx(
+            0.0
+        )
+        assert (
+            _breach_flagged(option) is True
+        ), "the constraint-breach warning must still fire on a genuine breach"
+        assert _badge_earned(option) is False
+
+    def test_extreme_finite_failure_margins_do_not_kill_the_response(self, client, auth_headers):
+        """2.477(k), the (f)/(g) family again. `np.median` AVERAGES the two
+        middle elements of an EVEN-length population, so two finite margins near
+        float64 max sum to inf before the division — measured: 92 margins, all
+        finite, max 1.696e308, median inf, render 500. The margin is omitted;
+        the probability is unaffected."""
+        payload = _with_constraint(_computed_status_inflated_request(), "<=", 1e300)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        row = _option(body, "opt_computed")["constraint_analysis"]["constraints"][0]
+        # The probability survives — only the unrepresentable diagnostic is dropped.
+        assert row["prob_satisfied"] == pytest.approx(87 / 183)
+        assert (
+            row.get("failure_margin_median") is None
+        ), "a non-finite failure margin must be OMITTED, never rendered"
