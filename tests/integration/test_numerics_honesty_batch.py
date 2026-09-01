@@ -1426,6 +1426,66 @@ class TestConstraintChannelIsGatedOnFiniteness:
         assert _badge_earned(option) is False
         assert _breach_flagged(option) is False
 
+    def test_zero_honest_satisfaction_is_not_lifted_above_zero_by_junk_draws(
+        self, client, auth_headers
+    ):
+        """THE BREACH-SILENCING DIRECTION — the harm the badge tests cannot see.
+
+        `_badge_earned` fires on `every(p === 1)` and the all-non-finite case
+        pins that. The OTHER consumer predicate is `p === 0`, the constraint
+        BREACH warning, and inflation is exactly what stops it firing: an option
+        that satisfies the limit on NO informative draw has an honest
+        `prob_satisfied` of exactly 0 — but the bare `value >= threshold`
+        admits every `+inf` draw, so the raw denominator lifts it off zero and
+        the warning goes quiet.
+
+        A user is then shown an option that breaches a limit they set on every
+        draw that could be evaluated, with no breach warning attached. That is
+        the claim this test binds, not the float.
+
+        The existing suite covers `p` inflated from 0.5246 to 0.565 (neither
+        badged nor breached, so no predicate flips) and the all-non-finite
+        refusal. Neither exercises a predicate CHANGING STATE because of the
+        inflation. This one does.
+        """
+        # A threshold above every finite draw, so no informative draw satisfies
+        # it and only the +inf draws could ever be counted as doing so.
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.7e308)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        option = _option(body, "opt_computed")
+
+        # PRECONDITION PINNED IN-TEST: the option must actually CARRY junk draws
+        # and must be `computed`, or this passes on a population that could not
+        # have inflated and asserts nothing (trap 13b — a guard agreeing with
+        # itself). 183 informative of 200 means 17 non-finite draws exist.
+        assert option["status"] == "computed"
+        assert (
+            option["outcome"]["n_valid_samples"] == 183
+        ), "fixture must carry the 17 non-finite draws, or inflation is impossible here"
+
+        ca = option["constraint_analysis"]
+        prob = ca["constraints"][0]["prob_satisfied"]
+
+        assert prob == 0.0, (
+            "no informative draw satisfies the limit, so the honest probability "
+            f"is exactly 0; got {prob!r}"
+        )
+        assert ca["joint_probability"] == 0.0
+
+        # CONSUMER-VISIBLE — the reason this test exists. The breach warning
+        # must FIRE. Pre-fix it did not, because the +inf draws lifted `p` off
+        # zero and `p === 0` is the predicate that drives it.
+        assert _breach_flagged(option) is True, (
+            "the constraint-breach warning must fire on an option that "
+            "satisfies the stated limit on no informative draw"
+        )
+        assert _badge_earned(option) is False
+
     def test_constraint_and_goal_channels_agree_on_the_same_question(self, client, auth_headers):
         """Same node, same threshold, same frame — so the two channels are
         answering ONE question and must return ONE number. At pristine they

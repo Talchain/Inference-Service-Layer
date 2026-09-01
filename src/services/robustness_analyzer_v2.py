@@ -4372,13 +4372,41 @@ class RobustnessAnalyzerV2:
                 # the target, rendered to a user on the option's card. Reproduced
                 # by execution through the endpoint at 28fe0c95.
                 #
-                # This was the LAST statistic in the family still ungated: the
-                # winners loop got its `math.isfinite` filter in 2.477(c),
-                # mean/std at the emission boundary in 2.477(f)/(g), the
-                # percentile/downside family in 2.475+2.477(f), the auto-noise std
-                # its own finite_mask, the factor elasticities 2.514(a). Same
+                # Siblings already gated: the winners loop got its `math.isfinite`
+                # filter in 2.477(c), mean/std at the emission boundary in
+                # 2.477(f)/(g), the percentile/downside family in 2.475+2.477(f),
+                # the auto-noise std its own finite_mask, the factor elasticities
+                # 2.514(a), and the constraint channel in 2.477(k) below. Same
                 # per-index convention as all of them — nothing is inpainted,
                 # reordered or imputed; a draw is simply in or out.
+                #
+                # ⚠ DO NOT WRITE "THE LAST ONE" HERE. This comment used to, and
+                # it was false twice over: the constraint channel was ungated at
+                # the time of writing (2.477(k)), and `_compute_evpi_metric`'s
+                # no-constraints branch still is — its `max()` over the RAW
+                # per-draw outcomes lets a `+inf` draw beat the field, exactly
+                # the failure the winners loop's own comment warns about.
+                # Reproduced by execution, not inferred: on a population with 106
+                # non-finite draws the recommended option's `win_probability` is
+                # 0.53 while `p_win_sensitivity.current_metric` reads 0.0, and
+                # applying this same gate there moves the reported per-factor
+                # deltas from 0.0/0.0 to 0.075/0.01. Rowed as 2.477(l); NOT fixed
+                # here, because its user-reachability has not been established
+                # and widening scope again is what this file's scope rule bans.
+                #
+                # ⚠ AND THE DENOMINATOR IS *NOT* THE SAME AS `win_probability`'S.
+                # `win_probability` deliberately keeps the FULL `n_samples`
+                # denominator (documented at the winners loop: "win_probabilities
+                # then sum to the informative fraction, which is the honest
+                # report") — a MARGINAL probability. `probability_of_goal`
+                # divides by `n_informative` — a probability CONDITIONAL on the
+                # draw being informative. Both are defensible and the choice here
+                # is deliberate, because this field's siblings on the same card
+                # (mean/std/percentiles/cvar_10) are all conditional. But the two
+                # probabilities a user sees side by side are conditioned
+                # DIFFERENTLY, and on a degraded option they will not reconcile
+                # by arithmetic. Do not "align" one to the other without reading
+                # both rules.
                 #
                 # MASK THE COMPARED QUANTITY, NOT `samples_array`. In level frame
                 # the compared value is `baseline + (sample - status_quo)`, so a
@@ -8218,7 +8246,7 @@ class RobustnessAnalyzerV2:
         self,
         satisfaction_matrix: List[List[bool]],
         constraints: List[GoalConstraint],
-        informative: Optional[List[bool]] = None,
+        informative: List[bool],
     ) -> Dict[str, Dict[str, float]]:
         """
         Compute pairwise conditional probabilities: P(C_j | C_i).
@@ -8234,13 +8262,19 @@ class RobustnessAnalyzerV2:
         if len(constraints) < 2:
             return {}
 
-        n_samples = len(satisfaction_matrix)
         n_constraints = len(constraints)
         # 2.477(k): same informative population as the marginals, so P(C_j | C_i)
         # stays commensurable with the per-constraint and joint figures.
-        if informative is None:
-            informative = [True] * n_samples
-
+        #
+        # ⚠ REQUIRED, not defaulted. This parameter carried
+        # `Optional[List[bool]] = None` falling back to all-True, which is a
+        # FAIL-OPEN default: a future caller that forgot it would silently get
+        # the RAW denominator back — reopening 2.477(k) with no test red
+        # anywhere, because every existing caller passes the mask and the suite
+        # would stay green. The hand-maintained mirror this file keeps paying
+        # for. Making it required puts the completeness check in mypy, which is
+        # the same reasoning the winners loop uses for its `Optional[str]`
+        # winner: let the type checker be the thing that cannot forget.
         conditional_probs: Dict[str, Dict[str, float]] = {}
 
         for i in range(n_constraints):
@@ -8275,7 +8309,8 @@ class RobustnessAnalyzerV2:
         constraints: List[GoalConstraint],
         satisfaction_matrix: List[List[bool]],
         near_miss_fraction_threshold: float = 0.1,
-        informative: Optional[List[bool]] = None,
+        *,
+        informative: List[bool],
     ) -> Dict[int, Dict[str, Any]]:
         """
         Compute near-miss diagnostics for each constraint.
@@ -8300,6 +8335,10 @@ class RobustnessAnalyzerV2:
             constraints: List of GoalConstraint objects
             satisfaction_matrix: Precomputed satisfaction matrix
             near_miss_fraction_threshold: Relative threshold for "near miss" (default 10%)
+            informative: 2.477(k) mask, one flag per draw, True where EVERY
+                constraint's value is a real number. REQUIRED and keyword-only:
+                a fail-open default would let a future caller silently restore
+                the raw denominator with no test red anywhere.
 
         Returns:
             Dict[constraint_idx, {failure_margin_median, near_miss_fraction, binding}]
@@ -8307,12 +8346,9 @@ class RobustnessAnalyzerV2:
         if not constraints:
             return {}
 
-        n_samples = len(satisfaction_matrix)
         # 2.477(k): a non-finite draw yields no margin and no verdict. Excluded
         # from the failure margins, the near-miss count and the binding
         # denominator alike — the same population the probabilities use.
-        if informative is None:
-            informative = [True] * n_samples
         n_informative = sum(1 for ok in informative if ok)
 
         diagnostics: Dict[int, Dict[str, Any]] = {}
@@ -8478,7 +8514,17 @@ class RobustnessAnalyzerV2:
                     "operator": constraint.operator,
                     "threshold": constraint.threshold,
                     "label": constraint.label,
-                    "prob_satisfied": per_constraint_probs.get(str(c_idx), 0.0),
+                    # 2.477(k): SUBSCRIPT, not `.get(..., 0.0)`. The default was
+                    # unreachable — `per_constraint_probs` is built by
+                    # `enumerate(constraints)` over this same list one function
+                    # away — but it was a fabricated `0.0` sitting three lines
+                    # under this PR's own rule that a fabricated 0.0 reads as a
+                    # MEASURED BREACH and fires the breach warning on nothing.
+                    # If the two loops ever disagree, a KeyError is the honest
+                    # outcome; a silent 0.0 is the untruth this change exists to
+                    # remove. Same reasoning, and the same wording, as the
+                    # Slice 6b echo subscript above.
+                    "prob_satisfied": per_constraint_probs[str(c_idx)],
                     "failure_margin_median": diag.get("failure_margin_median"),
                     "near_miss_fraction": diag.get("near_miss_fraction"),
                     "binding": diag.get("binding", False),
