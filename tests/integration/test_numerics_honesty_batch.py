@@ -1426,27 +1426,37 @@ class TestConstraintChannelIsGatedOnFiniteness:
         assert _badge_earned(option) is False
         assert _breach_flagged(option) is False
 
-    def test_zero_honest_satisfaction_is_not_lifted_above_zero_by_junk_draws(
+    def test_zero_honest_satisfaction_is_withheld_not_shipped_as_a_bare_zero(
         self, client, auth_headers
     ):
-        """THE BREACH-SILENCING DIRECTION — the harm the badge tests cannot see.
+        """THE BREACH-SILENCING DIRECTION — REWRITTEN BY 2.477(m).
 
-        `_badge_earned` fires on `every(p === 1)` and the all-non-finite case
-        pins that. The OTHER consumer predicate is `p === 0`, the constraint
-        BREACH warning, and inflation is exactly what stops it firing: an option
-        that satisfies the limit on NO informative draw has an honest
-        `prob_satisfied` of exactly 0 — but the bare `value >= threshold`
-        admits every `+inf` draw, so the raw denominator lifts it off zero and
-        the warning goes quiet.
+        ⚠ THIS TEST'S EXPECTATION WAS DELIBERATELY REVERSED, and the reversal is
+        a RULING, not a repair of a bad test. As written for (k) it asserted
+        `prob_satisfied == 0.0` on this 183-of-200 population and required the
+        consumer's BREACH warning to FIRE. (k) was right that the figure is the
+        honest CONDITIONAL probability. Primary's (m) ruling is that a bare
+        categorical `0` on a PARTIAL population is nonetheless a claim the
+        sample cannot support: the consumer reads exact zero as "no sampled draw
+        satisfied" and tells the user the limit was breached on every scenario
+        tested — when 17 of the 200 were never evaluated at all. So the value is
+        WITHHELD, and with it the warning it was driving.
 
-        A user is then shown an option that breaches a limit they set on every
-        draw that could be evaluated, with no breach warning attached. That is
-        the claim this test binds, not the float.
+        WHAT WAS LOST, STATED PLAINLY rather than quietly dropped: (k)'s
+        anti-inflation property is no longer OBSERVABLE on an extremum
+        population, because there is no longer a number there to inspect. It
+        remains guarded on MID-RANGE partial populations, where the denominator
+        question is still answerable and still bites, by
+        `test_crownable_computed_option_counts_only_informative_draws`
+        (0.5245901639344263, not the inflated 0.565) and by
+        `TestPartialPopulationExtremaAreWithheld
+        ::test_partial_mid_range_constraint_block_is_untouched` (96/183). The
+        (k) fix is NOT unguarded; its guard moved to the population where the
+        question survives.
 
-        The existing suite covers `p` inflated from 0.5246 to 0.565 (neither
-        badged nor breached, so no predicate flips) and the all-non-finite
-        refusal. Neither exercises a predicate CHANGING STATE because of the
-        inflation. This one does.
+        WHAT IS PRESERVED HERE is the consumer-visible half, in both directions
+        and in ONE body: the breach warning stays silent on the partial option
+        and still fires on the full-coverage one.
         """
         # A threshold above every finite draw, so no informative draw satisfies
         # it and only the +inf draws could ever be counted as doing so.
@@ -1458,6 +1468,7 @@ class TestConstraintChannelIsGatedOnFiniteness:
         _assert_all_finite(body)
 
         option = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
 
         # PRECONDITION PINNED IN-TEST: the option must actually CARRY junk draws
         # and must be `computed`, or this passes on a population that could not
@@ -1467,23 +1478,27 @@ class TestConstraintChannelIsGatedOnFiniteness:
         assert (
             option["outcome"]["n_valid_samples"] == 183
         ), "fixture must carry the 17 non-finite draws, or inflation is impossible here"
+        assert (
+            full["outcome"]["n_valid_samples"] == N_SAMPLES
+        ), "the contrast option must be FULL coverage, or the pair discriminates nothing"
 
-        ca = option["constraint_analysis"]
-        prob = ca["constraints"][0]["prob_satisfied"]
-
-        assert prob == 0.0, (
-            "no informative draw satisfies the limit, so the honest probability "
-            f"is exactly 0; got {prob!r}"
+        # 2.477(m): the block is refused whole — `prob_satisfied` is a REQUIRED
+        # wire float, so there is no field to null.
+        assert option.get("constraint_analysis") is None, (
+            "a partial-population zero must be WITHHELD, not shipped as a bare "
+            f"categorical 0; got {option.get('constraint_analysis')!r}"
         )
-        assert ca["joint_probability"] == 0.0
 
-        # CONSUMER-VISIBLE — the reason this test exists. The breach warning
-        # must FIRE. Pre-fix it did not, because the +inf draws lifted `p` off
-        # zero and `p === 0` is the predicate that drives it.
-        assert _breach_flagged(option) is True, (
-            "the constraint-breach warning must fire on an option that "
-            "satisfies the stated limit on no informative draw"
+        # CONSUMER-VISIBLE, BOTH DIRECTIONS. Silent on the partial option...
+        assert _breach_flagged(option) is False, (
+            "the breach warning must not claim a limit was breached on every "
+            "scenario tested when 17 of 200 were never evaluated"
         )
+        # ...and still firing on the full-coverage one in the SAME body, which
+        # is what stops this being a blanket silencing.
+        assert (
+            _breach_flagged(full) is True
+        ), "a FULL-coverage zero is a measured breach and must still warn"
         assert _badge_earned(option) is False
 
     def test_constraint_and_goal_channels_agree_on_the_same_question(self, client, auth_headers):
@@ -1565,3 +1580,236 @@ class TestConstraintChannelIsGatedOnFiniteness:
         assert (
             row.get("failure_margin_median") is None
         ), "a non-finite failure margin must be OMITTED, never rendered"
+
+
+# ================================================================ (m)
+#
+# ROADMAP 2.477(m) — A CATEGORICAL EXTREMUM COMPUTED FROM A PARTIAL POPULATION.
+#
+# (j) and (k) made these probabilities honest about their own DENOMINATOR: each
+# is now conditional on the draw being informative. What neither changed is that
+# the wire carries a BARE FLOAT with no coverage beside it — and at the extremes
+# a bare float stops being a probability and becomes a CATEGORICAL CLAIM.
+#
+# The deployed consumer says so in those words. At PLoT staging the crown policy
+# reads exact `0` as "no sampled draw satisfied" and removes the option from
+# eligibility; exact `1` classifies it `compliant`; the UI renders those reasons
+# verbatim. A consumer cannot distinguish "0 of 183 informative, 17 unknown"
+# from "0 of 200 tested". So on a partial population the extremum asserts a
+# certainty the sample never established — the product lying about certainty.
+#
+# THE RULING (Primary): WITHHOLD. Do not emit the value at all. Not clamped, not
+# nudged, not replaced with a near-value, and NO contract change — Channel A's
+# field is already Optional, and Channel B's refusal unit is already the BLOCK
+# (2.798), a shape every consumer already handles because it is already absent
+# whenever no constraints are sent.
+#
+# ⚠ THE DISCRIMINATING PAIR IS THE WHOLE POINT, AND IT IS WHY EVERY TEST BELOW
+# ASSERTS TWO OPTIONS FROM ONE RESPONSE. A fix that suppresses ALL extrema is
+# WRONG: a full-coverage 0 or 1 is a MEASURED certainty and destroying it would
+# throw away the honest answer to save the dishonest one. In every test here the
+# two options carry the SAME numeric value in the SAME body and differ ONLY in
+# coverage — so a gate keyed on the VALUE, or a blanket suppression, REDs
+# immediately, and a gate keyed on COVERAGE passes. Neither direction alone
+# shows anything (trap 19).
+
+
+class TestPartialPopulationExtremaAreWithheld:
+    """2.477(m) — withhold a categorical extremum backed by a partial
+    population; preserve a full-coverage one EXACTLY."""
+
+    # ------------------------------------------------------- Channel A
+
+    def test_goal_zero_withheld_on_partial_preserved_on_full(self, client, auth_headers):
+        """`probability_of_goal == 0.0` in both options of one body: withheld on
+        the 183/200 option, preserved on the 200/200 one."""
+        payload = _computed_status_inflated_request()
+        payload["goal_threshold"] = HUGE_FINITE
+        payload["goal_threshold_frame"] = "delta"
+
+        resp = _post(client, auth_headers, payload)
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        partial = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
+
+        # PRECONDITIONS PINNED IN-TEST (trap 13b). Without these the pair could
+        # pass on two options that happen to share a coverage class, and would
+        # be asserting nothing about the discrimination. In DELTA frame the
+        # compared array IS the sample array, so n_valid_samples is the exact
+        # coverage observable here, not a proxy.
+        assert partial["status"] == "computed", "must survive every downstream status allowlist"
+        assert partial["outcome"]["n_valid_samples"] == 183, "fixture must carry the 17 junk draws"
+        assert full["outcome"]["n_valid_samples"] == N_SAMPLES, "the contrast option must be FULL"
+
+        # WITHHELD — absent, not null, not clamped, not nudged.
+        assert "probability_of_goal" not in partial, (
+            "a 0.0 backed by 183 of 200 draws asserts 'this never happens' on a "
+            f"population that was never fully measured; got {partial.get('probability_of_goal')!r}"
+        )
+        # PRESERVED EXACTLY — the honest measured zero.
+        assert full["probability_of_goal"] == 0.0, (
+            "a full-coverage zero is a MEASURED certainty and must survive "
+            f"byte-identically; got {full.get('probability_of_goal')!r}"
+        )
+
+    def test_goal_one_withheld_on_partial_preserved_on_full(self, client, auth_headers):
+        """The opposite extremum, same structure. `1.0` is the direction that
+        drives PLoT's `compliant` classification."""
+        payload = _computed_status_inflated_request()
+        payload["goal_threshold"] = -HUGE_FINITE
+        payload["goal_threshold_frame"] = "delta"
+
+        resp = _post(client, auth_headers, payload)
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        partial = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
+
+        assert partial["outcome"]["n_valid_samples"] == 183
+        assert full["outcome"]["n_valid_samples"] == N_SAMPLES
+
+        assert "probability_of_goal" not in partial, (
+            "a 1.0 backed by 183 of 200 draws asserts 'this always happens'; got "
+            f"{partial.get('probability_of_goal')!r}"
+        )
+        assert (
+            full["probability_of_goal"] == 1.0
+        ), f"a full-coverage one must survive exactly; got {full.get('probability_of_goal')!r}"
+
+    def test_partial_mid_range_goal_probability_is_untouched(self, client, auth_headers):
+        """THE GATE MUST BE NARROW. A partial population is not itself
+        disqualifying — only a partial EXTREMUM is. This is the case (j) fixed
+        and (m) must leave exactly as it found it."""
+        resp = _post(client, auth_headers, _computed_status_inflated_request())
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        partial = _option(body, "opt_computed")
+        assert partial["outcome"]["n_valid_samples"] == 183, "must be genuinely partial"
+        assert partial["probability_of_goal"] == pytest.approx(96 / 183), (
+            "a mid-range conditional probability makes no categorical claim and "
+            f"must still be emitted; got {partial.get('probability_of_goal')!r}"
+        )
+
+    # ------------------------------------------------------- Channel B
+
+    def test_constraint_zero_block_withheld_on_partial_preserved_on_full(
+        self, client, auth_headers
+    ):
+        """`prob_satisfied == 0.0` and `joint_probability == 0.0` in both
+        options of one body. `prob_satisfied` is a REQUIRED wire float, so the
+        refusal unit is the BLOCK (2.798)."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", HUGE_FINITE)
+
+        resp = _post(client, auth_headers, payload)
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        partial = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
+
+        assert partial["status"] == "computed"
+        assert partial["outcome"]["n_valid_samples"] == 183
+        assert full["outcome"]["n_valid_samples"] == N_SAMPLES
+
+        assert partial.get("constraint_analysis") is None, (
+            "the whole block is refused when any emitted figure is a "
+            f"partial-population extremum; got {partial.get('constraint_analysis')!r}"
+        )
+
+        # PRESERVED EXACTLY, in the SAME body — this is the half that fails if
+        # the gate is a blanket extremum suppressor.
+        full_ca = full["constraint_analysis"]
+        assert full_ca is not None, "a full-coverage block must survive"
+        assert full_ca["joint_probability"] == 0.0
+        assert [c["prob_satisfied"] for c in full_ca["constraints"]] == [0.0]
+
+    def test_constraint_one_block_withheld_on_partial_preserved_on_full(self, client, auth_headers):
+        """The `1.0` direction — the one that earns PLoT's crown badge."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", -HUGE_FINITE)
+
+        resp = _post(client, auth_headers, payload)
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        partial = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
+
+        assert partial["outcome"]["n_valid_samples"] == 183
+        assert full["outcome"]["n_valid_samples"] == N_SAMPLES
+
+        assert (
+            partial.get("constraint_analysis") is None
+        ), f"got {partial.get('constraint_analysis')!r}"
+
+        full_ca = full["constraint_analysis"]
+        assert full_ca is not None
+        assert full_ca["joint_probability"] == 1.0
+        assert [c["prob_satisfied"] for c in full_ca["constraints"]] == [1.0]
+
+    def test_partial_mid_range_constraint_block_is_untouched(self, client, auth_headers):
+        """THE GATE MUST BE NARROW, Channel B. (k)'s conditional figure on a
+        partial population survives untouched, because it claims nothing
+        categorical."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.0)
+
+        resp = _post(client, auth_headers, payload)
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        partial = _option(body, "opt_computed")
+        assert partial["outcome"]["n_valid_samples"] == 183
+
+        ca = partial["constraint_analysis"]
+        assert ca is not None, "a partial MID-RANGE block must still be emitted"
+        assert ca["joint_probability"] == pytest.approx(96 / 183)
+        assert [c["prob_satisfied"] for c in ca["constraints"]] == [pytest.approx(96 / 183)]
+
+    # ------------------------------------------- the consumer-visible claim
+
+    def test_consumer_predicates_go_quiet_on_the_withheld_option_only(self, client, auth_headers):
+        """WHAT THE USER GETS, stated through PLoT's own predicates.
+
+        `_badge_earned` is `every(p === 1)` and `_breach_flagged` is
+        `any(p === 0)` — both are CATEGORICAL, and both are exactly what a
+        partial-population extremum was firing falsely. On the withheld option
+        they go quiet: the product declines to make a claim it cannot back. On
+        the full-coverage option in the SAME body they still fire, which is the
+        half that proves this is not a blanket silencing.
+        """
+        breach_payload = _with_constraint(_computed_status_inflated_request(), ">=", HUGE_FINITE)
+        body = _strict_parse(_post(client, auth_headers, breach_payload))
+
+        partial = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
+        assert partial["outcome"]["n_valid_samples"] == 183
+        assert full["outcome"]["n_valid_samples"] == N_SAMPLES
+
+        assert _breach_flagged(partial) is False, (
+            "the breach warning must NOT fire from a partial-population zero — "
+            "it would tell the user a limit was breached on every scenario "
+            "tested, when 17 of 200 were never evaluated"
+        )
+        assert _breach_flagged(full) is True, (
+            "a FULL-coverage zero must still raise the breach warning; if this "
+            "fails the gate has become a blanket suppressor"
+        )
+
+        badge_payload = _with_constraint(_computed_status_inflated_request(), ">=", -HUGE_FINITE)
+        body = _strict_parse(_post(client, auth_headers, badge_payload))
+
+        partial = _option(body, "opt_computed")
+        full = _option(body, "opt_healthy")
+        assert partial["outcome"]["n_valid_samples"] == 183
+
+        assert (
+            _badge_earned(partial) is False
+        ), "the crown badge must NOT be earned on a partial-population one"
+        assert _badge_earned(full) is True, "a FULL-coverage one must still earn the badge"

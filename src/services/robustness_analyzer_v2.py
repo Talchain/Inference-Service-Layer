@@ -4457,7 +4457,62 @@ class RobustnessAnalyzerV2:
                 informative = np.isfinite(compared)
                 n_informative = int(np.count_nonzero(informative))
                 if n_informative > 0:
-                    probability_of_goal = int(np.sum(meets[informative])) / n_informative
+                    candidate = int(np.sum(meets[informative])) / n_informative
+
+                    # 2.477(m) — WITHHOLD A PARTIAL-POPULATION EXTREMUM.
+                    #
+                    # (j)/(k) made this figure HONEST about its own population:
+                    # it is now a probability CONDITIONAL on the draw being
+                    # informative. What they did not change is that the wire
+                    # carries a BARE FLOAT with no coverage beside it, and at
+                    # the extremes a bare float is not a probability — it is a
+                    # CATEGORICAL CLAIM. Exactly 0 reads as "this never
+                    # happens" and exactly 1 as "this always happens", and the
+                    # deployed consumer says so in those words: PLoT's crown
+                    # policy treats `0` as "no sampled draw satisfied" and
+                    # removes the option from eligibility, treats `1` as
+                    # `compliant`, and the UI renders those reasons verbatim.
+                    # A consumer cannot distinguish "0 of 183 informative, 17
+                    # unknown" from "0 of 200 tested" — so on a PARTIAL
+                    # population the extremum asserts a certainty the sample
+                    # never established. That is the product lying about
+                    # certainty, which is the one thing this file exists to
+                    # stop.
+                    #
+                    # ONLY THE EXTREMA, AND ONLY WHEN PARTIAL. A mid-range
+                    # conditional probability makes no categorical claim and is
+                    # emitted unchanged (measured: 183/200 informative,
+                    # `0.5245901639344263`, still on the wire). A FULL-coverage
+                    # 0 or 1 is a MEASURED certainty over the whole population
+                    # and is preserved EXACTLY — suppressing those would destroy
+                    # the honest answer to save the dishonest one, and the
+                    # discriminating pair in
+                    # `TestPartialPopulationExtremaAreWithheld` fails if this
+                    # gate ever widens to them.
+                    #
+                    # THE POPULATION IS `informative.size`, NOT `n_valid_samples`.
+                    # In LEVEL frame the compared quantity folds in the
+                    # STATUS-QUO draw, so an option with 200/200 finite samples
+                    # can still have only 136 informative draws — the divergence
+                    # (j) documents directly above. Coverage must be judged
+                    # against the array actually compared, which is the only
+                    # place both directions are visible.
+                    #
+                    # NOT CLAMPED, NOT NUDGED, NOT REPLACED. The field is
+                    # Optional and `exclude_none` drops it from the wire; a
+                    # near-value like 1/184 would be a fabricated measurement,
+                    # and absence is an existing reachable shape here (an
+                    # unattested threshold already omits it for every option).
+                    #
+                    # NO-REGRESSION: on an all-finite population
+                    # `n_informative == informative.size`, the gate cannot fire
+                    # and the value is byte-identical to (j).
+                    coverage_is_partial = n_informative < int(informative.size)
+                    is_categorical_extremum = candidate == 0.0 or candidate == 1.0
+                    if coverage_is_partial and is_categorical_extremum:
+                        probability_of_goal = None
+                    else:
+                        probability_of_goal = candidate
 
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
@@ -8239,6 +8294,41 @@ class RobustnessAnalyzerV2:
             if informative[sample_idx] and all(sample)
         )
         joint_probability = joint_satisfied_count / n_informative
+
+        # 2.477(m) — WITHHOLD PARTIAL-POPULATION EXTREMA, refusal unit = BLOCK.
+        #
+        # Same defect as Channel A directly above, reached through this
+        # channel's own arithmetic. (k) made these figures conditional on the
+        # informative draws; it did not give the wire anywhere to say so.
+        # `prob_satisfied` and `joint_probability` are REQUIRED wire floats —
+        # there is no field to null — so per 2.798 the refusal unit is the
+        # BLOCK, exactly as it already is for `n_informative == 0` above and
+        # for an unresolvable frame in the caller. Absence is a shape every
+        # consumer already handles, because the block is already absent on
+        # every request that sends no constraints.
+        #
+        # ONE MASK, ONE VERDICT, WHOLE BLOCK. The block's numbers are mutually
+        # constrained (joint is P(ALL), the conditionals are P(C_j | C_i)), so
+        # dropping one constraint's figure while keeping its siblings would
+        # leave a joint probability that no longer reconciles with the
+        # marginals a consumer can see. If ANY emitted figure in the block is a
+        # partial-population extremum, the block is refused whole.
+        #
+        # THE CONSUMER PREDICATES ARE LITERALLY CATEGORICAL: PLoT's crown badge
+        # is `values.every(p => p === 1)` and the breach warning is
+        # `any(p === 0)`. Both go quiet on an absent block, which is the point —
+        # the product declines to make a claim it cannot back, rather than
+        # making a confident one it cannot back.
+        #
+        # ONLY THE EXTREMA, ONLY WHEN PARTIAL. A full-coverage 0 or 1 is a
+        # measured certainty and is preserved EXACTLY; a partial mid-range
+        # figure is emitted unchanged. Both directions are pinned by the
+        # discriminating pair, and a gate that widened to either would RED.
+        coverage_is_partial = n_informative < n_samples
+        if coverage_is_partial:
+            emitted = [joint_probability, *per_constraint_probs.values()]
+            if any(p == 0.0 or p == 1.0 for p in emitted):
+                return None
 
         return per_constraint_probs, joint_probability, satisfaction_matrix, informative
 
