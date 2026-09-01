@@ -7695,11 +7695,15 @@ class RobustnessAnalyzerV2:
                 status_quo_node_values,
                 recommended_option_id,
             )
-            _, joint_prob, _ = self._compute_constraint_probabilities(
+            probabilities = self._compute_constraint_probabilities(
                 resolved_values,
                 request.goal_constraints,
             )
-            return joint_prob
+            # 2.477(k): no informative draw => no honest joint probability. This
+            # already returns None on other refusals above; same treatment.
+            if probabilities is None:
+                return None
+            return probabilities[1]
         else:
             # P(win) of the fixed recommended option.
             # Tie-breaking mirrors main MC: equal credit split among tied options
@@ -8096,9 +8100,13 @@ class RobustnessAnalyzerV2:
         self,
         resolved_values: Dict[int, List[float]],
         constraints: List[GoalConstraint],
-    ) -> Tuple[Dict[str, float], float, List[List[bool]]]:
+    ) -> Optional[Tuple[Dict[str, float], float, List[List[bool]], List[bool]]]:
         """
-        Compute per-constraint and joint probabilities for an option.
+        Compute per-constraint and joint probabilities for an option, or REFUSE.
+
+        Returns ``None`` when NO draw is informative (2.477(k)) — every constraint
+        value non-finite on every draw. The caller then omits the whole
+        ``constraint_analysis`` block, per 2.798's all-or-nothing refusal unit.
 
         ROADMAP 2.798: takes samples ALREADY RESOLVED into each constraint's own
         frame by ``_resolve_constraint_series``, keyed by constraint INDEX. It no
@@ -8119,11 +8127,64 @@ class RobustnessAnalyzerV2:
             - satisfaction_matrix: List[sample_idx][constraint_idx] -> bool (for conditional prob)
         """
         if not constraints:
-            return {}, 1.0, []
+            return {}, 1.0, [], []
 
         n_samples = len(next(iter(resolved_values.values())))
 
-        # Build satisfaction matrix: [sample_idx][constraint_idx] -> bool
+        # 2.477(k) — THE INFORMATIVE POPULATION.
+        #
+        # `_check_constraint_satisfied` is a bare `value >= threshold` /
+        # `value <= threshold`, and nobody asked what `inf >= threshold` returns.
+        # It is True — and, because the operator flips, `-inf <= threshold` is
+        # True as well: this channel fabricated SIGN-SYMMETRICALLY, unlike
+        # Channel A which could only inflate. Every count then divided by the FULL
+        # `n_samples`, so non-finite draws were counted as satisfied AND kept in
+        # the denominator.
+        #
+        # Measured on the same fixture as Channel A's defect: an option with
+        # `status: "computed"` and 91.5% validity shipped `prob_satisfied` and
+        # `joint_probability` of 0.565 where the honest figure over its
+        # informative draws is lower. NOTHING downstream can catch it — every
+        # guard on the chain tests the DELIVERED VALUE (PLoT `prob01`, CEE's
+        # identical predicate and `z.number().min(0).max(1)`, UI
+        # `safeFiniteNumber`) and none tests the SAMPLE POPULATION. An inflated
+        # 0.565 is finite and inside [0, 1] and passes all of them. ISL is the
+        # only place this can be fixed.
+        #
+        # ONE MASK FOR THE WHOLE BLOCK, not one per constraint. `joint_probability`
+        # is P(ALL constraints satisfied) and the pairwise conditionals are
+        # P(C_j | C_i); if each number used its own denominator they would be
+        # over different populations and would no longer be mutually consistent —
+        # and a consumer that compares them (PLoT's crown badge tests
+        # `values.every(p => p === 1)` against joint semantics) would be
+        # comparing incommensurable quantities. A draw is informative iff EVERY
+        # constraint's value is a real number at that draw, which is the same
+        # all-or-nothing unit 2.798 already established for this block.
+        informative = [
+            all(
+                math.isfinite(resolved_values[c_idx][sample_idx])
+                for c_idx in range(len(constraints))
+            )
+            for sample_idx in range(n_samples)
+        ]
+        n_informative = sum(1 for ok in informative if ok)
+
+        # No draw on which the conjunction could be evaluated at all. There is no
+        # honest probability here, and `prob_satisfied`/`joint_probability` are
+        # REQUIRED wire floats — there is no field to null. Per 2.798 the refusal
+        # unit is the BLOCK: the caller omits `constraint_analysis` entirely,
+        # which is a shape every consumer already handles because it is already
+        # absent on every request that sends no constraints. A fabricated 0.0
+        # would be worse than absence: it reads as a measured breach.
+        if n_informative == 0:
+            return None
+
+        # Build satisfaction matrix: [sample_idx][constraint_idx] -> bool.
+        # DELIBERATELY FULL-LENGTH, including non-informative draws: the
+        # diagnostics pass indexes `resolved_values[c_idx][sample_idx]` against
+        # this matrix, so dropping rows here would silently MISALIGN margins with
+        # their samples. The mask travels alongside instead, and every count
+        # applies it.
         satisfaction_matrix: List[List[bool]] = []
         for sample_idx in range(n_samples):
             sample_satisfactions = []
@@ -8133,22 +8194,31 @@ class RobustnessAnalyzerV2:
                 sample_satisfactions.append(satisfied)
             satisfaction_matrix.append(sample_satisfactions)
 
-        # Per-constraint probabilities
+        # Per-constraint probabilities, over the informative draws only.
         per_constraint_probs = {}
         for c_idx, constraint in enumerate(constraints):
-            satisfied_count = sum(1 for sample in satisfaction_matrix if sample[c_idx])
-            per_constraint_probs[str(c_idx)] = satisfied_count / n_samples
+            satisfied_count = sum(
+                1
+                for sample_idx, sample in enumerate(satisfaction_matrix)
+                if informative[sample_idx] and sample[c_idx]
+            )
+            per_constraint_probs[str(c_idx)] = satisfied_count / n_informative
 
-        # Joint probability: all constraints satisfied
-        joint_satisfied_count = sum(1 for sample in satisfaction_matrix if all(sample))
-        joint_probability = joint_satisfied_count / n_samples
+        # Joint probability: all constraints satisfied, same population.
+        joint_satisfied_count = sum(
+            1
+            for sample_idx, sample in enumerate(satisfaction_matrix)
+            if informative[sample_idx] and all(sample)
+        )
+        joint_probability = joint_satisfied_count / n_informative
 
-        return per_constraint_probs, joint_probability, satisfaction_matrix
+        return per_constraint_probs, joint_probability, satisfaction_matrix, informative
 
     def _compute_conditional_probabilities(
         self,
         satisfaction_matrix: List[List[bool]],
         constraints: List[GoalConstraint],
+        informative: Optional[List[bool]] = None,
     ) -> Dict[str, Dict[str, float]]:
         """
         Compute pairwise conditional probabilities: P(C_j | C_i).
@@ -8166,13 +8236,21 @@ class RobustnessAnalyzerV2:
 
         n_samples = len(satisfaction_matrix)
         n_constraints = len(constraints)
+        # 2.477(k): same informative population as the marginals, so P(C_j | C_i)
+        # stays commensurable with the per-constraint and joint figures.
+        if informative is None:
+            informative = [True] * n_samples
 
         conditional_probs: Dict[str, Dict[str, float]] = {}
 
         for i in range(n_constraints):
             conditional_probs[str(i)] = {}
             # Count samples where constraint i is satisfied
-            count_i = sum(1 for sample in satisfaction_matrix if sample[i])
+            count_i = sum(
+                1
+                for s_idx, sample in enumerate(satisfaction_matrix)
+                if informative[s_idx] and sample[i]
+            )
 
             if count_i == 0:
                 # P(C_j | C_i) is undefined when P(C_i) = 0 - omit these entries
@@ -8183,7 +8261,9 @@ class RobustnessAnalyzerV2:
                     if i != j:
                         # Count samples where both i and j are satisfied
                         count_ij = sum(
-                            1 for sample in satisfaction_matrix if sample[i] and sample[j]
+                            1
+                            for s_idx, sample in enumerate(satisfaction_matrix)
+                            if informative[s_idx] and sample[i] and sample[j]
                         )
                         conditional_probs[str(i)][str(j)] = count_ij / count_i
 
@@ -8195,6 +8275,7 @@ class RobustnessAnalyzerV2:
         constraints: List[GoalConstraint],
         satisfaction_matrix: List[List[bool]],
         near_miss_fraction_threshold: float = 0.1,
+        informative: Optional[List[bool]] = None,
     ) -> Dict[int, Dict[str, Any]]:
         """
         Compute near-miss diagnostics for each constraint.
@@ -8227,6 +8308,12 @@ class RobustnessAnalyzerV2:
             return {}
 
         n_samples = len(satisfaction_matrix)
+        # 2.477(k): a non-finite draw yields no margin and no verdict. Excluded
+        # from the failure margins, the near-miss count and the binding
+        # denominator alike — the same population the probabilities use.
+        if informative is None:
+            informative = [True] * n_samples
+        n_informative = sum(1 for ok in informative if ok)
 
         diagnostics: Dict[int, Dict[str, Any]] = {}
 
@@ -8239,6 +8326,8 @@ class RobustnessAnalyzerV2:
             near_miss_count = 0
 
             for sample_idx, satisfied in enumerate(sample[c_idx] for sample in satisfaction_matrix):
+                if not informative[sample_idx]:
+                    continue
                 if not satisfied:
                     value = values[sample_idx]
                     # Compute margin (distance from threshold)
@@ -8259,11 +8348,29 @@ class RobustnessAnalyzerV2:
             # Compute diagnostics
             n_failures = len(failure_margins)
             failure_margin_median = float(np.median(failure_margins)) if failure_margins else None
+            # 2.477(k), same family as (f)/(g) — np.median AVERAGES the two middle
+            # elements on an EVEN-length population, so two finite margins near
+            # float64 max sum to inf before the division. Measured: 92 failure
+            # margins, every one finite, max 1.696e308 -> median inf -> the
+            # JSONResponse render rejects the whole body and the run 500s.
+            # The mechanism is pre-existing and latent (any even, extreme,
+            # all-finite failure population reaches it); gating the probabilities
+            # changed which draws are in that population and made it fire.
+            # A non-finite margin is not an honest diagnostic, and the field is
+            # already Optional and already None when there are no failures at
+            # all — so omit it, exactly as 2.477(f) omits the percentile family
+            # when interpolation overflows. The probability itself is unaffected.
+            if failure_margin_median is not None and not math.isfinite(failure_margin_median):
+                failure_margin_median = None
             near_miss_fraction = near_miss_count / n_failures if n_failures > 0 else None
 
             # Compute prob_satisfied for binding determination
-            satisfied_count = sum(1 for sample in satisfaction_matrix if sample[c_idx])
-            prob_satisfied = satisfied_count / n_samples
+            satisfied_count = sum(
+                1
+                for s_idx, sample in enumerate(satisfaction_matrix)
+                if informative[s_idx] and sample[c_idx]
+            )
+            prob_satisfied = satisfied_count / n_informative
             binding = 0.4 <= prob_satisfied <= 0.6
 
             diagnostics[c_idx] = {
@@ -8326,20 +8433,36 @@ class RobustnessAnalyzerV2:
         )
 
         # T3: Per-constraint and joint probability
+        probabilities = self._compute_constraint_probabilities(resolved_values, constraints)
+
+        # 2.477(k) THE SECOND REFUSAL POINT. `None` means no draw was
+        # informative: every constraint value was non-finite on every draw, so
+        # the conjunction could not be evaluated even once. `prob_satisfied` and
+        # `joint_probability` are REQUIRED wire floats, so there is no field to
+        # null and a partial block cannot be emitted honestly — the refusal unit
+        # is the BLOCK, exactly as it already is for an unresolvable frame above.
+        # Absence is a shape every consumer already handles; a fabricated 0.0
+        # would read as a MEASURED breach, and 1.0 is what the pre-fix code
+        # actually produced here.
+        if probabilities is None:
+            return None
+
         (
             per_constraint_probs,
             joint_probability,
             satisfaction_matrix,
-        ) = self._compute_constraint_probabilities(resolved_values, constraints)
+            informative,
+        ) = probabilities
 
         # T4: Pairwise conditional probabilities
         conditional_probs = self._compute_conditional_probabilities(
-            satisfaction_matrix, constraints
+            satisfaction_matrix, constraints, informative
         )
 
-        # T5: Near-miss diagnostics — on the SAME resolved series.
+        # T5: Near-miss diagnostics — on the SAME resolved series and the SAME
+        # informative population as the probabilities.
         near_miss_diagnostics = self._compute_near_miss_diagnostics(
-            resolved_values, constraints, satisfaction_matrix
+            resolved_values, constraints, satisfaction_matrix, informative=informative
         )
 
         # Build constraint results

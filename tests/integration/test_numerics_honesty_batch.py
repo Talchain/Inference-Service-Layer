@@ -1284,3 +1284,224 @@ class TestProbabilityOfGoalOnACrownableComputedOption:
         assert pog != pytest.approx(
             113 / N_SAMPLES
         ), "probability_of_goal is still counting the +inf draws as goal-meeting"
+
+
+# ================================================================ (k)
+#
+# ROADMAP 2.477(k) — the CONSTRAINT channel, the sibling the (j) sweep missed.
+#
+# WHY IT WAS MISSED, because the miss is the lesson: (j)'s enumeration swept
+# NUMPY reductions and generalised that to "every statistic in this file". The
+# constraint channel counts in PLAIN PYTHON (`sum(1 for …)`), so the probe was
+# structurally unable to see it. A sweep that sees one SYNTAX is not a
+# population. Re-derived across three syntaxes with cross-syntax contrast
+# controls (numpy=25, plain-Python=8, bare predicates=2).
+#
+# THE DEFECT. `_check_constraint_satisfied` is a bare `value >= threshold` /
+# `value <= threshold` with no finiteness gate, and every count divided by the
+# FULL `n_samples`. It is SIGN-SYMMETRIC, unlike Channel A: `+inf >= t` is True
+# AND `-inf <= t` is True, so it could fabricate in both directions.
+#
+# WHY THE PRODUCER IS THE ONLY PLACE TO FIX IT. Every guard on the whole chain
+# tests the DELIVERED VALUE and none tests the SAMPLE POPULATION — PLoT
+# `prob01`, CEE's identical predicate and `z.number().min(0).max(1)`, UI
+# `safeFiniteNumber`. An inflated 0.565 is finite and inside [0, 1] and passes
+# all of them. `validity_ratio`/`n_valid_samples` exist but sit on the OUTCOME
+# block and the constraint mapping never consults them.
+#
+# THESE TESTS BIND THE CONSUMER-VISIBLE CLAIM, NOT THE FLOAT. The two predicates
+# below are the consumer's own, evaluated here against ISL's output:
+#   BADGE  — PLoT fires "met every limit you set, in all the scenarios we
+#            tested" on `values.every(p => p === 1)`.
+#   BREACH — the constraint-breach warning fires on `p === 0`.
+# ISL cannot render the badge; what it CAN do — and what these assert — is that
+# its output makes those predicates come out right, in BOTH directions. A guard
+# that only proved suppression would suppress everything and pass, so every
+# suppression case here is paired with a twin in which the badge must still be
+# EARNABLE and the warning must still FIRE.
+
+
+def _badge_earned(option: dict) -> bool:
+    """PLoT's crown-badge predicate, applied to ISL's output."""
+    ca = option.get("constraint_analysis")
+    if ca is None:
+        return False
+    return all(c["prob_satisfied"] == 1 for c in ca["constraints"])
+
+
+def _breach_flagged(option: dict) -> bool:
+    """The constraint-breach warning predicate, applied to ISL's output."""
+    ca = option.get("constraint_analysis")
+    if ca is None:
+        return False
+    return any(c["prob_satisfied"] == 0 for c in ca["constraints"])
+
+
+def _with_constraint(payload: dict, operator: str, threshold: float) -> dict:
+    payload["goal_constraints"] = [
+        {
+            "node_id": "goal_out",
+            "operator": operator,
+            "threshold": threshold,
+            "label": "Stated limit",
+            "value_frame": "delta",
+        }
+    ]
+    return payload
+
+
+def _all_finite_constraint_request(operator: str, threshold: float) -> dict:
+    """Healthy graph: every draw finite, so the gate is a pure no-op here."""
+    payload = _mixed_finite_and_infinite_request()
+    for node in payload["graph"]["nodes"]:
+        if node["id"] in ("f_a", "f_b"):
+            node["observed_state"]["value"] = 0.3
+    payload["graph"]["edges"][1]["exists_probability"] = 0.30
+    payload["graph"]["edges"][2]["exists_probability"] = 0.30
+    payload["options"][0]["id"] = "opt_x"
+    payload["options"][1]["id"] = "opt_y"
+    return _with_constraint(payload, operator, threshold)
+
+
+class TestConstraintChannelIsGatedOnFiniteness:
+    """2.477(k) — the constraint channel over the informative population."""
+
+    def test_all_non_finite_option_refuses_the_whole_constraint_block(self, client, auth_headers):
+        """No draw is informative, so the conjunction was never evaluated once.
+        `prob_satisfied`/`joint_probability` are REQUIRED wire floats — there is
+        no field to null — so per 2.798 the refusal unit is the BLOCK."""
+        payload = _with_constraint(_goal_request(HUGE_FINITE, 1.0, 1.0), ">=", 1.0)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        degraded = _option(body, "opt_degraded")
+        assert degraded["status"] == "failed"
+        assert degraded["outcome"]["n_valid_samples"] == 0
+
+        assert "constraint_analysis" not in degraded, (
+            "an option with zero informative draws must OMIT the constraint "
+            f"block, not fabricate one: {degraded.get('constraint_analysis')!r}"
+        )
+        # CONSUMER-VISIBLE: with no block there is nothing to badge.
+        assert _badge_earned(degraded) is False
+
+        # In-run control: the healthy sibling still gets a real block, so the
+        # refusal is specific to the option that earned it.
+        healthy = _option(body, "opt_healthy")
+        assert healthy["constraint_analysis"] is not None
+        assert _breach_flagged(healthy) is True
+
+    def test_crownable_computed_option_counts_only_informative_draws(self, client, auth_headers):
+        """The guard-defeating case: `status: "computed"`, 91.5% validity, so
+        every downstream status allowlist admits it."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.0)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        option = _option(body, "opt_computed")
+
+        # PRECONDITION: genuinely mixed, and genuinely 'computed'.
+        assert option["status"] == "computed"
+        assert option["outcome"]["n_valid_samples"] == 183
+        assert option["outcome"]["validity_ratio"] > 0.8
+
+        ca = option["constraint_analysis"]
+        prob = ca["constraints"][0]["prob_satisfied"]
+
+        assert prob == pytest.approx(
+            96 / 183
+        ), f"prob_satisfied must use the 183 informative draws; got {prob!r}"
+        assert prob != pytest.approx(
+            113 / N_SAMPLES
+        ), "prob_satisfied is still counting the +inf draws as satisfied"
+        assert ca["joint_probability"] == pytest.approx(96 / 183)
+
+        # CONSUMER-VISIBLE: neither badged nor breached, which is the truth.
+        assert _badge_earned(option) is False
+        assert _breach_flagged(option) is False
+
+    def test_constraint_and_goal_channels_agree_on_the_same_question(self, client, auth_headers):
+        """Same node, same threshold, same frame — so the two channels are
+        answering ONE question and must return ONE number. At pristine they
+        disagreed (0.565 vs 0.5246) and only the goal channel was fixed by (j);
+        this pins that (k) closed the gap rather than moving it."""
+        payload = _with_constraint(_computed_status_inflated_request(), ">=", 1.0)
+        body = _strict_parse(_post(client, auth_headers, payload))
+
+        option = _option(body, "opt_computed")
+        pog = option["probability_of_goal"]
+        prob_satisfied = option["constraint_analysis"]["constraints"][0]["prob_satisfied"]
+
+        assert prob_satisfied == pytest.approx(pog), (
+            "the constraint and goal channels ask the same question of the same "
+            f"samples and must agree; got {prob_satisfied!r} vs {pog!r}"
+        )
+
+    def test_badge_is_still_earnable_on_a_healthy_run(self, client, auth_headers):
+        """OPPOSITE-DIRECTION TWIN. A guard that only proved suppression would
+        suppress everything and pass. On an all-finite run whose every draw
+        satisfies the limit, the badge predicate must come out TRUE."""
+        resp = _post(client, auth_headers, _all_finite_constraint_request(">=", -100.0))
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        for option_id in ("opt_x", "opt_y"):
+            option = _option(body, option_id)
+            # PRECONDITION: fully finite, so the gate has nothing to remove.
+            assert option["outcome"]["n_valid_samples"] == N_SAMPLES
+            assert (
+                option["constraint_analysis"] is not None
+            ), "a healthy run must still get a constraint block"
+            assert option["constraint_analysis"]["constraints"][0][
+                "prob_satisfied"
+            ] == pytest.approx(1.0)
+            assert _badge_earned(option) is True, (
+                "the crown badge must remain EARNABLE — trading the lie for a " "gap is not a fix"
+            )
+            assert _breach_flagged(option) is False
+
+    def test_breach_warning_still_fires_on_a_healthy_run(self, client, auth_headers):
+        """OPPOSITE-DIRECTION TWIN. An unreachable limit on an all-finite run
+        must still drive `prob_satisfied` to exactly 0, so the breach warning
+        fires. Inflation is what used to lift it off zero and silence this."""
+        resp = _post(client, auth_headers, _all_finite_constraint_request(">=", 99.0))
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+
+        option = _option(body, "opt_x")
+        assert option["outcome"]["n_valid_samples"] == N_SAMPLES
+        assert option["constraint_analysis"]["constraints"][0]["prob_satisfied"] == pytest.approx(
+            0.0
+        )
+        assert (
+            _breach_flagged(option) is True
+        ), "the constraint-breach warning must still fire on a genuine breach"
+        assert _badge_earned(option) is False
+
+    def test_extreme_finite_failure_margins_do_not_kill_the_response(self, client, auth_headers):
+        """2.477(k), the (f)/(g) family again. `np.median` AVERAGES the two
+        middle elements of an EVEN-length population, so two finite margins near
+        float64 max sum to inf before the division — measured: 92 margins, all
+        finite, max 1.696e308, median inf, render 500. The margin is omitted;
+        the probability is unaffected."""
+        payload = _with_constraint(_computed_status_inflated_request(), "<=", 1e300)
+        resp = _post(client, auth_headers, payload)
+
+        assert resp.status_code == 200, resp.text[:600]
+        body = _strict_parse(resp)
+        _assert_all_finite(body)
+
+        row = _option(body, "opt_computed")["constraint_analysis"]["constraints"][0]
+        # The probability survives — only the unrepresentable diagnostic is dropped.
+        assert row["prob_satisfied"] == pytest.approx(87 / 183)
+        assert (
+            row.get("failure_margin_median") is None
+        ), "a non-finite failure margin must be OMITTED, never rendered"
