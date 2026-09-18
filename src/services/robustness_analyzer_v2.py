@@ -2000,6 +2000,11 @@ class RobustnessAnalyzerV2:
             parent_map[edge.to].append(edge.from_)
             children_map[edge.from_].append(edge.to)
         uncertainty_node_ids = set(u.node_id for u in (request.parameter_uncertainties or []))
+        # The human name for each node. Used ONLY to name a node in a
+        # user-facing disclosure; never consumed in inference. It exists only on
+        # the request graph, so a disclosure that wants to name an input has to
+        # take it here or do without one.
+        node_label_by_id = {n.id: (n.label or "").strip() for n in request.graph.nodes}
         # Nodes every option intervenes on: the intervention overrides the
         # structural equation in EVERY sample, so no base default is ever
         # used there and no upstream influence passes through.
@@ -2126,17 +2131,31 @@ class RobustnessAnalyzerV2:
         # Emit root-default warnings (list computed above; emission order and
         # message unchanged)
         for node_id in defaulted_root_node_ids:
+            # NAME THE INPUT, NOT THE IDENTIFIER. This warning is the ONLY honest
+            # carrier of "the analysis had to guess this one": its population is
+            # DISJOINT from factor_sensitivity, whose membership is exactly the
+            # set of nodes that HAVE a ParameterUncertainty, so the factor-scoped
+            # `value_defaulted` flag can never speak for these nodes.
+            #
+            # It carried only the raw node id, which is not something a person
+            # can act on, and the label exists nowhere downstream — so a consumer
+            # wanting to say WHICH input was guessed had to drop the disclosure
+            # or invent a name. An unlabelled node degrades to its id rather than
+            # to a manufactured one: honest and ugly beats fluent and false.
+            node_label = node_label_by_id.get(node_id) or node_id
             inference_warnings.append(
                 InferenceWarning(
                     code="ROOT_NODE_DEFAULT_VALUE",
                     field=f"nodes[{node_id}].observed_state.value",
                     detail={
                         "node_id": node_id,
+                        "node_label": node_label,
                         "defaulted_to": 0.0,
                         "message": (
-                            f"No observed value provided for root node '{node_id}'; "
-                            f"defaulted to 0.0. Results for downstream nodes may be "
-                            f"unreliable."
+                            f'No starting value was provided for "{node_label}", '
+                            f"so the analysis used a default of 0.0. Results for "
+                            f"downstream nodes may be unreliable until a real "
+                            f"value or range is set."
                         ),
                     },
                 )
@@ -2885,6 +2904,70 @@ class RobustnessAnalyzerV2:
                         },
                     )
                 )
+
+        # ABSENCE WITH A REASON. factor_evppi is the "which unknown is worth
+        # resolving next" ranking, and its absence used to carry NO signal at
+        # all: no code, no status field — isl_analysis_status reads "computed" in
+        # both the present and the absent arm, so STATUS CANNOT DISTINGUISH THEM.
+        # Nothing downstream could tell "not computed" from "suppressed" from
+        # "genuinely nothing to learn", which left every surface choosing between
+        # saying nothing and guessing.
+        #
+        # The gate is a precondition ISL evaluates itself, so ISL can simply
+        # state which conjunct was unmet. Reported in GATE ORDER: the first unmet
+        # conjunct is the reason, because a later one is not independently
+        # informative once an earlier one already blocked the computation.
+        #
+        # NEVER SYNTHESISE A REASON. Where every precondition held and the
+        # estimator still produced nothing, that is recorded as exactly what it
+        # is and NOT reconstructed. A fabricated explanation of why a user has
+        # nothing worth learning would be worse than the silence it replaces.
+        # FACTOR_EVPPI_UNAVAILABLE already explains the estimator-raised case, so
+        # this never speaks over it.
+        if factor_evppi is None and not any(
+            w.code == "FACTOR_EVPPI_UNAVAILABLE" for w in inference_warnings
+        ):
+            evppi_absence_reason: str
+            evppi_absence_message: str
+            if not request.include_voi:
+                evppi_absence_reason = "voi_not_requested"
+                evppi_absence_message = (
+                    "Value-of-information was not requested for this analysis, so "
+                    "no ranking of which unknown is worth resolving next was "
+                    "computed."
+                )
+            elif not factor_sampler.has_uncertainties():
+                evppi_absence_reason = "no_parameter_uncertainties"
+                evppi_absence_message = (
+                    "Value-of-information needs at least one factor with a "
+                    "declared uncertainty to learn about; this analysis declared "
+                    "none, so no ranking of what is worth finding out was "
+                    "computed."
+                )
+            elif pre_noise_option_outcomes is None:
+                evppi_absence_reason = "pre_noise_outcomes_unavailable"
+                evppi_absence_message = (
+                    "Value-of-information needs the pre-noise sample population, "
+                    "which was not available for this analysis, so no ranking of "
+                    "what is worth finding out was computed."
+                )
+            else:
+                evppi_absence_reason = "estimator_returned_no_rows"
+                evppi_absence_message = (
+                    "Value-of-information ran but produced no rows. The reason is "
+                    "not known at this layer and has deliberately not been "
+                    "inferred."
+                )
+            inference_warnings.append(
+                InferenceWarning(
+                    code="FACTOR_EVPPI_NOT_COMPUTED",
+                    field="factor_evppi",
+                    detail={
+                        "reason": evppi_absence_reason,
+                        "message": evppi_absence_message,
+                    },
+                )
+            )
 
         # S4 (D-23.8): per-lever value of control (EVPC). Grid do(factor=value) on
         # the SAME retained joint CRN samples via the SAME evaluator used for the
