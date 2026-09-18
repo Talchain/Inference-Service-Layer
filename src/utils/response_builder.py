@@ -32,6 +32,7 @@ from src.models.response_v2 import (
     InferenceWarning,
     ISLV2Error422,
     ISLResponseV2,
+    ObjectiveRankingV2,
     OptionResultV2,
     PathDecompositionV2,
     RequestEchoV2,
@@ -139,6 +140,7 @@ class ResponseBuilder:
         self.inference_warnings: List[InferenceWarning] = []
         self.diagnostics: Optional[DiagnosticsV2] = None
         self.options: Optional[List[OptionResultV2]] = None
+        self.objective_ranking: Optional[ObjectiveRankingV2] = None
         self.robustness: Optional[RobustnessResultV2] = None
         self.factor_sensitivity: Optional[List[FactorSensitivityV2]] = None
         self.stability_thresholds: Optional[StabilityThresholdsResponse] = None  # 3C
@@ -201,9 +203,14 @@ class ResponseBuilder:
         p_win_sensitivity: Optional[list] = None,
         factor_evppi: Optional[list] = None,
         factor_evpc: Optional[list] = None,
+        objective_ranking: Optional["ObjectiveRankingV2"] = None,
     ) -> None:
         """Set analysis results."""
         self.options = options
+        # ROADMAP 2.1192: travels with the options it describes, so a builder
+        # that sets results can never set them WITHOUT saying what the ranking
+        # optimised.
+        self.objective_ranking = objective_ranking
         self.robustness = robustness
         self.factor_sensitivity = factor_sensitivity
         self.stability_thresholds = stability_thresholds
@@ -367,6 +374,7 @@ class ResponseBuilder:
             inference_warnings=self.inference_warnings,
             request_echo=self.request_echo,
             diagnostics=self.diagnostics,
+            objective_ranking=self.objective_ranking,
             options=self.options,
             robustness=self.robustness,
             factor_sensitivity=self.factor_sensitivity,

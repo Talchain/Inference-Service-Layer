@@ -53,6 +53,7 @@ from src.models.response_v2 import (
     FragileEdgeV2,
     ISLResponseV2,
     ISLV2Error422,
+    ObjectiveRankingV2,
     OptionResultV2,
     OutcomeDistributionV2,
     PathContributionV2,
@@ -1119,7 +1120,21 @@ async def _analyze_robustness_v2_enhanced(
                         percentiles_source=percentiles_source,
                     ),
                     downside=downside,
-                    win_probability=result.win_probability,
+                    # ROADMAP 2.1192. A withheld ranking omits this field
+                    # rather than publishing the 0.0 the analyzer produces for
+                    # it. The two are not the same statement: 0.0 says
+                    # "measured, and this option never won", which is a claim
+                    # about a comparison that was never made. Omission (the
+                    # field is Optional and exclude_none drops it) says nothing,
+                    # which is the truth. This estate has already named the
+                    # inverse of this mistake — turning honest absence into
+                    # "measured, and it is zero" — and refused it once; the
+                    # producer half must not create the value that invites it.
+                    win_probability=(
+                        None
+                        if v1_response.objective_ranking.status == "withheld"
+                        else result.win_probability
+                    ),
                     probability_of_goal=result.probability_of_goal,
                     constraint_analysis=constraint_analysis_v2,
                     status=status,
@@ -1225,7 +1240,18 @@ async def _analyze_robustness_v2_enhanced(
         #   NOT robust AND confidence > 0.5 → "low"
         #   NOT robust AND confidence <= 0.5 → "very_low"
         robustness_result = None
-        if v1_response.robustness:
+        # ROADMAP 2.1192. EVERY field in this block is a statement about a
+        # recommendation: `confidence` IS the share of scenarios the recommended
+        # option won (`confidence_basis: recommendation_stability_uncalibrated`),
+        # `is_robust` and `level` are thresholds on it, `fragile_edges` are the
+        # edges that FLIP it, and `interpretation` names it in prose. Under a
+        # withheld ranking there is no recommended option, so the whole block is
+        # omitted (`robustness_status` then reports "unavailable") rather than
+        # published at the 0.0 an empty win tally produces. Suppressing the
+        # options' win_probability while leaving 0% "confidence" and a
+        # flip-analysis beside it would withhold the ranking in one field and
+        # restate it in five.
+        if v1_response.robustness and v1_response.objective_ranking.status != "withheld":
             if v1_response.robustness.is_robust:
                 level = "high" if v1_response.robustness.confidence > 0.8 else "moderate"
             else:
@@ -1437,6 +1463,17 @@ async def _analyze_robustness_v2_enhanced(
             p_win_sensitivity=v1_response.p_win_sensitivity,  # S2 relabel (D-23.8)
             factor_evppi=v1_response.factor_evppi,  # S2 regression EVPPI (D-23.8)
             factor_evpc=v1_response.factor_evpc,  # S4 value-of-control (D-23.8)
+            # ROADMAP 2.1192: the ranking's provenance crosses the boundary with
+            # the ranking. Rebuilt into the wire model rather than passed
+            # through, because the internal and client shapes are separate
+            # contracts by design; the fields are identical and a drift test
+            # pins that.
+            objective_ranking=ObjectiveRankingV2(
+                direction=v1_response.objective_ranking.direction,
+                attested=v1_response.objective_ranking.attested,
+                status=v1_response.objective_ranking.status,
+                withheld_reason=v1_response.objective_ranking.withheld_reason,
+            ),
         )
 
         # B3: surface auto-noise disclosure on the V2 envelope so PLoT can read it

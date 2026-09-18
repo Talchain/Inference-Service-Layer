@@ -941,6 +941,52 @@ class RobustnessRequestV2(BaseModel):
         "never guesses a frame and never emits a fabricated or clamped probability.",
     )
 
+    # ROADMAP 2.1192. The user's OBJECTIVE SENSE for the goal node — the field
+    # whose absence made "which option wins?" answer a different question than
+    # the one the team asked.
+    #
+    # WHY THIS EXISTS. Measured at staging tip 28fe0c95 with a discriminating
+    # contrast control: supplying ``goal_threshold`` changed the ranking by
+    # EXACTLY NOTHING across four configurations, while flipping an edge sign
+    # moved it completely. "Wins" was ``max()`` over the propagated goal-node
+    # scalar and nothing else — no target, no direction, no constraint. So the
+    # leading option could carry ``probability_of_goal = 0.0`` and still be
+    # crowned: the threshold channel and the comparison channel never met. The
+    # nineteen fields of this request had ZERO direction-bearing members
+    # (contrast: goal_node_id / goal_threshold / goal_threshold_frame /
+    # goal_constraints, four present), so no upstream service could express
+    # "I want this to go UP" even if it wanted to.
+    #
+    # THREE SENSES, ONE RULE. This does not add a second score beside the
+    # maximiser — it PARAMETERISES the single per-sample winner rule that has
+    # always defined ``win_probability``. ``maximise`` IS the historical rule;
+    # ``minimise`` is the case where that rule was silently backwards (a goal
+    # node of churn or cost was crowned by whichever option made it worst);
+    # ``target`` is the case the linear SCM could not express at all, where
+    # argmax always lands on a corner and a moderate option is structurally
+    # incapable of winning.
+    #
+    # ABSENT MEANS UNATTESTED, NOT MAXIMISE. When this field is omitted the
+    # ranking is still produced by the historical maximiser — the deployed
+    # product must not go dark while the producer half lands — but the response
+    # carries ``objective_ranking.attested = False`` and a
+    # GOAL_DIRECTION_UNATTESTED inference warning naming that the team's aim was
+    # never supplied. That warning is the hook a coaching surface uses to ASK.
+    # It is pinned by a test so it cannot change silently.
+    goal_direction: Optional[Literal["maximise", "minimise", "target"]] = Field(
+        None,
+        description="The user's objective sense for the goal node, which decides "
+        "what 'this option wins this draw' MEANS. 'maximise' = largest goal value "
+        "wins (the historical rule). 'minimise' = smallest wins — required whenever "
+        "the goal is a quantity to reduce (cost, churn, risk), where the historical "
+        "rule crowned the worst option. 'target' = closest to goal_threshold wins, "
+        "which is the only sense under which a moderate option can win at all; it "
+        "REQUIRES goal_threshold and goal_threshold_frame (a target sense with no "
+        "target is refused at parse, never silently downgraded to maximise). When "
+        "absent, the maximiser runs UNATTESTED and the response says so — ISL never "
+        "infers the user's aim from a node label.",
+    )
+
     # Enhancement flags
     include_e_values: bool = Field(
         default=False,
@@ -1041,6 +1087,50 @@ class RobustnessRequestV2(BaseModel):
         if v is not None and (math.isnan(v) or math.isinf(v)):
             raise ValueError("goal_threshold must be a finite number, not NaN or infinite")
         return v
+
+    @model_validator(mode="after")
+    def validate_target_direction_has_a_target(self) -> "RobustnessRequestV2":
+        """A ``target`` objective with no target is a MALFORMED ENVELOPE (2.1192).
+
+        Refused at parse — a typed 422 before any compute — rather than
+        degraded. The estate's taxonomy puts envelope coherence here and
+        statement semantics in the refusal warnings: a request that names a
+        sense requiring a companion field, and omits that field, is incoherent
+        in the same way a ``parameter_uncertainties`` entry naming a node the
+        graph does not contain is incoherent.
+
+        The alternative — accept it and rank by ``max()`` anyway — is the exact
+        substitution this field exists to end: answering "which option produces
+        the largest number" for a team who asked "which option lands nearest my
+        target". Falling back silently would reproduce the defect while
+        appearing to have fixed it.
+
+        Note what is NOT checked here: whether a stated frame can actually be
+        CONVERTED. That is a semantic property of the graph (a root goal, a
+        missing baseline, a goal pinned by an intervention), it is decided by
+        ``_resolve_goal_threshold_in_sample_frame`` at analysis time, and its
+        refusal rides as an inference warning with the ranking WITHHELD — not
+        as a 422. Two different failures, two different vocabularies, neither
+        one guessing.
+        """
+        if self.goal_direction == "target":
+            missing = [
+                name
+                for name, value in (
+                    ("goal_threshold", self.goal_threshold),
+                    ("goal_threshold_frame", self.goal_threshold_frame),
+                )
+                if value is None
+            ]
+            if missing:
+                raise ValueError(
+                    "goal_direction='target' ranks options by closeness to the "
+                    "stated target, so it requires "
+                    f"{' and '.join(missing)}. Supply the target and the frame it "
+                    "is stated in, or state goal_direction='maximise'/'minimise' "
+                    "instead — ISL will not substitute a maximiser for a target."
+                )
+        return self
 
     @field_validator("goal_node_id")
     @classmethod
@@ -1945,6 +2035,50 @@ class PathDecomposition(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class ObjectiveRanking(BaseModel):
+    """WHAT the ranking in this response actually optimised (ROADMAP 2.1192).
+
+    THE FIELD THAT MAKES ``win_probability`` READABLE. That number has always
+    been "the fraction of draws on which this option produced the largest
+    goal-node value". Every surface in the estate rendered it as "which option
+    is best". Those are different sentences, and nothing on the wire said which
+    one the number supported — so a leader could be crowned at 70.67% while
+    carrying ``probability_of_goal = 0.0``, and no consumer had any way to tell.
+
+    This block is not a second score. It is the PROVENANCE of the only score,
+    so a surface can say what the ranking answers and, when the aim was never
+    stated, ASK for it instead of implying it was honoured.
+    """
+
+    direction: Literal["maximise", "minimise", "target"] = Field(
+        ...,
+        description="The objective sense the winner rule applied. Always the "
+        "sense that actually ran — never the sense that was requested but "
+        "refused (a refusal sets status='withheld' and reports the sense that "
+        "was asked for in the accompanying inference warning).",
+    )
+    attested: bool = Field(
+        ...,
+        description="True when the request stated goal_direction. FALSE means "
+        "no aim was supplied and 'maximise' is this service's DISCLOSED DEFAULT, "
+        "not a claim about what the team wants. A surface that presents an "
+        "unattested ranking as 'the best option for your goal' is overstating "
+        "what was computed; the honest move is to ask.",
+    )
+    status: Literal["computed", "withheld"] = Field(
+        ...,
+        description="'withheld' means NO ranking was produced: win_probability "
+        "is omitted for every option and no option is recommended, because the "
+        "requested objective could not be scored on this graph. It is never a "
+        "flat or tied ranking — it is the absence of one.",
+    )
+    withheld_reason: Optional[str] = Field(
+        None,
+        description="Machine-readable reason when status='withheld'. Omitted "
+        "otherwise.",
+    )
+
+
 class RobustnessResponseV2(BaseModel):
     """V2.2 robustness analysis response."""
 
@@ -1984,6 +2118,14 @@ class RobustnessResponseV2(BaseModel):
     inference_warnings: List[InferenceWarning] = Field(
         default_factory=list,
         description="Structured warnings about inference conditions that may affect result reliability",
+    )
+
+    # ROADMAP 2.1192. Always present: a response that does not say what its
+    # ranking optimised is exactly the response that caused this row.
+    objective_ranking: ObjectiveRanking = Field(
+        ...,
+        description="What the ranking in this response optimised, and whether "
+        "the user's aim was actually stated. See ObjectiveRanking.",
     )
 
     # Conditional winners (factor-partitioned win probabilities)

@@ -189,6 +189,9 @@ _ADDITIVE_WIRE_SURFACES = frozenset(
         "decision_evpi",
         "confidence_basis",
         "sample_population_provenance",
+        # ROADMAP 2.1192 — see _ADDITIVE_INFERENCE_WARNING_CODES below for why
+        # this one is safe to strip by name and its companion warning is not.
+        "objective_ranking",
     }
 )
 
@@ -205,6 +208,36 @@ _ADDITIVE_WIRE_SURFACES = frozenset(
 # first attempt did exactly that and this test caught it.) Stripped by PATH
 # instead, so the fragile-edge field stays compared.
 _EDGE_E_VALUE_ADDITIVE_KEYS = ("alternative_winner_id", "baseline_winner_id")
+
+# ROADMAP 2.1192 (2026-08-19): the objective-ranking provenance block and its
+# companion GOAL_DIRECTION_UNATTESTED disclosure. Both are purely ADDITIVE —
+# proven by execution in test_goal_direction_objective_ranking.py, where an
+# absent goal_direction is asserted NUMERICALLY IDENTICAL to an attested
+# maximise, i.e. no pre-existing value moves.
+#
+# TWO DIFFERENT STRIP MECHANISMS, for the reason this file already documents
+# one line above. `objective_ranking` is a NEW top-level key that exists nowhere
+# else on the wire, so the name-based recursive strip is safe for it. The
+# warning is NOT: `inference_warnings` is a pre-existing list that the golden
+# guards, and stripping the whole key would delete every OTHER warning from
+# `current` and hide a real regression in them. So the warning is removed BY
+# CODE, one entry, leaving the rest of the list compared.
+_ADDITIVE_INFERENCE_WARNING_CODES = ("GOAL_DIRECTION_UNATTESTED",)
+
+
+def _strip_additive_inference_warnings(payload: dict) -> dict:
+    """Remove ONLY the 2.1192 additive disclosure from inference_warnings."""
+    data = copy.deepcopy(payload)
+    warnings = data.get("inference_warnings")
+    if isinstance(warnings, list):
+        data["inference_warnings"] = [
+            w
+            for w in warnings
+            if not (
+                isinstance(w, dict) and w.get("code") in _ADDITIVE_INFERENCE_WARNING_CODES
+            )
+        ]
+    return data
 
 
 def _strip_edge_e_value_additions(payload: dict) -> dict:
@@ -342,8 +375,10 @@ class TestAdditiveVsBase:
         resp = client.post(ENDPOINT, json=_variant_request(0), headers=V2_HEADERS)
         assert resp.status_code == 200, resp.text
         golden = json.loads(GOLDEN_PATH.read_text())
-        current = _strip_edge_e_value_additions(
-            _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+        current = _strip_additive_inference_warnings(
+            _strip_edge_e_value_additions(
+                _strip_additive_surfaces(normalize_v2_payload(resp.json()))
+            )
         )
         # See _CHANGED_WIRE_VALUES: one value deliberately moved; drop it from BOTH
         # sides so this pin keeps guarding everything else byte-for-byte.

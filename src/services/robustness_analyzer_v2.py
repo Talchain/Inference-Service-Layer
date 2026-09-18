@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Tuple, cast
 
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
@@ -39,6 +39,7 @@ from src.models.robustness_v2 import (
     InferenceWarning,
     InterventionOption,
     NodeV2,
+    ObjectiveRanking,
     OptionResult,
     OutcomeDistribution,
     ParameterUncertainty,
@@ -55,6 +56,7 @@ from src.models.response_v2 import (
     SUPPRESSED_ATTR_CONDITIONAL_WINNERS,
     SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
     SUPPRESSED_ATTR_P_WIN_SENSITIVITY,
+    SUPPRESSED_ATTR_PATH_DECOMPOSITION,
     SUPPRESSED_ATTR_STABILITY_THRESHOLDS,
     CorrelationModelV2,
     CorrelationProjectionV2,
@@ -153,6 +155,18 @@ _CORRELATION_TAIL_NOTE = (
 )
 # Reason stamped on every suppressed independence-assuming per-factor attribution.
 _CORRELATION_SUPPRESSION_REASON = "not_separable_under_correlation"
+
+# ROADMAP 2.1192 (review P2). Reason stamped on every block the WITHHELD-RANKING
+# path suppressed. Deliberately a SECOND token on a SECOND channel rather than a
+# reuse of the correlation one: the two answer different questions — correlation
+# asks "is this attribution separable?", withhold asks "is there a recommendation
+# for this block to be about?" — and `_build_correlation_disclosure`'s own
+# docstring scopes its manifest to "what the run actually skipped BECAUSE OF
+# ACTIVE CORRELATION". Riding a withhold suppression on that carrier would be a
+# false attribution AND, because the carrier is absent whenever no correlations
+# were declared, an invisible one (CLAUDE.md trap 21: two questions under one
+# name; trap 12: a record nothing emits is not a record).
+_WITHHELD_RANKING_SUPPRESSION_REASON = "no_recommendation_to_describe"
 
 # Default samples for marginal switch probability calculation
 MARGINAL_K_SAMPLES = 100
@@ -1644,6 +1658,102 @@ class GoalThresholdPlan:
         return self.level_threshold is not None
 
 
+@dataclass(frozen=True)
+class ObjectivePlan:
+    """WHAT "this option wins this draw" MEANS for one request (ROADMAP 2.1192).
+
+    THE DEFECT THIS CLOSES. ``win_probability`` has always been the fraction of
+    Monte Carlo draws on which an option produced the LARGEST goal-node value.
+    That is a true statement about a maximiser and a false answer to "which
+    option best serves what this team is trying to do" — and the product served
+    the second sentence while computing the first. Measured at 28fe0c95 with a
+    contrast control that discriminates: supplying the user's target moved the
+    ranking by exactly nothing, and the crowned option could carry
+    ``probability_of_goal = 0.0``.
+
+    ONE RULE, PARAMETERISED — NOT A SECOND SCORE. There is exactly one place in
+    this service that decides a draw's winner (``_run_monte_carlo``'s
+    per-sample block), and everything downstream — ``win_probability``,
+    ``recommended_option_id``, ``recommendation_confidence``,
+    ``conditional_winners``, ``p_win_sensitivity``, and PLoT's own
+    ``deriveRecommendedOption`` — reads that one decision. This plan changes
+    what that rule optimises; it does not add a rival ranking beside it. A
+    parallel score would leave two authorities answering "which option wins?"
+    with no rule for which one the surface consumes, which is precisely the
+    two-authorities defect that has cost this estate real money before.
+
+    THE THREE SENSES.
+
+    ``maximise``
+        Largest goal value wins. Byte-identical to every ranking this service
+        has ever produced. This is the limb the historical ``max()`` becomes.
+
+    ``minimise``
+        Smallest goal value wins. Not a new feature so much as the repair of a
+        silent inversion: for a goal node that is a cost, a churn rate or a
+        risk, the historical rule crowned whichever option made the outcome
+        WORST, with full confidence and no disclosure anywhere.
+
+    ``target``
+        Closest to the stated target wins, scored per draw as
+        ``|level_i - target|``. This is the only sense under which a moderate
+        option can win AT ALL. Under a linear SCM the goal is monotone in each
+        intervention, so an argmax (or argmin) always lands on a corner: an
+        option deliberately placed between two extremes scored ~1.5% in the
+        reproduction purely for being in the middle, and no amount of evidence
+        could have moved it. "The optimum is in the middle" is the correct
+        answer to most pricing, staffing and capacity questions, and it was
+        structurally unsayable.
+
+        The target is not a new field. It is ``goal_threshold``, resolved by the
+        SAME ``GoalThresholdPlan`` the goal-probability channel uses, with the
+        same frame rules and the same fail-closed refusals. That is deliberate:
+        the two channels previously never met (a threshold that was an OUTPUT
+        beside the comparison, never an INPUT to it), and giving the comparison
+        a second, separately-framed target would have recreated the split it is
+        meant to close.
+
+    ``withheld``
+        NO option wins ANY draw. Not a ranking that came out flat — the absence
+        of a ranking, because the request asked for a sense that cannot be
+        scored on this graph. Every draw is recorded UNINFORMATIVE through the
+        machinery that already exists for a draw with no finite option, so no
+        option is credited and nothing downstream has to special-case it. The
+        wire then OMITS ``win_probability`` rather than publishing the 0.0 this
+        produces: a zero would say "measured, and it is zero", which is the
+        coalesce-on-absence untruth this estate has already named and refused
+        elsewhere. There is deliberately no limb that falls back to ``max()``.
+
+    ``attested``
+        False when the request carried no ``goal_direction`` at all. The
+        maximiser still runs — the deployed product must not go dark while the
+        producer half lands — but the response says the aim was never supplied,
+        and a GOAL_DIRECTION_UNATTESTED warning rides with it. An unattested
+        ranking is a disclosed default, never a claim about the user's intent.
+    """
+
+    sense: Literal["maximise", "minimise", "target", "withheld"]
+    attested: bool
+    # Populated only for ``sense == "target"``; carries the resolved target in
+    # whichever frame the GoalThresholdPlan settled on. Exactly one of
+    # target_delta / target_level is non-None on a target plan.
+    target_delta: Optional[float] = None
+    target_level: Optional[float] = None
+    goal_baseline: Optional[float] = None
+
+    @property
+    def needs_status_quo_reference(self) -> bool:
+        """True iff scoring this objective requires the per-draw status-quo series.
+
+        Only a level-framed target does: recovering ``level_i = baseline +
+        (option_i - status_quo_i)`` needs the reference draw. A delta-framed
+        target compares raw samples, and neither ``maximise`` nor ``minimise``
+        needs a reference at all — so every request that does not ask for a
+        level target does exactly the work it did before this field existed.
+        """
+        return self.sense == "target" and self.target_level is not None
+
+
 # =============================================================================
 # Robustness Analyzer V2
 # =============================================================================
@@ -2063,6 +2173,23 @@ class RobustnessAnalyzerV2:
         constraint_plans, constraint_frame_warnings = self._resolve_constraint_plans(request)
         inference_warnings.extend(constraint_frame_warnings)
 
+        # ROADMAP 2.1192: WHAT "wins" MEANS for this request. Resolved here,
+        # beside the threshold plan it reuses and BEFORE the Monte Carlo, for
+        # the same reason: it decides whether the goal needs a per-draw
+        # status-quo reference recorded. A pure static function of `request` and
+        # the threshold plan, so it cannot drift from either.
+        #
+        # A `withheld` sense => the caller asked for a target-based ranking that
+        # cannot be scored => NO ranking is produced. It is a PLAN rather than a
+        # None precisely so that no caller downstream can quietly substitute its
+        # own default and rank by `max()` after we refused to.
+        objective_plan, objective_warning = self._resolve_objective_plan(
+            request, goal_threshold_plan
+        )
+        if objective_warning is not None:
+            inference_warnings.append(objective_warning)
+        objective_ranking_withheld = objective_plan.sense == "withheld"
+
         # Cluster-2 goal-node disclosures (Track S Phase 0): make the goal
         # node's base/propagation semantics explicit — no numeric change.
         goal_disclosure_warnings, goal_disclosure_critiques = self._build_goal_node_disclosures(
@@ -2100,13 +2227,20 @@ class RobustnessAnalyzerV2:
             status_quo_reference_nodes=sorted(
                 (
                     {request.goal_node_id}
-                    if goal_threshold_plan is not None
-                    and goal_threshold_plan.needs_status_quo_reference
+                    if (
+                        goal_threshold_plan is not None
+                        and goal_threshold_plan.needs_status_quo_reference
+                    )
+                    # ROADMAP 2.1192: a level-framed TARGET objective needs the
+                    # same reference series, for the same reason. Unioned into
+                    # the same set — one reference per node, no second dialect.
+                    or objective_plan.needs_status_quo_reference
                     else set()
                 )
                 | set(self._constraint_status_quo_nodes(request, constraint_plans))
             )
             or None,
+            objective=objective_plan,
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
 
@@ -2341,6 +2475,23 @@ class RobustnessAnalyzerV2:
         # CLAUDE.md #12). Order follows code (gate) order.
         suppressed_attributions: List[str] = []
 
+        # ROADMAP 2.1192 (review P2). The WITHHELD-RANKING suppression record, kept
+        # APART from the correlation one above. Same RECORD-not-PREDICT discipline:
+        # appended at the skip site, emitted verbatim, never re-derived.
+        #
+        # WHY A SEPARATE LIST AND A SEPARATE CARRIER. Until this change these
+        # markers went into `suppressed_attributions`, whose ONLY carrier is
+        # `correlation_model.suppressed_attributions` — and that block is None
+        # whenever the request declared no `factor_correlations`, i.e. the common
+        # case. So the "recorded" omissions were silently discarded on most
+        # requests and the omission was "merely absent", the exact thing the skip
+        # sites say they are avoiding. This list rides the OBJECTIVE_RANKING_WITHHELD
+        # warning in `inference_warnings`, which is emitted on precisely this path,
+        # is always present on the envelope, and is on PLoT's never-withhold set —
+        # so the disclosure cannot go dark. `InferenceWarning.detail` is typed
+        # `Dict[str, Any]`, so this needs no contract change and adds no drift.
+        withheld_ranking_suppressions: List[str] = []
+
         # Compute factor sensitivity if factor uncertainties are specified.
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor OAT
         # elasticity perturbs one factor holding the others at their mean, an
@@ -2371,7 +2522,18 @@ class RobustnessAnalyzerV2:
         # disclosure marker (joint win_probability itself stays valid).
         conditional_winners = None
         if factor_sampler.has_uncertainties() and len(request.options) > 1:
-            if correlation_active:
+            # ROADMAP 2.1192: a conditional winner is a statement about WHERE
+            # THE WINNER FLIPS. Under a withheld ranking there is no winner to
+            # flip, and emitting these would smuggle back through a side channel
+            # exactly the ranking this response refused to state. Suppressed with
+            # the same disclosure marker correlation already uses — RECORDED, so
+            # the omission is visible rather than merely absent.
+            if objective_ranking_withheld:
+                # Withhold is checked FIRST and owns the record: it is the
+                # categorical reason ("there is no winner to flip"), where
+                # correlation's is evidential ("the attribution is confounded").
+                withheld_ranking_suppressions.append(SUPPRESSED_ATTR_CONDITIONAL_WINNERS)
+            elif correlation_active:
                 suppressed_attributions.append(SUPPRESSED_ATTR_CONDITIONAL_WINNERS)
             else:
                 conditional_winners = self._compute_conditional_winners(
@@ -2582,7 +2744,15 @@ class RobustnessAnalyzerV2:
         # code (see _optional_phase_unavailable_warning) — but its ``field`` now
         # points at the renamed wire field ``p_win_sensitivity``.
         p_win_sensitivity = None
-        if request.include_voi and factor_sampler.has_uncertainties() and correlation_active:
+        if request.include_voi and objective_ranking_withheld:
+            # ROADMAP 2.1192: this phase measures how much each factor moves THE
+            # RECOMMENDED OPTION's win probability. Under a withheld ranking
+            # there is no recommended option and no win probability, so the
+            # quantity does not exist — it is not merely unavailable. Skipped
+            # BEFORE it runs and recorded at the skip site — on the WITHHOLD
+            # channel, which is emitted whether or not correlations were declared.
+            withheld_ranking_suppressions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
+        elif request.include_voi and factor_sampler.has_uncertainties() and correlation_active:
             # SUPPRESSED under active correlation — record at the skip site.
             suppressed_attributions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
         elif request.include_voi and request.goal_constraints and constraint_plans is None:
@@ -2638,6 +2808,7 @@ class RobustnessAnalyzerV2:
                     recommended_option_id,
                     budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
                     constraint_plans=constraint_plans,
+                    objective=objective_plan,
                 )
                 if p_win_sensitivity is None:
                     # Reachable ONLY as a deadline trip here: the has_uncertainties()
@@ -2756,7 +2927,33 @@ class RobustnessAnalyzerV2:
         # (filter_inference_graph was applied before the evaluator was constructed), so the
         # decomposition explains exactly the structure the analysis used, not raw request.graph.
         path_decomposition = None
-        if request.include_path_decomposition:
+        if request.include_path_decomposition and objective_ranking_withheld:
+            # ROADMAP 2.1192 (review P1). THE SIXTH FIELD. Every part of this
+            # block is a statement about a RECOMMENDED OPTION: the block names one
+            # in `recommended_option_id` and then explains, path by path, why it
+            # wins. Under a withheld ranking there is no recommended option, so
+            # the quantity does not exist — the same reason `p_win_sensitivity`
+            # is skipped above and `conditional_winners` before it.
+            #
+            # AND THE VALUE IT WOULD HAVE CARRIED WAS NOT MERELY UNEARNED, IT WAS
+            # ARBITRARY. `_winners_for_draw` returns [] under a withheld plan, so
+            # `option_wins` is all-zero and `recommended_option_id = max(
+            # option_wins, key=...)` returns the FIRST KEY BY INSERTION ORDER.
+            # Measured at 0a570656 on the review's witness: options
+            # [modest, aggressive] named "modest"; reversing the array named
+            # "aggressive" — same evidence, different named winner, decided by
+            # array position, on a response that had just refused to rank.
+            #
+            # Request-gated phases are absent from the default corpus
+            # (`include_path_decomposition` defaults off), which is why four
+            # siblings were guarded and this one was not: a guard written against
+            # the default corpus cannot observe a phase no fixture asks for. The
+            # spec now asks for it explicitly.
+            #
+            # Skipped BEFORE it runs and recorded at the skip site, as the
+            # siblings do — no budget is spent on a block that cannot be emitted.
+            withheld_ranking_suppressions.append(SUPPRESSED_ATTR_PATH_DECOMPOSITION)
+        elif request.include_path_decomposition:
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
                 elapsed_ms = _elapsed_ms()
@@ -2808,6 +3005,35 @@ class RobustnessAnalyzerV2:
             request, correlation_plan, suppressed_attributions
         )
 
+        # ROADMAP 2.1192 (review P2). The withheld-ranking disclosure, assembled
+        # HERE — after every skip site has run — for the same reason the
+        # correlation block is: it is a RECORD of what this run actually
+        # suppressed, not a forecast of what it was going to.
+        #
+        # The carrier is the OBJECTIVE_RANKING_WITHHELD warning that
+        # `_resolve_objective_plan` already emitted on this exact path, so the
+        # refusal and the manifest of what it cost arrive as ONE object on a
+        # channel that is always on the wire. Nothing new is added to the
+        # envelope and no schema moves.
+        if objective_ranking_withheld:
+            # Asserted rather than silenced, following this file's existing
+            # fail-loud convention: `sense == "withheld"` and the warning are set
+            # together at ONE site in `_resolve_objective_plan`, so if that
+            # invariant is ever broken the manifest must fail loudly here rather
+            # than be dropped on the floor — which is the defect being fixed.
+            assert objective_warning is not None and (
+                objective_warning.code == "OBJECTIVE_RANKING_WITHHELD"
+            ), (
+                "a withheld ranking must carry its OBJECTIVE_RANKING_WITHHELD "
+                f"warning (got {objective_warning!r})"
+            )
+            objective_warning.detail["suppressed_blocks"] = list(
+                withheld_ranking_suppressions
+            )
+            objective_warning.detail["suppression_reason"] = (
+                _WITHHELD_RANKING_SUPPRESSION_REASON
+            )
+
         # Include stability thresholds when bootstrap stability was computed
         has_bootstrap = any(fs.attribution_stability is not None for fs in factor_sensitivity)
         stability_thresholds = (
@@ -2855,6 +3081,31 @@ class RobustnessAnalyzerV2:
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
+            # ROADMAP 2.1192. The ranking's provenance, always present.
+            #
+            # `direction` reports the sense that actually RAN. Under a withheld
+            # ranking there is no such sense, so it reports the one the caller
+            # ASKED for — which is what a surface needs in order to say "you
+            # asked to land near X and we could not score that", rather than
+            # inventing a sense nobody chose. The distinction is carried by
+            # `status`, not by overloading `direction`, so a consumer keying on
+            # one is never silently reading the other.
+            objective_ranking=ObjectiveRanking(
+                direction=(
+                    cast(Literal["maximise", "minimise", "target"], request.goal_direction)
+                    if objective_ranking_withheld and request.goal_direction is not None
+                    else cast(
+                        Literal["maximise", "minimise", "target"], objective_plan.sense
+                    )
+                ),
+                attested=objective_plan.attested,
+                status="withheld" if objective_ranking_withheld else "computed",
+                withheld_reason=(
+                    "target_not_resolvable_in_sample_frame"
+                    if objective_ranking_withheld
+                    else None
+                ),
+            ),
             conditional_winners=conditional_winners,
             stability_thresholds=stability_thresholds,
             edge_e_values=edge_e_values,
@@ -2976,6 +3227,7 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
         constraint_target_nodes: Optional[List[str]] = None,
         status_quo_reference_nodes: Optional[List[str]] = None,
+        objective: Optional["ObjectivePlan"] = None,
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
@@ -3135,8 +3387,35 @@ class RobustnessAnalyzerV2:
             finite_outcomes = {
                 opt_id: val for opt_id, val in sample_outcomes.items() if math.isfinite(val)
             }
-            max_outcome = max(finite_outcomes.values()) if finite_outcomes else None
-            winners = [opt_id for opt_id, val in finite_outcomes.items() if val == max_outcome]
+
+            # ROADMAP 2.1192 — the winner decision, delegated to its ONE owner.
+            #
+            # This block used to be an unconditional ``max()``. It is now the
+            # SAME single decision, taken by ``_winners_for_draw`` and
+            # parameterised by the request's attested objective sense. Nothing
+            # downstream changed: win_probability, recommended_option_id,
+            # recommendation_confidence, conditional_winners and
+            # p_win_sensitivity all still read this one rule's output, which is
+            # exactly why the fix belongs here and not in a rival scorer beside
+            # it.
+            #
+            # ``maximise`` reproduces the historical behaviour byte-for-byte on
+            # every request that does not ask for anything else, and the
+            # objective defaults to an unattested maximise plan — so an omitted
+            # goal_direction changes no number anywhere.
+            #
+            # The tie / finiteness / no-winner semantics below are UNTOUCHED and
+            # still operate on whatever the owner returns.
+            plan = objective or ObjectivePlan(sense="maximise", attested=False)
+            winners = self._winners_for_draw(
+                finite_outcomes,
+                plan,
+                (
+                    reference_values.get(request.goal_node_id)
+                    if sq_evaluator is not None and plan.needs_status_quo_reference
+                    else None
+                ),
+            )
 
             if not winners:
                 # No option produced a finite outcome at this draw. Award no
@@ -3677,6 +3956,199 @@ class RobustnessAnalyzerV2:
         on the wrong side of this predicate.
         """
         return goal_threshold_plan is not None and (request.goal_threshold_frame == "level")
+
+    @staticmethod
+    def _winners_for_draw(
+        finite_outcomes: Dict[str, float],
+        objective: "ObjectivePlan",
+        status_quo_reference: Optional[float],
+    ) -> List[str]:
+        """Which options win THIS draw, under the request's objective sense.
+
+        ROADMAP 2.1192 — THE CANONICAL OWNER of "which option wins?". Every
+        winner decision in this service routes through this function, and there
+        is deliberately no second implementation of it.
+
+        THAT IS THE POINT OF EXTRACTING IT. Before 2.1192 there were TWO
+        unconditional ``max()`` copies of this rule: the main Monte Carlo loop
+        and ``_compute_evpi_metric``'s fixed-policy replay, which feeds
+        ``p_win_sensitivity``. They agreed only because both were hardcoded to
+        the same sense. Parameterising one and leaving the other would have made
+        them disagree the moment a user stated ``minimise`` or ``target`` — the
+        ranking scored against the team's aim while the sensitivity beside it
+        scored against a maximiser, under labels that both say "win". Two
+        same-named-but-different code paths have cost this estate real money
+        before, and the failure mode is silent: each copy looks right on its
+        own.
+
+        ``status_quo_reference`` is this draw's no-intervention goal value, and
+        is required only by a level-framed target. Callers that cannot supply
+        one for such a target must not call this function with a maximise plan
+        instead — they must suppress their phase.
+
+        Returns ``[]`` for an uninformative draw (no finite option, or a
+        level-framed target whose reference is unusable). The callers' existing
+        no-winner semantics handle that: no option is credited, and the win
+        probabilities sum to the informative fraction, which is the honest
+        report.
+        """
+        if objective.sense == "withheld":
+            # Checked before everything else so no later limb can be reached by
+            # a withheld plan. A withheld ranking is not a degraded ranking: it
+            # is the refusal to state one, and the ONLY correct number of
+            # winners is none.
+            return []
+
+        if not finite_outcomes:
+            return []
+
+        if objective.sense == "maximise":
+            best = max(finite_outcomes.values())
+            return [opt_id for opt_id, val in finite_outcomes.items() if val == best]
+
+        if objective.sense == "minimise":
+            best = min(finite_outcomes.values())
+            return [opt_id for opt_id, val in finite_outcomes.items() if val == best]
+
+        # ``target``: rank by distance from the stated target. Smaller is
+        # better, which is what lets an option BETWEEN two extremes win — the
+        # thing an argmax over a monotone SCM can never do.
+        if objective.target_level is not None:
+            # LEVEL frame: recover each option's level per draw against the
+            # status-quo reference under common random numbers, exactly as the
+            # goal-probability channel does. Everything not caused by the option
+            # is present in both terms and cancels.
+            if status_quo_reference is None or not math.isfinite(status_quo_reference):
+                return []
+            baseline = objective.goal_baseline or 0.0
+            distances = {
+                opt_id: abs((baseline + (val - status_quo_reference)) - objective.target_level)
+                for opt_id, val in finite_outcomes.items()
+            }
+        else:
+            # DELTA frame: the caller attested the target is already in the
+            # samples' own frame, so compare raw.
+            assert objective.target_delta is not None
+            distances = {
+                opt_id: abs(val - objective.target_delta)
+                for opt_id, val in finite_outcomes.items()
+            }
+
+        best_distance = min(distances.values())
+        return [opt_id for opt_id, dist in distances.items() if dist == best_distance]
+
+    @staticmethod
+    def _resolve_objective_plan(
+        request: RobustnessRequestV2,
+        goal_threshold_plan: Optional["GoalThresholdPlan"],
+    ) -> Tuple["ObjectivePlan", Optional[InferenceWarning]]:
+        """Decide what "wins" MEANS for this request, or refuse (ROADMAP 2.1192).
+
+        Returns ``(plan, warning)``.
+
+        * A non-None plan means the per-sample winner rule may run, and the plan
+          says by which sense.
+        * A plan whose sense is ``withheld`` means the caller asked for a
+          target-based ranking that cannot be scored, so **no ranking is
+          produced at all**:
+          ``win_probability`` is omitted from every option on the wire, no
+          option is recommended, and the warning names what was missing. There
+          is deliberately no fallback limb — silently reverting to ``max()``
+          would answer the maximiser's question while displaying the target
+          question's label, which is the whole defect.
+
+        WHY THE REFUSAL IS NARROW. It fires only on ``goal_direction ==
+        "target"``, which today has zero live traffic (no producer sends the
+        field yet), so it cannot regress a deployed ranking. The MISSING-target
+        case never reaches here at all — the request model refuses it at parse
+        with a typed 422. What reaches here is the semantic case: a target that
+        was stated but whose frame the graph cannot support (a root goal, a
+        missing baseline, a goal pinned by an intervention). The estate's
+        taxonomy puts that in a warning, not a 422, and the response degrades to
+        dark-but-honest rather than to a wrong number.
+
+        WHY ABSENCE IS NOT A REFUSAL. An absent ``goal_direction`` returns an
+        UNATTESTED maximise plan plus a disclosure. This is a deliberate,
+        deploy-ordered posture and it is pinned by a test: ISL declares the
+        field before any producer stamps it (request models are
+        ``extra="ignore"``, so a producer-first field would die silently at
+        parse with a 200), and withholding every ranking in the window between
+        the two would take a journey-witnessed capability dark for a contract
+        that had not landed yet. The honest cost is stated on the wire rather
+        than hidden: ``attested=False`` plus GOAL_DIRECTION_UNATTESTED, which is
+        the signal a coaching surface uses to ASK the team for their aim.
+        """
+        direction = request.goal_direction
+
+        if direction is None:
+            return (
+                ObjectivePlan(sense="maximise", attested=False),
+                InferenceWarning(
+                    code="GOAL_DIRECTION_UNATTESTED",
+                    field="goal_direction",
+                    detail={
+                        "goal_node_id": request.goal_node_id,
+                        "assumed_sense": "maximise",
+                        "reason": "goal_direction_absent",
+                        "message": (
+                            "No objective sense was stated for the goal node, so "
+                            "options were ranked by largest goal value. That is an "
+                            "assumption, not the team's stated aim: if the goal is "
+                            "a quantity to reduce, or the aim is to land near a "
+                            "target rather than as high as possible, this ranking "
+                            "answers a different question. Send goal_direction to "
+                            "rank against the stated objective."
+                        ),
+                    },
+                    # Degradation disclosure, not a benign input note: PLoT hides
+                    # severity=='info', and a surface that cannot see this cannot
+                    # tell an attested ranking from an assumed one.
+                    severity="warning",
+                ),
+            )
+
+        if direction in ("maximise", "minimise"):
+            return ObjectivePlan(sense=direction, attested=True), None
+
+        # direction == "target". The parse-time validator guarantees
+        # goal_threshold and goal_threshold_frame are both present, so a None
+        # plan here means the frame was stated and could not be CONVERTED — the
+        # resolver has already emitted its own GOAL_THRESHOLD_NOT_CONVERTIBLE
+        # warning naming the reason. This warning says what that costs the
+        # ranking, which the threshold channel's warning does not know.
+        if goal_threshold_plan is None:
+            return ObjectivePlan(sense="withheld", attested=True), InferenceWarning(
+                code="OBJECTIVE_RANKING_WITHHELD",
+                field="goal_direction",
+                detail={
+                    "goal_node_id": request.goal_node_id,
+                    "goal_direction": direction,
+                    "goal_threshold": request.goal_threshold,
+                    "goal_threshold_frame": request.goal_threshold_frame,
+                    "reason": "target_not_resolvable_in_sample_frame",
+                    "message": (
+                        "Options were to be ranked by closeness to the stated "
+                        "target, but the target could not be resolved into the "
+                        "samples' frame (see the goal_threshold warning for the "
+                        "reason). No ranking is reported: win_probability is "
+                        "omitted for every option and no option is recommended. "
+                        "Ranking by largest value instead would answer a "
+                        "different question under the same label."
+                    ),
+                },
+                severity="warning",
+            )
+
+        return (
+            ObjectivePlan(
+                sense="target",
+                attested=True,
+                target_delta=goal_threshold_plan.delta_threshold,
+                target_level=goal_threshold_plan.level_threshold,
+                goal_baseline=goal_threshold_plan.goal_baseline,
+            ),
+            None,
+        )
 
     @staticmethod
     def _resolve_goal_threshold_in_sample_frame(
@@ -7453,6 +7925,7 @@ class RobustnessAnalyzerV2:
         recommended_option_id: str,
         budget_ms: Optional[float] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
+        objective: Optional["ObjectivePlan"] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """Compute Expected Value of Perfect Information (EVPI) per factor.
 
@@ -7539,6 +8012,7 @@ class RobustnessAnalyzerV2:
             recommended_option_id,
             deadline=deadline,
             constraint_plans=constraint_plans,
+            objective=objective,
         )
         if baseline_metric is None:
             # Deadline tripped inside the baseline sample loop.
@@ -7590,6 +8064,7 @@ class RobustnessAnalyzerV2:
                 recommended_option_id,
                 deadline=deadline,
                 constraint_plans=constraint_plans,
+                objective=objective,
             )
             if perfect_metric is None:
                 # Deadline tripped inside this factor's MC pass — discard the whole
@@ -7678,6 +8153,7 @@ class RobustnessAnalyzerV2:
         recommended_option_id: str,
         deadline: Optional["PhaseDeadline"] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
+        objective: Optional["ObjectivePlan"] = None,
     ) -> Optional[float]:
         """Compute the EVPI metric for a fixed decision policy over n_samples.
 
@@ -7710,6 +8186,14 @@ class RobustnessAnalyzerV2:
         # random numbers). Its evaluator carries no epsilon RNG, so recording it
         # consumes no draws and cannot shift this loop's existing output.
         sq_reference_nodes = self._constraint_status_quo_nodes(request, constraint_plans)
+        # ROADMAP 2.1192: a level-framed TARGET objective needs the goal's own
+        # per-draw reference here too, for the same reason the constraint
+        # channel needs its targets' — a level is only recoverable against a
+        # no-intervention draw under common random numbers. Added to the SAME
+        # set rather than recorded separately, so there is one reference series
+        # per node and no second dialect of the same idea.
+        if objective is not None and objective.needs_status_quo_reference:
+            sq_reference_nodes = sorted(set(sq_reference_nodes) | {request.goal_node_id})
         status_quo_node_values: Dict[str, List[float]] = {
             node_id: [] for node_id in sq_reference_nodes
         }
@@ -7791,10 +8275,38 @@ class RobustnessAnalyzerV2:
             # P(win) of the fixed recommended option.
             # Tie-breaking mirrors main MC: equal credit split among tied options
             # to avoid insertion-order bias (see _run_monte_carlo tie logic).
+            # P(win) of the fixed recommended option — ROADMAP 2.1192.
+            #
+            # THE SECOND COPY OF THE WINNER RULE, now routed through its one
+            # owner. This loop was an independent unconditional ``max()``; it
+            # agreed with the main Monte Carlo only because both were hardcoded
+            # to the same sense. Parameterising the ranking and leaving this
+            # alone would have made ``p_win_sensitivity`` measure a maximiser's
+            # win probability while the ranking beside it measured the team's
+            # stated objective — two authorities, one label, no rule for which
+            # one a surface should believe.
+            #
+            # A level-framed target needs this loop's own status-quo reference
+            # (recorded above under the same common random numbers). When the
+            # objective needs one and this loop has none, the phase is DISCARDED
+            # — the same all-or-nothing signal an unresolvable constraint plan
+            # already uses — rather than silently answering with a maximiser.
+            plan = objective or ObjectivePlan(sense="maximise", attested=False)
+            goal_reference_series = status_quo_node_values.get(request.goal_node_id)
+            if plan.needs_status_quo_reference and not goal_reference_series:
+                return None
             win_count = 0.0
             for i in range(n_samples):
-                max_outcome = max(option_outcomes[oid][i] for oid in option_outcomes)
-                winners = [oid for oid in option_outcomes if option_outcomes[oid][i] == max_outcome]
+                finite_i = {
+                    oid: option_outcomes[oid][i]
+                    for oid in option_outcomes
+                    if math.isfinite(option_outcomes[oid][i])
+                }
+                winners = self._winners_for_draw(
+                    finite_i,
+                    plan,
+                    goal_reference_series[i] if goal_reference_series else None,
+                )
                 if recommended_option_id in winners:
                     win_count += 1.0 / len(winners)
             return win_count / n_samples

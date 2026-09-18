@@ -3818,6 +3818,17 @@
             "title": "Inference Warnings",
             "type": "array"
           },
+          "objective_ranking": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectiveRankingV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this response's ranking optimised, and whether the user's objective was actually stated. See ObjectiveRankingV2."
+          },
           "options": {
             "anyOf": [
               {
@@ -4291,6 +4302,102 @@
           "label"
         ],
         "title": "NodeV2",
+        "type": "object"
+      },
+      "ObjectiveRanking": {
+        "description": "WHAT the ranking in this response actually optimised (ROADMAP 2.1192).\n\nTHE FIELD THAT MAKES ``win_probability`` READABLE. That number has always\nbeen \"the fraction of draws on which this option produced the largest\ngoal-node value\". Every surface in the estate rendered it as \"which option\nis best\". Those are different sentences, and nothing on the wire said which\none the number supported \u2014 so a leader could be crowned at 70.67% while\ncarrying ``probability_of_goal = 0.0``, and no consumer had any way to tell.\n\nThis block is not a second score. It is the PROVENANCE of the only score,\nso a surface can say what the ranking answers and, when the aim was never\nstated, ASK for it instead of implying it was honoured.",
+        "properties": {
+          "attested": {
+            "description": "True when the request stated goal_direction. FALSE means no aim was supplied and 'maximise' is this service's DISCLOSED DEFAULT, not a claim about what the team wants. A surface that presents an unattested ranking as 'the best option for your goal' is overstating what was computed; the honest move is to ask.",
+            "title": "Attested",
+            "type": "boolean"
+          },
+          "direction": {
+            "description": "The objective sense the winner rule applied. Always the sense that actually ran \u2014 never the sense that was requested but refused (a refusal sets status='withheld' and reports the sense that was asked for in the accompanying inference warning).",
+            "enum": [
+              "maximise",
+              "minimise",
+              "target"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "status": {
+            "description": "'withheld' means NO ranking was produced: win_probability is omitted for every option and no option is recommended, because the requested objective could not be scored on this graph. It is never a flat or tied ranking \u2014 it is the absence of one.",
+            "enum": [
+              "computed",
+              "withheld"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "withheld_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Machine-readable reason when status='withheld'. Omitted otherwise.",
+            "title": "Withheld Reason"
+          }
+        },
+        "required": [
+          "direction",
+          "attested",
+          "status"
+        ],
+        "title": "ObjectiveRanking",
+        "type": "object"
+      },
+      "ObjectiveRankingV2": {
+        "description": "What the ranking on this response optimised (ROADMAP 2.1192).\n\n``win_probability`` is the fraction of Monte Carlo draws on which an option\nscored best under the request's objective sense. Until 2.1192 that sense was\nhardcoded to \"largest goal-node value\" and nothing on the wire said so, so a\nconsumer rendering \"which option wins\" was making a claim the number did not\nsupport: measured at 28fe0c95, the crowned option could carry\n``probability_of_goal = 0.0``, and supplying the user's target moved the\nranking by exactly nothing.\n\nThis block is the provenance of the single ranking, not a rival to it.",
+        "properties": {
+          "attested": {
+            "description": "True when the caller stated the objective. FALSE means 'maximise' is ISL's disclosed default and the team's aim was never supplied \u2014 a ranking a surface should present as an assumption, or ask about, rather than as the answer to their goal.",
+            "title": "Attested",
+            "type": "boolean"
+          },
+          "direction": {
+            "description": "The objective sense the winner rule applied. Under status='withheld' this is the sense that was REQUESTED and refused, which is what a surface needs in order to say what could not be done.",
+            "enum": [
+              "maximise",
+              "minimise",
+              "target"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "status": {
+            "description": "'withheld' means NO ranking exists in this response: win_probability is omitted on every option and the robustness block (whose confidence IS the recommended option's win share) is omitted too. It is the absence of a ranking, never a flat one.",
+            "enum": [
+              "computed",
+              "withheld"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "withheld_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Machine-readable reason when status='withheld'.",
+            "title": "Withheld Reason"
+          }
+        },
+        "required": [
+          "direction",
+          "attested",
+          "status"
+        ],
+        "title": "ObjectiveRankingV2",
         "type": "object"
       },
       "ObservedState": {
@@ -5852,6 +5959,23 @@
             "description": "Multiple goal constraints for joint probability analysis. When provided, computes per-constraint probabilities, joint probability, and conditional probabilities. Requires nodes to exist in graph.",
             "title": "Goal Constraints"
           },
+          "goal_direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "maximise",
+                  "minimise",
+                  "target"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The user's objective sense for the goal node, which decides what 'this option wins this draw' MEANS. 'maximise' = largest goal value wins (the historical rule). 'minimise' = smallest wins \u2014 required whenever the goal is a quantity to reduce (cost, churn, risk), where the historical rule crowned the worst option. 'target' = closest to goal_threshold wins, which is the only sense under which a moderate option can win at all; it REQUIRES goal_threshold and goal_threshold_frame (a target sense with no target is refused at parse, never silently downgraded to maximise). When absent, the maximiser runs UNATTESTED and the response says so \u2014 ISL never infers the user's aim from a node label.",
+            "title": "Goal Direction"
+          },
           "goal_node_id": {
             "description": "Target outcome node to optimize",
             "title": "Goal Node Id",
@@ -6203,6 +6327,14 @@
             "title": "Inference Warnings",
             "type": "array"
           },
+          "objective_ranking": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ObjectiveRanking"
+              }
+            ],
+            "description": "What the ranking in this response optimised, and whether the user's aim was actually stated. See ObjectiveRanking."
+          },
           "p_win_sensitivity": {
             "anyOf": [
               {
@@ -6303,7 +6435,8 @@
           "recommended_option_id",
           "recommendation_confidence",
           "robustness",
-          "_metadata"
+          "_metadata",
+          "objective_ranking"
         ],
         "title": "RobustnessResponseV2",
         "type": "object"
