@@ -222,7 +222,20 @@ _EDGE_E_VALUE_ADDITIVE_KEYS = ("alternative_winner_id", "baseline_winner_id")
 # guards, and stripping the whole key would delete every OTHER warning from
 # `current` and hide a real regression in them. So the warning is removed BY
 # CODE, one entry, leaving the rest of the list compared.
-_ADDITIVE_INFERENCE_WARNING_CODES = ("GOAL_DIRECTION_UNATTESTED",)
+# ISL #174: FACTOR_EVPPI_NOT_COMPUTED joins this tuple rather than arriving
+# with a second helper of its own. Both branches independently built the
+# same strip-by-code mechanism while open; two same-shaped helpers under
+# different names is this estate's chronic defect (CLAUDE.md trap 21), so
+# the later one is folded into the earlier rather than shipped beside it.
+#
+# It is additive for the same reason: emitted on every run that did not
+# request VOI (which includes this golden's request), a NEW code, never a
+# change to an existing one. The golden stays as captured from e029cae2d —
+# re-capturing it would decay this control into a tautology (trap 12b).
+_ADDITIVE_INFERENCE_WARNING_CODES = (
+    "GOAL_DIRECTION_UNATTESTED",
+    "FACTOR_EVPPI_NOT_COMPUTED",
+)
 
 
 def _strip_additive_inference_warnings(payload: dict) -> dict:
@@ -260,7 +273,6 @@ def _strip_edge_e_value_additions(payload: dict) -> dict:
 # in test_confidence_is_now_the_bare_stability_fraction below, so it is pinned
 # rather than waved through, and only then excluded from the modulo comparison.
 _CHANGED_WIRE_VALUES = ("robustness", "confidence")
-
 
 def _strip_additive_surfaces(payload, keys=_ADDITIVE_WIRE_SURFACES):
     """Recursively remove additive-only surface keys so what remains is the
@@ -386,6 +398,24 @@ class TestAdditiveVsBase:
         current.get(section, {}).pop(key, None)
         golden.get(section, {}).pop(key, None)
         assert current == golden
+
+    def test_additive_warning_strip_removes_only_the_named_codes(self) -> None:
+        """The strip is a BLINDER, so its discrimination is pinned here. It must
+        remove EVERY additive code and PRESERVE every other warning — otherwise
+        the golden pin silently stops guarding warning drift (CLAUDE.md trap 13b:
+        a guard whose discrimination nothing pins). Covers BOTH codes, so neither
+        branch's disclosure can fall out of the tuple unnoticed."""
+        payload = {
+            "inference_warnings": [
+                {"code": "GOAL_DIRECTION_UNATTESTED", "detail": {}},
+                {"code": "FACTOR_EVPPI_NOT_COMPUTED", "detail": {"reason": "voi_not_requested"}},
+                {"code": "ROOT_NODE_DEFAULT_VALUE", "detail": {"node_id": "n1"}},
+            ]
+        }
+        got = _strip_additive_inference_warnings(payload)
+        assert [w["code"] for w in got["inference_warnings"]] == ["ROOT_NODE_DEFAULT_VALUE"]
+        # The input is not mutated — the caller's payload must survive intact.
+        assert len(payload["inference_warnings"]) == 3
 
     def test_confidence_is_now_the_bare_stability_fraction(self, no_env, client):
         """Pin the one value the golden comparison above excludes.
