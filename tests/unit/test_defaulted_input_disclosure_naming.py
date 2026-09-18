@@ -44,6 +44,7 @@ from src.models.robustness_v2 import (
     RobustnessRequestV2,
     StrengthDistribution,
 )
+from src.models.response_v2 import InferenceWarning
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
 # The genuinely-defaulted root: no observed_state, no ParameterUncertainty,
@@ -210,3 +211,92 @@ class TestFactorEvppiAbsenceIsDisclosed:
             "factor_evppi was genuinely computed"
         )
         assert _warnings(response, "FACTOR_EVPPI_NOT_COMPUTED") == []
+
+
+# ===========================================================================
+# 3. A DISCLOSURE MAY NOT DENY A REASON THE PAYLOAD BESIDE IT STATES
+#
+# Added 18 Sep 2026 on an independent review finding against this PR.
+#
+# `FACTOR_EVPPI_NOT_COMPUTED`'s last arm says "The reason is not known at this
+# layer and has deliberately not been inferred." Its suppression list excluded
+# only FACTOR_EVPPI_UNAVAILABLE, so on the path where every requested factor is
+# dropped in-loop -- `failed` non-empty, `results` empty, `return None` WITHOUT
+# raising -- FACTOR_EVPPI_PARTIAL was emitted STATING the reason (failed factor
+# ids and a per-factor category) and this warning was emitted beside it DENYING
+# the reason is known.
+#
+# The block's own governing rule is NEVER SYNTHESISE A REASON. Denying a stated
+# one is that rule's mirror, and is worse than inventing one: it teaches a
+# reader that nothing further is knowable while the answer sits in the same
+# response object.
+#
+# THE PAIR IS THE POINT (CLAUDE.md trap 19). The first test alone would pass if
+# the suppression were widened to swallow the disclosure entirely; the second
+# proves the disclosure still fires when nothing else explains the absence. One
+# without the other shows nothing.
+# ===========================================================================
+
+
+class TestAbsenceDisclosureNeverContradictsAPayloadThatExplainsIt:
+    @staticmethod
+    def _force_evppi_none(monkeypatch: Any, *, emit_partial: bool) -> None:
+        """Make the estimator return None, optionally having stated WHY first.
+
+        Patches the real seam rather than the outcome: `_compute_factor_evppi`
+        receives `inference_warnings` and returns None when `results` is empty,
+        which is exactly the reachable path the finding names.
+        """
+
+        def _fake(
+            self: Any,
+            *_args: Any,
+            inference_warnings: Any = None,
+            **_kwargs: Any,
+        ) -> None:
+            if emit_partial and inference_warnings is not None:
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="FACTOR_EVPPI_PARTIAL",
+                        field="factor_evppi",
+                        detail={
+                            "failed_factor_ids": ["f_demand"],
+                            "message": "1 factor could not be estimated.",
+                        },
+                    )
+                )
+            return None
+
+        monkeypatch.setattr(RobustnessAnalyzerV2, "_compute_factor_evppi", _fake)
+
+    def test_not_computed_is_silent_when_partial_already_states_the_reason(
+        self, monkeypatch: Any
+    ) -> None:
+        self._force_evppi_none(monkeypatch, emit_partial=True)
+        response = RobustnessAnalyzerV2().analyze(_request(include_voi=True))
+
+        assert response.factor_evppi is None
+        partial = _warnings(response, "FACTOR_EVPPI_PARTIAL")
+        assert len(partial) == 1, "precondition: the payload must state a reason"
+
+        not_computed = _warnings(response, "FACTOR_EVPPI_NOT_COMPUTED")
+        assert not_computed == [], (
+            "FACTOR_EVPPI_NOT_COMPUTED must not claim the reason is unknown "
+            "while FACTOR_EVPPI_PARTIAL states it in the same payload"
+        )
+
+    def test_not_computed_still_fires_when_nothing_else_explains_the_absence(
+        self, monkeypatch: Any
+    ) -> None:
+        """DISCRIMINATING CONTROL. Identical path, no FACTOR_EVPPI_PARTIAL --
+        the disclosure MUST still speak, or the fix above has simply deleted an
+        honest signal instead of removing a contradictory one."""
+        self._force_evppi_none(monkeypatch, emit_partial=False)
+        response = RobustnessAnalyzerV2().analyze(_request(include_voi=True))
+
+        assert response.factor_evppi is None
+        assert _warnings(response, "FACTOR_EVPPI_PARTIAL") == []
+
+        not_computed = _warnings(response, "FACTOR_EVPPI_NOT_COMPUTED")
+        assert len(not_computed) == 1, "the honest absence disclosure must survive"
+        assert not_computed[0].detail["reason"] == "estimator_returned_no_rows"

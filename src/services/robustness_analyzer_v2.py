@@ -2924,8 +2924,44 @@ class RobustnessAnalyzerV2:
         # nothing worth learning would be worse than the silence it replaces.
         # FACTOR_EVPPI_UNAVAILABLE already explains the estimator-raised case, so
         # this never speaks over it.
+        #
+        # =====================================================================
+        # FACTOR_EVPPI_PARTIAL IS EXCLUDED FOR THE SAME REASON, AND ITS ABSENCE
+        # HERE WAS A LIVE DEFECT. Added 18 Sep 2026 on an independent review.
+        #
+        # THE REACHABLE PATH: every requested factor is dropped in-loop, so
+        # `failed` is non-empty and `results` is empty. FACTOR_EVPPI_PARTIAL is
+        # emitted (with `failed_factor_ids` and a per-factor category -- i.e.
+        # STATING THE REASON), and then `if not results: return None` leaves
+        # `factor_evppi is None` WITHOUT raising, so no
+        # FACTOR_EVPPI_UNAVAILABLE exists to suppress this block. All three
+        # earlier conjuncts are false on that path -- VOI was requested, there
+        # were uncertainties, the pre-noise population was there -- so it fell
+        # through to `estimator_returned_no_rows` and emitted:
+        #
+        #     "The reason is not known at this layer and has deliberately not
+        #      been inferred."
+        #
+        # beside a warning in the SAME payload that names the failed factors
+        # and why each failed.
+        #
+        # A DISCLOSURE REFUTED BY THE PAYLOAD NEXT TO IT is the exact defect
+        # class this block exists to prevent, one level up: the block's own
+        # rule is NEVER SYNTHESISE A REASON, and the mirror of inventing a
+        # reason is denying one that is already stated. Both mislead; this one
+        # is worse, because it teaches a reader that nothing more is knowable
+        # while the answer sits in the same response.
+        #
+        # SUPPRESSING THE WHOLE BLOCK IS CORRECT, NOT JUST THE LAST ARM. If
+        # FACTOR_EVPPI_PARTIAL was emitted then the estimator ran, so VOI was
+        # requested, uncertainties existed and the pre-noise population was
+        # available -- every earlier conjunct is unreachable in its presence.
+        # Narrowing this to the `else` arm alone would be a guard written
+        # against the symptom rather than the condition.
+        # =====================================================================
         if factor_evppi is None and not any(
-            w.code == "FACTOR_EVPPI_UNAVAILABLE" for w in inference_warnings
+            w.code in ("FACTOR_EVPPI_UNAVAILABLE", "FACTOR_EVPPI_PARTIAL")
+            for w in inference_warnings
         ):
             evppi_absence_reason: str
             evppi_absence_message: str
