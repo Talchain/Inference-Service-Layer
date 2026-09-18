@@ -246,6 +246,17 @@ class TestAbsenceDisclosureNeverContradictsAPayloadThatExplainsIt:
         Patches the real seam rather than the outcome: `_compute_factor_evppi`
         receives `inference_warnings` and returns None when `results` is empty,
         which is exactly the reachable path the finding names.
+
+        ⚠ CALLERS MUST PASS `include_uncertainties=True`. `_request`'s default
+        is False, so without it `factor_sampler.has_uncertainties()` is false,
+        the guard short-circuits on its SECOND conjunct with
+        `no_parameter_uncertainties`, and the estimator -- and therefore this
+        patch -- is never reached at all. Both tests below would then be
+        measuring a completely different arm while looking like they passed
+        through this one. CI caught it, on the PRECONDITION assertions rather
+        than on the behaviour, which is the only reason it was visible: a test
+        that does not pin its own precondition reports success about a path it
+        never walked.
         """
 
         def _fake(
@@ -273,7 +284,9 @@ class TestAbsenceDisclosureNeverContradictsAPayloadThatExplainsIt:
         self, monkeypatch: Any
     ) -> None:
         self._force_evppi_none(monkeypatch, emit_partial=True)
-        response = RobustnessAnalyzerV2().analyze(_request(include_voi=True))
+        response = RobustnessAnalyzerV2().analyze(
+            _request(include_voi=True, include_uncertainties=True)
+        )
 
         assert response.factor_evppi is None
         partial = _warnings(response, "FACTOR_EVPPI_PARTIAL")
@@ -292,7 +305,9 @@ class TestAbsenceDisclosureNeverContradictsAPayloadThatExplainsIt:
         the disclosure MUST still speak, or the fix above has simply deleted an
         honest signal instead of removing a contradictory one."""
         self._force_evppi_none(monkeypatch, emit_partial=False)
-        response = RobustnessAnalyzerV2().analyze(_request(include_voi=True))
+        response = RobustnessAnalyzerV2().analyze(
+            _request(include_voi=True, include_uncertainties=True)
+        )
 
         assert response.factor_evppi is None
         assert _warnings(response, "FACTOR_EVPPI_PARTIAL") == []
