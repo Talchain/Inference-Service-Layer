@@ -1438,6 +1438,12 @@ SUPPRESSED_ATTR_FACTOR_SENSITIVITY = "factor_sensitivity"
 SUPPRESSED_ATTR_STABILITY_THRESHOLDS = "stability_thresholds"
 SUPPRESSED_ATTR_CONDITIONAL_WINNERS = "conditional_winners"
 SUPPRESSED_ATTR_P_WIN_SENSITIVITY = "p_win_sensitivity"
+# ROADMAP 2.1192 (review P1). Emitted ONLY by the withheld-ranking channel, never
+# by correlation: path decomposition is a statement about a RECOMMENDED OPTION, a
+# thing correlation never makes unavailable. Kept in this file with its siblings
+# so the token has one spelling; the two channels that carry tokens are named
+# apart (see `_WITHHELD_RANKING_SUPPRESSION_REASON` in the analyzer).
+SUPPRESSED_ATTR_PATH_DECOMPOSITION = "path_decomposition"
 
 
 class CorrelationModelV2(BaseModel):

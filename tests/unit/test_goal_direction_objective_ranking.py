@@ -484,3 +484,370 @@ class TestOneWinnerRule:
             RobustnessAnalyzerV2._winners_for_draw({"a": 0.1, "b": 0.9}, plan, float("nan"))
             == []
         )
+
+
+# ==========================================================================
+# ACCEPTANCE 2b — a withheld ranking may not be restated on ANY side channel,
+# and the RECORD of what it suppressed must survive to the wire
+#
+# Two blocking review findings at 0a570656, both reproduced here before the
+# fix, both with a contrast control in the same probe:
+#
+# P1  `path_decomposition` was NOT withhold-gated. Under a withheld ranking
+#     `_winners_for_draw` returns [], so `option_wins` is all-zero and
+#     `recommended_option_id = max(option_wins, key=...)` returns the FIRST KEY
+#     BY INSERTION ORDER. Measured at pristine on the witness below:
+#
+#         options [modest, aggressive] -> path_decomposition.recommended_option_id = "modest"
+#         options [aggressive, modest] -> path_decomposition.recommended_option_id = "aggressive"
+#         path_count = 2 (a full causal breakdown "explaining why it wins")
+#         CONTRAST  conditional_winners = None   <- that sibling IS gated
+#
+#     A field labelled "The recommended option this decomposition explains",
+#     populated by array position, on a response that refused to say which
+#     option wins.
+#
+# P2  The suppression markers were DARK whenever correlation was inactive.
+#     They were appended to `suppressed_attributions`, whose only carrier is
+#     `correlation_model.suppressed_attributions`, and `_build_correlation_
+#     disclosure` returns None when no `factor_correlations` were declared —
+#     the common case. Measured at pristine: `correlation_model is None` on
+#     every request below, so every marker the withhold path recorded was
+#     silently discarded and the omission was "merely absent", which is the
+#     exact thing the skip-site comment says it is avoiding.
+#
+# WHY THE SUITE COULD NOT SEE EITHER: `include_path_decomposition` defaults
+# OFF, so the phase is absent from every fixture unless a test asks for it;
+# and no test referenced the markers at all. Every request in this section
+# therefore sets `include_path_decomposition=True` explicitly and declares NO
+# `factor_correlations` — without those two clauses these tests pass vacuously,
+# which is how both defects got here.
+# ==========================================================================
+
+
+# The witness graph for this section differs from the module-level one in
+# exactly one respect: the goal carries NO `observed_state.baseline`, so a
+# level-framed target refuses with `missing_goal_baseline` and the ranking is
+# withheld. It is a THREE-node chain with a second direct edge so that
+# `path_decomposition` has real content (2 paths, entry node `driver`) — the
+# leak under test is a populated block, not an empty shell.
+#
+#     driver --1.0--> mid --1.0--> goal        (path 1, ~0.667 of the effect)
+#     driver --0.5------------> goal           (path 2, ~0.333 of the effect)
+#
+# Options intervene on `driver`, never on the goal, so the goal is not pinned
+# and the refusal is attributable to the missing baseline alone.
+_WITHHOLD_WITNESS_GRAPH: Dict[str, Any] = {
+    "nodes": [
+        {
+            "id": "driver",
+            "kind": "factor",
+            "label": "Driver",
+            "observed_state": {"value": 0.5, "baseline": 0.5},
+        },
+        {
+            "id": "mid",
+            "kind": "factor",
+            "label": "Mid",
+            "observed_state": {"value": 0.5, "baseline": 0.5},
+        },
+        {
+            "id": "goal",
+            "kind": "outcome",
+            "label": "Goal",
+            "observed_state": {"value": 0.5},  # no baseline -> level frame refuses
+        },
+    ],
+    "edges": [
+        {
+            "from": "driver",
+            "to": "mid",
+            "exists_probability": 1.0,
+            "strength": {"mean": 1.0, "std": 0.01},
+        },
+        {
+            "from": "mid",
+            "to": "goal",
+            "exists_probability": 1.0,
+            "strength": {"mean": 1.0, "std": 0.01},
+        },
+        {
+            "from": "driver",
+            "to": "goal",
+            "exists_probability": 1.0,
+            "strength": {"mean": 0.5, "std": 0.01},
+        },
+    ],
+}
+
+_WITHHOLD_WITNESS_OPTIONS: List[Dict[str, Any]] = [
+    {"id": "modest", "label": "Modest move", "interventions": {"driver": 0.3}},
+    {"id": "aggressive", "label": "Aggressive move", "interventions": {"driver": 0.9}},
+]
+
+# Two factor uncertainties so the optional phases that the withhold path
+# suppresses are genuinely REACHABLE on this request — a skip site that could
+# not have run anyway records nothing, and a manifest assertion over it would
+# be a tautology.
+_WITHHOLD_WITNESS_UNCERTAINTIES: List[Dict[str, Any]] = [
+    {"node_id": "mid", "distribution": "normal", "mean": 0.5, "std": 0.2},
+    {"node_id": "driver", "distribution": "normal", "mean": 0.5, "std": 0.2},
+]
+
+
+def _withhold_witness_payload(**overrides: Any) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "graph": _WITHHOLD_WITNESS_GRAPH,
+        "options": _WITHHOLD_WITNESS_OPTIONS,
+        "goal_node_id": "goal",
+        "n_samples": N_SAMPLES,
+        "seed": SEED,
+        "analysis_types": ["comparison"],
+        "parameter_uncertainties": _WITHHOLD_WITNESS_UNCERTAINTIES,
+        # NOT VACUOUS: the defaults for both of these would hide the defect.
+        "include_path_decomposition": True,
+        "include_voi": True,
+        # NO `factor_correlations` — deliberately absent. This is the clause
+        # that makes the P2 assertions non-vacuous.
+        # Withhold trigger: a level-framed target the resolver cannot convert.
+        "goal_direction": "target",
+        "goal_threshold": 0.6,
+        "goal_threshold_frame": "level",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _withhold_witness(**overrides: Any) -> Any:
+    return RobustnessAnalyzerV2().analyze(
+        RobustnessRequestV2(**_withhold_witness_payload(**overrides))
+    )
+
+
+def _withheld_warning(response: Any) -> Any:
+    """The OBJECTIVE_RANKING_WITHHELD warning, bound by CODE not by position."""
+    matches = [w for w in response.inference_warnings if w.code == "OBJECTIVE_RANKING_WITHHELD"]
+    assert len(matches) == 1, [w.code for w in response.inference_warnings]
+    return matches[0]
+
+
+class TestWithheldRankingSuppressesPathDecomposition:
+    """P1. The sixth field, and it was not gated."""
+
+    def test_the_witness_request_genuinely_withholds(self) -> None:
+        """PRECONDITION PINNED IN-TEST (trap 13b).
+
+        Every assertion in this class is about behaviour UNDER withhold. If the
+        witness ever stopped withholding — a resolver change, a schema default,
+        a graph edit — the absence assertions below would all pass for the wrong
+        reason and nothing would go red. This asserts the precondition they rest
+        on, so that failure is loud and attributable.
+        """
+        response = _withhold_witness()
+        assert response.objective_ranking.status == "withheld"
+        assert response.objective_ranking.withheld_reason == (
+            "target_not_resolvable_in_sample_frame"
+        )
+        assert "OBJECTIVE_RANKING_WITHHELD" in _warning_codes(response)
+        # And the phases under test were genuinely ASKED for.
+        assert _withhold_witness_payload()["include_path_decomposition"] is True
+        assert _withhold_witness_payload()["include_voi"] is True
+
+    def test_a_withheld_ranking_omits_path_decomposition_even_when_requested(self) -> None:
+        """⭐ THE P1 ACCEPTANCE TEST.
+
+        RED at 0a570656: `path_decomposition` was PRESENT, naming `modest` as
+        the recommended option with a 2-path causal breakdown, on a response
+        that had just refused to state a ranking.
+        """
+        assert _withhold_witness().path_decomposition is None
+
+    def test_the_leak_was_array_order_arbitrary_and_is_gone_in_both_orders(self) -> None:
+        """The leaked id was decided by INSERTION ORDER, not by evidence.
+
+        `max()` over an all-zero tally returns the first key. Measured at
+        pristine: [modest, aggressive] leaked "modest"; reversing the array
+        leaked "aggressive" — the same run, the same evidence, a different
+        named winner. Both orders must now be silent.
+        """
+        forward = _withhold_witness()
+        reversed_ = _withhold_witness(options=list(reversed(_WITHHOLD_WITNESS_OPTIONS)))
+        assert forward.objective_ranking.status == "withheld"
+        assert reversed_.objective_ranking.status == "withheld"
+        assert forward.path_decomposition is None
+        assert reversed_.path_decomposition is None
+
+    def test_a_computed_ranking_still_receives_its_path_decomposition(self) -> None:
+        """⭐ THE DISCRIMINATING TWIN — without it the P1 test above is satisfied
+        by deleting the phase outright.
+
+        Same graph, same flag, same uncertainties; only the objective's
+        resolvability differs. The block must still be computed, and it must
+        name its option BY IDENTITY.
+        """
+        response = _withhold_witness(
+            goal_direction="maximise", goal_threshold=None, goal_threshold_frame=None
+        )
+        assert response.objective_ranking.status == "computed"
+        assert response.path_decomposition is not None
+        assert response.path_decomposition.recommended_option_id == "aggressive"
+        assert response.path_decomposition.path_count == 2
+
+    def test_the_skipped_phase_is_recorded_not_merely_absent(self) -> None:
+        """The siblings record at the skip site; so must this one."""
+        manifest = _withheld_warning(_withhold_witness()).detail["suppressed_blocks"]
+        assert "path_decomposition" in manifest, manifest
+
+
+class TestWithholdSuppressionManifestReachesTheWire:
+    """P2. The markers were recorded into a list nothing emitted."""
+
+    def test_the_manifest_survives_with_no_declared_correlations(self) -> None:
+        """⭐ THE P2 ACCEPTANCE TEST.
+
+        RED at 0a570656: the only carrier was `correlation_model.suppressed_
+        attributions`, and `correlation_model` is None on any request that
+        declares no `factor_correlations` — so all three markers were dropped.
+
+        The "no correlations" clause is asserted here rather than assumed: a
+        version of this test with correlations declared passes at pristine and
+        proves nothing.
+        """
+        response = _withhold_witness()
+        assert response.correlation_model is None, (
+            "precondition: this request declares no factor_correlations, so the "
+            "old carrier is absent — that is the whole point of the test"
+        )
+
+        detail = _withheld_warning(response).detail
+        manifest = detail["suppressed_blocks"]
+        assert set(manifest) == {
+            "conditional_winners",
+            "p_win_sensitivity",
+            "path_decomposition",
+        }, manifest
+        assert detail["suppression_reason"] == "no_recommendation_to_describe"
+
+    def test_a_computed_ranking_records_no_withhold_suppression(self) -> None:
+        """The discriminating twin: the manifest tracks the WITHHOLD, not the
+        request shape. Under a computed ranking there is no withhold warning at
+        all, so there is nothing to carry a manifest.
+        """
+        response = _withhold_witness(
+            goal_direction="maximise", goal_threshold=None, goal_threshold_frame=None
+        )
+        assert "OBJECTIVE_RANKING_WITHHELD" not in _warning_codes(response)
+
+    def test_correlation_remains_the_carrier_for_correlation_driven_suppression(
+        self,
+    ) -> None:
+        """⭐ THE ANTI-REGRESSION TWIN. The withhold manifest moved to its own
+        channel; the correlation manifest must be UNCHANGED for the suppressions
+        that are genuinely correlation's.
+
+        Without this, routing the withhold markers away could have emptied the
+        correlation block and nothing would have gone red.
+        """
+        graph = {
+            "nodes": [n.copy() for n in _WITHHOLD_WITNESS_GRAPH["nodes"]],
+            "edges": _WITHHOLD_WITNESS_GRAPH["edges"],
+        }
+        # Restore the goal baseline so the ranking is COMPUTED, not withheld:
+        # this arm isolates correlation as the only reason for suppression.
+        graph["nodes"][2] = {
+            "id": "goal",
+            "kind": "outcome",
+            "label": "Goal",
+            "observed_state": {"value": 0.5, "baseline": 0.5},
+        }
+        response = RobustnessAnalyzerV2().analyze(
+            RobustnessRequestV2(
+                **_withhold_witness_payload(
+                    graph=graph,
+                    goal_direction="maximise",
+                    goal_threshold=None,
+                    goal_threshold_frame=None,
+                    factor_correlations=[{"factor_a": "mid", "factor_b": "driver", "rho": 0.5}],
+                )
+            )
+        )
+        assert response.objective_ranking.status == "computed"
+        assert response.correlation_model is not None
+        assert response.correlation_model.active is True
+        assert set(response.correlation_model.suppressed_attributions) == {
+            "conditional_winners",
+            "p_win_sensitivity",
+        }
+
+
+# ==========================================================================
+# THE WIRE. Everything above is measured in-process on the analyzer's V1
+# envelope; the leak the review found reaches a USER through the V2 response
+# builder (`src/api/robustness.py`, the `PathDecompositionV2` passthrough),
+# and that layer had ZERO coverage for any of this — which is precisely how a
+# field gated only on "non-null" came to restate a withheld ranking.
+#
+# These go through the REAL endpoint and assert on raw JSON, so an analyzer
+# that suppresses correctly but a builder that re-derives would still be red.
+# ==========================================================================
+
+
+_V2_ENDPOINT = "/api/v1/robustness/analyze/v2"
+_V2_HEADERS = {"X-ISL-Response-Version": "2"}
+
+
+def _post_witness(**overrides: Any) -> Dict[str, Any]:
+    """POST the witness request through the REAL endpoint and return raw JSON.
+
+    Built from the SAME payload builder as the in-process tests, so the two
+    layers cannot silently diverge on what was asked for.
+    """
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    payload = _withhold_witness_payload(**overrides)
+    payload["request_id"] = "withhold-side-channel-wire-test"
+    payload = {k: v for k, v in payload.items() if v is not None}
+    response = TestClient(app).post(_V2_ENDPOINT, json=payload, headers=_V2_HEADERS)
+    assert response.status_code == 200, (response.status_code, response.text[:400])
+    return response.json()  # type: ignore[no-any-return]
+
+
+class TestTheWireCarriesNeitherTheLeakNorASilentOmission:
+    def test_the_v2_envelope_omits_path_decomposition_under_a_withheld_ranking(
+        self,
+    ) -> None:
+        body = _post_witness()
+        assert body["objective_ranking"]["status"] == "withheld"
+        assert body.get("path_decomposition") is None, body.get("path_decomposition")
+
+    def test_the_v2_envelope_still_carries_it_under_a_computed_ranking(self) -> None:
+        """Discriminating twin at the wire, bound by option IDENTITY."""
+        body = _post_witness(
+            goal_direction="maximise", goal_threshold=None, goal_threshold_frame=None
+        )
+        assert body["objective_ranking"]["status"] == "computed"
+        assert body["path_decomposition"]["recommended_option_id"] == "aggressive"
+
+    def test_the_suppression_manifest_is_readable_on_the_wire(self) -> None:
+        """⭐ P2 AT THE WIRE — the assertion the old carrier could not satisfy.
+
+        `correlation_model` is absent from this response (no declared
+        correlations), which is asserted rather than assumed. The manifest must
+        be readable anyway.
+        """
+        body = _post_witness()
+        assert body.get("correlation_model") is None
+
+        withheld = [
+            w for w in body["inference_warnings"] if w["code"] == "OBJECTIVE_RANKING_WITHHELD"
+        ]
+        assert len(withheld) == 1, [w["code"] for w in body["inference_warnings"]]
+        detail = withheld[0]["detail"]
+        assert set(detail["suppressed_blocks"]) == {
+            "conditional_winners",
+            "p_win_sensitivity",
+            "path_decomposition",
+        }, detail["suppressed_blocks"]
+        assert detail["suppression_reason"] == "no_recommendation_to_describe"

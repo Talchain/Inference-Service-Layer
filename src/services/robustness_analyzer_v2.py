@@ -56,6 +56,7 @@ from src.models.response_v2 import (
     SUPPRESSED_ATTR_CONDITIONAL_WINNERS,
     SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
     SUPPRESSED_ATTR_P_WIN_SENSITIVITY,
+    SUPPRESSED_ATTR_PATH_DECOMPOSITION,
     SUPPRESSED_ATTR_STABILITY_THRESHOLDS,
     CorrelationModelV2,
     CorrelationProjectionV2,
@@ -154,6 +155,18 @@ _CORRELATION_TAIL_NOTE = (
 )
 # Reason stamped on every suppressed independence-assuming per-factor attribution.
 _CORRELATION_SUPPRESSION_REASON = "not_separable_under_correlation"
+
+# ROADMAP 2.1192 (review P2). Reason stamped on every block the WITHHELD-RANKING
+# path suppressed. Deliberately a SECOND token on a SECOND channel rather than a
+# reuse of the correlation one: the two answer different questions — correlation
+# asks "is this attribution separable?", withhold asks "is there a recommendation
+# for this block to be about?" — and `_build_correlation_disclosure`'s own
+# docstring scopes its manifest to "what the run actually skipped BECAUSE OF
+# ACTIVE CORRELATION". Riding a withhold suppression on that carrier would be a
+# false attribution AND, because the carrier is absent whenever no correlations
+# were declared, an invisible one (CLAUDE.md trap 21: two questions under one
+# name; trap 12: a record nothing emits is not a record).
+_WITHHELD_RANKING_SUPPRESSION_REASON = "no_recommendation_to_describe"
 
 # Default samples for marginal switch probability calculation
 MARGINAL_K_SAMPLES = 100
@@ -2462,6 +2475,23 @@ class RobustnessAnalyzerV2:
         # CLAUDE.md #12). Order follows code (gate) order.
         suppressed_attributions: List[str] = []
 
+        # ROADMAP 2.1192 (review P2). The WITHHELD-RANKING suppression record, kept
+        # APART from the correlation one above. Same RECORD-not-PREDICT discipline:
+        # appended at the skip site, emitted verbatim, never re-derived.
+        #
+        # WHY A SEPARATE LIST AND A SEPARATE CARRIER. Until this change these
+        # markers went into `suppressed_attributions`, whose ONLY carrier is
+        # `correlation_model.suppressed_attributions` — and that block is None
+        # whenever the request declared no `factor_correlations`, i.e. the common
+        # case. So the "recorded" omissions were silently discarded on most
+        # requests and the omission was "merely absent", the exact thing the skip
+        # sites say they are avoiding. This list rides the OBJECTIVE_RANKING_WITHHELD
+        # warning in `inference_warnings`, which is emitted on precisely this path,
+        # is always present on the envelope, and is on PLoT's never-withhold set —
+        # so the disclosure cannot go dark. `InferenceWarning.detail` is typed
+        # `Dict[str, Any]`, so this needs no contract change and adds no drift.
+        withheld_ranking_suppressions: List[str] = []
+
         # Compute factor sensitivity if factor uncertainties are specified.
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — per-factor OAT
         # elasticity perturbs one factor holding the others at their mean, an
@@ -2498,7 +2528,12 @@ class RobustnessAnalyzerV2:
             # exactly the ranking this response refused to state. Suppressed with
             # the same disclosure marker correlation already uses — RECORDED, so
             # the omission is visible rather than merely absent.
-            if objective_ranking_withheld or correlation_active:
+            if objective_ranking_withheld:
+                # Withhold is checked FIRST and owns the record: it is the
+                # categorical reason ("there is no winner to flip"), where
+                # correlation's is evidential ("the attribution is confounded").
+                withheld_ranking_suppressions.append(SUPPRESSED_ATTR_CONDITIONAL_WINNERS)
+            elif correlation_active:
                 suppressed_attributions.append(SUPPRESSED_ATTR_CONDITIONAL_WINNERS)
             else:
                 conditional_winners = self._compute_conditional_winners(
@@ -2714,8 +2749,9 @@ class RobustnessAnalyzerV2:
             # RECOMMENDED OPTION's win probability. Under a withheld ranking
             # there is no recommended option and no win probability, so the
             # quantity does not exist — it is not merely unavailable. Skipped
-            # BEFORE it runs and recorded at the skip site.
-            suppressed_attributions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
+            # BEFORE it runs and recorded at the skip site — on the WITHHOLD
+            # channel, which is emitted whether or not correlations were declared.
+            withheld_ranking_suppressions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
         elif request.include_voi and factor_sampler.has_uncertainties() and correlation_active:
             # SUPPRESSED under active correlation — record at the skip site.
             suppressed_attributions.append(SUPPRESSED_ATTR_P_WIN_SENSITIVITY)
@@ -2891,7 +2927,33 @@ class RobustnessAnalyzerV2:
         # (filter_inference_graph was applied before the evaluator was constructed), so the
         # decomposition explains exactly the structure the analysis used, not raw request.graph.
         path_decomposition = None
-        if request.include_path_decomposition:
+        if request.include_path_decomposition and objective_ranking_withheld:
+            # ROADMAP 2.1192 (review P1). THE SIXTH FIELD. Every part of this
+            # block is a statement about a RECOMMENDED OPTION: the block names one
+            # in `recommended_option_id` and then explains, path by path, why it
+            # wins. Under a withheld ranking there is no recommended option, so
+            # the quantity does not exist — the same reason `p_win_sensitivity`
+            # is skipped above and `conditional_winners` before it.
+            #
+            # AND THE VALUE IT WOULD HAVE CARRIED WAS NOT MERELY UNEARNED, IT WAS
+            # ARBITRARY. `_winners_for_draw` returns [] under a withheld plan, so
+            # `option_wins` is all-zero and `recommended_option_id = max(
+            # option_wins, key=...)` returns the FIRST KEY BY INSERTION ORDER.
+            # Measured at 0a570656 on the review's witness: options
+            # [modest, aggressive] named "modest"; reversing the array named
+            # "aggressive" — same evidence, different named winner, decided by
+            # array position, on a response that had just refused to rank.
+            #
+            # Request-gated phases are absent from the default corpus
+            # (`include_path_decomposition` defaults off), which is why four
+            # siblings were guarded and this one was not: a guard written against
+            # the default corpus cannot observe a phase no fixture asks for. The
+            # spec now asks for it explicitly.
+            #
+            # Skipped BEFORE it runs and recorded at the skip site, as the
+            # siblings do — no budget is spent on a block that cannot be emitted.
+            withheld_ranking_suppressions.append(SUPPRESSED_ATTR_PATH_DECOMPOSITION)
+        elif request.include_path_decomposition:
             remaining_ms = _budget_remaining_ms()
             if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
                 elapsed_ms = _elapsed_ms()
@@ -2942,6 +3004,35 @@ class RobustnessAnalyzerV2:
         correlation_model = self._build_correlation_disclosure(
             request, correlation_plan, suppressed_attributions
         )
+
+        # ROADMAP 2.1192 (review P2). The withheld-ranking disclosure, assembled
+        # HERE — after every skip site has run — for the same reason the
+        # correlation block is: it is a RECORD of what this run actually
+        # suppressed, not a forecast of what it was going to.
+        #
+        # The carrier is the OBJECTIVE_RANKING_WITHHELD warning that
+        # `_resolve_objective_plan` already emitted on this exact path, so the
+        # refusal and the manifest of what it cost arrive as ONE object on a
+        # channel that is always on the wire. Nothing new is added to the
+        # envelope and no schema moves.
+        if objective_ranking_withheld:
+            # Asserted rather than silenced, following this file's existing
+            # fail-loud convention: `sense == "withheld"` and the warning are set
+            # together at ONE site in `_resolve_objective_plan`, so if that
+            # invariant is ever broken the manifest must fail loudly here rather
+            # than be dropped on the floor — which is the defect being fixed.
+            assert objective_warning is not None and (
+                objective_warning.code == "OBJECTIVE_RANKING_WITHHELD"
+            ), (
+                "a withheld ranking must carry its OBJECTIVE_RANKING_WITHHELD "
+                f"warning (got {objective_warning!r})"
+            )
+            objective_warning.detail["suppressed_blocks"] = list(
+                withheld_ranking_suppressions
+            )
+            objective_warning.detail["suppression_reason"] = (
+                _WITHHELD_RANKING_SUPPRESSION_REASON
+            )
 
         # Include stability thresholds when bootstrap stability was computed
         has_bootstrap = any(fs.attribution_stability is not None for fs in factor_sensitivity)
