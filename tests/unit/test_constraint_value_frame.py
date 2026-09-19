@@ -471,11 +471,6 @@ class TestConvertibilityRefusals:
         "kwargs,expected_reason",
         [
             pytest.param(
-                {"target_is_root": True},
-                "root_target",
-                id="root_target_takes_its_base_from_observed_value",
-            ),
-            pytest.param(
                 {"target_baseline": None},
                 "missing_target_baseline",
                 id="level_frame_needs_a_baseline_to_convert_against",
@@ -522,6 +517,35 @@ class TestConvertibilityRefusals:
             result.constraint_analysis is None
         ), f"{expected_reason}: the block must be omitted, not scored"
         assert sole_refusal_reason(response) == expected_reason
+
+    def test_a_root_target_is_SCORED_in_its_own_level_frame_not_refused(self):
+        """SUPERSEDES the `root_target` refusal row removed from the table above.
+
+        A root's samples ARE levels — `SCMEvaluatorV2.evaluate` gives a parentless
+        node `base + intercept` with no propagation term, and every source of
+        `base` is an absolute value of the node's own quantity. So the level
+        threshold needs no conversion and the identity is the honest plan.
+
+        On this fixture `c` is a root carrying ParameterUncertainty uniform(0, 1),
+        so its samples are U(0, 1) and P(c >= 0.8) = 0.2. Three outcomes are
+        distinguishable here, which is what makes this pin discriminating:
+
+          0.2     the identity, the truth;
+          0.0     what the change-from-origin conversion would give — `c` is never
+                  intervened on, so option == status quo on every draw and the
+                  recovered "level" would be the constant baseline 0.7, which
+                  fails `>= 0.8` all 10000 times;
+          absent  the pre-fix refusal.
+
+        Full derivation and the surviving refusals:
+        tests/unit/test_root_target_level_identity.py.
+        """
+        response = analyse(value_frame="level", target_is_root=True)
+        analysis = only_result(response).constraint_analysis
+
+        assert analysis is not None, "a root target must be scored, not refused"
+        assert refusals(response) == []
+        assert constraint_by_id(analysis, CID).prob_satisfied == pytest.approx(0.2, abs=TOL)
 
     def test_the_domain_guard_refusal_reports_the_offending_operands(self):
         """A refusal that does not say WHICH operand was out of domain is unusable."""
@@ -658,10 +682,32 @@ class TestChannelAAndChannelBAreOneImplementation:
             result.probability_of_goal, abs=1e-12
         ), "one quantity computed by two channels must be one number"
 
+    def test_the_two_channels_agree_on_a_ROOT_target_too(self):
+        """SUPERSEDES the `root` row of the refuse-together table below.
+
+        Parity is the claim being bound here, not refusal: both channels used to
+        refuse a root, both now score it, and they must still produce ONE number.
+        A channel that accepted what its sibling refused would be the second
+        dialect this class exists to catch — and so would two different numbers.
+        """
+        response = analyse(
+            constrain_the_goal_node=True,
+            target_is_root=True,
+            value_frame="level",
+            goal_threshold=0.8,
+            goal_threshold_frame="level",
+        )
+        result = only_result(response)
+
+        assert result.probability_of_goal is not None, "Channel A must score a root goal"
+        assert result.constraint_analysis is not None, "Channel B must score a root target"
+        assert result.constraint_analysis.joint_probability == pytest.approx(
+            result.probability_of_goal, abs=1e-12
+        ), "one quantity computed by two channels must be one number"
+
     @pytest.mark.parametrize(
         "kwargs",
         [
-            pytest.param({"target_is_root": True}, id="root"),
             pytest.param({"target_baseline": None}, id="missing_baseline"),
             pytest.param({"intervene_on_target": True}, id="pinned_by_intervention"),
             pytest.param({"threshold": 250000.0}, id="out_of_domain"),

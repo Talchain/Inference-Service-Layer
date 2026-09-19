@@ -4059,22 +4059,32 @@ class RobustnessAnalyzerV2:
         to drift out of sync with the resolver.
 
         ``_resolve_goal_threshold_in_sample_frame`` reads
-        ``observed_state.baseline`` on exactly one limb: ``frame == 'level'``
-        carried through to completion. Every other exit leaves the
-        observed_state untouched — no threshold returns ``(None, None)``,
-        ``'delta'`` returns the caller's number unconverted before the goal node
-        is even looked up, an unstamped frame refuses, and each convertibility
-        refusal (root goal, PU on the goal, goal pinned by an intervention,
-        missing baseline, non-finite or out-of-domain operands, epsilon reaching
-        the goal) returns ``None``. So ``plan is not None AND frame == 'level'``
-        is exact evidence that the baseline was consumed.
+        ``observed_state.baseline`` on exactly one limb: the change-from-origin
+        CONVERSION, which is the only limb that returns a plan carrying
+        ``level_threshold``. Every other exit leaves the baseline untouched — no
+        threshold returns ``(None, None)``, ``'delta'`` returns the caller's
+        number unconverted before the goal node is even looked up, an unstamped
+        frame refuses, and each convertibility refusal returns ``None``.
+
+        ⚠ ``frame == 'level'`` ALONE STOPPED BEING EXACT when the ROOT GOAL limb
+        gained its identity path: a root goal in the ``level`` frame now returns a
+        plan, and that plan reads ``observed_state.value`` (via the central-value
+        resolver), never ``observed_state.baseline``. The predicate therefore
+        keys on the plan's own SHAPE — ``level_threshold is not None`` — which is
+        produced at exactly one site and cannot be reached without the baseline
+        having been read. The frame conjunct is kept because it is the caller's
+        attestation and costs nothing; the shape conjunct is what makes this true.
 
         ROADMAP 2.279 uses this to suppress GOAL_OBSERVED_VALUE_UNUSED on runs
         where the observed_state did its job. The frame Literal is enumerated by
         a test, so adding a third frame value REDs rather than silently landing
         on the wrong side of this predicate.
         """
-        return goal_threshold_plan is not None and (request.goal_threshold_frame == "level")
+        return (
+            goal_threshold_plan is not None
+            and (request.goal_threshold_frame == "level")
+            and goal_threshold_plan.level_threshold is not None
+        )
 
     @staticmethod
     def _winners_for_draw(
@@ -4516,6 +4526,44 @@ class RobustnessAnalyzerV2:
                 f"{noun} '{target_id}' is not present in the graph.",
             )
 
+        # --- domain guard (Tier 2) — ONE implementation, two callers ----------
+        # See NORMALISED_DOMAIN_LIMIT. NOTE this is Tier 2 (magnitude). Tier 1 —
+        # attesting the domain properly via observed_state.value ~= raw_value / cap
+        # — is deliberately NOT implemented here and is rowed separately. Neither
+        # tier can see a UNIT: a count of people normalised by a percentage cap is
+        # already the wrong number before any frame conversion, and it is not this
+        # guard's to catch (ROADMAP 2.797, a different service).
+        #
+        # Both level limbs bound the same operand CLASSES — the threshold and the
+        # level it is anchored against — so this is defined once and called twice
+        # rather than copied. Only the anchor differs: a ROOT's anchor is its own
+        # level, a NON-ROOT's is the baseline it converts against. Two copies of a
+        # magnitude rule is exactly the hand-maintained mirror this estate pays
+        # for most often.
+        def domain_refusal(
+            operands: Dict[str, float], field: str
+        ) -> Optional[Tuple[Optional["GoalThresholdPlan"], Any]]:
+            limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
+            out_of_domain = {
+                name: value for name, value in operands.items() if abs(value) > limit
+            }
+            if not out_of_domain:
+                return None
+            return refuse(
+                reasons["values_outside_normalised_domain"],
+                field,
+                (
+                    f"Conversion operands {sorted(out_of_domain)} exceed "
+                    f"|{limit}|, so they are not in the normalised [0, 1] domain "
+                    f"the evaluator assumes for node values. This usually means "
+                    f"raw user units were sent where normalised values were "
+                    f"expected; converting them would produce a wrong number "
+                    f"rather than no number."
+                ),
+                out_of_domain=out_of_domain,
+                domain_limit=limit,
+            )
+
         # --- convertibility preconditions -------------------------------------
         # Each of these makes `sample = intercept + S` false, so the identity the
         # conversion rests on no longer holds. Refusing is the only honest answer.
@@ -4532,17 +4580,120 @@ class RobustnessAnalyzerV2:
             )
 
         if not any(edge.to == target_id for edge in request.graph.edges):
-            return refuse(
-                reasons["root_target"],
-                f"nodes[{target_id}]",
+            # --- ROOT TARGET: the IDENTITY path, not a refusal ----------------
+            # This limb used to refuse outright, on the true observation that a
+            # root takes its base from observed_state.value and is therefore not
+            # in the non-root change-from-origin frame. The observation is right
+            # and the conclusion did not follow: a root does not need the
+            # conversion, because its samples are ALREADY levels.
+            #
+            # Derived from the evaluator, not assumed (``SCMEvaluatorV2.evaluate``,
+            # the ``is_root`` branch)::
+            #
+            #     node_values[T] = base + intercept + SUM(parent * strength)
+            #
+            # The sum is empty for a root, so ``sample = base + intercept``, and
+            # every source of ``base`` is an ABSOLUTE value of the node's own
+            # quantity: ``factor_values[T]`` (FactorSampler draws uniform over
+            # [range_min, range_max], normal around the central value, or the
+            # point mass itself), else ``observed_state.value``, else 0.0.
+            #
+            # So with a measured base and no intercept the samples ARE the level,
+            # and the honest plan is the identity — byte-identical to what the
+            # caller-attested ``delta`` branch returns above. PLoT had already
+            # derived this from the same evaluator and shipped it
+            # (``constraint-reliability.ts`` -> ``'root_observed_level'``); until
+            # now the two services held opposite rulings on one node class, and
+            # ISL's was the wrong one.
+            #
+            # WHAT THIS IS NOT. It does not weaken the fail-closed contract: the
+            # three refusals below cover every way a root's samples can fail to be
+            # a level, the intervention limb above still fires first, and the
+            # NON-ROOT conversion path below is untouched.
+            root_uncertainty = next(
                 (
-                    f"{noun} '{target_id}' has no parents. A root node takes its "
-                    f"base from observed_state.value, so its samples are not in "
-                    f"the non-root change-from-origin frame this conversion is "
-                    f"derived for."
+                    pu
+                    for pu in (request.parameter_uncertainties or [])
+                    if pu.node_id == target_id
                 ),
+                None,
             )
+            # THE one definition of "this node's central value", which is defined
+            # as the expectation of the distribution FactorSampler actually draws
+            # from. Used here rather than reading observed_state.value directly
+            # because for the ``uniform`` family the sampler ignores
+            # observed_state entirely, so a second reading would disagree with the
+            # samples it is supposed to describe.
+            root_anchor = resolve_factor_central_value(target_node, root_uncertainty)
+            root_intercept = target_node.intercept
 
+            if root_anchor.source == FACTOR_VALUE_SOURCE_DEFAULT_ZERO:
+                return refuse(
+                    reasons["root_target"],
+                    f"nodes[{target_id}]",
+                    (
+                        f"{noun} '{target_id}' has no parents and no measured base: "
+                        f"no observed_state.value, and no parameter uncertainty "
+                        f"whose own support could supply one. Its samples fall "
+                        f"through to 0.0, which is the absence of data rather than "
+                        f"a level, so a level threshold has nothing here to be "
+                        f"compared against."
+                    ),
+                    root_value_source=root_anchor.source,
+                )
+
+            if root_intercept != 0.0:
+                return refuse(
+                    reasons["root_target"],
+                    f"nodes[{target_id}].intercept",
+                    (
+                        f"{noun} '{target_id}' has no parents, so its samples are "
+                        f"its base plus its intercept ({root_intercept}). The level "
+                        f"that produces is not the level the node's own "
+                        f"observed_state describes, and a threshold stated in the "
+                        f"'level' frame cannot be compared against both. State it "
+                        f"in the 'delta' frame, or remove the intercept."
+                    ),
+                    root_intercept=root_intercept,
+                    root_observed_level=root_anchor.value,
+                )
+
+            # Belt-and-braces, for the same reason as the non-root limb's twin:
+            # the field validators reject non-finite inputs, but this helper is
+            # also called directly, and `abs(nan) > 1.5` is False so the domain
+            # guard below cannot catch a NaN.
+            if not all(math.isfinite(v) for v in (threshold, root_anchor.value)):
+                return refuse(
+                    "non_finite_conversion_input",
+                    f"nodes[{target_id}]",
+                    (
+                        "Comparison inputs must all be finite "
+                        f"({value_label}={threshold}, "
+                        f"root_observed_level={root_anchor.value})."
+                    ),
+                    root_observed_level=root_anchor.value,
+                )
+
+            root_out_of_domain = domain_refusal(
+                {
+                    operand_names["threshold"]: threshold,
+                    # Named apart from the non-root limb's `*_baseline` operand on
+                    # purpose: this is the node's own level, not a reference the
+                    # samples are differenced against. Same name as PLoT's anchor.
+                    "root_observed_level": root_anchor.value,
+                },
+                f"nodes[{target_id}]",
+            )
+            if root_out_of_domain is not None:
+                return root_out_of_domain
+
+            return GoalThresholdPlan(delta_threshold=threshold), None
+
+        # NON-ROOT from here down: the root limb above returns on every path.
+        # This one is specifically about a PU on a node that ALSO has parents —
+        # the sampled base is ADDED to their propagation, which is what makes the
+        # origin move per draw. On a root there is no propagation to add to, so
+        # the sampled base IS the level and the limb above handles it.
         if any(pu.node_id == target_id for pu in (request.parameter_uncertainties or [])):
             return refuse(
                 reasons["parameter_uncertainty_shifts_base"],
@@ -4598,37 +4749,18 @@ class RobustnessAnalyzerV2:
             )
 
         # --- domain guard (Tier 2) --------------------------------------------
-        # See NORMALISED_DOMAIN_LIMIT. NOTE this is Tier 2 (magnitude). Tier 1 —
-        # attesting the domain properly via observed_state.value ~= raw_value / cap
-        # — is deliberately NOT implemented here and is rowed separately. Neither
-        # tier can see a UNIT: a count of people normalised by a percentage cap is
-        # already the wrong number before any frame conversion, and it is not this
-        # guard's to catch (ROADMAP 2.797, a different service).
-        limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
-        out_of_domain = {
-            name: value
-            for name, value in (
-                (operand_names["threshold"], threshold),
-                (operand_names["baseline"], baseline),
-                (operand_names["intercept"], intercept),
-            )
-            if abs(value) > limit
-        }
-        if out_of_domain:
-            return refuse(
-                reasons["values_outside_normalised_domain"],
-                f"nodes[{target_id}].observed_state.baseline",
-                (
-                    f"Conversion operands {sorted(out_of_domain)} exceed "
-                    f"|{limit}|, so they are not in the normalised [0, 1] domain "
-                    f"the evaluator assumes for node values. This usually means "
-                    f"raw user units were sent where normalised values were "
-                    f"expected; converting them would produce a wrong number "
-                    f"rather than no number."
-                ),
-                out_of_domain=out_of_domain,
-                domain_limit=limit,
-            )
+        # Same guard, same message, same detail keys as the root limb's call —
+        # see `domain_refusal` above for why there is only one of it.
+        conversion_out_of_domain = domain_refusal(
+            {
+                operand_names["threshold"]: threshold,
+                operand_names["baseline"]: baseline,
+                operand_names["intercept"]: intercept,
+            },
+            f"nodes[{target_id}].observed_state.baseline",
+        )
+        if conversion_out_of_domain is not None:
+            return conversion_out_of_domain
 
         # --- epsilon guard -----------------------------------------------------
         # The anchor needs `option_sample_i` and `status_quo_sample_i` to differ
