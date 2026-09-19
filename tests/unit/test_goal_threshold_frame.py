@@ -489,7 +489,6 @@ class TestFailClosedWarnings:
     @pytest.mark.parametrize(
         "kwargs,reason",
         [
-            ({"goal_is_root": True}, "root_goal"),
             ({"pu_on_goal": True}, "goal_parameter_uncertainty_shifts_base"),
             ({"intervene_on_goal": True}, "goal_pinned_by_intervention"),
         ],
@@ -503,6 +502,31 @@ class TestFailClosedWarnings:
         found = warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE")
         assert len(found) == 1
         assert found[0].detail["reason"] == reason
+
+    def test_a_root_goal_is_SCORED_in_its_own_level_frame_not_refused(self):
+        """SUPERSEDES the `root_goal` row removed from the table above.
+
+        A root goal's samples ARE levels: `SCMEvaluatorV2.evaluate` gives a
+        parentless node `base + intercept` with no propagation term, so there is
+        nothing for the change-from-origin conversion to do and the identity is
+        the honest plan. Channel B (`goal_constraints`) settles the same way, on
+        the same limb.
+
+        On this fixture the root goal carries ParameterUncertainty uniform(0, 1),
+        so its samples are U(0, 1) and P(g >= 0.9) = 0.1. The pre-fix outcome was
+        no number at all; the conversion path would instead recover the constant
+        baseline 0.7 (no option intervenes on g, so option == status quo every
+        draw) and answer 0.0. All three are distinguishable.
+
+        Full derivation and the surviving refusals:
+        tests/unit/test_root_target_level_identity.py.
+        """
+        response = analyse(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7, goal_is_root=True
+        )
+
+        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
+        assert response.results[0].probability_of_goal == pytest.approx(0.1, abs=TOL)
 
     def test_no_threshold_requested_is_silent(self):
         """Control on the control: no threshold => no probability AND no warning.
@@ -1036,6 +1060,27 @@ class TestConsumptionPredicate:
 
         assert value is not None and warning is None, "fixture control: both frames resolve"
         assert RobustnessAnalyzerV2._goal_baseline_was_consumed(request, value) is consumed
+
+    def test_a_level_framed_ROOT_goal_plan_is_not_baseline_consumption(self):
+        """The frame alone stopped being exact when the root limb gained its
+        identity path: a root goal in the `level` frame now RESOLVES, and it does
+        so by reading `observed_state.value`, never `observed_state.baseline`.
+
+        This pins the distinction the predicate now makes. A guard written as
+        `frame == 'level'` alone passes this fixture while the baseline was never
+        touched — which is the whole reason the plan's shape is the discriminator.
+        """
+        request = build_request(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7, goal_is_root=True
+        )
+        plan, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(request)
+
+        # PRECONDITION: the fixture must actually reach the root identity path.
+        assert plan is not None and warning is None, "fixture control: a root goal resolves"
+        assert plan.level_threshold is None, "fixture control: the root limb returns the identity"
+        assert plan.delta_threshold == 0.9
+
+        assert RobustnessAnalyzerV2._goal_baseline_was_consumed(request, plan) is False
 
     def test_unresolved_threshold_is_never_consumed(self):
         """A refusal returns None; None can never count as consumption."""
