@@ -5075,7 +5075,11 @@ class RobustnessAnalyzerV2:
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
                     compared = samples_array
-                    meets = compared >= goal_threshold_plan.delta_threshold
+                    meets = (
+                        compared <= goal_threshold_plan.delta_threshold
+                        if request.goal_direction == "minimise"
+                        else compared >= goal_threshold_plan.delta_threshold
+                    )
                 else:
                     # Level frame: recover the goal's LEVEL per draw by adding the
                     # option's causal effect to the level the goal is actually at.
@@ -5084,7 +5088,11 @@ class RobustnessAnalyzerV2:
                     # all cancel instead of being mistaken for progress.
                     effect = samples_array - np.array(status_quo_outcomes)
                     compared = goal_threshold_plan.goal_baseline + effect
-                    meets = compared >= goal_threshold_plan.level_threshold
+                    meets = (
+                        compared <= goal_threshold_plan.level_threshold
+                        if request.goal_direction == "minimise"
+                        else compared >= goal_threshold_plan.level_threshold
+                    )
 
                 # 2.477(j) — FINITENESS GATE. This comparison used to run over the
                 # RAW array, and `+inf >= anything` is True. So the one shape that
