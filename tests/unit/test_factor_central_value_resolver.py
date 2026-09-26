@@ -436,12 +436,18 @@ _SCANNED_FILES = ("src/services/robustness_analyzer_v2.py", "src/api/robustness.
 # name the concepts apart rather than aligning their defaults).
 _VALUE_READ_ALLOWED = {
     "resolve_factor_central_value": "THE resolver — the sanctioned single site.",
-    "evaluate": (
-        "SCMEvaluatorV2 root-node BASE for one deterministic evaluation. A "
-        "different concept with its own published doctrine (analyzer :3615, "
-        ":3770); deliberately NOT folded into the central-value resolver."
+    "_propagate": (
+        "SCMEvaluatorV2 root-node BASE for one deterministic evaluation — the ONE "
+        "structural loop behind `evaluate` and `evaluate_multi` (N6 lifted it out of "
+        "both, arithmetic unchanged). A different concept with its own published "
+        "doctrine (analyzer :3615, :3770); deliberately NOT folded into the "
+        "central-value resolver."
     ),
-    "evaluate_multi": "As `evaluate` — the multi-goal twin of the same base rule.",
+    "status_quo_level": (
+        "N6: TODAY'S LEVEL of a non-root quantity (baseline, else observed value), the "
+        "anchor for reading an option's level in the model's frame. The level the "
+        "status quo stands for — not the factor's central value to sample around."
+    ),
     "_build_goal_node_disclosures": (
         "The GOAL node's observed value, for the goal-frame disclosure. Not a "
         "factor central value."
@@ -460,8 +466,8 @@ _OBSERVED_STATE_MENTION_MANIFEST = {
     # --- the resolver and its consumers -----------------------------------
     "resolve_factor_central_value",
     # --- different concepts, see _VALUE_READ_ALLOWED ----------------------
-    "evaluate",
-    "evaluate_multi",
+    "_propagate",
+    "status_quo_level",
     "_build_goal_node_disclosures",
     "_resolve_threshold_in_sample_frame",
     # --- presence / provenance checks (never a central value) -------------
