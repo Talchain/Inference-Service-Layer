@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, FrozenSet, List, Literal, NamedTuple, Optional, Tuple, cast
+from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Tuple, cast
 
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
@@ -1030,6 +1030,24 @@ class ResolvedFactorValue(NamedTuple):
     source: str
 
 
+def status_quo_level(node: NodeV2) -> Optional[float]:
+    """Today's level of a node's quantity: ``observed_state.baseline``, else its
+    observed ``value``; None when it states neither (or a non-finite one).
+
+    The ONE reading of "today" that both directions of the level frame use: the
+    evaluator writes an option's level for a non-root node as its status-quo sample
+    plus ``level - status_quo_level`` (``SCMEvaluatorV2._in_model_frame``), and the
+    constraint resolver maps a pinned option's samples back through the same number.
+    ``baseline`` first because it is the level plan's anchor; ``value`` because PLoT
+    sends a factor's observed level there and no baseline (the served churn node).
+    """
+    observed = node.observed_state
+    if observed is None:
+        return None
+    level = observed.baseline if observed.baseline is not None else observed.value
+    return level if math.isfinite(level) else None
+
+
 def resolve_factor_central_value(
     node: Optional[NodeV2], uncertainty: Optional[ParameterUncertainty]
 ) -> ResolvedFactorValue:
@@ -1367,6 +1385,14 @@ class SCMEvaluatorV2:
             self._children[edge.from_].append(edge.to)
             self._parents[edge.to].append(edge.from_)
 
+        # N6: the non-root nodes whose level an option can set in the model's frame
+        # (``_in_model_frame``). Roots are absent on purpose: their samples ARE levels.
+        self._status_quo_levels: Dict[str, float] = {}
+        for node in graph.nodes:
+            level = status_quo_level(node)
+            if self._parents.get(node.id) and level is not None:
+                self._status_quo_levels[node.id] = level
+
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
         # Build adjacency list
@@ -1432,64 +1458,8 @@ class SCMEvaluatorV2:
             Root factor nodes use observed_state.value as their base value.
             If factor_values is provided, those take precedence (for sampling).
         """
-        if base_values is None:
-            base_values = {}
-        if factor_values is None:
-            factor_values = {}
-
-        node_values: Dict[str, float] = {}
-
-        for node_id in self._node_order:
-            if node_id in interventions:
-                # Interventional value overrides structural equations
-                node_values[node_id] = interventions[node_id]
-            else:
-                # Get node object (used for observed_state and intercept)
-                node = self._nodes_by_id.get(node_id)
-
-                # Determine base value for this node
-                # Priority: factor_values > observed_state.value > base_values > 0
-                if node_id in factor_values:
-                    # Sampled factor value takes highest priority
-                    base = factor_values[node_id]
-                elif node_id in base_values:
-                    # Explicitly provided base value
-                    base = base_values[node_id]
-                else:
-                    # Check for observed_state.value on root nodes
-                    is_root = len(self._parents.get(node_id, [])) == 0
-                    if (
-                        is_root
-                        and node
-                        and node.observed_state
-                        and node.observed_state.value is not None
-                    ):
-                        base = node.observed_state.value
-                    else:
-                        base = 0.0
-
-                # Compute contribution from parents
-                parents_contribution = 0.0
-                for parent in self._parents[node_id]:
-                    edge_key = (parent, node_id)
-                    strength = edge_strengths.get(edge_key, 0.0)
-                    parent_value = node_values.get(parent, 0.0)
-                    parents_contribution += parent_value * strength
-
-                # Get node intercept (default 0.0 if not set)
-                intercept = getattr(node, "intercept", 0.0) if node else 0.0
-
-                node_values[node_id] = base + intercept + parents_contribution
-
-                # Per-node epsilon noise: unexplained variance (measurement
-                # error, omitted variables).  Only applied when epsilon_rng is
-                # provided and the node has epsilon_std > 0.  Clamp to [0, 1]
-                # to keep normalised node values in valid range.
-                if self._epsilon_rng and node and node.epsilon_std > 0:
-                    node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
-                    node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
-
-        return node_values.get(goal_node, 0.0)
+        framed = self._in_model_frame(edge_strengths, interventions, base_values, factor_values)
+        return self._propagate(edge_strengths, framed, base_values, factor_values).get(goal_node, 0.0)
 
     def evaluate_multi(
         self,
@@ -1515,6 +1485,23 @@ class SCMEvaluatorV2:
         Returns:
             Dict mapping target_node_id -> computed value
         """
+        framed = self._in_model_frame(edge_strengths, interventions, base_values, factor_values)
+        node_values = self._propagate(edge_strengths, framed, base_values, factor_values)
+
+        # Return only the requested target nodes
+        return {node_id: node_values.get(node_id, 0.0) for node_id in target_nodes}
+
+    def _propagate(
+        self,
+        edge_strengths: Dict[Tuple[str, str], float],
+        interventions: Dict[str, float],
+        base_values: Optional[Dict[str, float]],
+        factor_values: Optional[Dict[str, float]],
+        *,
+        noise: bool = True,
+    ) -> Dict[str, float]:
+        """The structural equations in topological order: the ONE loop behind
+        ``evaluate`` and ``evaluate_multi`` (it used to be written out in both)."""
         if base_values is None:
             base_values = {}
         if factor_values is None:
@@ -1561,13 +1548,50 @@ class SCMEvaluatorV2:
 
                 node_values[node_id] = base + intercept + parents_contribution
 
-                # Per-node epsilon noise (same logic as evaluate())
-                if self._epsilon_rng and node and node.epsilon_std > 0:
+                # Per-node epsilon noise (skipped for the status-quo reading, which
+                # must not draw from the epsilon stream: see _in_model_frame)
+                if noise and self._epsilon_rng and node and node.epsilon_std > 0:
                     node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
                     node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
 
-        # Return only the requested target nodes
-        return {node_id: node_values.get(node_id, 0.0) for node_id in target_nodes}
+        return node_values
+
+    def _in_model_frame(
+        self,
+        edge_strengths: Dict[Tuple[str, str], float],
+        interventions: Dict[str, float],
+        base_values: Optional[Dict[str, float]],
+        factor_values: Optional[Dict[str, float]],
+    ) -> Dict[str, float]:
+        """Read an option's level for a NON-root quantity in the frame its samples are in (N6).
+
+        A root's samples ARE levels (its base is its observed or sampled value), so a
+        root setting is written as given. A non-root node's samples are its parents'
+        composition plus its own base: NOT its level. Writing a level there compared
+        "churn set to 4%" (today) against siblings in the other frame, and it outscored
+        carrying on (#70 5844447523, served). So a setting on a non-root node with a
+        level for today (``status_quo_level``) is written as the node's status-quo
+        sample on THIS draw plus the stated change::
+
+            sample = status_quo_sample + (level - status_quo_level)
+
+        the inverse of the level plan (``_resolve_constraint_series``), so a limit on
+        the node maps it back to exactly ``level``. The status-quo sample is the node
+        under NO interventions, on the same edges and factor draws, without epsilon
+        (the reference ``_run_monte_carlo`` differences against is drawn the same way).
+        Everything the option does upstream is cut off, as ``do()`` requires. A setting
+        on a node with no level for today is written as given, as before.
+        """
+        set_levels = [node_id for node_id in interventions if node_id in self._status_quo_levels]
+        if not set_levels:
+            return interventions
+        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        framed = dict(interventions)
+        for node_id in set_levels:
+            framed[node_id] = status_quo[node_id] + (
+                interventions[node_id] - self._status_quo_levels[node_id]
+            )
+        return framed
 
 
 class PhaseDeadline:
@@ -1647,19 +1671,21 @@ class GoalThresholdPlan:
     because an intercept in raw user units is still evidence the whole request
     is mis-normalised.
 
-    ``identity_option_ids`` — options that SET the target themselves
-    (``do(target := x)``). Under such an option the target's samples are ``x`` on
-    every draw: the level that option sets, already in the threshold's frame, the
-    same identity a root's samples take. They are compared untouched, whatever
-    mode the plan is in for the other options. Constraint plans only: Channel A
-    still refuses a goal an option sets (its plan also drives the target
-    objective's ranking).
+    ``pinned_levels`` — ``(option_id, x)`` for each option that SETS the target
+    itself (``do(target := x)``). Under such an option the target's level is ``x``
+    on every draw, so that option is compared at exactly ``x``, whatever mode the
+    plan is in for the other options. The LEVEL, not the samples: on a non-root
+    target the evaluator writes ``x`` in the model's frame (N6,
+    ``SCMEvaluatorV2._in_model_frame``), and mapping that back would put float
+    rounding on a level stated AT the limit ("cut churn to 10%" against "churn
+    under 10%"). Constraint plans only: Channel A still refuses a goal an option
+    sets (its plan also drives the target objective's ranking).
     """
 
     delta_threshold: Optional[float] = None
     level_threshold: Optional[float] = None
     goal_baseline: Optional[float] = None
-    identity_option_ids: FrozenSet[str] = frozenset()
+    pinned_levels: Tuple[Tuple[str, float], ...] = ()
 
     @property
     def needs_status_quo_reference(self) -> bool:
@@ -4598,20 +4624,20 @@ class RobustnessAnalyzerV2:
             )
 
         # --- PINNED OPTIONS, per option (constraint channel) ---------------------
-        # An option that SETS the target (do(target := x)) makes the evaluator write
-        # ``node_values[target] = x`` on every draw, before any propagation
-        # (``SCMEvaluatorV2.evaluate``: the ``node_id in interventions`` branch). So
-        # under THAT option the samples are exactly the level it sets — already in
-        # the threshold's frame, the same identity a root's samples take (below).
+        # An option that SETS the target (do(target := x)) states the target's level:
+        # ``x`` on every draw. (The evaluator writes ``x`` itself on a root, and ``x``
+        # in the model's frame on a non-root: ``SCMEvaluatorV2._in_model_frame``.) So
+        # under THAT option the level is exactly the one it sets — already in the
+        # threshold's frame, the same identity a root's samples take (below).
         # For a LIMIT this limb used to refuse the whole threshold ("pinned samples
         # are not change-from-origin"). True of the pinned series, and no reason to
         # withhold the comparison for the option that states its own level — or,
         # through the all-or-nothing constraint block, every other limit on the run. So those
-        # options are compared untouched (``identity_option_ids``); every other
+        # options are compared at the level they set (``pinned_levels``); every other
         # option takes the plan the rules below give it, and every refusal below
         # still refuses the whole threshold. The pinned levels are operands like
         # any other: finite, and inside the normalised domain, or refused.
-        identity_option_ids: FrozenSet[str] = frozenset(pinned_levels)
+        set_levels: Tuple[Tuple[str, float], ...] = tuple(sorted(pinned_levels.items()))
         if pinned_levels:
             if not all(math.isfinite(v) for v in (threshold, *pinned_levels.values())):
                 return refuse(
@@ -4635,7 +4661,7 @@ class RobustnessAnalyzerV2:
                 # Every option sets the target: no option needs a conversion.
                 return (
                     GoalThresholdPlan(
-                        delta_threshold=threshold, identity_option_ids=identity_option_ids
+                        delta_threshold=threshold, pinned_levels=set_levels
                     ),
                     None,
                 )
@@ -4750,7 +4776,7 @@ class RobustnessAnalyzerV2:
 
             return (
                 GoalThresholdPlan(
-                    delta_threshold=threshold, identity_option_ids=identity_option_ids
+                    delta_threshold=threshold, pinned_levels=set_levels
                 ),
                 None,
             )
@@ -4887,7 +4913,7 @@ class RobustnessAnalyzerV2:
             GoalThresholdPlan(
                 level_threshold=threshold,
                 goal_baseline=baseline,
-                identity_option_ids=identity_option_ids,
+                pinned_levels=set_levels,
             ),
             None,
         )
@@ -5058,8 +5084,13 @@ class RobustnessAnalyzerV2:
             plan = constraint_plans[index]
             samples = option_values[constraint.node_id]
 
-            # An option that sets the target: its samples ARE the level it sets.
-            if plan.level_threshold is None or option_id in plan.identity_option_ids:
+            # An option that sets the target is compared at exactly the level it sets
+            # (on a non-root target its samples are that level in the model's frame).
+            set_level = dict(plan.pinned_levels).get(option_id)
+            if set_level is not None:
+                resolved[index] = [set_level] * len(samples)
+                continue
+            if plan.level_threshold is None:
                 resolved[index] = samples
                 continue
 

@@ -212,7 +212,8 @@ def _mediator_evppi_request(**overrides):
         "graph": {
             "nodes": [
                 {"id": "theta", "kind": "factor", "label": "Theta", "observed_state": {"value": 0.0}},
-                {"id": "m", "kind": "factor", "label": "M", "observed_state": {"value": 0.0}},
+                # m states no level of its own (N6): "pin m=0" is do(m := 0) in the model's frame.
+                {"id": "m", "kind": "factor", "label": "M"},
                 {"id": "c", "kind": "factor", "label": "C", "observed_state": {"value": 0.0}},
                 {"id": "revenue", "kind": "outcome", "label": "Revenue"},
             ],

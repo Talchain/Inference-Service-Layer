@@ -35,7 +35,7 @@ from src.utils.evppi import REGRESSION_EVPPI_METHOD, FactorEvppiEstimate
 SQRT_2_OVER_PI = math.sqrt(2.0 / math.pi)
 
 
-def _mediator_request(n_samples=6000, sigma=2.0, seed=777):
+def _mediator_request(n_samples=6000, sigma=2.0, seed=777, m_state=None):
     """theta -> m (+1); m -> outcome (+1); theta -> outcome (-0.5 direct).
 
     opt_pin intervenes m=0  => outcome = -0.5*theta
@@ -47,7 +47,10 @@ def _mediator_request(n_samples=6000, sigma=2.0, seed=777):
     """
     nodes = [
         NodeV2(id="theta", kind="factor", label="Theta", observed_state=ObservedState(value=0.0)),
-        NodeV2(id="m", kind="factor", label="M", observed_state=ObservedState(value=0.0)),
+        # m states NO level of its own (N6): "pin m=0" is then do(m := 0) in the model's frame, severing
+        # theta. With an observed level for m, a setting on m is read as a level against today's
+        # (``SCMEvaluatorV2._in_model_frame``) — see test_a_mediator_set_at_its_stated_level_is_no_change.
+        NodeV2(id="m", kind="factor", label="M", observed_state=m_state),
         NodeV2(id="outcome", kind="outcome", label="Out", observed_state=ObservedState(value=0.0)),
     ]
     edges = [
@@ -123,6 +126,15 @@ class TestPositiveEvppiAnalytic:
         assert theta["method"] == "regression_evppi_v1"
         assert theta["status"] == "resolved"
         assert theta["clamped_low"] is False
+
+    def test_a_mediator_set_at_its_stated_level_is_no_change(self):
+        """STATED DIVERGENCE (N6, #70 5844447523). The same shape with m's observed level stated (0.0):
+        "pin m=0" now reads as "keep m at today's level", which is carrying on, so the two options tie
+        on every draw and knowing theta cannot change the choice. Before N6 this fixture scored ~0.80,
+        because the pin severed theta as a raw model-frame value."""
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(sigma=2.0, m_state=ObservedState(value=0.0)))
+        theta = {e["factor_id"]: e for e in (r.factor_evppi or [])}.get("theta")
+        assert theta is None or theta["evppi"] == pytest.approx(0.0, abs=1e-9)
 
     def test_evppi_raw_respects_decision_evpi_bound(self):
         """The RAW estimate (pre-clamp) already respects EVPPI_i <= decision_evpi
