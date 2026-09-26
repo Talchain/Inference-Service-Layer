@@ -487,7 +487,7 @@ ISL **omits** `probability_of_goal` and emits a `warning`-severity
 |---|---|
 | `missing_goal_baseline` | No `observed_state.baseline` on the goal node |
 | `root_goal` | A root goal takes its base from `observed_state.value`; its samples are not in the frame this resolution is derived for |
-| `goal_parameter_uncertainty_shifts_base` | A `ParameterUncertainty` on the goal draws a per-sample base, so the origin varies per sample |
+| ~~`goal_parameter_uncertainty_shifts_base`~~ | **Retired (26 Sep 2026).** A `ParameterUncertainty` on the goal draws a per-sample base, but the level plan differences every option draw against a status-quo reference drawn with the SAME factor values, so the base cancels and the threshold is converted. |
 | `goal_pinned_by_intervention` | An option intervenes on the goal, pinning its samples to an absolute value |
 | `epsilon_breaks_status_quo_reference` | The goal **or any ancestor** has `epsilon_std > 0`. Epsilon is drawn inside each evaluation, so the option sample and the status-quo sample get independent noise that does not cancel — and the `[0, 1]` clamp applied after it is not additive |
 | `auto_scaled_noise_breaks_status_quo_reference` | Auto-scaled noise was applied to the option samples but not to the pre-noise reference they are differenced against |

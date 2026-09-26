@@ -486,10 +486,25 @@ class TestFailClosedWarnings:
         assert found[0].detail["reason"] == "missing_goal_baseline"
         assert found[0].detail["observed_state_present"] is False
 
+    def test_a_parameter_uncertainty_on_the_goal_is_SCORED_and_cancels(self):
+        """SUPERSEDES the `goal_parameter_uncertainty_shifts_base` refusal row.
+
+        The per-draw base a goal PU adds is in BOTH the option draw and the
+        status-quo reference (common random numbers), so it cancels in
+        ``baseline + (option - reference)``. The answer is the no-PU closed form
+        1 - 2*(0.9 - 0.7) = 0.6; a reference that did not share the draw would not
+        give 0.6.
+        """
+        response = analyse_level(
+            goal_threshold=0.9, goal_threshold_frame="level", baseline=0.7, pu_on_goal=True
+        )
+
+        assert warnings_by_code(response, "GOAL_THRESHOLD_NOT_CONVERTIBLE") == []
+        assert response.results[0].probability_of_goal == pytest.approx(0.6, abs=TOL)
+
     @pytest.mark.parametrize(
         "kwargs,reason",
         [
-            ({"pu_on_goal": True}, "goal_parameter_uncertainty_shifts_base"),
             ({"intervene_on_goal": True}, "goal_pinned_by_intervention"),
         ],
     )

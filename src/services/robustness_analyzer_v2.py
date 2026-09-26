@@ -4406,7 +4406,6 @@ class RobustnessAnalyzerV2:
                 "node_missing": "goal_node_missing",
                 "pinned_by_intervention": "goal_pinned_by_intervention",
                 "root_target": "root_goal",
-                "parameter_uncertainty_shifts_base": ("goal_parameter_uncertainty_shifts_base"),
                 "missing_baseline": "missing_goal_baseline",
                 "values_outside_normalised_domain": ("goal_values_outside_normalised_domain"),
             },
@@ -4694,17 +4693,17 @@ class RobustnessAnalyzerV2:
         # the sampled base is ADDED to their propagation, which is what makes the
         # origin move per draw. On a root there is no propagation to add to, so
         # the sampled base IS the level and the limb above handles it.
-        if any(pu.node_id == target_id for pu in (request.parameter_uncertainties or [])):
-            return refuse(
-                reasons["parameter_uncertainty_shifts_base"],
-                f"parameter_uncertainties[{target_id}]",
-                (
-                    f"{noun} '{target_id}' carries a ParameterUncertainty: each "
-                    f"sample draws a base that is ADDED to parent propagation, so "
-                    f"the samples' origin varies per sample and a single static "
-                    f"conversion is not valid."
-                ),
-            )
+        # A ParameterUncertainty on a NON-ROOT target is NOT refused (#70 5841944093).
+        # It draws a per-sample base, so the raw samples have no single static
+        # conversion — but the level plan below never uses one. It differences each
+        # option draw against the status-quo reference drawn with the SAME
+        # `factor_values` (the PU draw included) under common random numbers
+        # (`_run_monte_carlo`), so the base sits in both terms and cancels in
+        # ``baseline + (option - reference)``: the same cancellation that makes a
+        # parent's PU harmless (2.286). Refusing it withheld every level limit on a
+        # FACTOR the options move, because PLoT gives every factor with an observed
+        # level a PU. The epsilon refusal above is unchanged: epsilon is NOT shared
+        # with the reference, so it cannot cancel.
 
         observed = target_node.observed_state
         baseline = observed.baseline if observed is not None else None
@@ -4909,9 +4908,6 @@ class RobustnessAnalyzerV2:
                     "node_missing": "constraint_node_missing",
                     "pinned_by_intervention": "target_pinned_by_intervention",
                     "root_target": "root_target",
-                    "parameter_uncertainty_shifts_base": (
-                        "target_parameter_uncertainty_shifts_base"
-                    ),
                     "missing_baseline": "missing_target_baseline",
                     "values_outside_normalised_domain": (
                         "constraint_values_outside_normalised_domain"
