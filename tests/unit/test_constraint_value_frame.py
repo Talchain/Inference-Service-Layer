@@ -410,6 +410,32 @@ class TestLevelFrameIsConvertedAgainstTheStatusQuo:
             analysis.joint_probability, abs=1e-12
         )
 
+    @pytest.mark.parametrize(
+        "operator,expected",
+        [(">=", TRUE_LEVEL_PROBABILITY), ("<=", 1.0 - TRUE_LEVEL_PROBABILITY)],
+    )
+    def test_a_parameter_uncertainty_on_the_target_is_SCORED_and_cancels(self, operator, expected):
+        """SUPERSEDES the `target_parameter_uncertainty_shifts_base` refusal row.
+
+        A PU on the target draws a per-sample BASE, so its raw samples have no
+        single static conversion. But the level plan never uses one: it
+        differences each option draw against the status-quo reference drawn with
+        the SAME factor values (common random numbers, `_run_monte_carlo`), so the
+        base sits in both terms and cancels. The probability is therefore the
+        no-PU level probability. A reference that did NOT share the draw would
+        leave the base in, and this row would read ~1.0, not 0.8.
+
+        Why it matters: PLoT's translator gives every FACTOR with an observed
+        level a PU, so this refusal withheld every level limit on a factor the
+        options move (#70 5841944093).
+        """
+        response = analyse(value_frame="level", operator=operator, pu_on_target=True)
+        analysis = only_result(response).constraint_analysis
+
+        assert analysis is not None, "a level limit on a PU-carrying target must be scored"
+        assert refusals(response) == []
+        assert constraint_by_id(analysis, CID).prob_satisfied == pytest.approx(expected, abs=TOL)
+
     def test_a_less_than_constraint_converts_in_the_same_frame(self):
         """P(level <= 0.8) = 1 - P(level >= 0.8) = 0.2 on this graph."""
         response = analyse(value_frame="level", operator="<=")
@@ -499,11 +525,6 @@ class TestConvertibilityRefusals:
                 {"target_epsilon_std": 0.05},
                 "epsilon_breaks_status_quo_reference",
                 id="epsilon_on_the_target_itself",
-            ),
-            pytest.param(
-                {"pu_on_target": True},
-                "target_parameter_uncertainty_shifts_base",
-                id="a_per_draw_base_has_no_single_static_conversion",
             ),
         ],
     )
@@ -705,6 +726,24 @@ class TestChannelAAndChannelBAreOneImplementation:
             result.probability_of_goal, abs=1e-12
         ), "one quantity computed by two channels must be one number"
 
+    def test_both_channels_SCORE_a_parameter_uncertainty_on_the_target_and_agree(self):
+        """The PU row left the refusal parity below: both channels now convert it,
+        and one quantity computed by two channels must still be one number."""
+        response = analyse(
+            constrain_the_goal_node=True,
+            value_frame="level",
+            goal_threshold=0.8,
+            goal_threshold_frame="level",
+            pu_on_target=True,
+        )
+        result = only_result(response)
+
+        assert result.probability_of_goal is not None
+        assert result.constraint_analysis is not None
+        assert result.constraint_analysis.joint_probability == pytest.approx(
+            result.probability_of_goal, abs=1e-12
+        )
+
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -712,7 +751,6 @@ class TestChannelAAndChannelBAreOneImplementation:
             pytest.param({"intervene_on_target": True}, id="pinned_by_intervention"),
             pytest.param({"threshold": 250000.0}, id="out_of_domain"),
             pytest.param({"parent_epsilon_std": 0.05}, id="epsilon"),
-            pytest.param({"pu_on_target": True}, id="parameter_uncertainty"),
         ],
     )
     def test_both_channels_refuse_on_exactly_the_same_preconditions(self, kwargs):
