@@ -4689,12 +4689,10 @@ class RobustnessAnalyzerV2:
             return GoalThresholdPlan(delta_threshold=threshold), None
 
         # NON-ROOT from here down: the root limb above returns on every path.
-        # This one is specifically about a PU on a node that ALSO has parents —
-        # the sampled base is ADDED to their propagation, which is what makes the
-        # origin move per draw. On a root there is no propagation to add to, so
-        # the sampled base IS the level and the limb above handles it.
         # A ParameterUncertainty on a NON-ROOT target is NOT refused (#70 5841944093).
-        # It draws a per-sample base, so the raw samples have no single static
+        # Its sampled base is ADDED to the parents' propagation, so the origin moves
+        # per draw (on a root there is no propagation, the sampled base IS the level,
+        # and the limb above handles it). It draws a per-sample base, so the raw samples have no single static
         # conversion — but the level plan below never uses one. It differences each
         # option draw against the status-quo reference drawn with the SAME
         # `factor_values` (the PU draw included) under common random numbers
