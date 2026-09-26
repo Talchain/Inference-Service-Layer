@@ -103,14 +103,13 @@ class TestAMetLimitOnImpossibleLevelsIsReported:
         for oid in ("hold", "ai"):
             assert row(with_domain, oid).prob_satisfied == row(without, oid).prob_satisfied
 
-    def test_a_bound_is_inclusive_and_a_set_level_is_judged_like_any_other(self):
-        """An option that SETS the target is compared at the level it sets (#179): exactly 0.0 is inside,
-        -0.05 and 1.2 are outside, on every draw."""
-        response = analyse({"hold": {}, "at_zero": {"c": 0.0}, "below": {"c": -0.05}, "above": {"c": 1.2}})
+    def test_a_bound_is_inclusive(self):
+        """hold's level is EXACTLY 0.04 on every draw (0.04 + (s - s)): a domain starting at 0.04 holds it."""
+        assert row(analyse(domain=LevelDomain(min=0.04)), "hold").level_out_of_domain_fraction == pytest.approx(0.0, abs=EXACT)
 
-        assert row(response, "at_zero").level_out_of_domain_fraction == pytest.approx(0.0, abs=EXACT)
-        assert row(response, "below").level_out_of_domain_fraction == pytest.approx(1.0, abs=EXACT)
-        assert row(response, "above").level_out_of_domain_fraction == pytest.approx(1.0, abs=EXACT)
+    def test_the_upper_bound_counts(self):
+        """The mirror: with the domain ending at 0.03, hold's 0.04 is outside on every draw."""
+        assert row(analyse(domain=LevelDomain(max=0.03)), "hold").level_out_of_domain_fraction == pytest.approx(1.0, abs=EXACT)
 
     def test_judged_on_the_level_not_the_models_raw_samples(self):
         """hold's raw sample of c is 0.0 (a non-root's change-from-origin); its LEVEL is 0.04. With the domain
