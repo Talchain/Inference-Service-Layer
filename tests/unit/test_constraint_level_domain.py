@@ -204,3 +204,26 @@ class TestOnTheWire:
 
     def test_absent_without_one(self):
         assert all("level_out_of_domain_fraction" not in r for r in self.rows(self.post(None)))
+
+
+class TestSamePopulationAsTheProbability:
+    """Review N1 (MG, #181 5845459725): the fraction counts only the INFORMATIVE draws, the population
+    ``prob_satisfied`` is computed over. Removing that mask survived every row above (mutant D6), because
+    no row had a non-informative draw. The values are chosen so the two readings differ: masked, 1 of the
+    3 informative levels is outside [0, 1] (1/3); unmasked, the non-finite draw would count too (2/4)."""
+
+    def test_a_non_informative_draw_is_not_counted(self):
+        constraint = GoalConstraint(
+            constraint_id=LIMIT, node_id="c", operator="<=", value=0.10, value_frame="level", level_domain=UNIT
+        )
+        fraction = RobustnessAnalyzerV2._level_out_of_domain_fraction(
+            [float("inf"), -0.5, 0.04, 0.5], constraint, [False, True, True, True]
+        )
+        assert fraction == pytest.approx(1 / 3, abs=EXACT)
+
+    def test_no_informative_draw_gives_no_fraction(self):
+        """Nothing to count is not 'nothing outside': the field is absent, never 0.0."""
+        constraint = GoalConstraint(
+            constraint_id=LIMIT, node_id="c", operator="<=", value=0.10, value_frame="level", level_domain=UNIT
+        )
+        assert RobustnessAnalyzerV2._level_out_of_domain_fraction([float("nan"), -0.5], constraint, [False, False]) is None
