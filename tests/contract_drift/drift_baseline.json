@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 77
+    "superset_count": 79
   },
   "omissions": [
     {
@@ -394,6 +394,11 @@
     },
     {
       "isl_model": "ConstraintResultV2",
+      "prop": "level_out_of_domain_fraction",
+      "reason": "ISL superset — ConstraintResultV2.level_out_of_domain_fraction is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5844770854 (Delivery Lead: the churn-limit release is gated on a level-domain guard; AI Quality 5844762506). Deliberately ISL-first: every ISL request model is extra=\"ignore\", so PLoT can send level_domain before or after this lands. Remove when the schemas pin adopts it."
+    },
+    {
+      "isl_model": "ConstraintResultV2",
       "prop": "near_miss_fraction",
       "reason": "ISL superset — ConstraintResultV2.near_miss_fraction is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
@@ -561,6 +566,11 @@
       "isl_model": "FactorSensitivityV2",
       "prop": "zero_reason",
       "reason": "ISL superset — FactorSensitivityV2.zero_reason is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "GoalConstraint",
+      "prop": "level_domain",
+      "reason": "ISL superset — GoalConstraint.level_domain is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5844770854 (Delivery Lead: the churn-limit release is gated on a level-domain guard; AI Quality 5844762506). Deliberately ISL-first: every ISL request model is extra=\"ignore\", so PLoT can send level_domain before or after this lands. Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "ISLResponseV2",

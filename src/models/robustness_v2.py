@@ -622,6 +622,28 @@ class InterventionOption(BaseModel):
     }
 
 
+class LevelDomain(BaseModel):
+    """The levels the constraint's target quantity can physically take, in the same
+    normalised frame as its ``value`` (e.g. [0, 1] for a percentage). Supplied by the
+    caller, which owns units; ISL never infers it. At least one bound."""
+
+    min: Optional[float] = Field(None, description="Lowest possible level (inclusive), or None for unbounded below")
+    max: Optional[float] = Field(None, description="Highest possible level (inclusive), or None for unbounded above")
+
+    @model_validator(mode="after")
+    def _bounds_are_finite_and_ordered(self) -> "LevelDomain":
+        bounds = [b for b in (self.min, self.max) if b is not None]
+        if not bounds:
+            raise ValueError("level_domain needs at least one of min, max")
+        if not all(math.isfinite(b) for b in bounds):
+            raise ValueError("level_domain bounds must be finite")
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError("level_domain.min must not exceed level_domain.max")
+        return self
+
+    model_config = {"extra": "ignore"}
+
+
 class GoalConstraint(BaseModel):
     """
     A constraint on a goal/outcome node for multi-constraint analysis.
@@ -711,6 +733,17 @@ class GoalConstraint(BaseModel):
             "inference warning names what was missing — ISL never guesses a frame "
             "and never emits a fabricated or clamped probability. Mirrors "
             "@talchain/schemas 0.38.0 DraftGoalConstraint.value_frame."
+        ),
+    )
+    level_domain: Optional[LevelDomain] = Field(
+        None,
+        description=(
+            "The levels the target quantity can physically take, in the frame of "
+            "`value` (e.g. {min: 0, max: 1} for a percentage). Report-only: for a "
+            "'level' constraint ISL returns, per option, the share of draws whose "
+            "level falls outside it (`level_out_of_domain_fraction`), so the caller "
+            "can tell a check that rests on impossible levels from a real one. "
+            "Never changes a probability."
         ),
     )
 
@@ -1571,6 +1604,9 @@ class ConstraintResult(BaseModel):
     )
     binding: Optional[bool] = Field(
         None, description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
+    )
+    level_out_of_domain_fraction: Optional[float] = Field(
+        None, ge=0, le=1, description="Share of draws whose level is outside the request's level_domain"
     )
 
 
