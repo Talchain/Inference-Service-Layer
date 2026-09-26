@@ -20,7 +20,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Tuple, cast
+from typing import Any, Callable, Dict, FrozenSet, List, Literal, NamedTuple, Optional, Tuple, cast
 
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
@@ -1646,11 +1646,20 @@ class GoalThresholdPlan:
     sample and the status-quo sample. It is still domain-guarded as an operand,
     because an intercept in raw user units is still evidence the whole request
     is mis-normalised.
+
+    ``identity_option_ids`` — options that SET the target themselves
+    (``do(target := x)``). Under such an option the target's samples are ``x`` on
+    every draw: the level that option sets, already in the threshold's frame, the
+    same identity a root's samples take. They are compared untouched, whatever
+    mode the plan is in for the other options. Constraint plans only: Channel A
+    still refuses a goal an option sets (its plan also drives the target
+    objective's ranking).
     """
 
     delta_threshold: Optional[float] = None
     level_threshold: Optional[float] = None
     goal_baseline: Optional[float] = None
+    identity_option_ids: FrozenSet[str] = frozenset()
 
     @property
     def needs_status_quo_reference(self) -> bool:
@@ -4440,6 +4449,7 @@ class RobustnessAnalyzerV2:
         reasons: Dict[str, str],
         operand_names: Dict[str, str],
         refuse: Callable[..., Tuple[Optional["GoalThresholdPlan"], Any]],
+        pinned_options_are_levels: bool = False,
     ) -> Tuple[Optional["GoalThresholdPlan"], Any]:
         """THE convertibility rules — one implementation, two channels.
 
@@ -4566,7 +4576,16 @@ class RobustnessAnalyzerV2:
         # --- convertibility preconditions -------------------------------------
         # Each of these makes `sample = intercept + S` false, so the identity the
         # conversion rests on no longer holds. Refusing is the only honest answer.
-        if any(target_id in option.interventions for option in request.options):
+        pinned_levels = {
+            option.id: option.interventions[target_id]
+            for option in request.options
+            if target_id in option.interventions
+        }
+        if pinned_levels and not pinned_options_are_levels:
+            # Channel A keeps this refusal ON PURPOSE. Its plan also decides what
+            # "wins" means for a target objective (`_resolve_objective_plan`), so
+            # scoring a goal an option sets would change win_probability — a
+            # different decision from scoring a limit, and not this change's.
             return refuse(
                 reasons["pinned_by_intervention"],
                 "options[].interventions",
@@ -4577,6 +4596,49 @@ class RobustnessAnalyzerV2:
                     f"threshold cannot be converted consistently across options."
                 ),
             )
+
+        # --- PINNED OPTIONS, per option (constraint channel) ---------------------
+        # An option that SETS the target (do(target := x)) makes the evaluator write
+        # ``node_values[target] = x`` on every draw, before any propagation
+        # (``SCMEvaluatorV2.evaluate``: the ``node_id in interventions`` branch). So
+        # under THAT option the samples are exactly the level it sets — already in
+        # the threshold's frame, the same identity a root's samples take (below).
+        # For a LIMIT this limb used to refuse the whole threshold ("pinned samples
+        # are not change-from-origin"). True of the pinned series, and no reason to
+        # withhold the comparison for the option that states its own level — or,
+        # through the all-or-nothing constraint block, every other limit on the run. So those
+        # options are compared untouched (``identity_option_ids``); every other
+        # option takes the plan the rules below give it, and every refusal below
+        # still refuses the whole threshold. The pinned levels are operands like
+        # any other: finite, and inside the normalised domain, or refused.
+        identity_option_ids: FrozenSet[str] = frozenset(pinned_levels)
+        if pinned_levels:
+            if not all(math.isfinite(v) for v in (threshold, *pinned_levels.values())):
+                return refuse(
+                    "non_finite_conversion_input",
+                    "options[].interventions",
+                    (
+                        "Comparison inputs must all be finite "
+                        f"({value_label}={threshold}, pinned levels={pinned_levels})."
+                    ),
+                )
+            pinned_out_of_domain = domain_refusal(
+                {
+                    operand_names["threshold"]: threshold,
+                    **{f"pinned_level[{oid}]": v for oid, v in sorted(pinned_levels.items())},
+                },
+                "options[].interventions",
+            )
+            if pinned_out_of_domain is not None:
+                return pinned_out_of_domain
+            if len(pinned_levels) == len(request.options):
+                # Every option sets the target: no option needs a conversion.
+                return (
+                    GoalThresholdPlan(
+                        delta_threshold=threshold, identity_option_ids=identity_option_ids
+                    ),
+                    None,
+                )
 
         if not any(edge.to == target_id for edge in request.graph.edges):
             # --- ROOT TARGET: the IDENTITY path, not a refusal ----------------
@@ -4686,7 +4748,12 @@ class RobustnessAnalyzerV2:
             if root_out_of_domain is not None:
                 return root_out_of_domain
 
-            return GoalThresholdPlan(delta_threshold=threshold), None
+            return (
+                GoalThresholdPlan(
+                    delta_threshold=threshold, identity_option_ids=identity_option_ids
+                ),
+                None,
+            )
 
         # NON-ROOT from here down: the root limb above returns on every path.
         # A ParameterUncertainty on a NON-ROOT target is NOT refused (#70 5841944093).
@@ -4816,7 +4883,14 @@ class RobustnessAnalyzerV2:
         # construction. No post-hoc finiteness branch is emitted here on purpose:
         # unreachable machinery that reads as a guarantee is exactly the defect
         # class this repo hunts.
-        return GoalThresholdPlan(level_threshold=threshold, goal_baseline=baseline), None
+        return (
+            GoalThresholdPlan(
+                level_threshold=threshold,
+                goal_baseline=baseline,
+                identity_option_ids=identity_option_ids,
+            ),
+            None,
+        )
 
     @staticmethod
     def _resolve_constraint_plans(
@@ -4904,7 +4978,6 @@ class RobustnessAnalyzerV2:
                 omitted_field="constraint_analysis",
                 reasons={
                     "node_missing": "constraint_node_missing",
-                    "pinned_by_intervention": "target_pinned_by_intervention",
                     "root_target": "root_target",
                     "missing_baseline": "missing_target_baseline",
                     "values_outside_normalised_domain": (
@@ -4917,6 +4990,7 @@ class RobustnessAnalyzerV2:
                     "intercept": "constraint_intercept",
                 },
                 refuse=refuse,
+                pinned_options_are_levels=True,
             )
 
             if warning is not None:
@@ -4984,7 +5058,8 @@ class RobustnessAnalyzerV2:
             plan = constraint_plans[index]
             samples = option_values[constraint.node_id]
 
-            if plan.level_threshold is None:
+            # An option that sets the target: its samples ARE the level it sets.
+            if plan.level_threshold is None or option_id in plan.identity_option_ids:
                 resolved[index] = samples
                 continue
 

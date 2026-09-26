@@ -363,14 +363,22 @@ class TestRootTargetRefusalsThatSurvive:
         assert sole_refusal_reason(response) == "root_target"
         assert refusals(response)[0].detail["root_intercept"] == 0.25
 
-    def test_an_intervened_root_target_still_refuses_on_the_earlier_limb(self):
-        """CONTRAST CONTROL on the ordering: the intervention limb precedes the
-        root limb and must keep doing so — pinned samples are not this node's
-        own level."""
-        response = analyse(intervene_on_target=True, n_samples=2_000)
+    def test_an_option_that_sets_the_root_target_is_SCORED_at_the_level_it_sets(self):
+        """SUPERSEDES `test_an_intervened_root_target_still_refuses_on_the_earlier_limb`.
 
-        assert result_for(response, "hold").constraint_analysis is None
-        assert sole_refusal_reason(response) == "target_pinned_by_intervention"
+        "hold" sets t := 0.5; "push" leaves t at its own observed 0.6. Both series
+        are levels — the intervention is written before any propagation, and a
+        root's samples are its base — so one threshold between them splits the
+        options: 0.5 <= 0.55 on every draw, 0.6 <= 0.55 on none. The old limb
+        omitted the whole block, for both options.
+        """
+        response = analyse(intervene_on_target=True, threshold=0.55, n_samples=2_000)
+
+        assert refusals(response) == []
+        hold = constraint_row(result_for(response, "hold").constraint_analysis)
+        push = constraint_row(result_for(response, "push").constraint_analysis)
+        assert hold.prob_satisfied == pytest.approx(1.0, abs=1e-12)
+        assert push.prob_satisfied == pytest.approx(0.0, abs=1e-12)
 
     def test_the_domain_guard_still_fires_on_the_root_anchor(self):
         """Raw user units where normalised values were expected. The guard is the

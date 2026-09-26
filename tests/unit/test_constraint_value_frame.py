@@ -507,11 +507,6 @@ class TestConvertibilityRefusals:
                 id="no_observed_state_at_all",
             ),
             pytest.param(
-                {"intervene_on_target": True},
-                "target_pinned_by_intervention",
-                id="pinned_samples_are_not_change_from_origin",
-            ),
-            pytest.param(
                 {"threshold": 250000.0},
                 "constraint_values_outside_normalised_domain",
                 id="raw_user_units_where_normalised_values_were_expected",
@@ -538,6 +533,22 @@ class TestConvertibilityRefusals:
             result.constraint_analysis is None
         ), f"{expected_reason}: the block must be omitted, not scored"
         assert sole_refusal_reason(response) == expected_reason
+
+    @pytest.mark.parametrize("threshold,expected", [(0.8, 0.0), (0.4, 1.0)])
+    def test_an_option_that_sets_the_target_is_SCORED_at_the_level_it_sets(
+        self, threshold, expected
+    ):
+        """SUPERSEDES the `pinned_samples_are_not_change_from_origin` row above.
+
+        The only option sets c := 0.5, so its samples ARE 0.5 on every draw — a
+        level, compared untouched. The thresholds sit either side of 0.5; the
+        change-from-origin conversion (0.7 + (0.5 - reference)) passes neither pair.
+        """
+        response = analyse(value_frame="level", threshold=threshold, intervene_on_target=True)
+        analysis = only_result(response).constraint_analysis
+
+        assert analysis is not None, "an option that sets the target is scored, not refused"
+        assert analysis.joint_probability == pytest.approx(expected, abs=1e-12)
 
     def test_a_root_target_is_SCORED_in_its_own_level_frame_not_refused(self):
         """SUPERSEDES the `root_target` refusal row removed from the table above.
@@ -748,7 +759,6 @@ class TestChannelAAndChannelBAreOneImplementation:
         "kwargs",
         [
             pytest.param({"target_baseline": None}, id="missing_baseline"),
-            pytest.param({"intervene_on_target": True}, id="pinned_by_intervention"),
             pytest.param({"threshold": 250000.0}, id="out_of_domain"),
             pytest.param({"parent_epsilon_std": 0.05}, id="epsilon"),
         ],
@@ -769,3 +779,37 @@ class TestChannelAAndChannelBAreOneImplementation:
             "Channel B must refuse on the SAME precondition — a channel that "
             "accepts what its sibling refuses is a second dialect"
         )
+
+    @pytest.mark.parametrize("threshold,expected", [(0.8, 0.0), (0.4, 1.0)])
+    def test_an_option_that_sets_the_goal_node_is_a_STATED_divergence(
+        self, threshold, expected
+    ):
+        """SUPERSEDES the `pinned_by_intervention` row of the parity table above —
+        the one precondition the two channels no longer share, on purpose.
+
+        One node is both the goal and the constraint target, and the only option
+        sets it to 0.5. Channel B compares that option at the level it sets
+        (scored, either side of 0.5). Channel A still refuses: its plan also
+        decides what "wins" means for a target objective
+        (`_resolve_objective_plan`), so taking the identity there would change
+        win_probability — a decision this change does not make. Pinned here so the
+        divergence cannot widen or close silently.
+        """
+        response = analyse(
+            constrain_the_goal_node=True,
+            value_frame="level",
+            threshold=threshold,
+            goal_threshold=threshold,
+            goal_threshold_frame="level",
+            intervene_on_target=True,
+        )
+        result = only_result(response)
+
+        assert result.constraint_analysis is not None
+        assert result.constraint_analysis.joint_probability == pytest.approx(expected, abs=1e-12)
+        assert result.probability_of_goal is None, "Channel A keeps its refusal"
+        assert [
+            w.detail["reason"]
+            for w in response.inference_warnings
+            if w.code == "GOAL_THRESHOLD_NOT_CONVERTIBLE"
+        ] == ["goal_pinned_by_intervention"]
