@@ -5373,6 +5373,7 @@ class RobustnessAnalyzerV2:
                             failure_margin_median=c["failure_margin_median"],
                             near_miss_fraction=c["near_miss_fraction"],
                             binding=c["binding"],
+                            level_out_of_domain_fraction=c["level_out_of_domain_fraction"],
                         )
                         for c in analysis_dict["constraints"]
                     ]
@@ -9378,6 +9379,31 @@ class RobustnessAnalyzerV2:
 
         return diagnostics
 
+    @staticmethod
+    def _level_out_of_domain_fraction(
+        levels: List[float], constraint: GoalConstraint, informative: List[bool]
+    ) -> Optional[float]:
+        """Share of the informative draws whose LEVEL is outside ``constraint.level_domain``.
+
+        None unless the request stated a domain AND the constraint is a 'level'
+        constraint: only then is the resolved series a level of the quantity (a
+        'delta' series is a change, which has no physical domain). Same population
+        as the probability (2.477(k)). Report-only: it never moves a probability.
+        """
+        domain = constraint.level_domain
+        if domain is None or constraint.value_frame != "level":
+            return None
+        counted = outside = 0
+        for level, ok in zip(levels, informative, strict=True):
+            if not ok:
+                continue
+            counted += 1
+            if (domain.min is not None and level < domain.min) or (
+                domain.max is not None and level > domain.max
+            ):
+                outside += 1
+        return outside / counted if counted else None
+
     def _compute_constraint_analysis(
         self,
         constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]],
@@ -9489,6 +9515,9 @@ class RobustnessAnalyzerV2:
                     "failure_margin_median": diag.get("failure_margin_median"),
                     "near_miss_fraction": diag.get("near_miss_fraction"),
                     "binding": diag.get("binding", False),
+                    "level_out_of_domain_fraction": self._level_out_of_domain_fraction(
+                        resolved_values[c_idx], constraint, informative
+                    ),
                 }
             )
 

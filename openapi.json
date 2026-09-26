@@ -541,6 +541,20 @@
             "description": "Human-readable label for coaching",
             "title": "Label"
           },
+          "level_out_of_domain_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of draws whose level is outside the request's level_domain",
+            "title": "Level Out Of Domain Fraction"
+          },
           "near_miss_fraction": {
             "anyOf": [
               {
@@ -641,6 +655,20 @@
             ],
             "description": "Human-readable label for coaching",
             "title": "Label"
+          },
+          "level_out_of_domain_fraction": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present only when the request stated a level_domain for a 'level' constraint: the share of this option's draws whose level lies outside it. A high share means prob_satisfied rests on levels the quantity cannot take (e.g. a churn rate below 0%).",
+            "title": "Level Out Of Domain Fraction"
           },
           "near_miss_fraction": {
             "anyOf": [
@@ -3400,6 +3428,17 @@
             "description": "Human-readable label for coaching (e.g., 'Revenue target', 'Budget cap')",
             "title": "Label"
           },
+          "level_domain": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LevelDomain"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The levels the target quantity can physically take, in the frame of `value` (e.g. {min: 0, max: 1} for a percentage). Report-only: for a 'level' constraint ISL returns, per option, the share of draws whose level falls outside it (`level_out_of_domain_fraction`), so the caller can tell a check that rests on impossible levels from a real one. Never changes a probability."
+          },
           "node_id": {
             "description": "ID of the node this constraint applies to (must exist in graph)",
             "pattern": "^[a-z0-9_:-]+$",
@@ -4198,6 +4237,37 @@
           "variable_ranges"
         ],
         "title": "InterventionRegion",
+        "type": "object"
+      },
+      "LevelDomain": {
+        "description": "The levels the constraint's target quantity can physically take, in the same\nnormalised frame as its ``value`` (e.g. [0, 1] for a percentage). Supplied by the\ncaller, which owns units; ISL never infers it. At least one bound.",
+        "properties": {
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Highest possible level (inclusive), or None for unbounded above",
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest possible level (inclusive), or None for unbounded below",
+            "title": "Min"
+          }
+        },
+        "title": "LevelDomain",
         "type": "object"
       },
       "NodeV2": {
