@@ -503,6 +503,17 @@ class ConstraintResultV2(BaseModel):
     binding: Optional[bool] = Field(
         None, description="True if constraint is borderline (prob_satisfied ∈ [0.4, 0.6])"
     )
+    level_out_of_domain_fraction: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description=(
+            "Present only when the request stated a level_domain for a 'level' "
+            "constraint: the share of this option's draws whose level lies outside "
+            "it. A high share means prob_satisfied rests on levels the quantity "
+            "cannot take (e.g. a churn rate below 0%)."
+        ),
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
