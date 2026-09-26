@@ -218,6 +218,17 @@ class TestTheOtherLimitsSurvive:
 
 
 class TestWhatStillRefuses:
+    def test_every_option_sets_the_target_and_the_threshold_is_in_raw_units_refused(self):
+        """The all-pinned exit skips the root and non-root limbs, so the pinned-path domain guard is the ONLY bound
+        on the threshold there (review N3, #179 5844399997): a raw-units threshold would otherwise be compared
+        against the set levels and score 1.0 for every option."""
+        response = analyse(options={"winback": {"c": 0.3}, "hike": {"c": 0.7}}, target_baseline=None, threshold=250000.0)
+
+        found = refusals(response)
+        assert [w.detail["reason"] for w in found] == ["constraint_values_outside_normalised_domain"]
+        assert "constraint_threshold" in found[0].detail["out_of_domain"]
+        assert result_for(response, "winback").constraint_analysis is None
+
     def test_a_set_level_in_raw_units_is_refused_by_the_domain_guard(self):
         response = analyse(options={"winback": {"c": 3.0}, "hold": {}})
 
