@@ -192,6 +192,12 @@ _ADDITIVE_WIRE_SURFACES = frozenset(
         # ROADMAP 2.1192 — see _ADDITIVE_INFERENCE_WARNING_CODES below for why
         # this one is safe to strip by name and its companion warning is not.
         "objective_ranking",
+        # B1a (#70 5855068711): the per non-root node evaluation frames. A NEW
+        # top-level key that exists nowhere else on the wire, so the name-based
+        # recursive strip is safe; on this golden's graph no node holds an
+        # attested level, so every frame is 'no_level' and every other value must
+        # still match the golden byte-for-byte (which is what this pin checks).
+        "node_levels",
     }
 )
 
