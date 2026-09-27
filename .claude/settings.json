@@ -16,6 +16,7 @@
     "allow": [
       "Bash(git clone https://github.com/Talchain/*)",
       "Bash(gh api repos/Talchain/olumi-programme-docs/issues/70/comments*)",
+      "Bash(gh api repos/Talchain/olumi-programme-docs/issues/72/comments*)",
       "Bash(gh api repos/Talchain/olumi-programme-docs/issues/comments/*)",
       "Bash(gh pr create *)",
       "Bash(gh pr view *)",
