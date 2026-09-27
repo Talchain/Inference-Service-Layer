@@ -432,16 +432,22 @@
             "type": "array"
           },
           "joint_probability": {
-            "description": "P(all constraints satisfied simultaneously)",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Joint Probability",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset.",
+            "title": "Joint Probability"
           }
         },
         "required": [
-          "constraints",
-          "joint_probability"
+          "constraints"
         ],
         "title": "ConstraintAnalysis",
         "type": "object"
@@ -476,16 +482,22 @@
             "type": "array"
           },
           "joint_probability": {
-            "description": "P(all constraints satisfied simultaneously)",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Joint Probability",
-            "type": "number"
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset.",
+            "title": "Joint Probability"
           }
         },
         "required": [
-          "constraints",
-          "joint_probability"
+          "constraints"
         ],
         "title": "ConstraintAnalysisV2",
         "type": "object"

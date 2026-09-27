@@ -1617,8 +1617,17 @@ class ConstraintAnalysis(BaseModel):
     constraints: List[ConstraintResult] = Field(
         ..., description="Per-constraint probability results"
     )
-    joint_probability: float = Field(
-        ..., ge=0, le=1, description="P(all constraints satisfied simultaneously)"
+    joint_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description=(
+            "P(all constraints satisfied simultaneously). ABSENT while any "
+            "requested constraint is unscored (B5): each refused constraint is "
+            "named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED "
+            "warning and has no row in `constraints`; the scored ones keep theirs. "
+            "Never computed over the scored subset."
+        ),
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
         None, description="Pairwise conditional probabilities: P(C_j | C_i)"
