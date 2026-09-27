@@ -2221,11 +2221,21 @@ class RobustnessAnalyzerV2:
         # BEFORE the Monte Carlo, because the plans decide which target nodes need
         # a per-draw status-quo reference recorded.
         #
-        # `constraint_plans is None` => at least one constraint is unresolvable =>
-        # the whole constraint_analysis block will be omitted. The warnings name
-        # each refused constraint by its identity.
-        constraint_plans, constraint_frame_warnings = self._resolve_constraint_plans(request)
+        # B5 (AI Quality #70 5855345225 / 5855511541): ONE LIMIT'S REFUSAL NEVER
+        # SILENCES ANOTHER. `scored_constraint_plans` holds a plan for EVERY
+        # constraint that resolved, so each is scored on its own; the warnings
+        # name each refused constraint by its identity.
+        #
+        # `constraint_plans` keeps its 2.798 meaning for the consumers of the
+        # JOINT (P(all constraints satisfied) — EVPI's metric and the auto-noise
+        # guard): the full plan set, or None when ANY constraint is unresolvable.
+        # A joint over the scored subset would say "all your limits are met" when
+        # one was never checked, so the joint stays all-or-nothing.
+        scored_constraint_plans, constraint_frame_warnings = self._resolve_scored_constraint_plans(
+            request
+        )
         inference_warnings.extend(constraint_frame_warnings)
+        constraint_plans = self._complete_constraint_plans(request, scored_constraint_plans)
 
         # ROADMAP 2.1192: WHAT "wins" MEANS for this request. Resolved here,
         # beside the threshold plan it reuses and BEFORE the Monte Carlo, for
@@ -2291,7 +2301,7 @@ class RobustnessAnalyzerV2:
                     or objective_plan.needs_status_quo_reference
                     else set()
                 )
-                | set(self._constraint_status_quo_nodes(request, constraint_plans))
+                | set(self._constraint_status_quo_nodes(request, scored_constraint_plans))
             )
             or None,
             objective=objective_plan,
@@ -2436,14 +2446,21 @@ class RobustnessAnalyzerV2:
         # Unreachable at current settings (ENABLE_AUTO_SCALED_NOISE is False) and
         # written as a live guard rather than an assertion precisely because
         # flipping that flag must not silently re-open the defect.
-        if constraint_plans and auto_noise_applied and request.goal_constraints:
+        if scored_constraint_plans and auto_noise_applied and request.goal_constraints:
             noise_broken = [
                 index
-                for index, plan in constraint_plans.items()
+                for index, plan in scored_constraint_plans.items()
                 if plan.needs_status_quo_reference
                 and request.goal_constraints[index].node_id == request.goal_node_id
             ]
             if noise_broken:
+                # B5: per limit — only the broken constraints lose their score;
+                # the joint (complete plans) is withheld with them.
+                scored_constraint_plans = {
+                    index: plan
+                    for index, plan in scored_constraint_plans.items()
+                    if index not in noise_broken
+                }
                 constraint_plans = None
                 for index in noise_broken:
                     constraint = request.goal_constraints[index]
@@ -2464,7 +2481,9 @@ class RobustnessAnalyzerV2:
                                     "but not to the status-quo reference they are "
                                     "differenced against, so a level value cannot "
                                     "be resolved without attributing that noise to "
-                                    "the option. constraint_analysis is omitted."
+                                    "the option. This constraint's entry in "
+                                    "constraint_analysis is omitted; its siblings "
+                                    "are still scored."
                                 ),
                             },
                             severity="warning",
@@ -2479,7 +2498,7 @@ class RobustnessAnalyzerV2:
             constraint_node_values,
             pre_noise_expected_regret,
             status_quo_outcomes,
-            constraint_plans,
+            scored_constraint_plans,
             status_quo_node_values,
         )
 
@@ -4919,10 +4938,44 @@ class RobustnessAnalyzerV2:
         )
 
     @staticmethod
+    def _complete_constraint_plans(
+        request: RobustnessRequestV2,
+        scored_plans: Dict[int, "GoalThresholdPlan"],
+    ) -> Optional[Dict[int, "GoalThresholdPlan"]]:
+        """The full plan set when EVERY constraint resolved, else None.
+
+        The unit the JOINT needs (B5): P(all constraints satisfied) exists only
+        when every conjunct is scored. ``{}`` when no constraints were requested.
+        """
+        if len(scored_plans) != len(request.goal_constraints or []):
+            return None
+        return scored_plans
+
+    @staticmethod
     def _resolve_constraint_plans(
         request: RobustnessRequestV2,
     ) -> Tuple[Optional[Dict[int, "GoalThresholdPlan"]], List[InferenceWarning]]:
-        """Resolve EVERY goal_constraint into a comparison plan, or refuse the block.
+        """The complete plan set, or None if ANY constraint is unresolvable.
+
+        The joint's view (2.798), kept for its callers. ``analyze`` scores each
+        constraint on its own via ``_resolve_scored_constraint_plans`` (B5).
+        """
+        plans, warnings = RobustnessAnalyzerV2._resolve_scored_constraint_plans(request)
+        return RobustnessAnalyzerV2._complete_constraint_plans(request, plans), warnings
+
+    @staticmethod
+    def _resolve_scored_constraint_plans(
+        request: RobustnessRequestV2,
+    ) -> Tuple[Dict[int, "GoalThresholdPlan"], List[InferenceWarning]]:
+        """Resolve EACH goal_constraint into a comparison plan, or refuse IT.
+
+        B5 (AI Quality #70 5855345225 / 5855511541) supersedes the 2.798
+        all-or-nothing unit below for the per-constraint figures: one limit's
+        refusal never silences another. Each constraint that resolves gets a plan
+        and is scored; each that does not is named by a warning and gets no row.
+        The JOINT keeps the all-or-nothing unit (``_complete_constraint_plans``).
+
+        The 2.798 rationale, kept for the joint it still governs:
 
         ROADMAP 2.798 — Channel B's half of the fail-closed contract Channel A has
         had since 2.258 / 2.286. Runs BEFORE the Monte Carlo, because the plans
@@ -4944,10 +4997,10 @@ class RobustnessAnalyzerV2:
         when we are least sure of ourselves.
 
         Returns:
-            ``(plans, warnings)``. ``plans`` maps constraint INDEX -> plan when
-            every constraint resolved; ``None`` means the block must be omitted.
-            ``warnings`` names each unresolvable constraint by its identity.
-            ``({}, [])`` when no constraints were requested.
+            ``(plans, warnings)``. ``plans`` maps constraint INDEX -> plan for
+            every constraint that resolved (possibly none). ``warnings`` names each
+            unresolvable constraint by its identity. ``({}, [])`` when no
+            constraints were requested.
         """
         constraints = request.goal_constraints
         if not constraints:
@@ -5001,7 +5054,7 @@ class RobustnessAnalyzerV2:
                 frame_field=f"goal_constraints[{index}].value_frame",
                 value_label="constraint value",
                 noun="Constraint target node",
-                omitted_field="constraint_analysis",
+                omitted_field="this constraint's entry in constraint_analysis",
                 reasons={
                     "node_missing": "constraint_node_missing",
                     "root_target": "root_target",
@@ -5024,8 +5077,6 @@ class RobustnessAnalyzerV2:
             elif plan is not None:
                 plans[index] = plan
 
-        if len(plans) != len(constraints):
-            return None, warnings
         return plans, warnings
 
     @staticmethod
@@ -9060,6 +9111,8 @@ class RobustnessAnalyzerV2:
         self,
         resolved_values: Dict[int, List[float]],
         constraints: List[GoalConstraint],
+        *,
+        joint_emitted: bool = True,
     ) -> Optional[Tuple[Dict[str, float], float, List[List[bool]], List[bool]]]:
         """
         Compute per-constraint and joint probabilities for an option, or REFUSE.
@@ -9203,7 +9256,12 @@ class RobustnessAnalyzerV2:
         # discriminating pair, and a gate that widened to either would RED.
         coverage_is_partial = n_informative < n_samples
         if coverage_is_partial:
-            emitted = [joint_probability, *per_constraint_probs.values()]
+            # B5: a joint that will be WITHHELD (a sibling constraint is unscored)
+            # is not an emitted figure, so it cannot refuse the block.
+            emitted = [
+                *([joint_probability] if joint_emitted else []),
+                *per_constraint_probs.values(),
+            ]
             if any(p == 0.0 or p == 1.0 for p in emitted):
                 return None
 
@@ -9420,9 +9478,11 @@ class RobustnessAnalyzerV2:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
 
-        THE REFUSAL POINT. ``constraint_plans is None`` means at least one
-        constraint could not be proved comparable against its target's samples, so
-        this returns None and the caller omits ``constraint_analysis`` entirely.
+        THE REFUSAL POINT, PER CONSTRAINT (B5). ``constraint_plans`` holds a plan
+        for each constraint proved comparable against its target's samples; only
+        those are scored, and the joint is withheld unless every constraint has
+        one. With no plan at all this returns None and the caller omits
+        ``constraint_analysis`` entirely.
         That is the whole difference between this and the pre-2.798 behaviour: a
         block that cannot be computed honestly is now ABSENT rather than filled
         with a number whose only property is that it looks like a probability.
@@ -9431,8 +9491,10 @@ class RobustnessAnalyzerV2:
             constraint_node_values: Dict[option_id, Dict[node_id, List[sample_values]]]
             constraints: List of GoalConstraint objects
             option_id: The option to compute analysis for
-            constraint_plans: Resolved per-constraint comparison plans. None =>
-                REFUSE. Defaulted for direct callers that pass no constraints.
+            constraint_plans: Resolved per-constraint comparison plans, keyed by
+                index into ``constraints`` (possibly a subset). None or empty =>
+                nothing to score. Defaulted for direct callers that pass no
+                constraints.
             status_quo_node_values: Per-draw no-intervention series per target
                 node, CRN-paired with the option samples.
 
@@ -9443,25 +9505,41 @@ class RobustnessAnalyzerV2:
         if not constraints or not constraint_node_values:
             return None
 
-        if constraint_plans is None:
-            # At least one constraint is unresolvable. A joint probability over a
-            # resolved conjunct AND an unresolved one is not a probability of
-            # anything, so the block is omitted whole. The caller has already
-            # emitted a warning naming each refused constraint.
+        if not constraint_plans:
+            # No constraint resolved: there is nothing to score. The caller has
+            # already emitted a warning naming each refused constraint.
             return None
 
-        # Put every constraint's samples into the frame ITS threshold is stated
-        # in, once, before any comparison sees them.
+        # B5 (AI Quality #70 5855345225 / 5855511541): ONE LIMIT'S REFUSAL NEVER
+        # SILENCES ANOTHER. Score exactly the constraints that resolved, in
+        # request order; a refused one gets no row (absent — never 0 or 1).
+        #
+        # The JOINT is withheld unless EVERY constraint is scored: a joint over
+        # a resolved conjunct and an unresolved one is not a probability of
+        # anything, and a joint over the scored subset would certify a limit that
+        # was never checked. When all are scored, `scored` is `constraints` and
+        # the plans are the caller's own dict, so the block is byte-identical.
+        scored_indices = sorted(constraint_plans)
+        joint_emitted = len(scored_indices) == len(constraints)
+        scored = [constraints[index] for index in scored_indices]
+        scored_plans = {
+            position: constraint_plans[index] for position, index in enumerate(scored_indices)
+        }
+
+        # Put every scored constraint's samples into the frame ITS threshold is
+        # stated in, once, before any comparison sees them.
         resolved_values = self._resolve_constraint_series(
             constraint_node_values,
-            constraints,
-            constraint_plans,
+            scored,
+            scored_plans,
             status_quo_node_values or {},
             option_id,
         )
 
         # T3: Per-constraint and joint probability
-        probabilities = self._compute_constraint_probabilities(resolved_values, constraints)
+        probabilities = self._compute_constraint_probabilities(
+            resolved_values, scored, joint_emitted=joint_emitted
+        )
 
         # 2.477(k) THE SECOND REFUSAL POINT. `None` means no draw was
         # informative: every constraint value was non-finite on every draw, so
@@ -9482,20 +9560,28 @@ class RobustnessAnalyzerV2:
             informative,
         ) = probabilities
 
-        # T4: Pairwise conditional probabilities
-        conditional_probs = self._compute_conditional_probabilities(
-            satisfaction_matrix, constraints, informative
+        # T4: Pairwise conditional probabilities among the SCORED constraints,
+        # re-keyed to their positions in goal_constraints (the V2 contract: the
+        # indices are request order). Identity when every constraint is scored.
+        scored_conditionals = self._compute_conditional_probabilities(
+            satisfaction_matrix, scored, informative
         )
+        conditional_probs = {
+            str(scored_indices[int(i)]): {
+                str(scored_indices[int(j)]): value for j, value in row.items()
+            }
+            for i, row in scored_conditionals.items()
+        }
 
         # T5: Near-miss diagnostics — on the SAME resolved series and the SAME
         # informative population as the probabilities.
         near_miss_diagnostics = self._compute_near_miss_diagnostics(
-            resolved_values, constraints, satisfaction_matrix, informative=informative
+            resolved_values, scored, satisfaction_matrix, informative=informative
         )
 
         # Build constraint results
         constraint_results = []
-        for c_idx, constraint in enumerate(constraints):
+        for c_idx, constraint in enumerate(scored):
             diag = near_miss_diagnostics.get(c_idx, {})
             constraint_results.append(
                 {
@@ -9528,6 +9614,7 @@ class RobustnessAnalyzerV2:
 
         return {
             "constraints": constraint_results,
-            "joint_probability": joint_probability,
+            # B5: ABSENT while any constraint is unscored — never the subset joint.
+            "joint_probability": joint_probability if joint_emitted else None,
             "conditional_probabilities": conditional_probs if conditional_probs else None,
         }

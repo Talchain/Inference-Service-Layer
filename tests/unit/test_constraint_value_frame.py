@@ -618,53 +618,165 @@ class TestConvertibilityRefusals:
 
 
 # =============================================================================
-# 4. WHOLE-BLOCK REFUSAL — a joint probability is a conjunction.
+# 4. ONE LIMIT'S REFUSAL NEVER SILENCES ANOTHER (B5, AI Quality #70 5855345225 /
+#    5855511541). Each constraint is scored or refused ON ITS OWN; only the JOINT
+#    ("all your limits met") is withheld while any constraint is unscored.
 # =============================================================================
 
 
-class TestPartialAttestationSuppressesTheJoint:
-    """P(ALL satisfied) is unresolvable if ANY conjunct is unresolvable.
+def unattested_sibling() -> GoalConstraint:
+    """No value_frame: refused as CONSTRAINT_FRAME_UNSPECIFIED / frame_not_stamped."""
+    return GoalConstraint(
+        **{
+            "constraint_id": "cid-second",
+            "node_id": "c",
+            "operator": "<=",
+            "value": 0.95,
+        }
+    )
 
-    `ConstraintAnalysisV2.joint_probability` is a REQUIRED wire field with a live
-    consumer in another repo, so a partially-populated block cannot be emitted
-    honestly. `constraint_analysis` is already Optional and already absent on the
-    no-constraints path, so absence is the shape every consumer already handles.
+
+def unconvertible_sibling() -> GoalConstraint:
+    """Paul's 0e19bb82 shape: a LEVEL limit on a derived node that carries no
+    observed_state (the spend limit on a calculated outcome). Refused as
+    CONSTRAINT_NOT_CONVERTIBLE / missing_target_baseline."""
+    return GoalConstraint(
+        **{
+            "constraint_id": "cid-spend-like",
+            "node_id": "g",
+            "operator": "<=",
+            "value": 0.9,
+        },
+        value_frame="level",
+    )
+
+
+REFUSED_SIBLINGS = [
+    pytest.param(unattested_sibling, "cid-second", "CONSTRAINT_FRAME_UNSPECIFIED", id="unattested"),
+    pytest.param(
+        unconvertible_sibling,
+        "cid-spend-like",
+        "CONSTRAINT_NOT_CONVERTIBLE",
+        id="unconvertible_0e19bb82",
+    ),
+]
+
+
+class TestOneRefusalNeverSilencesAnother:
+    """SUPERSEDES the 2.798 whole-block refusal (`TestPartialAttestationSuppressesTheJoint`).
+
+    The block used to be all-or-nothing, so one unconvertible limit silenced every
+    limit: on Paul's 0e19bb82 the churn limit could not be scored because the spend
+    limit could not. The honest unit is the LIMIT. What stays all-or-nothing is the
+    JOINT: P(ALL satisfied) is unresolvable if any conjunct is, so it is ABSENT (never
+    computed over the scored subset — that would say "all your limits are met" when
+    one was never checked).
     """
 
-    def test_one_unattested_constraint_suppresses_the_whole_block(self):
-        unattested = GoalConstraint(
-            **{
-                "constraint_id": "cid-second",
-                "node_id": "c",
-                "operator": "<=",
-                "value": 0.95,
-            }
-        )
-        response = analyse(value_frame="level", extra_constraints=[unattested])
+    @pytest.mark.parametrize("make_sibling,sibling_id,sibling_code", REFUSED_SIBLINGS)
+    def test_the_scoreable_constraint_is_scored_beside_a_refused_one(
+        self, make_sibling, sibling_id, sibling_code
+    ):
+        response = analyse(value_frame="level", extra_constraints=[make_sibling()])
+        analysis = only_result(response).constraint_analysis
 
-        assert only_result(response).constraint_analysis is None, (
-            "a joint probability computed over a resolved conjunct AND an "
-            "unresolved one is not a probability of anything"
+        assert analysis is not None, "one refused limit must not silence a scoreable sibling"
+        assert [c.constraint_id for c in analysis.constraints] == [
+            CID
+        ], "only the scored limit carries a row; the refused one is absent, never 0 or 1"
+        assert constraint_by_id(analysis, CID).prob_satisfied == pytest.approx(
+            TRUE_LEVEL_PROBABILITY, abs=TOL
         )
+
+    @pytest.mark.parametrize("make_sibling,sibling_id,sibling_code", REFUSED_SIBLINGS)
+    def test_the_joint_is_withheld_while_any_constraint_is_unscored(
+        self, make_sibling, sibling_id, sibling_code
+    ):
+        response = analyse(value_frame="level", extra_constraints=[make_sibling()])
+        analysis = only_result(response).constraint_analysis
+
+        assert analysis is not None
+        assert (
+            analysis.joint_probability is None
+        ), "a joint over the scored subset would certify a limit that was never checked"
+        refused = [
+            w.detail["constraint_id"] for w in response.inference_warnings if w.code == sibling_code
+        ]
+        assert refused == [sibling_id], "the refusal names the refused limit, and only it"
 
     def test_the_refusal_names_the_unattested_constraint_not_the_attested_one(self):
-        unattested = GoalConstraint(
-            **{
-                "constraint_id": "cid-second",
-                "node_id": "c",
-                "operator": "<=",
-                "value": 0.95,
-            }
-        )
-        response = analyse(value_frame="level", extra_constraints=[unattested])
+        response = analyse(value_frame="level", extra_constraints=[unattested_sibling()])
 
         warnings = unstamped_warnings(response)
         assert [w.detail["constraint_id"] for w in warnings] == [
             "cid-second"
         ], "the attested constraint is not the problem and must not be blamed"
 
+    def test_conditionals_keep_the_request_indices_of_the_scored_constraints(self):
+        """Indices on the wire are positions in goal_constraints (the V2 contract).
+        With request order [CID, refused, second], the scored pair is (0, 2)."""
+        second = GoalConstraint(
+            **{"constraint_id": "cid-second", "node_id": "c", "operator": "<=", "value": 0.95},
+            value_frame="level",
+        )
+        response = analyse(value_frame="level", extra_constraints=[unconvertible_sibling(), second])
+        analysis = only_result(response).constraint_analysis
+
+        assert analysis is not None
+        assert [c.constraint_id for c in analysis.constraints] == [CID, "cid-second"]
+        assert analysis.joint_probability is None
+        conditionals = analysis.conditional_probabilities
+        assert conditionals is not None and set(conditionals) == {"0", "2"}
+        # P(C2 | C0) = P(f in [0.5, 0.8]) / P(f <= 0.8) = 0.3 / 0.8.
+        assert conditionals["0"]["2"] == pytest.approx(0.375, abs=TOL)
+        assert conditionals["2"]["0"] == pytest.approx(0.6, abs=TOL)
+
+    def test_the_joint_never_feeds_p_win_sensitivity_while_a_limit_is_unscored(self):
+        """The SECOND producer of the joint (EVPI's P(joint_goal) metric) must also
+        refuse on a mixed run, not fold a joint over the scored subset."""
+        response = analyse(
+            value_frame="level", extra_constraints=[unconvertible_sibling()], include_voi=True
+        )
+
+        assert only_result(response).constraint_analysis is not None
+        assert response.p_win_sensitivity is None
+        assert [
+            w.detail.get("reason")
+            for w in response.inference_warnings
+            if w.code == "EVPI_UNAVAILABLE"
+        ] == ["constraints_not_convertible"]
+
+    def test_on_the_wire_the_joint_key_is_absent_never_null_or_the_subset_joint(self):
+        """What PLoT reads: the V2 envelope, serialised with exclude_none."""
+        import os
+
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        request = build_request(
+            value_frame="level",
+            option_interventions=PUSH_DRIVER,
+            extra_constraints=[unconvertible_sibling()],
+        )
+        headers = (
+            {}
+            if os.environ.get("ISL_AUTH_DISABLED", "").lower() == "true"
+            else {"X-API-Key": os.environ.get("ISL_API_KEY", "test_key")}
+        )
+        resp = TestClient(app).post(
+            "/api/v1/robustness/analyze/v2?response_version=2",
+            json=request.model_dump(mode="json", by_alias=True, exclude_none=True),
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text[:600]
+        [option] = resp.json()["options"]
+        analysis = option["constraint_analysis"]
+        assert [c["constraint_id"] for c in analysis["constraints"]] == [CID]
+        assert "joint_probability" not in analysis
+
     def test_two_attested_constraints_still_produce_a_joint(self):
-        """The suppression must be caused by the REFUSAL, not by having two rows."""
+        """CONTRAST: the withholding is caused by the REFUSAL, not by having two rows."""
         second = GoalConstraint(
             **{
                 "constraint_id": "cid-second",
