@@ -480,6 +480,8 @@ _OBSERVED_STATE_MENTION_MANIFEST = {
     "level_anchor_source",  # reads observed_state.source: WHO attests a held level
     "anchored_level_domain",  # reads observed_state.cap for PRESENCE: capped frame -> <= 1
     "_node_level_frames",  # echoes observed_state.source into the node_levels disclosure
+    # --- B1a-5 held root levers (presence + provenance; the level itself comes from the resolver) ---
+    "held_root_lever_levels",  # .value PRESENCE (no level -> not held) + .source attestation
 }
 
 

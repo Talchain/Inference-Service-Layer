@@ -1190,6 +1190,52 @@ def resolve_factor_central_value(
 # =============================================================================
 
 
+def held_root_lever_levels(request: "RobustnessRequestV2") -> Dict[str, float]:
+    """B1a-5 (AIQ ruling, #70 5859788040): a ROOT lever is a decision, not an uncertainty.
+
+    A root lever is a ROOT node (no parents) that at least one option SETS. Carrying on means
+    "keep today's settings", so the status quo and every option that does not set the lever
+    must share TODAY's level for it on every draw. A status quo that SAMPLES the lever while
+    an option HOLDS it compares two different worlds: on Paul's ``a6ed1bff`` the price's
+    ``std`` 1e-4 alone gave keep-current (price held at today's £49) a per-draw effect of
+    +/- epsilon around £0, so P(MRR >= £75k) read 0.4985 beside a status quo of 1.0.
+
+    Returns ``{node_id: today's level}`` for each root lever that carries a parameter
+    uncertainty AND an ATTESTED observed level. The level is the ONE central-value resolver's
+    (``resolve_factor_central_value``), i.e. exactly the mean the sampler draws around.
+
+    NOT held, and so kept in today's sampled form:
+    * a root lever with no observed level — there is no "today's level" to hold it at, and
+      inventing one (0.0) would be a fabrication;
+    * a root lever whose level no author attests (the B1a-6 authority, read through the same
+      ``LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE`` mapping ``level_anchor_source`` reads) — its
+      parameter uncertainty may be about where the lever sits TODAY, which is real
+      uncertainty the status quo must keep. (Scope proposed to AIQ; the literal "every root
+      lever" form failed 24 witnesses that model exactly that.)
+
+    Callers overwrite the SAMPLED value after ``sample_factor_values()`` rather than
+    removing the uncertainty from the sampler, so the RNG stream is consumed exactly as
+    before and every factor that is not a root lever keeps its draws byte for byte.
+    """
+    has_parent = {edge.to for edge in request.graph.edges}
+    levers = {node_id for option in request.options for node_id in option.interventions}
+    uncertainty = {u.node_id: u for u in (request.parameter_uncertainties or [])}
+    held: Dict[str, float] = {}
+    for node in request.graph.nodes:
+        if node.id not in levers or node.id in has_parent or node.id not in uncertainty:
+            continue
+        if node.observed_state is None or node.observed_state.value is None:
+            continue
+        source = node.observed_state.source
+        if source is None or LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE.get(source) is None:
+            # Today's level is not ATTESTED — read through the SAME mapping ``level_anchor_source``
+            # reads (B1a-6: the ONE list of attesting authors). An unattested level's uncertainty may
+            # be about where the lever sits TODAY, so it keeps today's sampled form.
+            continue
+        held[node.id] = resolve_factor_central_value(node, uncertainty[node.id]).value
+    return held
+
+
 class FactorSampler:
     """
     Samples factor node values with parameter uncertainty.
@@ -3569,6 +3615,7 @@ class RobustnessAnalyzerV2:
         winner_per_sample: List[Optional[str]] = []
         edge_configs_per_sample: List[Dict[Tuple[str, str], float]] = []
         factor_values_per_sample: List[Dict[str, float]] = []
+        held_root_levers = held_root_lever_levels(request)
         tie_count = 0
 
         # Initialize constraint node values tracking if needed
@@ -3611,6 +3658,9 @@ class RobustnessAnalyzerV2:
 
             # Sample factor values (parameter uncertainty)
             factor_values = factor_sampler.sample_factor_values()
+            if held_root_levers:
+                # B1a-5: a root lever sits at today's level in every arm that does not set it.
+                factor_values.update(held_root_levers)
             factor_values_per_sample.append(factor_values)
 
             # The reference draw: the SAME edge strengths and factor values as
@@ -8903,6 +8953,7 @@ class RobustnessAnalyzerV2:
             node_id: [] for node_id in sq_reference_nodes
         }
         sq_evaluator = SCMEvaluatorV2(request.graph) if sq_reference_nodes else None
+        held_root_levers = held_root_lever_levels(request)
 
         for i in range(n_samples):
             # F7: periodic wall-clock deadline re-check (mirrors the E-value
@@ -8919,6 +8970,9 @@ class RobustnessAnalyzerV2:
                 return None
             edge_config = sampler.sample_edge_configuration()
             factor_values = factor_sampler.sample_factor_values()
+            if held_root_levers:
+                # B1a-5: the same held root levers as the main pass (same rule, same levels).
+                factor_values.update(held_root_levers)
 
             if sq_evaluator is not None:
                 reference_values = sq_evaluator.evaluate_multi(

@@ -40,11 +40,14 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from unittest import mock
+
 import numpy as np
 import pytest
 
 import src.services.robustness_analyzer_v2 as rav2
 from src.models.robustness_v2 import RobustnessRequestV2
+from src.services import robustness_analyzer_v2 as rav2
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
 FIXTURE = (
@@ -146,6 +149,19 @@ def strip_sources(d: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def strip_non_root_sources(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Anchoring OFF and nothing else. B1a anchors NON-root nodes only, so removing the source from the
+    non-root nodes switches anchoring off, while a ROOT lever keeps its attested level and stays held
+    at today's level in both arms (B1a-5). ``strip_sources`` removes both and so moves the lever rule
+    too; this contrast isolates anchoring for the wire-level byte-identity rows."""
+    out = copy.deepcopy(d)
+    has_parent = {edge["to"] for edge in out["graph"]["edges"]}
+    for node in out["graph"]["nodes"]:
+        if node["id"] in has_parent and node.get("observed_state"):
+            node["observed_state"].pop("source", None)
+    return out
+
+
 def analyse(d: Dict[str, Any]):
     return RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
 
@@ -178,6 +194,12 @@ def samples(response, option_id: str) -> np.ndarray:
 
 def effect_gbp(response, option_id: str, reference: str = KEEP) -> float:
     return float(np.mean(samples(response, option_id) - samples(response, reference))) * CAP_GBP
+
+
+def effect_and_se_gbp(response, option_id: str, reference: str = KEEP):
+    """The option's mean per-draw effect against ``reference`` in £, and its Monte Carlo standard error."""
+    diff = (samples(response, option_id) - samples(response, reference)) * CAP_GBP
+    return float(np.mean(diff)), float(np.std(diff, ddof=1) / np.sqrt(len(diff)))
 
 
 def codes(response) -> set:
@@ -253,7 +275,8 @@ class TestB1a1StatusQuoReproducesTheHeldLevels:
 
     def test_keep_current_is_75k_where_it_was_15k(self):
         """Keep-current pins the price at its held £49 (PU sd 0.0001), so its band is the status quo up
-        to that pin. Before B1a the same draws read ~£15k (the propagated sum), which the contrast shows."""
+        to that pin. Before B1a the same draws read ~£15k (the propagated sum), which the contrast shows.
+        """
         d = paul_request(options=[KEEP, P59], n_samples=10_000)
         anchored, today = analyse(d), analyse_unanchored(d)
         assert abs(float(np.median(samples(anchored, KEEP))) - 0.6) <= 1e-6
@@ -261,7 +284,8 @@ class TestB1a1StatusQuoReproducesTheHeldLevels:
 
     def test_keep_current_reaches_the_wire_at_75k(self):
         """The served V2 route: keep-current's p50 is £75,000 to within £1.25, and its p10/p90 to within
-        £25 (the price pin against a price PU of sd 0.0001, x strength ~0.5: measured 5.5e-5 at p10)."""
+        £25 (the price pin against a price PU of sd 0.0001, x strength ~0.5: measured 5.5e-5 at p10).
+        """
         from fastapi.testclient import TestClient
 
         from src.api.main import app
@@ -287,7 +311,8 @@ class TestB1a1StatusQuoReproducesTheHeldLevels:
 class TestB1a2RootLeverOptionsAreUnchanged:
     """The Monte Carlo estimates of the two price effects on this seed are +£2,421.08 / +£1,210.54 at
     n=10,000 (3717e36 and this branch alike); the analytic expected values the acceptance row quotes are
-    0.0198447 x £125,000 = +£2,480.6 and half that, +£1,240.3. What B1a must not move is the estimate."""
+    0.0198447 x £125,000 = +£2,480.6 and half that, +£1,240.3. What B1a must not move is the estimate.
+    """
 
     @pytest.fixture(scope="class")
     def pair(self):
@@ -332,12 +357,18 @@ class TestB1a3EffectsAtThePersistedLevels:
     def persisted(self):
         return analyse(paul_request(options=SIX_OPTIONS, n_samples=10_000))
 
-    def test_conversion_is_plus_17_56(self, persisted):
-        assert abs(effect_gbp(persisted, CONVERSION) - CONVERSION_EFFECT_AT_BASE_GBP) <= 1e-6
+    # AIQ re-statement (#70 5859788040): once the status quo and every option share today's level for a
+    # ROOT lever (B1a-5), an effect is no longer byte-identical to the sampled-lever form. It must stay
+    # within 3 Monte Carlo standard errors of the reference, with its sign unchanged.
 
-    def test_retention_is_plus_8_71_and_above_keep_current(self, persisted):
-        effect = effect_gbp(persisted, RETENTION)
-        assert abs(effect - RETENTION_EFFECT_AT_BASE_GBP) <= 1e-6
+    def test_conversion_is_plus_17_56_within_3_se(self, persisted):
+        effect, se = effect_and_se_gbp(persisted, CONVERSION)
+        assert abs(effect - CONVERSION_EFFECT_AT_BASE_GBP) <= 3 * se, (effect, se)
+        assert effect > 0.0
+
+    def test_retention_is_plus_8_71_within_3_se_and_above_keep_current(self, persisted):
+        effect, se = effect_and_se_gbp(persisted, RETENTION)
+        assert abs(effect - RETENTION_EFFECT_AT_BASE_GBP) <= 3 * se, (effect, se)
         assert effect > 0.0
 
     def test_an_effect_whose_levels_leave_the_domain_is_unclamped(self):
@@ -376,10 +407,15 @@ class TestB1a4StructuralOutputsAreByteIdentical:
 
     @pytest.fixture(scope="class")
     def pair(self):
+        """B1a-4 isolates ANCHORING: the held-root-lever rule (B1a-5) is made inert here, because it
+        deliberately moves lever-uncertainty outputs (named in ``TestB1a5HeldRootLeverNamedMoves``),
+        and this row must still prove anchoring itself moves nothing structural. Both arms run with the
+        same rule, so the comparison is anchored vs unanchored and nothing else."""
         d = served_request(options=SIX_OPTIONS)
         d["include_path_decomposition"] = True
         d["control_candidates"] = [{"factor_id": PRICE, "values": [0.245, 0.27, 0.295]}]
-        return analyse(d), analyse_unanchored(d)
+        with mock.patch.object(rav2, "held_root_lever_levels", lambda request: {}):
+            return analyse(d), analyse_unanchored(d)
 
     def test_everything_but_the_reported_levels_is_byte_identical(self, pair):
         anchored, today = pair
@@ -420,7 +456,7 @@ class TestB1a4OnTheV2Wire:
         client = TestClient(app)
         d = served_request(options=[KEEP, P59, P54, CONVERSION, RETENTION])
         bodies = []
-        for request_dict in (d, strip_sources(d)):
+        for request_dict in (d, strip_non_root_sources(d)):
             response = client.post(
                 "/api/v1/robustness/analyze/v2",
                 json=request_dict,
@@ -560,7 +596,8 @@ class TestB1a6OnlyAttestedLevelsAnchor:
 
     def test_epsilon_noise_reaching_a_held_level_refuses_the_anchor(self):
         """The status-quo reference is drawn without epsilon, so noise that reaches the node would be
-        read as an effect (and its [0, 1] clamp as a change). Refused, with the level plan's own reason."""
+        read as an effect (and its [0, 1] clamp as a change). Refused, with the level plan's own reason.
+        """
         d = paul_request(options=[HOLD, KEEP])
         (churn,) = [n for n in d["graph"]["nodes"] if n["id"] == CHURN]
         churn["epsilon_std"] = 0.01
@@ -603,7 +640,9 @@ class TestAnAnchoredGoalGetsNoFalseBaseDisclosure:
 
     def test_an_anchored_goal_with_a_pu_gets_neither_goal_base_disclosure(self):
         d = paul_request(options=[HOLD, KEEP])
-        d["parameter_uncertainties"].append({"node_id": GOAL, "distribution": "normal", "std": 0.05})
+        d["parameter_uncertainties"].append(
+            {"node_id": GOAL, "distribution": "normal", "std": 0.05}
+        )
         assert "GOAL_PU_BASE_ADDITIVE" in codes(analyse_unanchored(d))  # CONTRAST: true of today
         anchored = analyse(d)
         assert not {"GOAL_PU_BASE_ADDITIVE", "GOAL_OBSERVED_VALUE_UNUSED"} & codes(anchored)
@@ -759,3 +798,223 @@ class TestTheV2EnvelopeCarriesTheLevelFrames:
                 float(min(max(v, 0.0), 1.0)) for v in raw
             ], option_id
         assert np.percentile(samples(v1, GRANDFATHER), 10) < 0.0, "precondition"
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The SERVED wire, unedited — B1a-1 / B1a-2 / B1a-3 / B1a-5 (root lever) / B1a-7 moves, per AIQ's
+# re-statement #70 5859788040
+# ---------------------------------------------------------------------------------------------------------
+
+SERVED_WIRE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "anchored_delta"
+    / "paul_a295e4a1_served_wire_plot_a6da42b.json"
+)
+
+# AIQ's SERVED reference (#70 5859210779, PLoT 3203991 / ISL 3717e36; reproduced in process to the penny).
+SERVED_KEEP_CURRENT_GBP = 14_870.28
+SERVED_EFFECTS_GBP = {P59: 2_410.43, P54: 1_205.22, CONVERSION: 17.82, RETENTION: 8.98}
+
+
+def served_wire(**overrides: Any) -> Dict[str, Any]:
+    """The EXACT ISL request PLoT staging ``a6da42b9`` builds for Paul's CEE->PLoT request.
+
+    Produced in process (``POST /v2/run``, ISL stubbed at ``callAnalysisEndpoint``) from PLoT's
+    ``tests/fixtures/paul-own-a295e4a1-20260927/cee-to-plot.request.json`` (sha256 ``8bc6f257…``, the
+    request AIQ's served acceptance replays). Since PLoT #373 the wire carries conversion 0.09,
+    retention 0.025 and the churn limit 0.04 itself, so nothing here is edited."""
+    d = json.loads(SERVED_WIRE.read_text())
+    d.update(overrides)
+    return d
+
+
+def without_the_lever_rule(fn, *args):
+    with mock.patch.object(rav2, "held_root_lever_levels", lambda request: {}):
+        return fn(*args)
+
+
+class TestB1aOnTheServedWire:
+    @pytest.fixture(scope="class")
+    def served(self):
+        return analyse(served_wire())
+
+    def test_b1a_1_keep_current_sits_at_the_held_75k(self, served):
+        assert float(np.median(samples(served, KEEP))) * CAP_GBP == pytest.approx(
+            75_000.0, abs=1e-6
+        )
+
+    def test_b1a_1_control_todays_form_is_the_served_15k(self):
+        """Anchoring off (and the B1a-5 lever rule off, as served today) is exactly today's served status
+        quo — the RED this row turns GREEN."""
+        today = without_the_lever_rule(analyse_unanchored, served_wire())
+        assert float(np.mean(samples(today, KEEP))) * CAP_GBP == pytest.approx(
+            SERVED_KEEP_CURRENT_GBP, abs=0.005
+        )
+
+    @pytest.mark.parametrize("option_id", [P59, P54, CONVERSION, RETENTION])
+    def test_b1a_2_3_each_effect_is_within_3_se_of_the_served_effect(self, served, option_id):
+        effect, se = effect_and_se_gbp(served, option_id)
+        reference = SERVED_EFFECTS_GBP[option_id]
+        assert abs(effect - reference) <= 3 * se, (option_id, effect, reference, se)
+        assert np.sign(effect) == np.sign(reference)
+
+    def test_b1a_3_retention_still_beats_keep_current(self, served):
+        assert effect_and_se_gbp(served, RETENTION)[0] > 0.0
+
+    def test_b1a_2_3_control_without_the_lever_rule_the_effects_are_the_served_pennies(self):
+        """CONTROL: with the rule inert, anchoring is report-only and every effect is the served value
+        to the penny — so any move above is the lever rule's, not anchoring's."""
+        response = without_the_lever_rule(analyse, served_wire())
+        for option_id, reference in SERVED_EFFECTS_GBP.items():
+            assert effect_gbp(response, option_id) == pytest.approx(reference, abs=0.005), option_id
+
+
+class TestB1a5CarryOnHoldsARootLeverAtToday:
+    """AIQ B1a-5 (#70 5859788040): carry-on IS the status quo. Keep-current holds the ROOT lever price
+    at today's £49 (0.245); the status quo used to SAMPLE it (std 1e-4), so keep-current's per-draw
+    effect was ±ε around £0 and P(MRR >= £75k) read 0.4985 beside the status quo's 1.0. The principled
+    fix, not a carry-on special case: every arm that does not set a root lever shares today's level.
+    """
+
+    def request(self) -> Dict[str, Any]:
+        d = served_wire(goal_threshold=0.6)  # the goal at exactly today's level (£75,000)
+        d["options"] = d["options"] + [{"id": HOLD, "label": "Status quo", "interventions": {}}]
+        return d
+
+    def test_precondition_price_is_a_root_lever_with_a_sampled_uncertainty(self):
+        d = self.request()
+        assert PRICE not in {e["to"] for e in d["graph"]["edges"]}
+        assert any(u["node_id"] == PRICE for u in d["parameter_uncertainties"])
+        assert rav2.held_root_lever_levels(RobustnessRequestV2.model_validate(d)) == {PRICE: 0.245}
+
+    def test_carry_on_effect_is_exactly_zero_on_every_draw(self):
+        response = analyse(self.request())
+        assert np.array_equal(samples(response, KEEP), samples(response, HOLD))
+
+    def test_carry_on_goal_probability_equals_the_status_quo(self):
+        response = analyse(self.request())
+        assert (
+            result(response, KEEP).probability_of_goal == result(response, HOLD).probability_of_goal
+        )
+
+    def test_the_rows_above_are_red_without_the_rule(self):
+        """CONTROL: the sampled-lever artefact is real on this wire (the RED this row fixes)."""
+        response = without_the_lever_rule(analyse, self.request())
+        assert not np.array_equal(samples(response, KEEP), samples(response, HOLD))
+        assert (
+            result(response, KEEP).probability_of_goal < result(response, HOLD).probability_of_goal
+        )
+
+    def test_a_root_lever_with_no_observed_level_is_not_held(self):
+        """No "today's level" to hold it at: inventing 0.0 would be a fabrication."""
+        d = self.request()
+        for node in d["graph"]["nodes"]:
+            if node["id"] == PRICE:
+                node["observed_state"] = None
+        assert PRICE not in rav2.held_root_lever_levels(RobustnessRequestV2.model_validate(d))
+
+    @pytest.mark.parametrize("source", [None, "computed", "engine_default"])
+    def test_a_root_lever_whose_level_is_not_attested_is_not_held(self, source):
+        """SCOPE (proposed to AIQ): only an ATTESTED level is "today's level" — the SAME authority as
+        B1a-6. An unattested lever's uncertainty may be about where it sits TODAY (the level-frame,
+        conditional-winner and correlation witnesses model exactly that), so it keeps its sampled form.
+        Mutant: drop the attestation check -> RED here and in 24 witnesses across the suite."""
+        d = self.request()
+        for node in d["graph"]["nodes"]:
+            if node["id"] == PRICE:
+                node["observed_state"]["source"] = source
+        assert PRICE not in rav2.held_root_lever_levels(RobustnessRequestV2.model_validate(d))
+
+    def test_a_root_that_no_option_sets_keeps_its_sampled_uncertainty(self):
+        """``pro_paying_subscribers`` is a root with a PU that no option sets: an uncertainty, not a
+        decision. It is not held."""
+        d = self.request()
+        assert SUBS not in rav2.held_root_lever_levels(RobustnessRequestV2.model_validate(d))
+
+
+class TestB1a5HeldRootLeverNamedMoves:
+    """AIQ B1a-4 / B1a-7 re-stated: every output the lever rule moves is NAMED here, before -> after, on
+    the served wire at the £75,000 threshold. An output that moves and is not in ``MOVED`` is RED.
+
+    TWO causes, both named. (1) The rule itself: arms that do not set the price no longer carry its
+    sampled spread. (2) A PRE-EXISTING coupling it exposes: tie-breaking draws from the EDGE sampler's
+    RNG (``sampler.rng.choice(winners)``), and holding the lever creates exact ties (519 -> 530), so from
+    the first new tie (draw 1,107 of 10,000) the edge stream is realised differently. That re-realisation
+    moves absolute outcomes by Monte Carlo noise (keep-current's today-form mean £14,870.28 -> £15,047.70,
+    1.7 SE of £104) — every effect is a within-run common-random-numbers difference, so effects stay
+    valid (``TestB1aOnTheServedWire``: each within 3 SE of the served reference)."""
+
+    MOVED = {
+        "_metadata",
+        "factor_evppi",
+        "factor_sensitivity",
+        "recommendation_confidence",
+        "results",
+        "robustness",
+        "sensitivity",
+    }
+    VOLATILE = {"request_id", "timing", "latency_ms", "computed_at", "metadata"}
+
+    # P(goal >= £75,000) per option: sampled lever -> held lever (measured, 2,000... n = the wire's 10,000).
+    GOAL_PROBABILITY = {
+        KEEP: (0.5333, 1.0),
+        P59: (0.8575, 0.8609),
+        P54: (0.8575, 0.8609),
+        CONVERSION: (0.9721, 0.9735),
+        RETENTION: (0.9707, 0.97),
+    }
+
+    @pytest.fixture(scope="class")
+    def pair(self):
+        d = served_wire(goal_threshold=0.6)
+        after = analyse(d).model_dump(mode="json", by_alias=True)
+        before = without_the_lever_rule(analyse, d).model_dump(mode="json", by_alias=True)
+        return before, after
+
+    def test_only_the_named_outputs_move(self, pair):
+        before, after = pair
+        moved = {
+            k
+            for k in set(before) | set(after)
+            if k not in self.VOLATILE and _json(before.get(k)) != _json(after.get(k))
+        }
+        assert moved == self.MOVED
+
+    @pytest.mark.parametrize("option_id", list(GOAL_PROBABILITY))
+    def test_each_goal_probability_move_is_the_named_one(self, pair, option_id):
+        before, after = pair
+        was, now = self.GOAL_PROBABILITY[option_id]
+        assert (
+            next(r for r in before["results"] if r["option_id"] == option_id)["probability_of_goal"]
+            == was
+        )
+        assert (
+            next(r for r in after["results"] if r["option_id"] == option_id)["probability_of_goal"]
+            == now
+        )
+
+    def test_the_tie_count_move_is_the_named_one(self, pair):
+        before, after = pair
+        assert (before["_metadata"]["tie_count"], after["_metadata"]["tie_count"]) == (519, 530)
+
+    def test_the_recommendation_and_the_fragile_edge_set_do_not_move(self, pair):
+        before, after = pair
+        assert before["recommended_option_id"] == after["recommended_option_id"] == P59
+        assert before["robustness"]["fragile_edges"] == after["robustness"]["fragile_edges"]
+        assert before["robustness"]["is_robust"] == after["robustness"]["is_robust"] is True
+
+
+class TestS2AStrictLimitIsRefusedAtTheEngine:
+    """DL gate (#70 5860001229) / AIQ S-2 (5859984425): once B1a makes today's level an exact atom, a
+    strict limit read as non-strict is a wrong pass exactly at today's level. ISL's half of S-2: the
+    comparator admits only ``>=`` / ``<=``, so a strict operator is REFUSED at validation — never
+    coerced. (Whether CEE/PLoT coerce it before it reaches ISL is Canonical's measurement.)"""
+
+    @pytest.mark.parametrize("operator", ["<", ">"])
+    def test_a_strict_operator_is_refused_not_coerced(self, operator):
+        d = served_wire()
+        d["goal_constraints"][0]["operator"] = operator
+        with pytest.raises(Exception) as excinfo:
+            RobustnessRequestV2.model_validate(d)
+        assert "operator" in str(excinfo.value)
