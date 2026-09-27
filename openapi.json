@@ -3857,6 +3857,21 @@
             "title": "Inference Warnings",
             "type": "array"
           },
+          "node_levels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NodeLevelFrame"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per non-root node: 'anchored_level' (an attested held level, with its author, domain and per-option level_out_of_domain_share) or 'no_level'. Absent when the graph has no non-root node.",
+            "title": "Node Levels"
+          },
           "objective_ranking": {
             "anyOf": [
               {
@@ -4268,6 +4283,139 @@
           }
         },
         "title": "LevelDomain",
+        "type": "object"
+      },
+      "NodeLevelFrame": {
+        "description": "One non-root node's evaluation frame.",
+        "properties": {
+          "frame": {
+            "description": "'anchored_level': the node holds an attested level; ISL evaluates it as that level plus the change its parents make from the same draw's status quo, so each of its samples is a LEVEL and the status quo reproduces the held level. 'no_level': the node is its parents' propagated sum (today's form); its samples are NOT levels and must never be shown as one.",
+            "enum": [
+              "anchored_level",
+              "no_level"
+            ],
+            "title": "Frame",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present iff frame is 'anchored_level': the held level the status quo reproduces (observed_state.baseline, else observed_state.value), in the node's own frame.",
+            "title": "Level"
+          },
+          "level_anchor_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user_stated",
+                  "user_ratified",
+                  "olumi_estimate"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present iff frame is 'anchored_level': who authored the held level. 'olumi_estimate' means a band or limit on this node rests on Olumi's own estimate of today's level.",
+            "title": "Level Anchor Source"
+          },
+          "level_domain_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anchored nodes only: the highest level, in its own frame. 1 when the node carries a cap (its level is a share of that cap); absent otherwise.",
+            "title": "Level Domain Max"
+          },
+          "level_domain_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anchored nodes only: the lowest level the quantity can take, in its own frame. 0 when the held level is non-negative (AIQ 5855046894 (2)); absent otherwise.",
+            "title": "Level Domain Min"
+          },
+          "level_out_of_domain_share": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anchored nodes whose level ISL reports (the goal band, a limit's target) and that have a domain: option_id -> the share of that option's draws whose level lies outside the domain. Reported levels (the goal band, limit probabilities) are clamped to the domain; win shares, rankings and differences are computed on the UNCLAMPED draws. A share above 0 means the model's own changes push the quantity somewhere it cannot go, in that share of futures.",
+            "title": "Level Out Of Domain Share"
+          },
+          "no_level_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "no_observed_level",
+                  "source_not_attested"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present iff frame is 'no_level': 'no_observed_level' (the node states no level) or 'source_not_attested' (it states one, but with no source or a source that is not an attested author, so it is never used as an anchor).",
+            "title": "No Level Reason"
+          },
+          "node_id": {
+            "description": "The non-root node this frame describes",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "observed_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node's observed_state.source, echoed verbatim when present. Echo only.",
+            "title": "Observed Source"
+          },
+          "parameter_uncertainty_unused": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Anchored nodes only: true when the request carried a parameter_uncertainty for this node. An anchored node's status quo is its held level on every draw, so that draw is not used.",
+            "title": "Parameter Uncertainty Unused"
+          }
+        },
+        "required": [
+          "node_id",
+          "frame"
+        ],
+        "title": "NodeLevelFrame",
         "type": "object"
       },
       "NodeV2": {
@@ -6396,6 +6544,21 @@
             },
             "title": "Inference Warnings",
             "type": "array"
+          },
+          "node_levels": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/NodeLevelFrame"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per non-root node: anchored at an attested level (with its author, domain and per-option out-of-domain share) or 'no level'. Absent when the graph has no non-root node.",
+            "title": "Node Levels"
           },
           "objective_ranking": {
             "allOf": [

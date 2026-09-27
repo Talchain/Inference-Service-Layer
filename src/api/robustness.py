@@ -16,7 +16,7 @@ import logging
 import math
 import uuid
 
-from typing import Any, Dict, NamedTuple, Optional, Union
+from typing import Any, Dict, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 
@@ -873,6 +873,31 @@ async def _analyze_robustness_v2_enhanced(
         # Task 3: Build option label lookup for propagation to V2 response
         option_label_map = {opt.id: opt.label for opt in request.options}
 
+        # B1a (AIQ 5855046894 (2)): when the goal is evaluated at an attested level, its
+        # band is a LEVEL and is reported clamped to the goal's domain. Win shares and
+        # every difference stay on the unclamped draws; how often the draws left the
+        # domain is disclosed per option in node_levels[goal].level_out_of_domain_share.
+        # The band family only (p10/p50/p90): mean, std and the downside block are not
+        # clamped here.
+        goal_level_domain: Optional[Tuple[float, float]] = None
+        for level_frame in v1_response.node_levels or []:
+            if (
+                level_frame.node_id == request.goal_node_id
+                and level_frame.frame == "anchored_level"
+                and (
+                    level_frame.level_domain_min is not None
+                    or level_frame.level_domain_max is not None
+                )
+            ):
+                goal_level_domain = (
+                    -math.inf
+                    if level_frame.level_domain_min is None
+                    else level_frame.level_domain_min,
+                    math.inf
+                    if level_frame.level_domain_max is None
+                    else level_frame.level_domain_max,
+                )
+
         # B2 downside — JOINT expected regret is computed in the ANALYZER from the
         # PRE-noise CRN-aligned outcomes (the same population as win_probability)
         # and threaded here via OptionResult.pre_noise_expected_regret (a regular
@@ -1016,6 +1041,11 @@ async def _analyze_robustness_v2_enhanced(
                         p50_val = None
                         p90_val = None
                         percentiles_source = "unavailable"
+                    elif goal_level_domain is not None:
+                        low, high = goal_level_domain
+                        p10_val, p50_val, p90_val = (
+                            min(max(v, low), high) for v in (p10_val, p50_val, p90_val)
+                        )
                     # PRE-noise CRN-aligned joint regret (B2 CRN-fix F1), threaded
                     # from the analyzer. Present for every option with samples; if
                     # unexpectedly absent, omit downside rather than fabricate —
@@ -1508,6 +1538,10 @@ async def _analyze_robustness_v2_enhanced(
         # user_stated_ranges, or their typed refusals). None when no ranges were
         # stated → absent on wire. Echo only — compute never reads these (S3).
         builder.set_range_fit_disclosures(v1_response.range_fit_disclosures)
+
+        # B1a: each non-root node's evaluation frame (anchored level / no level), with the
+        # author of every anchored level and its per-option out-of-domain share.
+        builder.set_node_levels(v1_response.node_levels)
 
         # T1-6: Path decomposition passthrough (additive; request-gated by
         # include_path_decomposition so it only appears when asked for).
