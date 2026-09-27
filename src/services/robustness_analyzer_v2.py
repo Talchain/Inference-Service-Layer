@@ -1124,6 +1124,17 @@ def level_anchor_source(node: NodeV2) -> Optional[LevelAnchorSource]:
     return LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE.get(observed.source)
 
 
+def todays_level_is_attested(node: NodeV2) -> bool:
+    """B1a-5: whether an author attests the node's level TODAY, so that a setting equal
+    to it can be "no change" (``is_todays_level``). The SAME mapping as B1a-6's anchor
+    (``LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE``), read on its own so that anchoring and
+    the no-change rule stay separately switchable: a source-less value is never today.
+    """
+    observed = node.observed_state
+    source = None if observed is None else observed.source
+    return source is not None and source in LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE
+
+
 def anchored_level_domain(node: NodeV2, level: float) -> Tuple[Optional[float], Optional[float]]:
     """The levels an anchored quantity can take, in its own frame (AIQ 5855046894 (2)).
 
@@ -1475,8 +1486,10 @@ class SCMEvaluatorV2:
             self._children[edge.from_].append(edge.to)
             self._parents[edge.to].append(edge.from_)
 
-        # Today's level of every node that states one, root or not (B1a-5: a setting
-        # equal to it changes nothing). A node with no level cannot be "equal".
+        # B1a-5: today's level of every node whose level an author ATTESTS, root or not
+        # (a setting equal to it changes nothing). Attestation is B1a-6's one mapping
+        # (``level_anchor_source``): a source-less value never anchors, so it is never
+        # "today" either, and a node with no level cannot be "equal".
         self._todays_levels: Dict[str, float] = {}
         # N6: the non-root nodes whose level an option can set in the model's frame
         # (``_in_model_frame``). Roots are absent on purpose: their samples ARE levels.
@@ -1485,7 +1498,8 @@ class SCMEvaluatorV2:
             level = status_quo_level(node)
             if level is None:
                 continue
-            self._todays_levels[node.id] = level
+            if todays_level_is_attested(node):
+                self._todays_levels[node.id] = level
             if self._parents.get(node.id):
                 self._status_quo_levels[node.id] = level
 
@@ -1678,8 +1692,8 @@ class SCMEvaluatorV2:
         Everything the option does upstream is cut off, as ``do()`` requires. A setting
         on a node with no level for today is written as given, as before.
 
-        B1a-5 (AIQ ruling ISL #184 5860095249): a setting EQUAL to the node's level
-        today (``is_todays_level``) is no change, root or not. The node takes the
+        B1a-5 (AIQ ruling ISL #184 5860095249): a setting EQUAL to the node's ATTESTED
+        level today (``is_todays_level``) is no change, root or not. The node takes the
         status quo's OWN sample on this draw, so a root keeps its sampled uncertainty
         exactly as the status quo sees it, and "keep it as it is" is the status quo
         draw for draw. It stays pinned (upstream still cut, no epsilon drawn for it),

@@ -146,6 +146,18 @@ def strip_sources(d: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def strip_non_root_sources(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Anchoring off through the wire: only NON-root sources removed. Anchoring applies to non-roots
+    only, so this switches it off and nothing else; a root's attested level still decides B1a-5's
+    "no change" on both sides (``strip_sources`` would switch B1a-5 off too)."""
+    out = copy.deepcopy(d)
+    targets = {edge["to"] for edge in out["graph"]["edges"]}
+    for node in out["graph"]["nodes"]:
+        if node["id"] in targets and node.get("observed_state"):
+            node["observed_state"].pop("source", None)
+    return out
+
+
 def analyse(d: Dict[str, Any]):
     return RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
 
@@ -487,7 +499,7 @@ class TestB1a4OnTheV2Wire:
         client = TestClient(app)
         d = served_request(options=[KEEP, P59, P54, CONVERSION, RETENTION])
         bodies = []
-        for request_dict in (d, strip_sources(d)):
+        for request_dict in (d, strip_non_root_sources(d)):
             response = client.post(
                 "/api/v1/robustness/analyze/v2",
                 json=request_dict,
@@ -969,6 +981,17 @@ class TestB1a5CarryOnIsTheStatusQuo:
         ]
         (option,) = [o for o in d["options"] if o["id"] == KEEP]
         option["interventions"] = {GRANDFATHERED: 0.0}
+        response = analyse(d)
+        assert not np.array_equal(samples(response, KEEP), samples(response, HOLD))
+
+    def test_an_unattested_level_is_never_today(self):
+        """The same value with no author (price's source removed) is not an attested "today", so keep-current
+        HOLDS it — B1a-6's mapping, the rule the uncertain-lever tests rely on (a source-less central value
+        pinned against its own wide PU is a real action). Attestation dropped from the rule turns this RED.
+        """
+        d = self.request()
+        (price,) = [n for n in d["graph"]["nodes"] if n["id"] == PRICE]
+        price["observed_state"].pop("source")
         response = analyse(d)
         assert not np.array_equal(samples(response, KEEP), samples(response, HOLD))
 
