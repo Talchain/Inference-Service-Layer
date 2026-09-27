@@ -21,6 +21,7 @@ from src.__version__ import __version__ as engine_version
 from src.constants import MIN_VALID_RATIO
 from src.models.critique import INTERNAL_ERROR
 from src.models.range_fit import RangeFitDisclosure
+from src.models.node_level import NodeLevelFrame
 from src.models.response_v2 import (
     SUPPRESSED_ATTR_FACTOR_SENSITIVITY,
     ConditionalWinnerV2,
@@ -177,6 +178,8 @@ class ResponseBuilder:
         # ROADMAP 2.720: range-fit disclosures (present iff user_stated_ranges
         # was supplied). Echo only — never read by compute (S3).
         self.range_fit_disclosures: Optional[List[RangeFitDisclosure]] = None
+        # B1a: per non-root node evaluation frame (anchored level / no level).
+        self.node_levels: Optional[List[NodeLevelFrame]] = None
 
     def add_critique(self, critique: CritiqueV2) -> None:
         """Add a single critique."""
@@ -282,6 +285,10 @@ class ResponseBuilder:
     ) -> None:
         """Set the range-fit disclosure block (ROADMAP 2.720)."""
         self.range_fit_disclosures = range_fit_disclosures
+
+    def set_node_levels(self, node_levels: Optional[List[NodeLevelFrame]]) -> None:
+        """Set the per non-root node evaluation frames (B1a)."""
+        self.node_levels = node_levels
 
     def _determine_analysis_status(self) -> str:
         """Determine overall analysis status."""
@@ -389,6 +396,7 @@ class ResponseBuilder:
             sensitivity_reference_option_id=self.sensitivity_reference_option_id,  # T1-5
             correlation_model=self.correlation_model,  # B3-S1
             range_fit_disclosures=self.range_fit_disclosures,  # ROADMAP 2.720
+            node_levels=self.node_levels,  # B1a
             auto_noise_applied=self.auto_noise_applied,
             sample_population_provenance=self.sample_population_provenance,
             request_id=self.request_id,

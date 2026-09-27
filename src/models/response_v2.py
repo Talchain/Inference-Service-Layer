@@ -23,6 +23,7 @@ from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
 # Range→distribution disclosure model (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure
+from src.models.node_level import NodeLevelFrame
 
 
 class InferenceWarning(BaseModel):
@@ -1999,6 +2000,17 @@ class ISLResponseV2(BaseModel):
         "user_stated_ranges: fitted parameters for display (or a typed refusal). "
         "Absent when no ranges were stated. Carried, not applied — compute is "
         "byte-identical in S3.",
+    )
+
+    # B1a (#70 5855068711 — additive optional): each NON-ROOT node's evaluation frame.
+    # 'anchored_level' = ISL evaluated the node at its attested held level (its samples
+    # and the goal band are LEVELS; level_anchor_source names whose figure). 'no_level'
+    # = a propagated sum, never to be shown as a level.
+    node_levels: Optional[List[NodeLevelFrame]] = Field(
+        None,
+        description="Per non-root node: 'anchored_level' (an attested held level, with its "
+        "author, domain and per-option level_out_of_domain_share) or 'no_level'. Absent "
+        "when the graph has no non-root node.",
     )
 
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can

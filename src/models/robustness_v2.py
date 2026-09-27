@@ -38,6 +38,7 @@ from src.models.response_v2 import (
 
 # Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure, UserStatedRange
+from src.models.node_level import NodeLevelFrame
 
 # Pure-numpy correlation helpers (no circular import — correlation.py imports nothing
 # from the model layer). Used to reject HARD-INVALID correlation matrices at request
@@ -2276,6 +2277,16 @@ class RobustnessResponseV2(BaseModel):
         "interquartile fit): fitted parameters for display, or the typed refusal. "
         "Absent when no ranges were stated. Carried, not applied — compute is "
         "byte-identical (S3).",
+    )
+    # B1a (#70 5855068711): each NON-ROOT node's evaluation frame — an attested held
+    # level (anchored delta: its samples are levels) or no level (its samples are a
+    # propagated sum and must never be shown as a level). A REGULAR field so it
+    # survives the offload worker's model_dump_json/model_validate_json boundary.
+    node_levels: Optional[List[NodeLevelFrame]] = Field(
+        None,
+        description="Per non-root node: anchored at an attested level (with its author, "
+        "domain and per-option out-of-domain share) or 'no level'. Absent when the "
+        "graph has no non-root node.",
     )
 
     model_config = {

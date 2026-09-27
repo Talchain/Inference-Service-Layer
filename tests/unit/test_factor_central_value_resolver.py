@@ -444,9 +444,10 @@ _VALUE_READ_ALLOWED = {
         "central-value resolver."
     ),
     "status_quo_level": (
-        "N6: TODAY'S LEVEL of a non-root quantity (baseline, else observed value), the "
-        "anchor for reading an option's level in the model's frame. The level the "
-        "status quo stands for — not the factor's central value to sample around."
+        "N6: TODAY'S LEVEL of a quantity (baseline, else observed value), the anchor "
+        "for reading an option's level in the model's frame and (B1a-5) the level a "
+        "setting equal to it leaves unchanged. The level the status quo stands for — "
+        "not the factor's central value to sample around."
     ),
     "_build_goal_node_disclosures": (
         "The GOAL node's observed value, for the goal-frame disclosure. Not a "
@@ -476,6 +477,11 @@ _OBSERVED_STATE_MENTION_MANIFEST = {
     "_compute_conditional_winners",  # reads observed_state.unit, not .value
     "_analyze_robustness_v2_legacy",  # counts nodes with a value, for logging
     "_analyze_robustness_v2_enhanced",  # Track S provenance echo (source/type)
+    # --- B1a anchored-delta attestation (provenance and presence, never a value) ---
+    "level_anchor_source",  # reads observed_state.source: WHO attests a held level
+    "anchored_level_domain",  # reads observed_state.cap for PRESENCE: capped frame -> <= 1
+    "todays_level_is_attested",  # B1a-5: reads observed_state.source, WHO attests today's level
+    "_node_level_frames",  # echoes observed_state.source into the node_levels disclosure
 }
 
 

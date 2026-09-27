@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 79
+    "superset_count": 80
   },
   "omissions": [
     {
@@ -616,6 +616,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "factor_sensitivity_status",
       "reason": "ISL superset — ISLResponseV2.factor_sensitivity_status is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "node_levels",
+      "reason": "ISL superset — ISLResponseV2.node_levels is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5855068711 (Delivery Lead build train, row B1: anchored-delta evaluation; design 5855036638, AI Quality ruling 5855046894). Additive and optional (absent when the graph has no non-root node). Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "ISLResponseV2",

@@ -19,12 +19,25 @@ import statistics
 import time
 import uuid
 from collections import defaultdict, deque
+from types import MappingProxyType
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, NamedTuple, Optional, Tuple, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Tuple,
+    cast,
+)
 
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
 
+from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReason
 from src.models.robustness_v2 import (
     BucketResult,
     ClampMetrics,
@@ -1040,12 +1053,100 @@ def status_quo_level(node: NodeV2) -> Optional[float]:
     constraint resolver maps a pinned option's samples back through the same number.
     ``baseline`` first because it is the level plan's anchor; ``value`` because PLoT
     sends a factor's observed level there and no baseline (the served churn node).
+    It is also what an option's setting is compared with to decide it changes
+    nothing (``is_todays_level``, B1a-5), for a root as for a non-root.
     """
     observed = node.observed_state
     if observed is None:
         return None
     level = observed.baseline if observed.baseline is not None else observed.value
     return level if math.isfinite(level) else None
+
+
+# B1a-5 (AIQ ruling ISL #184 5860095249): an option that sets a factor to the level
+# it holds TODAY changes nothing, so it takes the status quo's OWN draws of that
+# factor and its effect is exactly 0 on every draw. "Equal" is RELATIVE (S-3) and is
+# decided here, once: the evaluator asks nothing else.
+NO_CHANGE_RELATIVE_TOLERANCE = 1e-9
+
+
+def is_todays_level(value: float, level: float) -> bool:
+    """True when setting a factor to ``value`` leaves it at today's ``level`` (B1a-5).
+
+    Relative, with no absolute floor: a level of exactly 0 is matched only by 0, and
+    £49.50 is never £49 (a 1% move is a change).
+    """
+    return math.isclose(value, level, rel_tol=NO_CHANGE_RELATIVE_TOLERANCE, abs_tol=0.0)
+
+
+# B1a (#70 5855068711; AIQ ruling 5855046894 (1), binding): WHO may anchor a level.
+# ANY held level anchors, and its author travels with it: the user's own figure
+# (stated in the brief or typed), a figure a person ratified without typing it, and
+# Olumi's own estimate or repair. NEVER a source-less value, and never a literal this
+# map does not name: an unknown source is honest-neutral (it does not anchor, and the
+# node is flagged 'source_not_attested'), never a guessed author. Membership is the
+# known @talchain/schemas OBSERVED_STATE_SOURCE_LITERALS (0.40.0) plus the three
+# literals the AIQ ruling names (user_stated, user_ratified, system_repaired); the
+# author classes follow the UI's valueProvenance kinds (brief/edited/assumption ->
+# stated; confirmed/panel -> ratified; ai -> Olumi's estimate).
+# An engine-defaulted ROOT (ROOT_NODE_DEFAULT_VALUE) never anchors either: anchoring
+# applies to NON-root nodes only, and a root's samples are already its levels.
+LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE: Mapping[str, LevelAnchorSource] = MappingProxyType(
+    {
+        "brief_extraction": "user_stated",
+        "explicit": "user_stated",
+        "user_override": "user_stated",
+        "user": "user_stated",
+        "user_edited": "user_stated",
+        "user_calibration": "user_stated",
+        "user_assumption": "user_stated",
+        "user_stated": "user_stated",
+        "user_confirmed": "user_ratified",
+        "panel_elicited": "user_ratified",
+        "user_ratified": "user_ratified",
+        "cee_inference": "olumi_estimate",
+        "inferred": "olumi_estimate",
+        "cee_repair": "olumi_estimate",
+        "system_repaired": "olumi_estimate",
+    }
+)
+
+
+def level_anchor_source(node: NodeV2) -> Optional[LevelAnchorSource]:
+    """Who attests the level a node holds (B1a), or None when nothing attests it.
+
+    Reads ``observed_state.source`` only — provenance, never a value. None for a node
+    with no observed_state, no source, or a source that is not an attested author.
+    """
+    observed = node.observed_state
+    if observed is None or observed.source is None:
+        return None
+    return LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE.get(observed.source)
+
+
+def todays_level_is_attested(node: NodeV2) -> bool:
+    """B1a-5: whether an author attests the node's level TODAY, so that a setting equal
+    to it can be "no change" (``is_todays_level``). The SAME mapping as B1a-6's anchor
+    (``LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE``), read on its own so that anchoring and
+    the no-change rule stay separately switchable: a source-less value is never today.
+    """
+    observed = node.observed_state
+    source = None if observed is None else observed.source
+    return source is not None and source in LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE
+
+
+def anchored_level_domain(node: NodeV2, level: float) -> Tuple[Optional[float], Optional[float]]:
+    """The levels an anchored quantity can take, in its own frame (AIQ 5855046894 (2)).
+
+    ``>= 0``, unless the held level is itself negative (then the quantity is evidently
+    signed and has no floor here); ``<= 1`` when the node carries a ``cap`` (its level
+    is a share of that cap), unless the held level already exceeds 1. The cap is read
+    for its PRESENCE only.
+    """
+    observed = node.observed_state
+    lower = 0.0 if level >= 0.0 else None
+    upper = 1.0 if observed is not None and observed.cap is not None and level <= 1.0 else None
+    return lower, upper
 
 
 def resolve_factor_central_value(
@@ -1385,12 +1486,21 @@ class SCMEvaluatorV2:
             self._children[edge.from_].append(edge.to)
             self._parents[edge.to].append(edge.from_)
 
+        # B1a-5: today's level of every node whose level an author ATTESTS, root or not
+        # (a setting equal to it changes nothing). Attestation is B1a-6's one mapping
+        # (``level_anchor_source``): a source-less value never anchors, so it is never
+        # "today" either, and a node with no level cannot be "equal".
+        self._todays_levels: Dict[str, float] = {}
         # N6: the non-root nodes whose level an option can set in the model's frame
         # (``_in_model_frame``). Roots are absent on purpose: their samples ARE levels.
         self._status_quo_levels: Dict[str, float] = {}
         for node in graph.nodes:
             level = status_quo_level(node)
-            if self._parents.get(node.id) and level is not None:
+            if level is None:
+                continue
+            if todays_level_is_attested(node):
+                self._todays_levels[node.id] = level
+            if self._parents.get(node.id):
                 self._status_quo_levels[node.id] = level
 
     def _compute_topological_order(self) -> List[str]:
@@ -1581,12 +1691,32 @@ class SCMEvaluatorV2:
         (the reference ``_run_monte_carlo`` differences against is drawn the same way).
         Everything the option does upstream is cut off, as ``do()`` requires. A setting
         on a node with no level for today is written as given, as before.
+
+        B1a-5 (AIQ ruling ISL #184 5860095249): a setting EQUAL to the node's ATTESTED
+        level today (``is_todays_level``) is no change, root or not. The node takes the
+        status quo's OWN sample on this draw, so a root keeps its sampled uncertainty
+        exactly as the status quo sees it, and "keep it as it is" is the status quo
+        draw for draw. It stays pinned (upstream still cut, no epsilon drawn for it),
+        so the option consumes the same random numbers as before. Any other value is
+        held as above, and its effect keeps the uncertainty about today's level.
         """
-        set_levels = [node_id for node_id in interventions if node_id in self._status_quo_levels]
-        if not set_levels:
+        unchanged = [
+            node_id
+            for node_id, value in interventions.items()
+            if node_id in self._todays_levels
+            and is_todays_level(value, self._todays_levels[node_id])
+        ]
+        set_levels = [
+            node_id
+            for node_id in interventions
+            if node_id in self._status_quo_levels and node_id not in unchanged
+        ]
+        if not unchanged and not set_levels:
             return interventions
         status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
         framed = dict(interventions)
+        for node_id in unchanged:
+            framed[node_id] = status_quo[node_id]
         for node_id in set_levels:
             framed[node_id] = status_quo[node_id] + (
                 interventions[node_id] - self._status_quo_levels[node_id]
@@ -2067,6 +2197,31 @@ class RobustnessAnalyzerV2:
             ):
                 defaulted_root_node_ids.append(node.id)
 
+        # B1a: each NON-ROOT node's frame. ``_node_level_frames`` is THE authority on
+        # which nodes are anchored: the reported levels below (``anchored_levels``) and
+        # the node_levels disclosure are both read off it, so they cannot drift apart.
+        # Anchoring is REPORT-ONLY (round 2, AIQ 5856229075): the Monte Carlo and every
+        # structural analysis run on today's evaluator and today's draws, untouched. An
+        # anchored node's reported LEVEL is recovered per draw from those draws:
+        #     level_i = o + (option_sample_i - status_quo_sample_i)
+        # ``level_domains`` is the reported-level clamp for anchored nodes that have
+        # one; it never reaches a difference, a win share or a structural analysis.
+        node_level_frames = self._node_level_frames(request, parent_map, uncertainty_node_ids)
+        anchored_levels: Dict[str, float] = {
+            f.node_id: f.level
+            for f in node_level_frames
+            if f.frame == "anchored_level" and f.level is not None
+        }
+        level_domains: Dict[str, Tuple[float, float]] = {
+            f.node_id: (
+                -math.inf if f.level_domain_min is None else f.level_domain_min,
+                math.inf if f.level_domain_max is None else f.level_domain_max,
+            )
+            for f in node_level_frames
+            if f.frame == "anchored_level"
+            and (f.level_domain_min is not None or f.level_domain_max is not None)
+        }
+
         # Detect constraint target nodes that will silently default to base=0.0
         # (non-root nodes without ParameterUncertainty, not fully covered by
         # interventions across all options)
@@ -2078,7 +2233,23 @@ class RobustnessAnalyzerV2:
                 # Skip warning if every option intervenes on this node
                 # (intervention value overrides the base, so base=0.0 is never used)
                 all_options_intervene = node_id in fully_intervened_node_ids
-                if not is_root and not has_uncertainty and not all_options_intervene:
+                # B1a: every limit on an ANCHORED target is read at its level, anchored at
+                # the held level (the level plan differences each draw against the same
+                # draw's status quo, so the 0.0 base offset cancels). "Defaulted to
+                # base=0.0" would then say something false about every figure reported
+                # for it, so it is withheld. A 'delta' limit on the same node compares
+                # the raw samples, where the 0.0 offset is real, and keeps the warning.
+                is_anchored_level_target = node_id in anchored_levels and all(
+                    constraint.value_frame == "level"
+                    for constraint in request.goal_constraints or []
+                    if constraint.node_id == node_id
+                )
+                if (
+                    not is_root
+                    and not has_uncertainty
+                    and not all_options_intervene
+                    and not is_anchored_level_target
+                ):
                     # Cluster-2: a non-root node's samples are the forward-
                     # propagated composition of its parents; base=0.0 is a zero
                     # exogenous OFFSET, not a fabricated value. Whether the
@@ -2265,6 +2436,7 @@ class RobustnessAnalyzerV2:
             defaulted_root_node_ids,
             seed,
             self._goal_baseline_was_consumed(request, goal_threshold_plan),
+            goal_is_anchored=request.goal_node_id in anchored_levels,
         )
         inference_warnings.extend(goal_disclosure_warnings)
 
@@ -2302,6 +2474,10 @@ class RobustnessAnalyzerV2:
                     else set()
                 )
                 | set(self._constraint_status_quo_nodes(request, scored_constraint_plans))
+                # B1a: an ANCHORED goal's band is a level, read per draw against the
+                # same reference (the reference evaluator draws no epsilon, so adding a
+                # node to this set cannot shift any stream or any other number).
+                | ({request.goal_node_id} if request.goal_node_id in anchored_levels else set())
             )
             or None,
             objective=objective_plan,
@@ -2500,6 +2676,20 @@ class RobustnessAnalyzerV2:
             status_quo_outcomes,
             scored_constraint_plans,
             status_quo_node_values,
+            level_domains=level_domains,
+            goal_level_anchor=anchored_levels.get(request.goal_node_id),
+        )
+        # B1a: per anchored node whose level is reported (the goal band, a limit's
+        # target), the share of each option's reported levels that left the node's
+        # domain. Report-only: it reads the unclamped reported levels and moves nothing.
+        node_level_frames = self._with_level_out_of_domain_shares(
+            node_level_frames,
+            level_domains,
+            request,
+            results,
+            constraint_node_values,
+            constraint_plans,
+            status_quo_node_values,
         )
 
         # Build critiques for analysis warnings
@@ -2509,7 +2699,12 @@ class RobustnessAnalyzerV2:
         # Use tolerance to catch near-zero values from floating point arithmetic
         option_labels = {opt.id: (opt.label or opt.id) for opt in request.options}
         for result in results:
-            if result.outcome_distribution.std < ZERO_VARIANCE_TOLERANCE:
+            # B1a: read on TODAY's draws (``option_outcomes``), not on the reported band.
+            # Whether an option's draws are degenerate is a property of the analysis, and
+            # an anchored band is exactly a point wherever the option changes nothing (the
+            # status quo reproduces its held level on every draw), which is not degenerate.
+            # float(np.std(...)) over the same list is what the band's std was until B1a.
+            if float(np.std(option_outcomes[result.option_id])) < ZERO_VARIANCE_TOLERANCE:
                 critiques.append(
                     DEGENERATE_OPTION_ZERO_VARIANCE.build(
                         option_label=option_labels.get(result.option_id, result.option_id),
@@ -3289,6 +3484,7 @@ class RobustnessAnalyzerV2:
             path_decomposition=path_decomposition,
             correlation_model=correlation_model,
             range_fit_disclosures=range_fit_disclosures,
+            node_levels=node_level_frames or None,
         )
 
         self.logger.info(
@@ -3676,6 +3872,157 @@ class RobustnessAnalyzerV2:
                 reaching.append(root_id)
         return sorted(reaching)
 
+    @staticmethod
+    def _node_level_frames(
+        request: RobustnessRequestV2,
+        parent_map: Dict[str, List[str]],
+        uncertainty_node_ids: set,
+    ) -> List[NodeLevelFrame]:
+        """B1a: THE authority on which NON-ROOT nodes are anchored, in graph order.
+
+        A non-root node is ANCHORED at its held level ``o`` (``status_quo_level``:
+        ``observed_state.baseline``, else ``observed_state.value``) when an attested
+        author holds it (``level_anchor_source``) and no epsilon noise can reach it.
+        Its reported levels are then recovered per draw as ``o + (option_sample -
+        status_quo_sample)`` from TODAY's draws (``_compute_option_results``,
+        ``_resolve_constraint_series``); nothing is re-evaluated, so no structural
+        analysis can move. Every other non-root node is 'no_level', with the reason.
+
+        Why epsilon refuses the anchor: the per-draw status-quo reference is drawn
+        without epsilon, and epsilon is drawn per evaluation and clamped to [0, 1], so
+        ``option - status_quo`` would carry noise and a clamp no option caused and the
+        status quo would not reproduce ``o``. The same rule, and the same reason name,
+        as the level plan's refusal (``_resolve_threshold_in_sample_frame``).
+        Roots are absent: their samples ARE levels, and an engine-defaulted root holds
+        no level at all.
+        """
+        noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
+        frames: List[NodeLevelFrame] = []
+        for node in request.graph.nodes:
+            if not parent_map.get(node.id):
+                continue
+            observed = node.observed_state
+            observed_source = observed.source if observed is not None else None
+            level = status_quo_level(node)
+            author = level_anchor_source(node)
+            if level is None:
+                reason: Optional[NoLevelReason] = "no_observed_level"
+            elif author is None:
+                reason = "source_not_attested"
+            elif noisy and RobustnessAnalyzerV2._reached_by(node.id, noisy, parent_map):
+                reason = "epsilon_breaks_status_quo_reference"
+            else:
+                reason = None
+            if reason is None:
+                assert level is not None and author is not None
+                low, high = anchored_level_domain(node, level)
+                frames.append(
+                    NodeLevelFrame(
+                        node_id=node.id,
+                        frame="anchored_level",
+                        level_anchor_source=author,
+                        observed_source=observed_source,
+                        level=level,
+                        level_domain_min=low,
+                        level_domain_max=high,
+                        parameter_uncertainty_unused=(
+                            True if node.id in uncertainty_node_ids else None
+                        ),
+                    )
+                )
+            else:
+                frames.append(
+                    NodeLevelFrame(
+                        node_id=node.id,
+                        frame="no_level",
+                        observed_source=observed_source,
+                        no_level_reason=reason,
+                    )
+                )
+        return frames
+
+    @staticmethod
+    def _reached_by(node_id: str, sources: set, parent_map: Dict[str, List[str]]) -> bool:
+        """True when ``node_id`` or any of its ancestors is in ``sources``."""
+        seen = {node_id}
+        frontier = [node_id]
+        while frontier:
+            current = frontier.pop()
+            if current in sources:
+                return True
+            for parent in parent_map.get(current, []):
+                if parent not in seen:
+                    seen.add(parent)
+                    frontier.append(parent)
+        return False
+
+    def _with_level_out_of_domain_shares(
+        self,
+        frames: List[NodeLevelFrame],
+        level_domains: Dict[str, Tuple[float, float]],
+        request: RobustnessRequestV2,
+        results: List[OptionResult],
+        constraint_node_values: Optional[Dict[str, Dict[str, List[float]]]],
+        constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]],
+        status_quo_node_values: Dict[str, List[float]],
+    ) -> List[NodeLevelFrame]:
+        """B1a: per ANCHORED node whose level ISL reports, each option's out-of-domain share.
+
+        Reported levels are the goal band (``results[].outcome_distribution.samples``,
+        which ARE levels for an anchored goal) and a 'level' limit's target (the SAME
+        resolved series the limit block scores, ``_resolve_constraint_series``, before
+        its clamp). Denominator: that option's finite levels. Report-only: it never
+        moves a probability, a win share or a sample.
+        """
+        level_series: Dict[str, Dict[str, List[float]]] = {}
+        goal_id = request.goal_node_id
+        if goal_id in level_domains:
+            level_series[goal_id] = {
+                result.option_id: list(result.outcome_distribution.samples or [])
+                for result in results
+            }
+        constraints = request.goal_constraints or []
+        if constraints and constraint_plans and constraint_node_values:
+            level_index: Dict[str, int] = {}
+            for index, constraint in enumerate(constraints):
+                if (
+                    constraint.value_frame == "level"
+                    and constraint.node_id in level_domains
+                    and constraint.node_id != goal_id
+                ):
+                    level_index.setdefault(constraint.node_id, index)
+            for option in request.options:
+                if not level_index or option.id not in constraint_node_values:
+                    continue
+                resolved = self._resolve_constraint_series(
+                    constraint_node_values,
+                    constraints,
+                    constraint_plans,
+                    status_quo_node_values,
+                    option.id,
+                )
+                for node_id, index in level_index.items():
+                    level_series.setdefault(node_id, {})[option.id] = resolved[index]
+
+        updated: List[NodeLevelFrame] = []
+        for frame in frames:
+            domain = level_domains.get(frame.node_id)
+            per_option = level_series.get(frame.node_id)
+            if domain is None or not per_option:
+                updated.append(frame)
+                continue
+            low, high = domain
+            shares: Dict[str, float] = {}
+            for option_id, series in per_option.items():
+                draws = np.asarray(series, dtype=float)
+                finite = draws[np.isfinite(draws)]
+                if finite.size == 0:
+                    continue
+                outside = int(np.count_nonzero((finite < low) | (finite > high)))
+                shares[option_id] = outside / int(finite.size)
+            updated.append(frame.model_copy(update={"level_out_of_domain_share": shares or None}))
+        return updated
+
     def _build_goal_node_disclosures(
         self,
         request: RobustnessRequestV2,
@@ -3686,6 +4033,7 @@ class RobustnessAnalyzerV2:
         defaulted_root_node_ids: List[str],
         seed: int,
         goal_baseline_consumed: bool,
+        goal_is_anchored: bool = False,
     ) -> Tuple[List[InferenceWarning], List[CritiqueV2]]:
         """
         Cluster-2 (Track S Phase 0): disclose the goal node's base/propagation
@@ -3765,7 +4113,15 @@ class RobustnessAnalyzerV2:
 
         # Non-root goal: distribution = forward-propagated composition of
         # parents (doctrine B).
-        if goal_has_pu:
+        if goal_is_anchored:
+            # B1a: an ANCHORED goal's reported band is its level, anchored at its held
+            # level (``o + (sample - status_quo_sample)`` per draw). Its observed level IS
+            # used, and a PU draw on it sits in both terms and cancels, so neither "its
+            # observed value is unused" nor "a sampled base is added to the parents' sum"
+            # is true of anything reported for it; both are withheld. Which level anchors
+            # it, whose it is, and that the PU is unused, ride node_levels.
+            pass
+        elif goal_has_pu:
             warnings.append(
                 InferenceWarning(
                     code="GOAL_PU_BASE_ADDITIVE",
@@ -5180,6 +5536,8 @@ class RobustnessAnalyzerV2:
         status_quo_outcomes: Optional[List[float]] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
+        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
+        goal_level_anchor: Optional[float] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -5202,9 +5560,32 @@ class RobustnessAnalyzerV2:
             status_quo_outcomes: Per-draw no-intervention goal values, CRN-paired
                 element-wise with every option's samples. Required by, and only
                 by, a level-frame plan (ROADMAP 2.286).
+            level_domains: B1a — node_id -> (low, high) for each ANCHORED node with a
+                domain. A reported LEVEL of such a node (the goal's level-frame
+                probability, a level limit on it) is clamped to it before any
+                comparison; win shares and samples are never touched here.
+            goal_level_anchor: B1a — the goal's held level ``o`` when the goal is
+                ANCHORED (``_node_level_frames``), else None. The goal's reported
+                distribution (``outcome_distribution``: samples, mean, std, median,
+                interval) is then its LEVEL, recovered per draw against the same
+                draw's status quo::
+
+                    level_i = o + (sample_i - status_quo_sample_i)
+
+                so the status quo reproduces ``o`` on every draw. REPORT-ONLY: every
+                other figure here (win share, regret, probability_of_goal, the limit
+                block) and every structural analysis keeps reading today's draws.
         """
         expected_regret = expected_regret or {}
+        level_domains = level_domains or {}
         results = []
+        # B1a: the per-draw status-quo reference the anchored band reads. The analyzer
+        # records it for an anchored goal (``status_quo_reference_nodes``), so its absence
+        # here is a broken invariant, not an input to degrade on.
+        status_quo_goal: Optional[np.ndarray] = None
+        if goal_level_anchor is not None:
+            assert status_quo_outcomes, "an anchored goal needs its status-quo reference"
+            status_quo_goal = np.array(status_quo_outcomes)
 
         for option in request.options:
             samples = outcomes[option.id]
@@ -5212,8 +5593,19 @@ class RobustnessAnalyzerV2:
                 continue
 
             samples_array = np.array(samples)
+            # The distribution REPORTED for this option: today's draws, or (B1a) the
+            # goal's level on each draw when the goal is anchored. Only the reported
+            # distribution reads it; everything below that is not the band reads
+            # ``samples_array``.
+            if status_quo_goal is not None:
+                assert goal_level_anchor is not None
+                reported_array = goal_level_anchor + (samples_array - status_quo_goal)
+                reported_samples = reported_array.tolist()
+            else:
+                reported_array = samples_array
+                reported_samples = samples
             ci_lower, ci_upper = self._compute_confidence_interval(
-                samples_array, request.confidence_level
+                reported_array, request.confidence_level
             )
 
             # Compute probability_of_goal from the resolved PLAN (ROADMAP 2.258 /
@@ -5239,6 +5631,10 @@ class RobustnessAnalyzerV2:
                     # all cancel instead of being mistaken for progress.
                     effect = samples_array - np.array(status_quo_outcomes)
                     compared = goal_threshold_plan.goal_baseline + effect
+                    goal_domain = level_domains.get(request.goal_node_id)
+                    if goal_domain is not None:
+                        # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
+                        compared = np.clip(compared, goal_domain[0], goal_domain[1])
                     meets = (
                         compared <= goal_threshold_plan.level_threshold
                         if request.goal_direction == "minimise"
@@ -5405,6 +5801,7 @@ class RobustnessAnalyzerV2:
                     option.id,
                     constraint_plans,
                     status_quo_node_values,
+                    level_domains=level_domains,
                 )
                 if analysis_dict:
                     # Convert dict to ConstraintAnalysis model
@@ -5437,14 +5834,15 @@ class RobustnessAnalyzerV2:
             option_result = OptionResult(
                 option_id=option.id,
                 outcome_distribution=OutcomeDistribution(
-                    mean=float(np.mean(samples_array)),
-                    std=float(np.std(samples_array)),
-                    median=float(np.median(samples_array)),
+                    mean=float(np.mean(reported_array)),
+                    std=float(np.std(reported_array)),
+                    median=float(np.median(reported_array)),
                     ci_lower=ci_lower,
                     ci_upper=ci_upper,
                     # Task 2: Store raw samples so the V2 API layer can compute
                     # actual p10/p50/p90 percentiles instead of aliasing CI bounds.
-                    samples=samples,
+                    # B1a: the REPORTED samples (levels, for an anchored goal).
+                    samples=reported_samples,
                 ),
                 win_probability=wins[option.id] / request.n_samples,
                 probability_of_goal=probability_of_goal,
@@ -9474,6 +9872,7 @@ class RobustnessAnalyzerV2:
         option_id: str,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
+        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -9535,6 +9934,29 @@ class RobustnessAnalyzerV2:
             status_quo_node_values or {},
             option_id,
         )
+        # B1a (AIQ 5855046894 (2)): a 'level' limit on an ANCHORED node reads its level
+        # CLAMPED to the node's domain, so every figure in the block (probability, joint,
+        # conditionals, margins) is about levels the quantity can take. The request's own
+        # level_domain disclosure below still reads the UNCLAMPED levels, and the node's
+        # out-of-domain share rides node_levels. Nothing here reaches a win share.
+        unclamped_values = resolved_values
+        if level_domains:
+            resolved_values = {
+                index: (
+                    [
+                        min(
+                            max(level, level_domains[constraint.node_id][0]),
+                            level_domains[constraint.node_id][1],
+                        )
+                        if math.isfinite(level)
+                        else level
+                        for level in resolved_values[index]
+                    ]
+                    if constraint.value_frame == "level" and constraint.node_id in level_domains
+                    else resolved_values[index]
+                )
+                for index, constraint in enumerate(constraints)
+            }
 
         # T3: Per-constraint and joint probability
         probabilities = self._compute_constraint_probabilities(
@@ -9607,7 +10029,7 @@ class RobustnessAnalyzerV2:
                     "near_miss_fraction": diag.get("near_miss_fraction"),
                     "binding": diag.get("binding", False),
                     "level_out_of_domain_fraction": self._level_out_of_domain_fraction(
-                        resolved_values[c_idx], constraint, informative
+                        unclamped_values[c_idx], constraint, informative
                     ),
                 }
             )
