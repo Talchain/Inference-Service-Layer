@@ -444,9 +444,10 @@ _VALUE_READ_ALLOWED = {
         "central-value resolver."
     ),
     "status_quo_level": (
-        "N6: TODAY'S LEVEL of a non-root quantity (baseline, else observed value), the "
-        "anchor for reading an option's level in the model's frame. The level the "
-        "status quo stands for — not the factor's central value to sample around."
+        "N6: TODAY'S LEVEL of a quantity (baseline, else observed value), the anchor "
+        "for reading an option's level in the model's frame and (B1a-5) the level a "
+        "setting equal to it leaves unchanged. The level the status quo stands for — "
+        "not the factor's central value to sample around."
     ),
     "_build_goal_node_disclosures": (
         "The GOAL node's observed value, for the goal-frame disclosure. Not a "

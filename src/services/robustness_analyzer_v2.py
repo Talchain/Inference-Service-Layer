@@ -1053,12 +1053,30 @@ def status_quo_level(node: NodeV2) -> Optional[float]:
     constraint resolver maps a pinned option's samples back through the same number.
     ``baseline`` first because it is the level plan's anchor; ``value`` because PLoT
     sends a factor's observed level there and no baseline (the served churn node).
+    It is also what an option's setting is compared with to decide it changes
+    nothing (``is_todays_level``, B1a-5), for a root as for a non-root.
     """
     observed = node.observed_state
     if observed is None:
         return None
     level = observed.baseline if observed.baseline is not None else observed.value
     return level if math.isfinite(level) else None
+
+
+# B1a-5 (AIQ ruling ISL #184 5860095249): an option that sets a factor to the level
+# it holds TODAY changes nothing, so it takes the status quo's OWN draws of that
+# factor and its effect is exactly 0 on every draw. "Equal" is RELATIVE (S-3) and is
+# decided here, once: the evaluator asks nothing else.
+NO_CHANGE_RELATIVE_TOLERANCE = 1e-9
+
+
+def is_todays_level(value: float, level: float) -> bool:
+    """True when setting a factor to ``value`` leaves it at today's ``level`` (B1a-5).
+
+    Relative, with no absolute floor: a level of exactly 0 is matched only by 0, and
+    £49.50 is never £49 (a 1% move is a change).
+    """
+    return math.isclose(value, level, rel_tol=NO_CHANGE_RELATIVE_TOLERANCE, abs_tol=0.0)
 
 
 # B1a (#70 5855068711; AIQ ruling 5855046894 (1), binding): WHO may anchor a level.
@@ -1457,12 +1475,18 @@ class SCMEvaluatorV2:
             self._children[edge.from_].append(edge.to)
             self._parents[edge.to].append(edge.from_)
 
+        # Today's level of every node that states one, root or not (B1a-5: a setting
+        # equal to it changes nothing). A node with no level cannot be "equal".
+        self._todays_levels: Dict[str, float] = {}
         # N6: the non-root nodes whose level an option can set in the model's frame
         # (``_in_model_frame``). Roots are absent on purpose: their samples ARE levels.
         self._status_quo_levels: Dict[str, float] = {}
         for node in graph.nodes:
             level = status_quo_level(node)
-            if self._parents.get(node.id) and level is not None:
+            if level is None:
+                continue
+            self._todays_levels[node.id] = level
+            if self._parents.get(node.id):
                 self._status_quo_levels[node.id] = level
 
     def _compute_topological_order(self) -> List[str]:
@@ -1653,12 +1677,32 @@ class SCMEvaluatorV2:
         (the reference ``_run_monte_carlo`` differences against is drawn the same way).
         Everything the option does upstream is cut off, as ``do()`` requires. A setting
         on a node with no level for today is written as given, as before.
+
+        B1a-5 (AIQ ruling ISL #184 5860095249): a setting EQUAL to the node's level
+        today (``is_todays_level``) is no change, root or not. The node takes the
+        status quo's OWN sample on this draw, so a root keeps its sampled uncertainty
+        exactly as the status quo sees it, and "keep it as it is" is the status quo
+        draw for draw. It stays pinned (upstream still cut, no epsilon drawn for it),
+        so the option consumes the same random numbers as before. Any other value is
+        held as above, and its effect keeps the uncertainty about today's level.
         """
-        set_levels = [node_id for node_id in interventions if node_id in self._status_quo_levels]
-        if not set_levels:
+        unchanged = [
+            node_id
+            for node_id, value in interventions.items()
+            if node_id in self._todays_levels
+            and is_todays_level(value, self._todays_levels[node_id])
+        ]
+        set_levels = [
+            node_id
+            for node_id in interventions
+            if node_id in self._status_quo_levels and node_id not in unchanged
+        ]
+        if not unchanged and not set_levels:
             return interventions
         status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
         framed = dict(interventions)
+        for node_id in unchanged:
+            framed[node_id] = status_quo[node_id]
         for node_id in set_levels:
             framed[node_id] = status_quo[node_id] + (
                 interventions[node_id] - self._status_quo_levels[node_id]
