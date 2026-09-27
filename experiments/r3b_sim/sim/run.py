@@ -126,12 +126,21 @@ def identities_block(
     for t in targets:
         rows: dict[str, Any] = {}
         sq_val = evals[base].nodes[t].value if evals[base].computable else None
+        spec_withheld = t in spec["declared_identities"] and (
+            spec["declared_identities"][t]["status"] == "withheld"
+        )
         for opt in graph.option_ids:
             ev = evals[opt]
             if not ev.computable:
                 rows[opt] = {"status": "withheld", "gaps": ev.option_gaps}
                 continue
             nv = ev.nodes[t]
+            if spec_withheld:
+                rows[opt] = {
+                    "status": "withheld",
+                    "gaps": list(spec["declared_identities"][t]["gaps"]),
+                }
+                continue
             if nv.value is not None:
                 rows[opt] = {
                     "status": "computed",
