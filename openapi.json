@@ -4407,7 +4407,7 @@
                 "type": "null"
               }
             ],
-            "description": "Anchored nodes only: true when the request carried a parameter_uncertainty for this node. An anchored node's status quo is its held level on every draw, so that draw is not used.",
+            "description": "Anchored nodes only: true when the request carried a parameter_uncertainty for this node. An anchored node's status quo is its held level on every draw, so that draw is not used for its level (the band, a limit on it, win shares). Edge and factor sensitivity and the fragile-edge gate are computed in the propagated-sum form, where it is still used.",
             "title": "Parameter Uncertainty Unused"
           }
         },

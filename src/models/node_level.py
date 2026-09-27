@@ -8,6 +8,11 @@ quantity, and the status quo reproduces the held level on every draw. Every othe
 propagated-sum form, and nothing about it is a level. This block says which is which, so a consumer
 never shows a propagated sum as a level and always names whose figure a level rests on.
 
+Only LEVELS move (round 2, #70 5856099271 / 5856103285): edge sensitivity, factor sensitivity and the
+fragile-edge gate are computed in the propagated-sum form and are unchanged, and a do(x) on a no-level
+node below an anchored one keeps today's effect. Anchoring changes no sign and does not touch F-01, which
+lives at the PLoT seam (A3).
+
 Shared by the internal (V1) response and the V2 wire envelope, exactly as ``RangeFitDisclosure`` is. It
 lives in its own module because ``response_v2`` cannot import ``robustness_v2`` (circular).
 """
@@ -93,7 +98,9 @@ class NodeLevelFrame(BaseModel):
         None,
         description=(
             "Anchored nodes only: true when the request carried a parameter_uncertainty for this node. "
-            "An anchored node's status quo is its held level on every draw, so that draw is not used."
+            "An anchored node's status quo is its held level on every draw, so that draw is not used for "
+            "its level (the band, a limit on it, win shares). Edge and factor sensitivity and the "
+            "fragile-edge gate are computed in the propagated-sum form, where it is still used."
         ),
     )
 

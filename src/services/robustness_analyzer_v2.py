@@ -1433,7 +1433,13 @@ class SCMEvaluatorV2:
     - Providing value-aware robustness analysis
     """
 
-    def __init__(self, graph: GraphV2, epsilon_rng: Optional[SeededRNG] = None):
+    def __init__(
+        self,
+        graph: GraphV2,
+        epsilon_rng: Optional[SeededRNG] = None,
+        *,
+        anchor_levels: bool = True,
+    ):
         """
         Initialize evaluator.
 
@@ -1443,6 +1449,11 @@ class SCMEvaluatorV2:
                 noise.  When provided and a node has epsilon_std > 0, adds
                 N(0, epsilon_std) after computing the structural equation.
                 Node values are clamped to [0, 1] after epsilon noise.
+            anchor_levels: B1a. ``False`` builds TODAY's (pre-B1a) evaluator: no node is
+                anchored, and every non-root node that states a level is read in the
+                model's frame (N6), exactly as before B1a. The analyzer uses it for the
+                phases that are not about levels (edge and factor sensitivity, the
+                fragile-edge gate), so those stay byte-identical to today.
         """
         self.graph = graph
         self._epsilon_rng = epsilon_rng
@@ -1469,10 +1480,46 @@ class SCMEvaluatorV2:
             level = status_quo_level(node)
             if not self._parents.get(node.id) or level is None:
                 continue
-            if level_anchor_source(node) is not None:
+            if anchor_levels and level_anchor_source(node) is not None:
                 self._anchored_levels[node.id] = level
             else:
                 self._status_quo_levels[node.id] = level
+
+        # B1a round 2 (verifier: 'support_load'). A NO-level non-root node below an
+        # anchored one: its samples are a propagated sum (today's form), but its anchored
+        # ancestors now contribute LEVELS, so its status quo moved. A do(x) on it is
+        # written in today's frame and translated by exactly that move
+        # (``_in_model_frame``), so the option's effect is today's. Nodes that state a
+        # level are absent (N6 reads them against the status quo, frame-free), and so is
+        # a node with no anchored ancestor (its samples did not move).
+        self._level_shifted_nodes: frozenset = frozenset(self._no_level_descendants_of_anchors())
+
+        # B1a round 2 (verifier M11). Today's form clamps a noisy node to [0, 1] after its
+        # epsilon draw; the noise-free status-quo reference does not. An anchored node
+        # differenced against that reference would read the clamp as a change
+        # (strength * (clamp(raw + e) - raw)), so its status quo would leave its level.
+        # When such a node exists, the ANCHORING difference reads a reference that
+        # carries the same clamp without the noise (``_anchoring_reference``).
+        self._noisy_unanchored = any(
+            node.epsilon_std > 0 and node.id not in self._anchored_levels for node in graph.nodes
+        )
+
+    def _no_level_descendants_of_anchors(self) -> List[str]:
+        """Non-root nodes that state no level and have an anchored ancestor (B1a round 2)."""
+        reached: set = set()
+        stack = list(self._anchored_levels)
+        while stack:
+            for child in self._children.get(stack.pop(), []):
+                if child not in reached:
+                    reached.add(child)
+                    stack.append(child)
+        return [
+            node_id
+            for node_id in self._node_order
+            if node_id in reached
+            and node_id not in self._anchored_levels
+            and node_id not in self._status_quo_levels
+        ]
 
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
@@ -1546,7 +1593,13 @@ class SCMEvaluatorV2:
             edge_strengths, interventions, base_values, factor_values, reference=reference
         )
         return self._propagate(
-            edge_strengths, framed, base_values, factor_values, reference=reference
+            edge_strengths,
+            framed,
+            base_values,
+            factor_values,
+            reference=self._anchoring_reference(
+                reference, edge_strengths, base_values, factor_values
+            ),
         ).get(goal_node, 0.0)
 
     def evaluate_multi(
@@ -1580,7 +1633,13 @@ class SCMEvaluatorV2:
             edge_strengths, interventions, base_values, factor_values, reference=reference
         )
         node_values = self._propagate(
-            edge_strengths, framed, base_values, factor_values, reference=reference
+            edge_strengths,
+            framed,
+            base_values,
+            factor_values,
+            reference=self._anchoring_reference(
+                reference, edge_strengths, base_values, factor_values
+            ),
         )
 
         # Return only the requested target nodes
@@ -1607,6 +1666,28 @@ class SCMEvaluatorV2:
             return None
         return self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
 
+    def _anchoring_reference(
+        self,
+        reference: Optional[Dict[str, float]],
+        edge_strengths: Dict[Tuple[str, str], float],
+        base_values: Optional[Dict[str, float]],
+        factor_values: Optional[Dict[str, float]],
+    ) -> Optional[Dict[str, float]]:
+        """The reference the ANCHORED-DELTA difference reads (B1a round 2, verifier M11).
+
+        ``reference`` itself, unless epsilon noise is live and some unanchored node carries
+        it: today's form clamps that node to [0, 1] after its draw, so the anchoring
+        difference must read the same clamp WITHOUT the noise, or an anchored child's
+        status quo leaves its level by ``strength * (clamp(raw + e) - raw)``. N6 keeps
+        reading ``reference`` unchanged (today's arithmetic), and with epsilon off (every
+        phase after the Monte Carlo) the two are the same object.
+        """
+        if reference is None or not (self._epsilon_rng and self._noisy_unanchored):
+            return reference
+        return self._propagate(
+            edge_strengths, {}, base_values, factor_values, noise=False, clamp_noisy=True
+        )
+
     def _propagate(
         self,
         edge_strengths: Dict[Tuple[str, str], float],
@@ -1616,6 +1697,8 @@ class SCMEvaluatorV2:
         *,
         noise: bool = True,
         reference: Optional[Dict[str, float]] = None,
+        todays_form: bool = False,
+        clamp_noisy: bool = False,
     ) -> Dict[str, float]:
         """The structural equations in topological order: the ONE loop behind
         ``evaluate`` and ``evaluate_multi`` (it used to be written out in both).
@@ -1639,6 +1722,12 @@ class SCMEvaluatorV2:
         Every other node keeps today's form verbatim: ``base + intercept + sum(parent *
         strength)`` with the base a root's observed or sampled value (else 0.0), epsilon
         clamped to [0, 1].
+
+        ``todays_form=True`` evaluates EVERY node in today's form (no anchoring): the
+        reference ``_in_model_frame`` translates a do(x) on a no-level descendant of an
+        anchored node against. ``clamp_noisy=True`` (with ``noise=False``) applies today's
+        [0, 1] clamp to each noisy unanchored node without drawing its noise: the
+        anchoring reference (``_anchoring_reference``).
         """
         if base_values is None:
             base_values = {}
@@ -1656,7 +1745,7 @@ class SCMEvaluatorV2:
             # Get node object (used for observed_state and intercept)
             node = self._nodes_by_id.get(node_id)
 
-            anchored_level = self._anchored_levels.get(node_id)
+            anchored_level = None if todays_form else self._anchored_levels.get(node_id)
             if anchored_level is not None:
                 if reference is None:
                     node_values[node_id] = anchored_level
@@ -1708,6 +1797,9 @@ class SCMEvaluatorV2:
             if noise and self._epsilon_rng and node and node.epsilon_std > 0:
                 node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
                 node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
+            elif clamp_noisy and self._epsilon_rng and node and node.epsilon_std > 0:
+                # B1a round 2: the anchoring reference's clamp, with no draw.
+                node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
 
         return node_values
 
@@ -1742,7 +1834,8 @@ class SCMEvaluatorV2:
         written as given, as before.
         """
         set_levels = [node_id for node_id in interventions if node_id in self._status_quo_levels]
-        if not set_levels:
+        shifted = [node_id for node_id in interventions if node_id in self._level_shifted_nodes]
+        if not set_levels and not shifted:
             return interventions
         status_quo = (
             reference
@@ -1753,6 +1846,15 @@ class SCMEvaluatorV2:
         )
         assert status_quo is not None  # a set level always needs (and gets) the reference
         framed = dict(interventions)
+        if shifted:
+            # B1a round 2: a do(x) on a NO-level node below an anchored one is written in
+            # today's frame, translated by how far anchoring moved that node's status quo
+            # on this draw, so its effect (and every win share and tie) is today's.
+            todays = self._propagate(
+                edge_strengths, {}, base_values, factor_values, noise=False, todays_form=True
+            )
+            for node_id in shifted:
+                framed[node_id] = interventions[node_id] + (status_quo[node_id] - todays[node_id])
         for node_id in set_levels:
             framed[node_id] = status_quo[node_id] + (
                 interventions[node_id] - self._status_quo_levels[node_id]
@@ -2489,6 +2591,27 @@ class RobustnessAnalyzerV2:
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
 
+        # B1a round 2 (verifier blocker 1). Edge sensitivity, factor sensitivity and the
+        # fragile-edge gate are not about levels: each perturbs an edge or a factor on the
+        # reference option and reads how far the goal moves, and an ANCHORED goal
+        # differenced against the same draw's status quo cancels that perturbation (they
+        # read 0, and fragile_edges emptied). So they run on TODAY's evaluator
+        # (``anchor_levels=False``) against TODAY's reference-option draws, and are
+        # byte-identical to a run in which nothing is anchored. A graph with no anchored
+        # node uses the one evaluator and the one population, exactly as before.
+        todays_evaluator = evaluator
+        todays_reference_outcomes: Optional[List[float]] = None
+        if evaluator._anchored_levels:
+            todays_evaluator = SCMEvaluatorV2(evaluator.graph, anchor_levels=False)
+            todays_reference_outcomes = self._todays_form_reference_outcomes(
+                request,
+                evaluator.graph,
+                edge_configs_per_sample,
+                factor_values_per_sample,
+                seed,
+                has_epsilon,
+            )
+
         # B2 CRN-fix (CODE-REVIEW-ISL F1): expected_regret is a JOINT Common-
         # Random-Numbers metric and MUST be computed from the PRE-noise outcomes
         # -- the exact CRN-aligned population that produced winner_per_sample /
@@ -2534,6 +2657,17 @@ class RobustnessAnalyzerV2:
             request.graph.nodes,
             rng_noise,
         )
+        # B1a round 2: the population the sensitivity phases read their baseline mean
+        # from. Today's reference-option draws get today's auto-noise: the reference option
+        # is the first the noise pass visits, so a fresh seed + 2 stream reproduces its draws.
+        sensitivity_baseline_outcomes = option_outcomes
+        if todays_reference_outcomes is not None:
+            sensitivity_baseline_outcomes, _ = self._apply_auto_scaled_noise(
+                {request.options[0].id: todays_reference_outcomes},
+                request.goal_node_id,
+                request.graph.nodes,
+                SeededRNG(seed + 2),
+            )
 
         # Keep constraint probabilities on the same sample semantics as
         # probability_of_goal for the goal node: a constraint on the goal node
@@ -2716,7 +2850,7 @@ class RobustnessAnalyzerV2:
         sensitivity = []
         if "sensitivity" in request.analysis_types:
             sensitivity = self._compute_sensitivity(
-                request, option_outcomes, sampler, rng_edge, evaluator
+                request, sensitivity_baseline_outcomes, sampler, rng_edge, todays_evaluator
             )
 
         # B3-S1 (D-23.4) suppression RECORD (not PREDICT): each compute-gate below
@@ -2762,7 +2896,11 @@ class RobustnessAnalyzerV2:
                 suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
                 factor_sensitivity = self._compute_factor_sensitivity(
-                    request, option_outcomes, rng_factor, evaluator, critiques=critiques
+                    request,
+                    sensitivity_baseline_outcomes,
+                    rng_factor,
+                    todays_evaluator,
+                    critiques=critiques,
                 )
 
         # Compute conditional winners (factor-partitioned win probabilities).
@@ -2796,13 +2934,15 @@ class RobustnessAnalyzerV2:
                 )
 
         # Compute robustness assessment (with alternative winner analysis)
+        # B1a round 2: the fragile-edge gate (and the alternative winners of the edges it
+        # names) reads today's evaluator, like the edge sensitivity it gates on.
         robustness = self._compute_robustness(
             option_wins,
             winner_per_sample,
             sensitivity,
             request,
             edge_configs_per_sample,
-            evaluator,
+            todays_evaluator,
             seed,
             n_defaulted_roots=len(defaulted_root_node_ids),
             defaulted_root_node_ids=defaulted_root_node_ids,
@@ -3807,6 +3947,54 @@ class RobustnessAnalyzerV2:
             factor_values_per_sample,
             status_quo_node_values,
         )
+
+    @staticmethod
+    def _todays_form_reference_outcomes(
+        request: RobustnessRequestV2,
+        graph: GraphV2,
+        edge_configs_per_sample: List[Dict[Tuple[str, str], float]],
+        factor_values_per_sample: List[Dict[str, float]],
+        seed: int,
+        has_epsilon: bool,
+    ) -> List[float]:
+        """B1a round 2: the reference option's goal draws as TODAY's (unanchored) evaluator
+        produced them in the Monte Carlo, on the same recorded edge and factor draws.
+
+        With no epsilon noise each draw is a pure function of its edge and factor values,
+        so only the reference option is evaluated. With epsilon noise the draws depend on
+        the shared seed + 3 stream, so every option is replayed in the Monte Carlo's order
+        on a fresh seed + 3 stream (anchoring consumes that stream exactly as today's form
+        does: one draw per noisy, non-intervened node per evaluation), and the reference
+        option's draws are kept.
+        """
+        reference_option = request.options[0]
+        goal = request.goal_node_id
+        if not has_epsilon:
+            todays = SCMEvaluatorV2(graph, anchor_levels=False)
+            return [
+                todays.evaluate(
+                    edge_strengths=edge_config,
+                    interventions=reference_option.interventions,
+                    goal_node=goal,
+                    factor_values=factor_values,
+                )
+                for edge_config, factor_values in zip(
+                    edge_configs_per_sample, factor_values_per_sample
+                )
+            ]
+        todays = SCMEvaluatorV2(graph, epsilon_rng=SeededRNG(seed + 3), anchor_levels=False)
+        outcomes: List[float] = []
+        for edge_config, factor_values in zip(edge_configs_per_sample, factor_values_per_sample):
+            for option in request.options:
+                value = todays.evaluate(
+                    edge_strengths=edge_config,
+                    interventions=option.interventions,
+                    goal_node=goal,
+                    factor_values=factor_values,
+                )
+                if option is reference_option:
+                    outcomes.append(value)
+        return outcomes
 
     @staticmethod
     def _defaulted_roots_reaching(
