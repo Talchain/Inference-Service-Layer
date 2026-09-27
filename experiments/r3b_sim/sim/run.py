@@ -199,6 +199,30 @@ def scenarios(spec: dict[str, Any]) -> list[dict[str, float]]:
     return [dict(zip(ids, combo)) for combo in itertools.product(*sweeps)]
 
 
+def model_evals(
+    graph: Graph,
+    spec: dict[str, Any],
+    model: dict[str, Any],
+    scenario: dict[str, float],
+    draws: Draws,
+) -> dict[str, OptionEval]:
+    """Static evaluation of every option at the model tier, with the model's replaced edges."""
+    tier = TIERS[model["tier"]]
+    # The model evaluates its own algebraic outputs, so their operand edges are handled there.
+    replaced = set(model["replaces_edges"])
+    for a in model.get("algebraic", []):
+        replaced |= {f"{op}->{a['target']}" for op in a["operands"]}
+    return evaluate_all(
+        graph,
+        spec,
+        tier,
+        draws,
+        replaced_edges=frozenset(replaced),
+        active_derived=_active_derived(model) if tier == 3 else (),
+        x_effects=_x_effects(spec, scenario) if tier == 3 else (),
+    )
+
+
 def simulate(
     graph: Graph,
     spec: dict[str, Any],
@@ -208,19 +232,7 @@ def simulate(
 ) -> dict[str, Trajectory]:
     tier = TIERS[model["tier"]]
     horizon = int(spec["horizon"]["months"])
-    # The model evaluates its own algebraic outputs, so their operand edges are handled there.
-    replaced = set(model["replaces_edges"])
-    for a in model.get("algebraic", []):
-        replaced |= {f"{op}->{a['target']}" for op in a["operands"]}
-    evals = evaluate_all(
-        graph,
-        spec,
-        tier,
-        draws,
-        replaced_edges=frozenset(replaced),
-        active_derived=_active_derived(model) if tier == 3 else (),
-        x_effects=_x_effects(spec, scenario) if tier == 3 else (),
-    )
+    evals = model_evals(graph, spec, model, scenario, draws)
     sq = evals[graph.baseline_option].nodes
     return {
         opt: run_model(

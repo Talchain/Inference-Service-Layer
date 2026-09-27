@@ -338,3 +338,32 @@ def test_monte_carlo_converges_between_2k_and_50k_draws() -> None:
         # SE at n=2,000 implied by the 50k estimate (a 2k estimate of exactly 0 or 1 has SE 0).
         se = float(np.sqrt(p_large * (1 - p_large) / runs[0]["n_draws"]))
         assert abs(p_small - p_large) <= 3 * se + 1e-6, opt
+
+
+# ------------------------------------------------------------------ MVP-B break-even (Mode X)
+
+
+@pytest.mark.parametrize("model_id", ["X_net_reading", "X_gross_reading"])
+def test_breakeven_threshold_is_where_each_verdict_flips(model_id: str) -> None:
+    from sim.breakeven import bisect, margins
+
+    for verdict, margin in margins(model_id).items():
+        t = bisect(margin)
+        assert margin(0.0) > 0, verdict
+        assert margin(t - 1e-6) > 0 >= margin(t + 1e-6), verdict
+    # Hand: churn 3 % (held) - 0.2 pp per +10 perception x (75 - 50) = 2.5 %; limit 4 % -> 1.5.
+    assert bisect(margins(model_id)["churn_limit"]) == pytest.approx(1.5, abs=1e-9)
+
+
+def test_breakeven_is_labelled_mode_x_and_matches_the_committed_file() -> None:
+    from sim.breakeven import compute
+    from sim.corpus import ROOT
+
+    out = compute()
+    assert (out["tier"], out["label"], out["excluded_from_claims"]) == (
+        "X",
+        "prototype_assumption",
+        True,
+    )
+    assert out["goal"]["semantics"] == "attain_by_H"
+    assert json.loads((ROOT / "breakeven.json").read_text()) == json.loads(json.dumps(out))

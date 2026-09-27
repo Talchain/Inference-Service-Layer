@@ -7,7 +7,7 @@
 - the hand-audited mapping (`MAPPING.md`, `mapping/*.json`);
 - `ANALYSIS-PLAN.md`, frozen with the mapping in `FROZEN.sha256` before any simulation ran.
 
-**Reproduce:** from `experiments/r3b_sim`, run `poetry run python -m sim.run` and then `poetry run python -m sim.report`. `results.json` is byte-identical across runs (seed 20260927); timings go to `runtime.json`.
+**Reproduce:** from `experiments/r3b_sim`, run `poetry run python -m sim.run` and then `poetry run python -m sim.report`. The MVP-B break-even is `poetry run python -m sim.breakeven` (writes `breakeven.json`). `results.json` is byte-identical across runs (seed 20260927); timings go to `runtime.json`.
 
 ## Answer
 **No, not from today's model representation.** Across all 12 graphs, the strict tiers (T0/T1) admit **no** time path:
@@ -179,7 +179,7 @@ Every one of these results carries 5–9 named defaults or assumptions (`n_defau
 | Work-to-completion for delivery goals | 4 / 4 E | New goal quantity (work remaining, velocity → completion) | User; weakly; high |
 | Complete option levels | 5 / 12 have options with `{}` | CEE construction completeness | Model generator |
 
-**Engineering (ESTIMATE, not measured):** 8–13 engineer-weeks.
+**Engineering for full B at human pace (ESTIMATE, not measured):** 8–13 engineer-weeks.
 - schemas + adoption across 4 consumers: 1–2 weeks;
 - CEE extraction and construction of roles, onsets, lags and effects: 3–5 weeks;
 - PLoT forwarding: 0.5–1 week;
@@ -188,6 +188,53 @@ Every one of these results carries 5–9 named defaults or assumptions (`n_defau
 - re-baselining every exit row: 1 week or more.
 
 The dominant cost is **information acquisition** (the burden column), not code. Every row marked "high" either becomes an Olumi estimate, and so stays T1/T2 with no strict gain, or becomes a new user question.
+
+### MVP B (added after the RESULT post; see `AMENDMENTS.md`)
+The 8–13 weeks above is full B at human pace. Agents compress the code. They do not compress:
+- the missing semantics;
+- the serial Delivery Lead review of HIGH-risk changes;
+- served witnesses, which need LLM credit.
+
+A much smaller B exists.
+
+**Scope.** It is R3-A's planned slice 2 (stock-and-flow over the horizon), not a second engine. Journeys A and C only; E is out, because it has no work-to-completion quantity. It adds:
+- one stock (paying subscribers), with a gross inflow per month and a churn % per month;
+- the declared MRR = price × subscribers, plus the `sum` carrier;
+- a typed horizon with a first-passage goal;
+- every limit checked every month.
+
+**Inputs no agent can supply:**
+- **Two user facts:** paying subscribers today, and new subscribers per month before churn. These remove the net-vs-gross ambiguity and replace an Olumi estimate for the start stock.
+- **Paul's call on two disclosed defaults:** rates persist at today's level, and an option starts at month 0 unless it is dated. Accepting them does **not** make the results strict: under this plan's tiers, MVP-B deadline verdicts are T2 (assumption-augmented) evidence. The decision is whether T2 verdicts, with their defaults stated, may be shown to users.
+- **The horizon as a typed field.** CEE #2140 reportedly stores `goal_horizon_months` (Runtime, #70 5860324603). That is not verified here.
+
+**Output: a threshold instead of an elasticity.** The price → churn response is the decisive unknown in the A graphs, and users rarely know it. Rather than assume one, MVP B can report the response at which each verdict flips.
+
+The table comes from `sim/breakeven.py` → `breakeven.json`: Mode X, `prototype_assumption`, excluded from claims. It covers A-180910Z, £59 + feature release, competitive response 0, point values. Each verdict holds while the churn rise per +£10 is at most:
+
+| Verdict for £59 + feature | Net reading | Gross reading |
+|---|---|---|
+| Reaches £100k MRR by month 12 | +2.35 pp | +2.09 pp |
+| Ends month 12 above keep-current | +2.53 pp | +2.79 pp |
+| Monthly churn stays ≤ 4% (user limit) | +1.5 pp | +1.5 pp |
+
+- **The churn limit binds first.** The +1.5 pp is:
+  - held churn of 3% (an Olumi estimate);
+  - minus 0.5 pp from the feature release (perception 50 → 75, a CEE hypothesis, × Olumi's −0.2 pp per +10);
+  - checked against the user's 4% limit.
+
+  So it rests on T1 estimates.
+- **The unknown response matters far more than the ambiguity.** Net vs gross moves the thresholds by ≤0.3 pp. The unknown response spans 0–4.25 pp in the mapping sweep.
+- **With the X competitive response (−£31,250), £59 fails both MRR verdicts even at zero churn response.** It misses the goal by £8,952 (net) or £14,261 (gross), and it trails keep-current. A threshold on churn alone does not settle the decision.
+
+**Revised ESTIMATE (not measured).**
+- **Code:** ~1–2 agent-days across file-disjoint lanes:
+  - ISL: port `sim/dynamic.py`'s single-stock integration, first passage, per-month limits and the threshold search, using this folder's tests as RED-first rows;
+  - CEE: a CEE-local role field and the two questions;
+  - PLoT: forwarding;
+  - UI: one sentence in the existing result, with no time-path chart.
+- **Elapsed:** ~3–5 days, set by serial DL review, served witnesses and Paul's decision, not by code.
+- The remaining full-B rows stay blocked by information, not code: lags, non-template uncertainty, work-to-completion, and effects on every decisive link.
 
 ## Per-graph evaluation
 
@@ -433,7 +480,8 @@ Mode X deadline outcomes (point, links exist): X_inversion [X_price_churn_via_se
    - User-confirmed start stocks (44/67 levels are estimates).
    - User-unit effects on the decisive links (price → churn is not fully quantified in 4/4 A graphs).
    - Non-template uncertainty (31/31 are templates), onsets and lags, work-to-completion (4/4 E), and a `sum` carrier.
-   - About 8–13 engineer-weeks (ESTIMATE). The larger cost is the elicitation burden in the table above.
+   - Full B: about 8–13 engineer-weeks at human pace (ESTIMATE). The larger cost is the elicitation burden in the table above.
+   - MVP B (one stock, journeys A and C, = R3-A slice 2): ~1–2 agent-days of code and ~3–5 days elapsed (ESTIMATE). It needs 2 user facts and Paul's call on showing T2 verdicts with 2 disclosed defaults. It can report the churn response at which a verdict flips instead of assuming one (see "MVP B").
 4. **Cheap wins for R3-A.**
    - The taint/withhold rule, with "at unchanged X" conditional statements.
    - The identity-versus-held-level consistency check.

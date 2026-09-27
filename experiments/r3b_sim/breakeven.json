@@ -1,0 +1,60 @@
+{
+ "baseline": "keep_current_pricing",
+ "draws": "point",
+ "excluded_from_claims": true,
+ "fixed": {
+  "X_feature_competitive_mrr": 0.0,
+  "X_price_churn_via_sensitivity": 0.0
+ },
+ "goal": {
+  "horizon_months": 12,
+  "node": "mrr",
+  "semantics": "attain_by_H",
+  "threshold": 100000.0
+ },
+ "graph": "pj-20260927T180910Z-A",
+ "label": "prototype_assumption",
+ "models": {
+  "X_gross_reading": {
+   "margins_at_zero_response": {
+    "beats_keep_current": 21986.410255,
+    "churn_limit": 1.5,
+    "goal": 16988.709337
+   },
+   "thresholds": {
+    "beats_keep_current": 2.793468,
+    "churn_limit": 1.5,
+    "goal": 2.086491
+   }
+  },
+  "X_net_reading": {
+   "margins_at_zero_response": {
+    "beats_keep_current": 23778.21173,
+    "churn_limit": 1.5,
+    "goal": 22298.21173
+   },
+   "thresholds": {
+    "beats_keep_current": 2.527803,
+    "churn_limit": 1.5,
+    "goal": 2.349588
+   }
+  }
+ },
+ "option": "59_with_feature_release",
+ "reading": "verdict holds while the price -> churn response is below the threshold",
+ "schema": "r3b-breakeven-v1",
+ "swept": {
+  "bracket": [
+   0.0,
+   10.0
+  ],
+  "id": "X_price_churn_direct",
+  "mapping_sweep": [
+   0.0,
+   0.5,
+   4.25
+  ],
+  "unit": "percentage points per +£10 price"
+ },
+ "tier": "X"
+}
