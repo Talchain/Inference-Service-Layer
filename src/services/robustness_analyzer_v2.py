@@ -1509,10 +1509,11 @@ def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
        ``identity_frame_missing``: a frame is never inferred from "compatible" operands;
     2. every participant has a level today (``status_quo_level``), else
        ``identity_operand_missing``;
-    3. a product has no zero operand, and a stated target is not zero, else
-       ``identity_zero_level`` (the ratio and the relative check are undefined there);
-    4. with a stated target ``o``: ``|o - (term(operands) + sum(addends))| / |o| <= 5%``
-       in user units, else ``identity_inconsistent``.
+    3. a product has no zero operand and no zero stated target, else
+       ``identity_zero_level`` (its ratio and relative check are undefined there);
+    4. with a stated target ``o``, in user units, else ``identity_inconsistent``:
+       product ``|o - (term + addends)| / |o| <= 5%``; sum (no ratio, so 0 is an ordinary
+       level) ``|o - (term + addends)| <= 5% x max(|o|, sum|parts|)``.
     A node with no stated level is evaluated from its inputs (AIQ 5860087988 item 4).
     """
     nodes = {node.id: node for node in graph.nodes}
@@ -1555,20 +1556,27 @@ def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
         if len(levels) != len(participants):
             plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
             continue
-        if (
-            identity.operation == "product"
-            and any(levels[node_id] == 0.0 for node_id in factor_ids)
-        ) or target_level == 0.0:
+        if identity.operation == "product" and (
+            any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0
+        ):
             plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
             continue
         if target_level is None:
             plans[node.id] = plan(None)
             continue
+        parts = [levels[i] * frames[i] for i in participants]
         reconstructed = _identity_term(
             identity.operation, [levels[i] * frames[i] for i in factor_ids]
         ) + math.fsum(levels[i] * frames[i] for i in addends)
         stated = target_level * frames[node.id]
-        share = abs(stated - reconstructed) / abs(stated)
+        if identity.operation == "product":
+            share = abs(stated - reconstructed) / abs(stated)
+        else:
+            # AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated 0 is an ordinary
+            # level. Scaled absolute check: |o - sum| <= tau x max(|o|, sum|parts|); both
+            # sides 0 is consistent exactly (R3-2: a tally of £0 today).
+            scale = max(abs(stated), math.fsum(abs(part) for part in parts))
+            share = 0.0 if scale == 0.0 else abs(stated - reconstructed) / scale
         plans[node.id] = plan(
             IDENTITY_INCONSISTENT if share > IDENTITY_RECONCILIATION_TOLERANCE else None,
             reconstructed=reconstructed,
@@ -1576,6 +1584,20 @@ def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
             mismatch_share=share,
         )
     return plans
+
+
+def definitional_edges(graph: GraphV2) -> set:
+    """R3-9: the operand and addend edges of every EVALUATED identity, as ``(from, to)``.
+
+    They are definitions, not beliefs: the evaluator never reads their sampled strengths,
+    and no edge-level output may describe them as uncertain (AIQ ISL #187 5860770241 (3)).
+    A withheld identity's edges stay beliefs (the node is still linear)."""
+    return {
+        (participant, plan.node_id)
+        for plan in resolve_identity_plans(graph).values()
+        if plan.evaluated
+        for participant in plan.participants
+    }
 
 
 def identity_blocking_critiques(
@@ -3796,6 +3818,43 @@ class RobustnessAnalyzerV2:
         # silent default with extra steps.
         range_fit_disclosures, range_fit_warnings = resolve_range_fits(request.user_stated_ranges)
         inference_warnings.extend(range_fit_warnings)
+
+        # R3-9 (AIQ ISL #187 5860770241 (3)): an evaluated identity's operand/addend edges
+        # are definitions, so no edge-level output lists them (edge sensitivity, e-values,
+        # fragile/robust edges). The evaluator never read them: nothing else moves.
+        definitional = definitional_edges(request.graph)
+        if definitional:
+            definitional_ids = {f"{source}->{target}" for source, target in definitional}
+            sensitivity = [
+                row
+                for row in sensitivity
+                if (row.edge_from, row.edge_to) not in definitional
+            ]
+            if edge_e_values is not None:
+                edge_e_values = [
+                    row
+                    for row in edge_e_values
+                    if (row.get("from_id"), row.get("to_id")) not in definitional
+                ]
+            robustness = robustness.model_copy(
+                update={
+                    "fragile_edges": [
+                        e for e in robustness.fragile_edges if e not in definitional_ids
+                    ],
+                    "fragile_edges_enhanced": (
+                        None
+                        if robustness.fragile_edges_enhanced is None
+                        else [
+                            e
+                            for e in robustness.fragile_edges_enhanced
+                            if (e.from_id, e.to_id) not in definitional
+                        ]
+                    ),
+                    "robust_edges": [
+                        e for e in robustness.robust_edges if e not in definitional_ids
+                    ],
+                }
+            )
 
         response = RobustnessResponseV2(
             request_id=request_id,

@@ -537,10 +537,30 @@ class TestSum:
         d["graph"]["nodes"][2].pop("nonlinear_identity")
         assert tally_effects(d)["features"] == pytest.approx(10_000.0)
 
-    def test_a_stated_zero_tally_is_withheld_as_ruled(self):
-        """AIQ 5860087988 item 3 as ruled: a stated target of zero -> identity_zero_level. OPEN meaning
-        question for R3-2 (its tally is £0 today): see the PR body."""
-        (plan,) = resolve_identity_plans(graph_of(tally_request(0.0))).values()
+    def test_r3_2_a_stated_zero_tally_evaluates(self):
+        """AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated £0 is an ordinary level; both
+        sides 0 reconcile exactly. R3-2: features £20,000 · advertising £20,000 · carry-on £0. The
+        product's relative check applied to a sum (mutant) withholds it -> RED."""
+        d = tally_request(0.0)
+        (plan,) = resolve_identity_plans(graph_of(d)).values()
+        assert plan.evaluated and plan.mismatch_share == 0.0
+        assert tally_effects(d) == pytest.approx(
+            {"features": 20_000.0, "advertising": 20_000.0, "carry_on": 0.0}
+        )
+
+    def test_a_stated_zero_tally_whose_parts_are_not_zero_is_withheld(self):
+        """o = £0 against parts summing to £5,000: the scaled absolute check fails (share 1.0)."""
+        d = tally_request(0.0)
+        d["graph"]["nodes"][0]["observed_state"]["value"] = 0.05  # £5,000 of features spend today
+        (plan,) = resolve_identity_plans(graph_of(d)).values()
+        assert plan.withheld_reason == rav2.IDENTITY_INCONSISTENT
+        assert plan.mismatch_share == pytest.approx(1.0)
+
+    def test_a_product_keeps_the_zero_level_withhold(self):
+        d = wire()
+        (mrr,) = [n for n in d["graph"]["nodes"] if n["id"] == MRR]
+        mrr["observed_state"].update(value=0.0, baseline=0.0, raw_value=0)
+        (plan,) = resolve_identity_plans(graph_of(d)).values()
         assert plan.withheld_reason == rav2.IDENTITY_ZERO_LEVEL
 
     def test_a_stated_nonzero_tally_moves_by_the_unscaled_sum(self):
@@ -555,3 +575,55 @@ class TestSum:
         )
         assert today * 100_000.0 == pytest.approx(10_000.0)
         assert (more - today) * 100_000.0 == pytest.approx(20_000.0)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# R3-9 (AIQ ISL #187 5860770241 (3), a SERVING condition): an evaluated identity's operand edges are
+# definitions, so no edge-level output lists them.
+# ---------------------------------------------------------------------------------------------------------
+
+DEFINITIONAL = {(PRICE, MRR), (SUBS, MRR)}
+
+
+def edge_pairs_listed(v1: Any, v2: Dict[str, Any]) -> set:
+    listed = {(row.edge_from, row.edge_to) for row in v1.sensitivity}
+    listed |= {(row["from_id"], row["to_id"]) for row in (v1.edge_e_values or [])}
+    for edge_id in [*v1.robustness.fragile_edges, *v1.robustness.robust_edges]:
+        source, target = edge_id.split("->")
+        listed.add((source, target))
+    robustness = v2.get("robustness") or {}
+    for key in ("edge_sensitivity", "edge_e_values", "fragile_edges", "robust_edges"):
+        for row in robustness.get(key) or []:
+            if isinstance(row, str):
+                source, target = row.split("->")
+                listed.add((source, target))
+            else:
+                listed.add(
+                    (
+                        row.get("from_id") or row.get("edge_from") or row.get("from"),
+                        row.get("to_id") or row.get("edge_to") or row.get("to"),
+                    )
+                )
+    return listed
+
+
+class TestR3_9DefinitionalEdgesAreNotBeliefs:
+    def _pair(self, identity):
+        d = wire(identity=identity)
+        v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+        return v1, v2_body(d)
+
+    def test_no_edge_level_output_lists_an_operand_edge(self):
+        v1, v2 = self._pair(PRODUCT)
+        assert not (edge_pairs_listed(v1, v2) & DEFINITIONAL)
+
+    def test_control_without_the_identity_they_are_listed(self):
+        """Non-vacuity: the same outputs DO list them when the link is a belief."""
+        v1, v2 = self._pair(None)
+        assert edge_pairs_listed(v1, v2) >= DEFINITIONAL
+
+    def test_every_other_edge_is_still_listed(self):
+        v1, v2 = self._pair(PRODUCT)
+        listed = edge_pairs_listed(v1, v2)
+        assert (OTHER, MRR) in listed  # undeclared addend: still a sampled belief edge
+        assert (PRICE, "monthly_new_pro_subscribers") in listed
