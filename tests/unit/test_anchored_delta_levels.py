@@ -253,7 +253,8 @@ class TestB1a1StatusQuoReproducesTheHeldLevels:
 
     def test_keep_current_is_75k_where_it_was_15k(self):
         """Keep-current pins the price at its held £49 (PU sd 0.0001), so its band is the status quo up
-        to that pin. Before B1a the same draws read ~£15k (the propagated sum), which the contrast shows."""
+        to that pin. Before B1a the same draws read ~£15k (the propagated sum), which the contrast shows.
+        """
         d = paul_request(options=[KEEP, P59], n_samples=10_000)
         anchored, today = analyse(d), analyse_unanchored(d)
         assert abs(float(np.median(samples(anchored, KEEP))) - 0.6) <= 1e-6
@@ -261,7 +262,8 @@ class TestB1a1StatusQuoReproducesTheHeldLevels:
 
     def test_keep_current_reaches_the_wire_at_75k(self):
         """The served V2 route: keep-current's p50 is £75,000 to within £1.25, and its p10/p90 to within
-        £25 (the price pin against a price PU of sd 0.0001, x strength ~0.5: measured 5.5e-5 at p10)."""
+        £25 (the price pin against a price PU of sd 0.0001, x strength ~0.5: measured 5.5e-5 at p10).
+        """
         from fastapi.testclient import TestClient
 
         from src.api.main import app
@@ -287,7 +289,8 @@ class TestB1a1StatusQuoReproducesTheHeldLevels:
 class TestB1a2RootLeverOptionsAreUnchanged:
     """The Monte Carlo estimates of the two price effects on this seed are +£2,421.08 / +£1,210.54 at
     n=10,000 (3717e36 and this branch alike); the analytic expected values the acceptance row quotes are
-    0.0198447 x £125,000 = +£2,480.6 and half that, +£1,240.3. What B1a must not move is the estimate."""
+    0.0198447 x £125,000 = +£2,480.6 and half that, +£1,240.3. What B1a must not move is the estimate.
+    """
 
     @pytest.fixture(scope="class")
     def pair(self):
@@ -560,7 +563,8 @@ class TestB1a6OnlyAttestedLevelsAnchor:
 
     def test_epsilon_noise_reaching_a_held_level_refuses_the_anchor(self):
         """The status-quo reference is drawn without epsilon, so noise that reaches the node would be
-        read as an effect (and its [0, 1] clamp as a change). Refused, with the level plan's own reason."""
+        read as an effect (and its [0, 1] clamp as a change). Refused, with the level plan's own reason.
+        """
         d = paul_request(options=[HOLD, KEEP])
         (churn,) = [n for n in d["graph"]["nodes"] if n["id"] == CHURN]
         churn["epsilon_std"] = 0.01
@@ -603,7 +607,9 @@ class TestAnAnchoredGoalGetsNoFalseBaseDisclosure:
 
     def test_an_anchored_goal_with_a_pu_gets_neither_goal_base_disclosure(self):
         d = paul_request(options=[HOLD, KEEP])
-        d["parameter_uncertainties"].append({"node_id": GOAL, "distribution": "normal", "std": 0.05})
+        d["parameter_uncertainties"].append(
+            {"node_id": GOAL, "distribution": "normal", "std": 0.05}
+        )
         assert "GOAL_PU_BASE_ADDITIVE" in codes(analyse_unanchored(d))  # CONTRAST: true of today
         anchored = analyse(d)
         assert not {"GOAL_PU_BASE_ADDITIVE", "GOAL_OBSERVED_VALUE_UNUSED"} & codes(anchored)
@@ -759,3 +765,102 @@ class TestTheV2EnvelopeCarriesTheLevelFrames:
                 float(min(max(v, 0.0), 1.0)) for v in raw
             ], option_id
         assert np.percentile(samples(v1, GRANDFATHER), 10) < 0.0, "precondition"
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The SERVED wire, unedited — B1a-1 / B1a-2 / B1a-3, plus B1a-5 for a ROOT lever (OPEN: pinned xfail)
+# ---------------------------------------------------------------------------------------------------------
+
+SERVED_WIRE = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "anchored_delta"
+    / "paul_a295e4a1_served_wire_plot_a6da42b.json"
+)
+
+# AIQ's SERVED reference (#70 5859210779, PLoT 3203991 / ISL 3717e36; reproduced in process to the penny).
+SERVED_KEEP_CURRENT_GBP = 14_870.28
+SERVED_EFFECTS_GBP = {P59: 2_410.43, P54: 1_205.22, CONVERSION: 17.82, RETENTION: 8.98}
+
+
+def served_wire(**overrides: Any) -> Dict[str, Any]:
+    """The EXACT ISL request PLoT staging ``a6da42b9`` builds for Paul's CEE->PLoT request.
+
+    Produced in process (``POST /v2/run``, ISL stubbed at ``callAnalysisEndpoint``) from PLoT's
+    ``tests/fixtures/paul-own-a295e4a1-20260927/cee-to-plot.request.json`` (sha256 ``8bc6f257…``, the
+    request AIQ's served acceptance replays). Since PLoT #373 the wire carries conversion 0.09,
+    retention 0.025 and the churn limit 0.04 itself, so nothing here is edited."""
+    d = json.loads(SERVED_WIRE.read_text())
+    d.update(overrides)
+    return d
+
+
+class TestB1aOnTheServedWire:
+    """B1a measured on the body PLoT sends ISL today. ISL staging reproduces AIQ's SERVED baseline to the
+    penny on this body (keep-current £14,870.28; effects +2,410.43 / +1,205.22 / +17.82 / +8.98), so an
+    in-process run here IS the served computation."""
+
+    @pytest.fixture(scope="class")
+    def pair(self):
+        d = served_wire()
+        return analyse(d), analyse_unanchored(d)
+
+    def test_b1a_1_keep_current_sits_at_the_held_75k(self, pair):
+        anchored, _ = pair
+        assert float(np.median(samples(anchored, KEEP))) * CAP_GBP == pytest.approx(
+            75_000.0, abs=1e-6
+        )
+
+    def test_b1a_1_control_todays_form_is_the_served_15k(self, pair):
+        """Anchoring off is exactly today's served status quo — the RED this row turns GREEN."""
+        _, today = pair
+        assert float(np.mean(samples(today, KEEP))) * CAP_GBP == pytest.approx(
+            SERVED_KEEP_CURRENT_GBP, abs=0.005
+        )
+
+    @pytest.mark.parametrize("option_id", [P59, P54, CONVERSION, RETENTION])
+    def test_b1a_2_3_every_effect_is_the_served_effect(self, pair, option_id):
+        anchored, today = pair
+        assert abs(effect_gbp(anchored, option_id) - effect_gbp(today, option_id)) <= 1e-6
+        assert effect_gbp(anchored, option_id) == pytest.approx(
+            SERVED_EFFECTS_GBP[option_id], abs=0.005
+        )
+
+    def test_b1a_3_retention_still_beats_keep_current(self, pair):
+        anchored, _ = pair
+        assert effect_gbp(anchored, RETENTION) > 0.0
+
+
+class TestB1a5CarryOnHoldsARootLever_OPEN:
+    """AIQ B1a-5 (#70 5859788040): carry-on IS the status quo. Keep-current holds the ROOT lever price at
+    today's £49 (0.245); the status quo SAMPLES it (PU std 1e-4), so keep-current's per-draw effect is
+    ±ε around £0 and P(MRR >= £75k) reads 0.5333 beside the status quo's 1.0 on this wire.
+
+    OPEN, pinned ``xfail(strict=True)``: the literal rule ("every arm that does not set a root lever
+    shares today's level") turns these GREEN but fails 25 existing tests that model a root lever whose
+    TODAY's level is itself uncertain (branch ``r3/b1a5-held-root-levers-wip``). The scope needs AIQ's
+    ruling. Strict, so the day B1a-5 lands these rows XPASS and the pin must be removed."""
+
+    def request(self) -> Dict[str, Any]:
+        d = served_wire(goal_threshold=0.6)  # the goal at exactly today's level (£75,000)
+        d["options"] = d["options"] + [{"id": HOLD, "label": "Status quo", "interventions": {}}]
+        return d
+
+    @pytest.mark.xfail(strict=True, reason="B1a-5 open: root-lever scope awaits AIQ's ruling")
+    def test_carry_on_effect_is_exactly_zero_on_every_draw(self):
+        response = analyse(self.request())
+        assert np.array_equal(samples(response, KEEP), samples(response, HOLD))
+
+    @pytest.mark.xfail(strict=True, reason="B1a-5 open: root-lever scope awaits AIQ's ruling")
+    def test_carry_on_goal_probability_equals_the_status_quo(self):
+        response = analyse(self.request())
+        assert (
+            result(response, KEEP).probability_of_goal == result(response, HOLD).probability_of_goal
+        )
+
+    def test_the_defect_is_the_named_one(self):
+        """What IS true today, pinned: the status quo meets £75,000 on every draw (1.0) while carry-on's
+        ±ε effect puts it at about a coin flip (measured 0.5339 with this option set)."""
+        response = analyse(self.request())
+        assert result(response, HOLD).probability_of_goal == 1.0
+        assert 0.45 < result(response, KEEP).probability_of_goal < 0.6
