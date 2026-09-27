@@ -11,5 +11,29 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git clone https://github.com/Talchain/*)",
+      "Bash(gh api repos/Talchain/olumi-programme-docs/issues/70/comments*)",
+      "Bash(gh api repos/Talchain/olumi-programme-docs/issues/comments/*)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh pr diff *)",
+      "Bash(gh pr checks *)",
+      "Bash(npm ci*)",
+      "Bash(npm test*)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(pnpm install*)",
+      "Bash(pnpm test*)",
+      "Bash(pnpm typecheck*)",
+      "Bash(pnpm exec vitest *)",
+      "Bash(poetry install*)",
+      "Bash(poetry run pytest*)",
+      "Bash(pytest *)"
+    ]
   }
 }
