@@ -1,0 +1,180 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T180910Z-A",
+  "journey": "A",
+  "horizon": {
+    "status": "resolved",
+    "months": 12,
+    "evidence": {"kind": "brief", "quote": "within 12 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reaching £100k MRR within 12 months"},
+    "gaps": []
+  },
+  "quantities": {
+    "mrr": {
+      "class": "algebraic_identity",
+      "evidence": [
+        {"kind": "typed_field", "ptr": "nodes/mrr/observed_state"},
+        {"kind": "brief", "quote": "[Currently 75k]"},
+        {"kind": "accounting_identity", "basis": "MRR = Pro plan MRR + Non-Pro MRR by label complement; NOT declared (no sum carrier)"}
+      ],
+      "gaps": ["SUM_CARRIER_ABSENT"],
+      "note": "Held level £75,000 is brief-stated. The only link to Pro MRR is a 0.15 placeholder coefficient; the sum reading is Mode X only. Internally consistent at month 0: 49 x 1,200 + 16,200 = 75,000 (both operands cee_inference)."
+    },
+    "pro_plan_price": {
+      "class": "exogenous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}],
+      "gaps": [],
+      "note": "Controllable lever; options set it (cap 200 frame)."
+    },
+    "feature_release_availability": {
+      "class": "exogenous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/feature_release_availability/observed_state"}],
+      "gaps": ["ONSET_UNSPECIFIED"],
+      "note": "Switch lever. Brief ties the price rise to 'the next Pro feature release' whose date is not given."
+    },
+    "feature_value_perception": {
+      "class": "behavioural_parameter",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/feature_value_perception/observed_state"}],
+      "gaps": ["EFFECT_TIMING_UNSPECIFIED"],
+      "note": "Latent mediator (score out of 100, cee_inference 50). Natural effects in and out carry user units; no persistence/decay semantics."
+    },
+    "monthly_churn": {
+      "class": "behavioural_parameter",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}],
+      "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"],
+      "note": "Rate (percent per month, cee_inference 3). Price reaches it through a user_specified 0.85 coefficient with no natural_effect and through an unquantified risk node."
+    },
+    "pro_paying_subscribers": {
+      "class": "stock",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_paying_subscribers/observed_state"}],
+      "gaps": ["FLOW_NET_VS_GROSS_AMBIGUOUS"],
+      "note": "Count level 1,200 (cee_inference) with two inbound flows: 'net' additions AND churn. 'Net' already includes churn, so the graph double-counts; the stock update is withheld in S and T2, and both readings are Mode X."
+    },
+    "monthly_net_pro_additions": {
+      "class": "flow",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_net_pro_additions/observed_state"}],
+      "gaps": ["FLOW_NET_VS_GROSS_AMBIGUOUS"],
+      "note": "40 subscribers per month (cee_inference)."
+    },
+    "non_pro_mrr": {
+      "class": "exogenous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/non_pro_mrr/observed_state"}],
+      "gaps": ["RATE_PERSISTENCE_UNSPECIFIED"],
+      "note": "£16,200 per month (cee_inference). No dynamics given; constancy over the horizon is the level_persistence default."
+    },
+    "price_sensitivity": {
+      "class": "unsupported_or_ambiguous",
+      "evidence": [],
+      "gaps": ["UNQUANTIFIED_NODE"],
+      "note": "Risk node with no level or unit."
+    },
+    "pro_plan_mrr": {
+      "class": "algebraic_identity",
+      "evidence": [{"kind": "declared_identity", "ptr": "nodes/pro_plan_mrr/nonlinear_identity"}],
+      "gaps": [],
+      "note": "Declared product pro_plan_price x pro_paying_subscribers (stated_in_brief false)."
+    },
+    "fac_trial_to_pro_conversion": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor; no level or unit."},
+    "fac_retention_intervention_for_at_risk_accounts": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor; no level or unit."},
+    "fac_new_pro_customer_price": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor; no level or unit."},
+    "fac_grandfathering_existing_customers": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor; no level or unit."},
+    "risk_competitive_price_or_ai_feature_response": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node on the feature-release path to MRR; no level or unit."}
+  },
+  "declared_identities": {
+    "pro_plan_mrr": {"status": "admitted", "gaps": [], "note": "No held level to contradict."}
+  },
+  "derived_identities": [
+    {
+      "id": "X_sum_mrr",
+      "target": "mrr",
+      "operation": "sum",
+      "operands": ["pro_plan_mrr", "non_pro_mrr"],
+      "tier": "X",
+      "basis": "Label complement: 'Non-Pro MRR' + 'Pro plan MRR' = 'MRR'. Internally consistent with held levels at month 0.",
+      "identity_overrides_held": false,
+      "gaps": ["SUM_CARRIER_ABSENT"]
+    }
+  ],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["FLOW_NET_VS_GROSS_AMBIGUOUS", "SUM_CARRIER_ABSENT"],
+    "note": "Typed flows sit upstream of MRR, so level persistence of MRR would contradict the graph; the stock update itself is ambiguous."
+  },
+  "x_effects": [
+    {
+      "id": "X_price_churn_direct",
+      "path": ["pro_plan_price", "monthly_churn"],
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "sweep": [0.0, 0.5, 4.25],
+      "basis": ["0: no churn response", "0.5: sibling graph pj-20260927T181846Z-A olumi_estimate natural_effect (+0.5 pp per £10)", "4.25: served-engine frame reading of the 0.85 coefficient (0.85 x 10/200 x 100)"]
+    },
+    {
+      "id": "X_price_churn_via_sensitivity",
+      "path": ["pro_plan_price", "price_sensitivity", "monthly_churn"],
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "sweep": [0.0],
+      "basis": ["0: folded into X_price_churn_direct (served frame reading of this chain is ~0.03 pp)"]
+    },
+    {
+      "id": "X_feature_competitive_mrr",
+      "path": ["feature_release_availability", "risk_competitive_price_or_ai_feature_response", "mrr"],
+      "amount_unit": "GBP per month",
+      "per_source_change": 1,
+      "sweep": [0.0, -31250.0],
+      "basis": ["0: no competitive response", "-31,250: served-engine frame reading (0.5 x -0.5 x cap 125,000)"]
+    }
+  ],
+  "dynamic_models": [
+    {
+      "id": "X_net_reading",
+      "type": "stock_flow",
+      "tier": "X",
+      "defaults": ["rate_persistence", "level_persistence", "onset_month_0", "no_lag"],
+      "assumptions": ["X_reading_net_additions_are_net", "X_sum_mrr"],
+      "stocks": {"pro_paying_subscribers": {"init": "held", "option_delta_mode": "jump"}},
+      "flows": [
+        {"id": "net_in", "stock": "pro_paying_subscribers", "sign": 1, "form": "level", "level": "monthly_net_pro_additions"},
+        {"id": "churn_change_out", "stock": "pro_paying_subscribers", "sign": -1, "form": "rate_delta_x_stock", "rate": "monthly_churn", "rate_scale": 0.01}
+      ],
+      "algebraic": [
+        {"target": "pro_plan_mrr", "op": "product", "operands": ["pro_plan_price", "pro_paying_subscribers"], "source": "declared"},
+        {"target": "mrr", "op": "sum", "operands": ["pro_plan_mrr", "non_pro_mrr"], "source": "derived", "derived_id": "X_sum_mrr"}
+      ],
+      "output": "mrr",
+      "replaces_edges": ["monthly_churn->pro_paying_subscribers", "monthly_net_pro_additions->pro_paying_subscribers", "pro_plan_mrr->mrr", "non_pro_mrr->mrr"],
+      "note": "Reading N: 'net' additions are net of baseline churn and persist; only a CHANGE in churn removes extra subscribers."
+    },
+    {
+      "id": "X_gross_reading",
+      "type": "stock_flow",
+      "tier": "X",
+      "defaults": ["rate_persistence", "level_persistence", "onset_month_0", "no_lag"],
+      "assumptions": ["X_reading_gross_additions_persist", "X_sum_mrr"],
+      "stocks": {"pro_paying_subscribers": {"init": "held", "option_delta_mode": "jump"}},
+      "flows": [
+        {"id": "gross_in", "stock": "pro_paying_subscribers", "sign": 1, "form": "derived_gross", "net": "monthly_net_pro_additions", "rate": "monthly_churn", "rate_scale": 0.01},
+        {"id": "churn_out", "stock": "pro_paying_subscribers", "sign": -1, "form": "rate_x_stock", "rate": "monthly_churn", "rate_scale": 0.01}
+      ],
+      "algebraic": [
+        {"target": "pro_plan_mrr", "op": "product", "operands": ["pro_plan_price", "pro_paying_subscribers"], "source": "declared"},
+        {"target": "mrr", "op": "sum", "operands": ["pro_plan_mrr", "non_pro_mrr"], "source": "derived", "derived_id": "X_sum_mrr"}
+      ],
+      "output": "mrr",
+      "replaces_edges": ["monthly_churn->pro_paying_subscribers", "monthly_net_pro_additions->pro_paying_subscribers", "pro_plan_mrr->mrr", "non_pro_mrr->mrr"],
+      "note": "Reading G: gross additions = held net + held churn x held subscribers (76/month) persist; churn applies to the current stock."
+    }
+  ],
+  "brief_decision_pair": ["keep_current_pricing", "59_with_feature_release"],
+  "graph_gaps": ["FLOW_NET_VS_GROSS_AMBIGUOUS", "SUM_CARRIER_ABSENT", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING", "ONSET_UNSPECIFIED", "OPTION_LEVELS_MISSING"],
+  "notes": ["Three user-added options carry interventions {} (OPTION_LEVELS_MISSING)."]
+}

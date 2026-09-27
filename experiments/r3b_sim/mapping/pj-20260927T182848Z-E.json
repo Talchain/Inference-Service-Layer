@@ -1,0 +1,58 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T182848Z-E",
+  "journey": "E",
+  "horizon": {
+    "status": "HORIZON_AMBIGUOUS",
+    "months": null,
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS"]
+  },
+  "goal": {
+    "node": "new_platform_shipped_by_q3",
+    "operator": null,
+    "threshold_ptr": null,
+    "temporal_semantics": "withheld",
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"]
+  },
+  "quantities": {
+    "new_platform_shipped_by_q3": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["GOAL_NOT_QUANTIFIED", "HORIZON_AMBIGUOUS"], "note": "Binary goal; no work quantity."},
+    "senior_engineers_hired": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/senior_engineers_hired/observed_state"}, {"kind": "brief", "quote": "two senior engineers"}], "gaps": [], "note": "Hire count lever (change from today)."},
+    "junior_engineers_hired": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/junior_engineers_hired/observed_state"}, {"kind": "brief", "quote": "four junior engineers"}], "gaps": [], "note": "Hire count lever (change from today)."},
+    "senior_annual_salary": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/senior_annual_salary/observed_state"}], "gaps": [], "note": "£120k/year per engineer (user_assumption)."},
+    "junior_annual_salary": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/junior_annual_salary/observed_state"}], "gaps": [], "note": "£65k/year per engineer (user_assumption)."},
+    "hiring_lead_time_risk": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag named, not quantified."},
+    "budget_overrun_risk": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."},
+    "senior_annual_salary_spend": {"class": "algebraic_identity", "evidence": [{"kind": "declared_identity", "ptr": "nodes/senior_annual_salary_spend/nonlinear_identity"}], "gaps": [], "note": "Declared product hires x salary."},
+    "junior_annual_salary_spend": {"class": "algebraic_identity", "evidence": [{"kind": "declared_identity", "ptr": "nodes/junior_annual_salary_spend/nonlinear_identity"}], "gaps": [], "note": "Declared product hires x salary."},
+    "annual_salary_spend": {"class": "algebraic_identity", "evidence": [{"kind": "brief", "quote": "keeping annual salary spend under £400k"}, {"kind": "accounting_identity", "basis": "Annual salary spend = senior + junior annual salary spend by label; NOT declared"}], "gaps": ["SUM_CARRIER_ABSENT", "BASELINE_MISSING"], "note": "The limit node has no level and no declared identity; the sum reading is Mode X. Whether the £400k limit covers the existing team is also not stated."}
+  },
+  "declared_identities": {
+    "senior_annual_salary_spend": {"status": "admitted", "gaps": [], "note": "No held level to contradict."},
+    "junior_annual_salary_spend": {"status": "admitted", "gaps": [], "note": "No held level to contradict."}
+  },
+  "derived_identities": [
+    {
+      "id": "X_sum_salary",
+      "target": "annual_salary_spend",
+      "operation": "sum",
+      "operands": ["senior_annual_salary_spend", "junior_annual_salary_spend"],
+      "tier": "X",
+      "basis": "Label partition: senior + junior annual salary spend = annual salary spend (new hires only; baseline team spend not modelled).",
+      "identity_overrides_held": false,
+      "gaps": ["SUM_CARRIER_ABSENT"]
+    }
+  ],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"],
+    "note": "No deadline and no quantified goal."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["hire_2_senior_engineers", "hire_4_junior_engineers"],
+  "graph_gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED", "SUM_CARRIER_ABSENT", "UNQUANTIFIED_NODE", "OPTION_LEVELS_MISSING"],
+  "notes": ["Option f1dde2e6 carries interventions {}."]
+}

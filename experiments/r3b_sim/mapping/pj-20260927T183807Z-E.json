@@ -1,0 +1,42 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T183807Z-E",
+  "journey": "E",
+  "horizon": {
+    "status": "HORIZON_AMBIGUOUS",
+    "months": null,
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS"]
+  },
+  "goal": {
+    "node": "ship_the_new_platform",
+    "operator": null,
+    "threshold_ptr": null,
+    "temporal_semantics": "withheld",
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"]
+  },
+  "quantities": {
+    "ship_the_new_platform": {"class": "unsupported_or_ambiguous", "evidence": [{"kind": "typed_field", "ptr": "nodes/ship_the_new_platform/goal_threshold_raw"}], "gaps": ["GOAL_NOT_QUANTIFIED", "HORIZON_AMBIGUOUS"], "note": "Threshold 1 on a 0/1 'shipped' node; no work quantity and no deadline."},
+    "senior_engineers_added": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/senior_engineers_added/observed_state"}, {"kind": "brief", "quote": "two senior engineers"}], "gaps": [], "note": "Hire count lever."},
+    "junior_engineers_added": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/junior_engineers_added/observed_state"}, {"kind": "brief", "quote": "four junior engineers"}], "gaps": [], "note": "Hire count lever."},
+    "annual_salary_spend": {"class": "algebraic_identity", "evidence": [{"kind": "typed_field", "ptr": "nodes/annual_salary_spend/observed_state"}, {"kind": "brief", "quote": "keeping annual salary spend under £400k"}], "gaps": [], "note": "Held £0/year (user_assumption); options set it directly (cee_hypothesis)."},
+    "senior_hiring_delay": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag named, not quantified."},
+    "junior_ramp_up_risk": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag named, not quantified."},
+    "delivery_capacity": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Outcome with no unit or level."},
+    "salary_budget_headroom": {"class": "algebraic_identity", "evidence": [{"kind": "accounting_identity", "basis": "headroom = limit - annual salary spend; NOT declared"}], "gaps": ["SUM_CARRIER_ABSENT", "UNQUANTIFIED_NODE"], "note": "No level or unit."}
+  },
+  "declared_identities": {},
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"],
+    "note": "No deadline and no quantified goal."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["two_senior_engineers", "four_junior_engineers"],
+  "graph_gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED", "UNQUANTIFIED_NODE"],
+  "notes": ["Option f90a16bd sets only annual_salary_spend; its hire counts are not set."]
+}

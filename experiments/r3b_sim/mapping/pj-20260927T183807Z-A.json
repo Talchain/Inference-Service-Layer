@@ -1,0 +1,128 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T183807Z-A",
+  "journey": "A",
+  "horizon": {
+    "status": "resolved",
+    "months": 12,
+    "evidence": {"kind": "brief", "quote": "within 12 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reaching £100k MRR within 12 months"},
+    "gaps": []
+  },
+  "quantities": {
+    "mrr": {
+      "class": "stock",
+      "evidence": [
+        {"kind": "typed_field", "ptr": "nodes/mrr/observed_state"},
+        {"kind": "brief", "quote": "[Currently 75k]"},
+        {"kind": "typed_field", "ptr": "nodes/monthly_underlying_mrr_growth/observed_state"}
+      ],
+      "gaps": ["IDENTITY_INCOMPLETE"],
+      "note": "Accumulates through a typed per-month growth rate. Pro MRR (49 x 900 = £44,100) explains only part of £75k; £30,900 is unexplained."
+    },
+    "pro_plan_price": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}], "gaps": [], "note": "Controllable lever."},
+    "monthly_churn": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}], "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "3.2% (cee_inference). Price links are user_specified 0.85 with no natural_effect."},
+    "pro_paying_subscribers": {"class": "unsupported_or_ambiguous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_paying_subscribers/observed_state"}], "gaps": ["INFLOW_MISSING"], "note": "900 (cee_inference). Churn reaches it as a STATIC level effect (-9 subscribers per 1 pp), which conflicts with stock-flow semantics (1 pp for 12 months on 900 is ~ -100)."},
+    "monthly_underlying_mrr_growth": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_underlying_mrr_growth/observed_state"}], "gaps": ["RATE_PERSISTENCE_UNSPECIFIED"], "note": "1.5 %/month (cee_inference): the one typed growth RATE in the corpus. The static graph collapses it to +£750 per month-level (one month of growth)."},
+    "price_sensitivity": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."},
+    "pro_mrr": {"class": "algebraic_identity", "evidence": [{"kind": "declared_identity", "ptr": "nodes/pro_mrr/nonlinear_identity"}], "gaps": [], "note": "Declared product pro_plan_price x pro_paying_subscribers."},
+    "fac_trial_to_pro_conversion": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."},
+    "fac_at_risk_account_coverage": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."},
+    "fac_new_pro_customer_price": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."},
+    "fac_grandfather_existing_pro_customers": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."},
+    "risk_competitive_response_to_ai_feature_launch": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Root risk node."}
+  },
+  "declared_identities": {
+    "pro_mrr": {"status": "admitted", "gaps": [], "note": "No held level to contradict."}
+  },
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "model",
+    "model": "T2_growth",
+    "gaps": [],
+    "note": "MRR accumulates at the typed growth rate held constant (rate_persistence). Options that change price are tainted by the unquantified Pro MRR -> MRR link."
+  },
+  "x_effects": [
+    {
+      "id": "X_price_churn_direct",
+      "path": ["pro_plan_price", "monthly_churn"],
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "sweep": [0.0, 0.5, 4.25],
+      "basis": ["0: no churn response", "0.5: sibling graph pj-20260927T181846Z-A natural_effect", "4.25: served-engine frame reading of 0.85"]
+    },
+    {
+      "id": "X_price_churn_via_sensitivity",
+      "path": ["pro_plan_price", "price_sensitivity", "monthly_churn"],
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "sweep": [0.0],
+      "basis": ["0: folded into X_price_churn_direct"]
+    },
+    {
+      "id": "X_pro_mrr_in_mrr",
+      "path": ["pro_mrr", "mrr"],
+      "amount_unit": "GBP/month",
+      "per_source_change": 1,
+      "sweep": [1.0],
+      "basis": ["1: accounting reading, Pro MRR is part of MRR one-for-one; the unexplained £30,900 remainder is held constant"]
+    }
+  ],
+  "dynamic_models": [
+    {
+      "id": "T2_growth",
+      "type": "stock_flow",
+      "tier": "T2",
+      "defaults": ["rate_persistence", "onset_month_0", "no_lag"],
+      "assumptions": [],
+      "stocks": {"mrr": {"init": "held", "option_delta_mode": "jump"}},
+      "flows": [
+        {"id": "growth", "stock": "mrr", "sign": 1, "form": "rate_x_stock", "rate": "monthly_underlying_mrr_growth", "rate_scale": 0.01}
+      ],
+      "algebraic": [],
+      "output": "mrr",
+      "replaces_edges": ["monthly_underlying_mrr_growth->mrr"],
+      "note": "MRR(t+1) = MRR(t) x (1 + g); g = typed 1.5 %/month held constant."
+    },
+    {
+      "id": "X_uplift_grows",
+      "type": "stock_flow",
+      "tier": "X",
+      "defaults": ["rate_persistence", "onset_month_0", "no_lag"],
+      "assumptions": ["X_pro_mrr_in_mrr", "X_growth_applies_to_uplift"],
+      "stocks": {"mrr": {"init": "held", "option_delta_mode": "jump"}},
+      "flows": [
+        {"id": "growth", "stock": "mrr", "sign": 1, "form": "rate_x_stock", "rate": "monthly_underlying_mrr_growth", "rate_scale": 0.01}
+      ],
+      "algebraic": [],
+      "output": "mrr",
+      "replaces_edges": ["monthly_underlying_mrr_growth->mrr"],
+      "note": "An option's month-0 MRR change joins the base and then grows at g."
+    },
+    {
+      "id": "X_uplift_flat",
+      "type": "stock_flow",
+      "tier": "X",
+      "defaults": ["rate_persistence", "onset_month_0", "no_lag"],
+      "assumptions": ["X_pro_mrr_in_mrr", "X_growth_excludes_uplift"],
+      "stocks": {"mrr": {"init": "held", "option_delta_mode": "overlay"}},
+      "flows": [
+        {"id": "growth", "stock": "mrr", "sign": 1, "form": "rate_x_stock", "rate": "monthly_underlying_mrr_growth", "rate_scale": 0.01}
+      ],
+      "algebraic": [],
+      "output": "mrr",
+      "replaces_edges": ["monthly_underlying_mrr_growth->mrr"],
+      "note": "The base grows at g; an option's month-0 change is added flat and does not grow."
+    }
+  ],
+  "brief_decision_pair": ["keep_pro_at_49", "raise_pro_to_59"],
+  "graph_gaps": ["IDENTITY_INCOMPLETE", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING", "RATE_PERSISTENCE_UNSPECIFIED", "OPTION_LEVELS_MISSING"],
+  "notes": ["The typed churn -> subscribers natural_effect is a static level shift; it is used as given and not reinterpreted as a monthly flow."]
+}

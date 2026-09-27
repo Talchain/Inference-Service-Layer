@@ -1,0 +1,40 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T181846Z-C",
+  "journey": "C",
+  "horizon": {
+    "status": "resolved",
+    "months": 6,
+    "evidence": {"kind": "brief", "quote": "within 6 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reach £100k MRR within 6 months"},
+    "gaps": ["BASELINE_MISSING"]
+  },
+  "quantities": {
+    "mrr": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["BASELINE_MISSING"], "note": "No observed_state: today's MRR is not held anywhere in this graph (and the brief does not state it)."},
+    "pro_plan_monthly_price": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_monthly_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}], "gaps": [], "note": "Controllable lever."},
+    "incremental_feature_investment_6_months": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/incremental_feature_investment_6_months/observed_state"}], "gaps": [], "note": "Six-month spend component."},
+    "incremental_advertising_spend_6_months": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/incremental_advertising_spend_6_months/observed_state"}], "gaps": [], "note": "Six-month spend component."},
+    "incremental_6_month_spend": {"class": "algebraic_identity", "evidence": [{"kind": "typed_field", "ptr": "nodes/incremental_6_month_spend/observed_state"}, {"kind": "accounting_identity", "basis": "Total spend = feature + advertising components; encoded only as behavioural natural_effects (£20,000 per £20,000), NOT declared"}], "gaps": ["SUM_CARRIER_ABSENT"], "note": "Options set it directly, so the limit is evaluable from the intervention without the sum."},
+    "monthly_churn": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}], "gaps": [], "note": "3% (user_assumption). Every inbound link carries a natural_effect: price +0.4 pp per £10; features -0.5 pp per £20,000."}
+  },
+  "declared_identities": {},
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["BASELINE_MISSING"],
+    "note": "No baseline MRR; never invented, including in Mode X."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["features_59_pro_price", "additional_advertising"],
+  "graph_gaps": ["BASELINE_MISSING", "SUM_CARRIER_ABSENT", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"],
+  "notes": ["The churn limit is fully quantified with typed natural effects and a user-stated level: a static verdict is available at T0."]
+}

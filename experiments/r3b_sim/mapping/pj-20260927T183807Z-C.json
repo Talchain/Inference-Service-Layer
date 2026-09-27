@@ -1,0 +1,81 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T183807Z-C",
+  "journey": "C",
+  "horizon": {
+    "status": "resolved",
+    "months": 6,
+    "evidence": {"kind": "brief", "quote": "within 6 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reach £100k MRR within 6 months"},
+    "gaps": []
+  },
+  "quantities": {
+    "mrr": {"class": "algebraic_identity", "evidence": [{"kind": "typed_field", "ptr": "nodes/mrr/observed_state"}, {"kind": "declared_identity", "ptr": "nodes/mrr/nonlinear_identity"}], "gaps": ["STOCK_LEVEL_MISSING"], "note": "Held £72,000 (user_override); declared MRR = price x subscribers, but subscribers has no level, so the identity cannot be checked or evaluated in S."},
+    "pro_plan_price": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}], "gaps": [], "note": "Controllable lever."},
+    "feature_investment": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/feature_investment/observed_state"}], "gaps": [], "note": "Six-month spend component."},
+    "six_month_incremental_spend": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/six_month_incremental_spend/observed_state"}, {"kind": "brief", "quote": "with a £20k budget"}], "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "Six-month total; links to acquisition with no natural_effect."},
+    "paid_pro_acquisition_rate": {"class": "flow", "evidence": [{"kind": "typed_field", "ptr": "nodes/paid_pro_acquisition_rate/observed_state"}], "gaps": [], "note": "20 new Pro subscribers per month (cee_inference): a typed inflow."},
+    "pro_monthly_churn": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_monthly_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}], "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "3 percent per month (cee_inference): a typed outflow rate. Price reaches it via an unquantified risk node."},
+    "price_sensitivity": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."},
+    "pro_paying_subscribers": {"class": "stock", "evidence": [], "gaps": ["STOCK_LEVEL_MISSING"], "note": "Has a typed inflow and outflow rate but NO starting level. Mode X derives one by inverting the declared identity (72,000 / 49 = 1,469.4, not a whole number)."},
+    "fac_advertising_spend": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."}
+  },
+  "declared_identities": {
+    "mrr": {"status": "withheld", "gaps": ["STOCK_LEVEL_MISSING"], "note": "Operand pro_paying_subscribers has no level."}
+  },
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["STOCK_LEVEL_MISSING"],
+    "note": "Typed flows exist, but the stock they act on has no starting level."
+  },
+  "x_effects": [
+    {
+      "id": "X_price_churn_via_sensitivity",
+      "path": ["pro_plan_price", "price_sensitivity", "pro_monthly_churn"],
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "sweep": [0.0, 0.02, 0.4, 1.0],
+      "basis": ["0: no response", "0.02: served-engine frame reading of the chain (0.5 x 0.05 x 0.0075 x 100)", "0.4: sibling graph pj-20260927T181846Z-C natural_effect (+0.4 pp per £10)", "1.0: high end"]
+    },
+    {
+      "id": "X_spend_total_to_acquisition",
+      "path": ["six_month_incremental_spend", "paid_pro_acquisition_rate"],
+      "amount_unit": "new Pro subscribers per month",
+      "per_source_change": 20000,
+      "sweep": [0.0],
+      "basis": ["0: the spend total is an accounting roll-up of its components; the component links already carry the effect"]
+    }
+  ],
+  "dynamic_models": [
+    {
+      "id": "X_inversion",
+      "type": "stock_flow",
+      "tier": "X",
+      "defaults": ["rate_persistence", "level_persistence", "onset_month_0", "no_lag"],
+      "assumptions": ["X_subscribers_by_identity_inversion"],
+      "stocks": {"pro_paying_subscribers": {"init": "inversion", "inversion": {"identity_target": "mrr", "known_operand": "pro_plan_price"}, "option_delta_mode": "jump"}},
+      "flows": [
+        {"id": "acq_in", "stock": "pro_paying_subscribers", "sign": 1, "form": "level", "level": "paid_pro_acquisition_rate"},
+        {"id": "churn_out", "stock": "pro_paying_subscribers", "sign": -1, "form": "rate_x_stock", "rate": "pro_monthly_churn", "rate_scale": 0.01}
+      ],
+      "algebraic": [
+        {"target": "mrr", "op": "product", "operands": ["pro_plan_price", "pro_paying_subscribers"], "source": "declared"}
+      ],
+      "output": "mrr",
+      "replaces_edges": ["paid_pro_acquisition_rate->pro_paying_subscribers", "pro_monthly_churn->pro_paying_subscribers"],
+      "note": "Starting subscribers = held MRR / held price. With 20 in and 3% out, the model's own figures imply decline toward 667."
+    }
+  ],
+  "brief_decision_pair": ["feature_59_price", "advertising_investment"],
+  "graph_gaps": ["STOCK_LEVEL_MISSING", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING", "OPTION_TARGET_INVALID", "OPTION_LEVELS_MISSING"],
+  "notes": ["Option 'advertising_investment' intervenes on itself (key 'advertising_investment' is the option node): OPTION_TARGET_INVALID for that key; its other keys apply.", "Option 7ce6c1cf carries interventions {}."]
+}

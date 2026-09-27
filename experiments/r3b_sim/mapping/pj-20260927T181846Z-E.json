@@ -1,0 +1,42 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T181846Z-E",
+  "journey": "E",
+  "horizon": {
+    "status": "HORIZON_AMBIGUOUS",
+    "months": null,
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS"]
+  },
+  "goal": {
+    "node": "ship_the_new_platform",
+    "operator": null,
+    "threshold_ptr": null,
+    "temporal_semantics": "withheld",
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"]
+  },
+  "quantities": {
+    "ship_the_new_platform": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["GOAL_NOT_QUANTIFIED", "HORIZON_AMBIGUOUS"], "note": "Binary goal; no work quantity; the goal node itself drops 'by Q3'."},
+    "new_senior_engineers_hired": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/new_senior_engineers_hired/observed_state"}, {"kind": "brief", "quote": "two senior engineers"}], "gaps": [], "note": "Hire count lever."},
+    "new_junior_engineers_hired": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/new_junior_engineers_hired/observed_state"}, {"kind": "brief", "quote": "four junior engineers"}], "gaps": [], "note": "Hire count lever."},
+    "annual_salary_spend": {"class": "algebraic_identity", "evidence": [{"kind": "typed_field", "ptr": "nodes/annual_salary_spend/observed_state"}, {"kind": "brief", "quote": "keeping annual salary spend under £400k"}], "gaps": [], "note": "Held £0/year (user_assumption); options set it directly (cee_hypothesis)."},
+    "senior_hiring_lead_time_risk": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag named, not quantified."},
+    "junior_ramp_up_risk": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag named, not quantified."},
+    "budget_cap_breach_risk": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."},
+    "incremental_platform_delivery_capacity": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Outcome with no unit or level."}
+  },
+  "declared_identities": {},
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"],
+    "note": "No deadline and no quantified goal."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["hire_two_senior_engineers", "hire_four_junior_engineers"],
+  "graph_gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED", "UNQUANTIFIED_NODE"],
+  "notes": []
+}

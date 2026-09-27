@@ -1,0 +1,59 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T182848Z-A",
+  "journey": "A",
+  "horizon": {
+    "status": "resolved",
+    "months": 12,
+    "evidence": {"kind": "brief", "quote": "within 12 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reaching £100k MRR within 12 months"},
+    "gaps": []
+  },
+  "quantities": {
+    "mrr": {
+      "class": "unsupported_or_ambiguous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/mrr/observed_state"}, {"kind": "brief", "quote": "[Currently 75k]"}],
+      "gaps": ["IDENTITY_INCOMPLETE"],
+      "note": "Held £75k; only a 0.15 placeholder link from Pro plan MRR, with no non-Pro component in the graph."
+    },
+    "pro_plan_listed_price": {
+      "class": "exogenous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_listed_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}],
+      "gaps": [],
+      "note": "Controllable lever."
+    },
+    "price_rise_rollout_share": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/price_rise_rollout_share/observed_state"}], "gaps": [], "note": "Share lever (0-1)."},
+    "feature_release_availability": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/feature_release_availability/observed_state"}], "gaps": ["ONSET_UNSPECIFIED"], "note": "Share lever (0-1)."},
+    "perceived_pro_value": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/perceived_pro_value/observed_state"}], "gaps": ["EFFECT_TIMING_UNSPECIFIED", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "Latent mediator (score 70, cee_inference). Price reaches it via an unquantified risk node."},
+    "monthly_pro_churn": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_pro_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}], "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "3% monthly (cee_inference). Direct price link is user_specified 0.85 with no natural_effect."},
+    "pro_paying_subscribers": {"class": "stock", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_paying_subscribers/observed_state"}], "gaps": ["INFLOW_MISSING"], "note": "918 (cee_inference). Churn is the only flow; there is no acquisition flow, so a stock update would decay spuriously."},
+    "price_sensitivity": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."},
+    "average_pro_price": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["FRAME_MISSING"], "note": "Outcome with no level or frame; driven by listed price and rollout share via coefficients without natural_effect."},
+    "pro_plan_mrr": {"class": "algebraic_identity", "evidence": [{"kind": "declared_identity", "ptr": "nodes/pro_plan_mrr/nonlinear_identity"}], "gaps": ["FRAME_MISSING"], "note": "Declared product average_pro_price x pro_paying_subscribers; the average_pro_price operand has no frame, so the identity is withheld (R3-8 identity_frame_missing)."},
+    "fac_trial_to_pro_conversion": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."},
+    "fac_existing_pro_customers_grandfathered": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "User-added option factor."},
+    "risk_competitive_response_to_our_ai_launch": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node on the feature path to MRR."}
+  },
+  "declared_identities": {
+    "pro_plan_mrr": {"status": "withheld", "gaps": ["FRAME_MISSING"], "note": "Operand average_pro_price has no level or frame."}
+  },
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["INFLOW_MISSING", "IDENTITY_INCOMPLETE", "FRAME_MISSING"],
+    "note": "A typed churn rate sits upstream of MRR with no inflow; level persistence of MRR would contradict it."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["carry_on_as_now", "59_with_feature_release"],
+  "graph_gaps": ["INFLOW_MISSING", "FRAME_MISSING", "IDENTITY_INCOMPLETE", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING", "OPTION_LEVELS_MISSING"],
+  "notes": ["No Mode X model: the missing acquisition flow cannot be supplied without inventing a rate (hard boundary)."]
+}

@@ -1,0 +1,120 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T181846Z-A",
+  "journey": "A",
+  "horizon": {
+    "status": "resolved",
+    "months": 12,
+    "evidence": {"kind": "brief", "quote": "within 12 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "withheld",
+    "evidence": {"kind": "brief", "quote": "reaching £100k MRR within 12 months"},
+    "gaps": ["GOAL_TEMPORAL_SEMANTICS_AMBIGUOUS", "HORIZON_BAKED_INTO_NODE"]
+  },
+  "quantities": {
+    "mrr": {
+      "class": "algebraic_identity",
+      "evidence": [
+        {"kind": "typed_field", "ptr": "nodes/mrr/observed_state"},
+        {"kind": "brief", "quote": "[Currently 75k]"},
+        {"kind": "accounting_identity", "basis": "MRR(month 12) = Pro MRR at month 12 + Other-plan MRR at month 12 by label; NOT declared"}
+      ],
+      "gaps": ["SUM_CARRIER_ABSENT", "GOAL_TEMPORAL_SEMANTICS_AMBIGUOUS"],
+      "note": "Held level is TODAY (£75k); the operands are MONTH-12 forecasts, so the node mixes two time points."
+    },
+    "pro_plan_price": {
+      "class": "exogenous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}],
+      "gaps": [],
+      "note": "Controllable lever."
+    },
+    "pro_paying_subscribers_at_month_12": {
+      "class": "unsupported_or_ambiguous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_paying_subscribers_at_month_12/observed_state"}],
+      "gaps": ["HORIZON_BAKED_INTO_NODE", "STOCK_LEVEL_MISSING"],
+      "note": "1,360 is a cee_inference FORECAST at month 12, not a starting stock; today's subscriber count is absent."
+    },
+    "monthly_churn_rate": {
+      "class": "behavioural_parameter",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_churn_rate/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}],
+      "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"],
+      "note": "3% (cee_inference). Price has a typed natural_effect (+0.5 pp per £10) but also reaches churn through an unquantified risk node."
+    },
+    "other_plan_mrr_at_month_12": {
+      "class": "unsupported_or_ambiguous",
+      "evidence": [{"kind": "typed_field", "ptr": "nodes/other_plan_mrr_at_month_12/observed_state"}],
+      "gaps": ["HORIZON_BAKED_INTO_NODE"],
+      "note": "£26,000 forecast at month 12 (cee_inference)."
+    },
+    "price_sensitivity": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node; no level or unit."},
+    "pro_mrr_at_month_12": {
+      "class": "algebraic_identity",
+      "evidence": [{"kind": "declared_identity", "ptr": "nodes/pro_mrr_at_month_12/nonlinear_identity"}],
+      "gaps": ["HORIZON_BAKED_INTO_NODE"],
+      "note": "Declared product price x subscribers-at-month-12."
+    },
+    "fac_trial_to_pro_conversion_improvement": {"class": "unsupported_or_ambiguous", "evidence": [{"kind": "typed_field", "ptr": "nodes/fac_trial_to_pro_conversion_improvement/observed_state"}], "gaps": ["FRAME_MISSING"], "note": "Level 0 with no unit or frame."},
+    "fac_at_risk_account_retention_intervention": {"class": "unsupported_or_ambiguous", "evidence": [{"kind": "typed_field", "ptr": "nodes/fac_at_risk_account_retention_intervention/observed_state"}], "gaps": ["FRAME_MISSING"], "note": "Level 0 with no unit or frame."},
+    "fac_existing_customer_grandfathering": {"class": "unsupported_or_ambiguous", "evidence": [{"kind": "typed_field", "ptr": "nodes/fac_existing_customer_grandfathering/observed_state"}], "gaps": ["FRAME_MISSING"], "note": "Level 0 with no unit or frame."},
+    "risk_competitor_price_or_ai_feature_response": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Root risk node; no level or unit."}
+  },
+  "declared_identities": {
+    "pro_mrr_at_month_12": {"status": "admitted", "gaps": [], "note": "Evaluated on month-12 operands only."}
+  },
+  "derived_identities": [
+    {
+      "id": "X_sum_mrr_month12",
+      "target": "mrr",
+      "operation": "sum",
+      "operands": ["pro_mrr_at_month_12", "other_plan_mrr_at_month_12"],
+      "tier": "X",
+      "basis": "Label: Pro MRR at month 12 + Other-plan MRR at month 12 = MRR at month 12. Overrides today's held £75k because the operands are month-12 values.",
+      "identity_overrides_held": true,
+      "gaps": ["SUM_CARRIER_ABSENT", "HORIZON_BAKED_INTO_NODE"]
+    }
+  ],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["GOAL_TEMPORAL_SEMANTICS_AMBIGUOUS", "SUM_CARRIER_ABSENT", "STOCK_LEVEL_MISSING"],
+    "note": "There is no dynamic structure at all: the horizon is baked into node identity."
+  },
+  "x_effects": [
+    {
+      "id": "X_price_churn_via_sensitivity",
+      "path": ["pro_plan_price", "price_sensitivity", "monthly_churn_rate"],
+      "amount_unit": "percentage points",
+      "per_source_change": 10,
+      "sweep": [0.0, 2.125],
+      "basis": ["0: typed natural_effect on the direct edge carries the whole response", "2.125: served-engine frame reading of the chain (0.5 x 10/200 x 0.85 x 100)"]
+    },
+    {
+      "id": "X_churn_to_subscribers_m12",
+      "path": ["monthly_churn_rate", "pro_paying_subscribers_at_month_12"],
+      "amount_unit": "subscribers",
+      "per_source_change": 1,
+      "sweep": [-25.0, -159.0],
+      "basis": ["-25: served-engine frame reading (-0.5 x 0.01 x 5,000)", "-159: 12 months of +1 pp churn compounding on 1,360 ((0.96/0.97)^12 - 1) x 1,360, a stock-flow reading"]
+    }
+  ],
+  "dynamic_models": [
+    {
+      "id": "X_static_at_month_12",
+      "type": "static_at_H",
+      "tier": "X",
+      "defaults": ["onset_month_0", "no_lag"],
+      "assumptions": ["X_sum_mrr_month12", "X_month12_nodes_are_forecast_at_H"],
+      "output": "mrr",
+      "replaces_edges": ["pro_mrr_at_month_12->mrr", "other_plan_mrr_at_month_12->mrr"],
+      "note": "Reads the model's own month-12 forecasts as the deadline state; no dynamics exist to simulate."
+    }
+  ],
+  "brief_decision_pair": ["keep_pro_at_49", "raise_pro_to_59_at_release"],
+  "graph_gaps": ["HORIZON_BAKED_INTO_NODE", "GOAL_TEMPORAL_SEMANTICS_AMBIGUOUS", "STOCK_LEVEL_MISSING", "SUM_CARRIER_ABSENT", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING", "FRAME_MISSING"],
+  "notes": ["The generator encoded 'by month 12' as static node identity. A static engine with product + sum identities could answer the month-12 question from these nodes without any dynamics."]
+}

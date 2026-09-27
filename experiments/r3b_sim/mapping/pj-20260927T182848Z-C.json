@@ -1,0 +1,44 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T182848Z-C",
+  "journey": "C",
+  "horizon": {
+    "status": "resolved",
+    "months": 6,
+    "evidence": {"kind": "brief", "quote": "within 6 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reach £100k MRR within 6 months"},
+    "gaps": []
+  },
+  "quantities": {
+    "mrr": {"class": "algebraic_identity", "evidence": [{"kind": "typed_field", "ptr": "nodes/mrr/observed_state"}, {"kind": "declared_identity", "ptr": "nodes/mrr/nonlinear_identity"}], "gaps": ["IDENTITY_INCONSISTENT_WITH_HELD_LEVEL"], "note": "Declared MRR = price x subscribers gives 49 x 1,000 = £49,000, but held MRR is £72,000 (user_override). The identity is withheld."},
+    "incremental_launch_budget": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/incremental_launch_budget/observed_state"}, {"kind": "brief", "quote": "with a £20k budget"}], "gaps": [], "note": "Six-month budget total."},
+    "feature_development_spend": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/feature_development_spend/observed_state"}], "gaps": [], "note": "Spend component."},
+    "pro_advertising_spend": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_advertising_spend/observed_state"}], "gaps": [], "note": "Spend component."},
+    "pro_plan_price": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}], "gaps": [], "note": "Controllable lever."},
+    "pro_paying_subscribers": {"class": "stock", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_paying_subscribers/observed_state"}], "gaps": ["INFLOW_MISSING", "EFFECT_TIMING_UNSPECIFIED"], "note": "1,000 (user_assumption). Advertising adds +150 per £20,000 as a one-off level effect with no timing; churn is linked by a coefficient with no natural_effect; no acquisition flow."},
+    "monthly_churn": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}], "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "3% (user_assumption). Price reaches it via an unquantified risk node."},
+    "price_driven_churn": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."}
+  },
+  "declared_identities": {
+    "mrr": {"status": "withheld", "gaps": ["IDENTITY_INCONSISTENT_WITH_HELD_LEVEL"], "note": "49 x 1,000 = 49,000 is not the held 72,000."}
+  },
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["IDENTITY_INCONSISTENT_WITH_HELD_LEVEL", "INFLOW_MISSING"],
+    "note": "The declared identity contradicts the held level, and the subscriber stock has no inflow."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["features_59_price", "advertising_investment"],
+  "graph_gaps": ["IDENTITY_INCONSISTENT_WITH_HELD_LEVEL", "INFLOW_MISSING", "EFFECT_TIMING_UNSPECIFIED", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"],
+  "notes": ["No Mode X model: resolving the identity contradiction would mean choosing which of two user figures is wrong."]
+}

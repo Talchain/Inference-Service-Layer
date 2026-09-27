@@ -1,0 +1,42 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T180910Z-E",
+  "journey": "E",
+  "horizon": {
+    "status": "HORIZON_AMBIGUOUS",
+    "months": null,
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS"]
+  },
+  "goal": {
+    "node": "new_platform_shipped_by_q3",
+    "operator": null,
+    "threshold_ptr": null,
+    "temporal_semantics": "withheld",
+    "evidence": {"kind": "brief", "quote": "ship the new platform by Q3"},
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"]
+  },
+  "quantities": {
+    "new_platform_shipped_by_q3": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["GOAL_NOT_QUANTIFIED", "HORIZON_AMBIGUOUS"], "note": "Binary 'shipped' with no work-remaining quantity and no velocity-to-completion mapping. 'Q3' has no year or fiscal basis (today is 27 Sep 2026)."},
+    "senior_engineering_hires": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/senior_engineering_hires/observed_state"}, {"kind": "brief", "quote": "two senior engineers"}], "gaps": [], "note": "Hire count lever."},
+    "junior_engineering_hires": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/junior_engineering_hires/observed_state"}, {"kind": "brief", "quote": "four junior engineers"}], "gaps": [], "note": "Hire count lever."},
+    "additional_delivery_capacity": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/additional_delivery_capacity/observed_state"}], "gaps": ["EFFECT_TIMING_UNSPECIFIED"], "note": "FTE-equivalent capacity; natural effects 1.5 per senior and 0.75 per junior (olumi_estimate). No ramp-up timing."},
+    "annual_salary_spend": {"class": "algebraic_identity", "evidence": [{"kind": "typed_field", "ptr": "nodes/annual_salary_spend/observed_state"}, {"kind": "brief", "quote": "keeping annual salary spend under £400k"}], "gaps": [], "note": "Options set it directly (£240k / £260k / £250k, cee_hypothesis). The placeholder natural effects (£100,000 per 2 seniors) contradict the option levels (INTERNAL_INCONSISTENCY); the interventions override them."},
+    "additional_platform_delivery_velocity": {"class": "flow", "evidence": [{"kind": "typed_field", "ptr": "nodes/additional_platform_delivery_velocity/observed_state"}], "gaps": ["GOAL_NOT_QUANTIFIED"], "note": "Platform delivery units per month: a typed rate, but there is no stock of work remaining for it to deplete."},
+    "senior_hiring_lead_time": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag concept named but not quantified (no months)."},
+    "junior_ramp_up_time": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Lag concept named but not quantified (no months)."}
+  },
+  "declared_identities": {},
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED"],
+    "note": "No deadline and no quantified goal."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["hire_2_senior_engineers", "hire_4_junior_engineers"],
+  "graph_gaps": ["HORIZON_AMBIGUOUS", "GOAL_NOT_QUANTIFIED", "UNQUANTIFIED_NODE", "INTERNAL_INCONSISTENCY"],
+  "notes": ["Lead time and ramp-up are exactly the lags a dynamic engine would need, but they are named only as unquantified risks."]
+}

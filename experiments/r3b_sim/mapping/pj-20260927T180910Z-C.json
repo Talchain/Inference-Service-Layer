@@ -1,0 +1,42 @@
+{
+  "schema": "r3b-mapping-v1",
+  "graph": "pj-20260927T180910Z-C",
+  "journey": "C",
+  "horizon": {
+    "status": "resolved",
+    "months": 6,
+    "evidence": {"kind": "brief", "quote": "within 6 months"},
+    "gaps": []
+  },
+  "goal": {
+    "node": "mrr",
+    "operator": ">=",
+    "threshold_ptr": "nodes/mrr/goal_threshold_raw",
+    "temporal_semantics": "attain_by_H",
+    "evidence": {"kind": "brief", "quote": "reach £100k MRR within 6 months"},
+    "gaps": []
+  },
+  "quantities": {
+    "mrr": {"class": "unsupported_or_ambiguous", "evidence": [{"kind": "typed_field", "ptr": "nodes/mrr/observed_state"}], "gaps": ["INFLOW_MISSING"], "note": "£72,000 (user_override). Churn feeds MRR through a coefficient with no natural_effect; there is no acquisition or growth rate, so MRR has no defensible time path."},
+    "pro_plan_price": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/pro_plan_price/observed_state"}, {"kind": "brief", "quote": "from £49 to £59 per month"}], "gaps": [], "note": "Controllable lever."},
+    "new_feature_release": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/new_feature_release/observed_state"}], "gaps": ["ONSET_UNSPECIFIED"], "note": "Binary lever."},
+    "additional_six_month_growth_spend": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/additional_six_month_growth_spend/observed_state"}, {"kind": "brief", "quote": "with a £20k budget"}], "gaps": [], "note": "Six-month spend total (a budget quantity, not a monthly flow)."},
+    "advertising_share_of_growth_spend": {"class": "exogenous", "evidence": [{"kind": "typed_field", "ptr": "nodes/advertising_share_of_growth_spend/observed_state"}], "gaps": [], "note": "Share lever (percent)."},
+    "monthly_churn": {"class": "behavioural_parameter", "evidence": [{"kind": "typed_field", "ptr": "nodes/monthly_churn/observed_state"}, {"kind": "brief", "quote": "keeping monthly churn under 4%"}], "gaps": ["STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "3% (cee_inference). Price reaches it via an unquantified risk node."},
+    "price_driven_churn_increase": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE"], "note": "Risk node."},
+    "new_customer_mrr_added": {"class": "unsupported_or_ambiguous", "evidence": [], "gaps": ["UNQUANTIFIED_NODE", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"], "note": "Outcome with no level; spend links have no natural_effect. Arguably a flow into MRR, but no per-month unit is given."}
+  },
+  "declared_identities": {},
+  "derived_identities": [],
+  "goal_model_t2": {
+    "status": "withheld",
+    "model": null,
+    "gaps": ["INFLOW_MISSING", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING"],
+    "note": "Churn is a typed rate upstream of MRR with no inflow, so level persistence of MRR is not defensible."
+  },
+  "x_effects": [],
+  "dynamic_models": [],
+  "brief_decision_pair": ["features_pro_price", "additional_advertising"],
+  "graph_gaps": ["INFLOW_MISSING", "STATIC_COEFFICIENT_NO_TEMPORAL_MEANING", "UNQUANTIFIED_NODE", "ONSET_UNSPECIFIED"],
+  "notes": ["Brief budget £20k; typed limit is £30,000 (explicit, later user edit). The typed limit is used.", "No Mode X model: the only temporal content would be invented flows."]
+}
