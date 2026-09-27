@@ -38,6 +38,7 @@ from src.models.response_v2 import (
 
 # Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure, UserStatedRange
+from src.models.identity_evaluation import IdentityEvaluation
 from src.models.node_level import NodeLevelFrame
 
 # Pure-numpy correlation helpers (no circular import — correlation.py imports nothing
@@ -2372,6 +2373,12 @@ class RobustnessResponseV2(BaseModel):
         description="Per non-root node: anchored at an attested level (with its author, "
         "domain and per-option out-of-domain share) or 'no level'. Absent when the "
         "graph has no non-root node.",
+    )
+    # R3 slice 1: each declared accounting identity and whether the numbers rest on it.
+    identity_evaluations: Optional[List[IdentityEvaluation]] = Field(
+        None,
+        description="Per declared identity: evaluated (with its reconciliation) or the "
+        "reason it was not. Absent when the graph declares none.",
     )
 
     model_config = {

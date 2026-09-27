@@ -3887,6 +3887,21 @@
             "title": "Factor Sensitivity Status",
             "type": "string"
           },
+          "identity_evaluations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/IdentityEvaluation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per declared identity: evaluated (with level_source and the reconciliation of its stated level against its inputs) or withheld_reason. Absent when the graph declares none.",
+            "title": "Identity Evaluations"
+          },
           "inference_warnings": {
             "description": "Structured warnings about inference conditions that may affect result reliability",
             "items": {
@@ -4174,6 +4189,127 @@
           "critiques"
         ],
         "title": "ISLV2Error422",
+        "type": "object"
+      },
+      "IdentityEvaluation": {
+        "additionalProperties": false,
+        "description": "One declared identity and what ISL did with it.",
+        "properties": {
+          "addends": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Addends",
+            "type": "array"
+          },
+          "evaluated": {
+            "description": "True only when the numbers rest on the identity",
+            "title": "Evaluated",
+            "type": "boolean"
+          },
+          "factor_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Factor Ids",
+            "type": "array"
+          },
+          "level_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "stated_level",
+                  "identity_inputs"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluated only: anchored at the node's stated level, or (no stated level) the level its inputs give (AIQ 5860087988 item 4)",
+            "title": "Level Source"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "product",
+              "sum"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "reconciliation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdentityReconciliation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stated_in_brief": {
+            "title": "Stated In Brief",
+            "type": "boolean"
+          },
+          "withheld_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "identity_frame_missing",
+                  "identity_operand_missing",
+                  "identity_zero_level",
+                  "identity_inconsistent"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withheld Reason"
+          }
+        },
+        "required": [
+          "node_id",
+          "operation",
+          "factor_ids",
+          "stated_in_brief",
+          "evaluated"
+        ],
+        "title": "IdentityEvaluation",
+        "type": "object"
+      },
+      "IdentityReconciliation": {
+        "description": "The stated level against the level the identity's own inputs give today, in USER units\n(AIQ 5860087988 item 1). Above 1% a consumer says it; above 5% the identity is withheld.",
+        "properties": {
+          "mismatch_share": {
+            "description": "|stated - reconstructed| / |stated|",
+            "minimum": 0.0,
+            "title": "Mismatch Share",
+            "type": "number"
+          },
+          "reconstructed": {
+            "description": "term(operands) + addends at today's levels",
+            "title": "Reconstructed",
+            "type": "number"
+          },
+          "stated": {
+            "description": "The node's own stated level today",
+            "title": "Stated",
+            "type": "number"
+          }
+        },
+        "required": [
+          "reconstructed",
+          "stated",
+          "mismatch_share"
+        ],
+        "title": "IdentityReconciliation",
         "type": "object"
       },
       "InferenceWarning": {
@@ -6649,6 +6785,21 @@
             },
             "title": "Factor Sensitivity",
             "type": "array"
+          },
+          "identity_evaluations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/IdentityEvaluation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per declared identity: evaluated (with its reconciliation) or the reason it was not. Absent when the graph declares none.",
+            "title": "Identity Evaluations"
           },
           "inference_warnings": {
             "description": "Structured warnings about inference conditions that may affect result reliability",

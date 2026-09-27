@@ -345,6 +345,7 @@ RECOMPUTED = {
     "factor_flip_values",
     "factor_evppi",  # R3-6, MEASURED: 0.0, below_resolution (see below)
     "critiques",  # analysis critiques are recomputed on the new samples
+    "identity_evaluations",  # the new disclosure itself (absent when nothing is declared)
     "metadata",  # execution_time_ms differs on ANY two runs; edge_existence_rates move through the
     # tie-break coupling (£59 no longer ties, so the edge stream is consumed differently)
 }
@@ -375,3 +376,60 @@ class TestR3_5TheConsumerMatrix:
         (row,) = [r for r in on["factor_evppi"] if r["factor_id"] == SUBS]
         assert row["evppi"] == 0.0
         assert row["status"] == "below_resolution"
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The disclosure: declared is not evaluated (R3-4). Only evaluated=true licenses a numerical claim.
+# ---------------------------------------------------------------------------------------------------------
+
+
+def v2_body(d: Dict[str, Any]) -> Dict[str, Any]:
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    response = TestClient(app).post(
+        "/api/v1/robustness/analyze/v2", json=d, headers={"X-ISL-Response-Version": "2"}
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+class TestTheDisclosureOnTheV2Wire:
+    def test_an_evaluated_identity_says_so_with_its_reconciliation(self):
+        (entry,) = v2_body(wire())["identity_evaluations"]
+        assert entry["node_id"] == MRR and entry["operation"] == "product"
+        assert entry["factor_ids"] == [PRICE, SUBS] and entry["addends"] == [OTHER]
+        assert entry["evaluated"] is True and entry.get("withheld_reason") is None
+        assert entry["level_source"] == "stated_level"
+        assert entry["stated_in_brief"] is True
+        rec = entry["reconciliation"]
+        assert rec["reconstructed"] == pytest.approx(74_500.0)
+        assert rec["stated"] == pytest.approx(75_000.0)
+        assert rec["mismatch_share"] == pytest.approx(500.0 / 75_000.0)
+
+    def test_no_declaration_no_key(self):
+        """A graph that declares nothing is unchanged on the wire."""
+        assert v2_body(wire(identity=None, frames={})).get("identity_evaluations") is None
+
+    def test_a_declared_but_unused_identity_says_it_was_not_evaluated(self):
+        d = wire(identity=None, frames={})
+        d["graph"]["nodes"].append(
+            {
+                "id": "side_total",
+                "kind": "factor",
+                "label": "Side total",
+                "nonlinear_identity": {
+                    "operation": "sum",
+                    "factor_ids": [OTHER],
+                    "stated_in_brief": False,
+                },
+            }
+        )
+        d["graph"]["edges"].append(
+            {"from": OTHER, "to": "side_total", "strength": {"mean": 1.0, "std": 0.01}}
+        )
+        (entry,) = v2_body(d)["identity_evaluations"]
+        assert entry["evaluated"] is False
+        assert entry["withheld_reason"] == "identity_frame_missing"
+        assert entry.get("level_source") is None

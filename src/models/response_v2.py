@@ -23,6 +23,7 @@ from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
 # Range→distribution disclosure model (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure
+from src.models.identity_evaluation import IdentityEvaluation
 from src.models.node_level import NodeLevelFrame
 
 
@@ -2011,6 +2012,15 @@ class ISLResponseV2(BaseModel):
         description="Per non-root node: 'anchored_level' (an attested held level, with its "
         "author, domain and per-option level_out_of_domain_share) or 'no_level'. Absent "
         "when the graph has no non-root node.",
+    )
+
+    # R3 slice 1 (additive optional): each declared accounting identity. Only
+    # evaluated=true licenses a numerical claim that rests on it (R3-4).
+    identity_evaluations: Optional[List[IdentityEvaluation]] = Field(
+        None,
+        description="Per declared identity: evaluated (with level_source and the "
+        "reconciliation of its stated level against its inputs) or withheld_reason. Absent "
+        "when the graph declares none.",
     )
 
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can

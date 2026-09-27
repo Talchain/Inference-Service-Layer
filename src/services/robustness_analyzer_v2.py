@@ -38,6 +38,7 @@ from typing import (
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
 
+from src.models.identity_evaluation import IdentityEvaluation, IdentityReconciliation
 from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReason
 from src.models.robustness_v2 import (
     BucketResult,
@@ -1631,6 +1632,45 @@ def identity_blocking_critiques(
             )
         )
     return critiques
+
+
+def identity_evaluations(graph: GraphV2) -> List[IdentityEvaluation]:
+    """R3: the wire disclosure, one entry per DECLARED identity, from the same plans the
+    evaluator uses (never re-derived)."""
+    nodes = {node.id: node for node in graph.nodes}
+    out: List[IdentityEvaluation] = []
+    for plan in resolve_identity_plans(graph).values():
+        identity = nodes[plan.node_id].nonlinear_identity
+        assert identity is not None
+        reconciliation = (
+            IdentityReconciliation(
+                reconstructed=plan.reconstructed,
+                stated=plan.stated,
+                mismatch_share=plan.mismatch_share,
+            )
+            if plan.reconstructed is not None
+            and plan.stated is not None
+            and plan.mismatch_share is not None
+            else None
+        )
+        out.append(
+            IdentityEvaluation(
+                node_id=plan.node_id,
+                operation=identity.operation,
+                factor_ids=list(plan.factor_ids),
+                addends=list(plan.addends),
+                stated_in_brief=identity.stated_in_brief,
+                evaluated=plan.evaluated,
+                withheld_reason=cast(Any, plan.withheld_reason),
+                level_source=(
+                    None
+                    if not plan.evaluated
+                    else "stated_level" if plan.target_level is not None else "identity_inputs"
+                ),
+                reconciliation=reconciliation,
+            )
+        )
+    return out
 
 
 class IdentityNotEvaluatedError(ValueError):
@@ -3818,6 +3858,7 @@ class RobustnessAnalyzerV2:
             correlation_model=correlation_model,
             range_fit_disclosures=range_fit_disclosures,
             node_levels=node_level_frames or None,
+            identity_evaluations=identity_evaluations(request.graph) or None,
         )
 
         self.logger.info(

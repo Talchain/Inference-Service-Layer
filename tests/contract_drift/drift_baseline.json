@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 80
+    "superset_count": 81
   },
   "omissions": [
     {
@@ -616,6 +616,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "factor_sensitivity_status",
       "reason": "ISL superset — ISLResponseV2.factor_sensitivity_status is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "identity_evaluations",
+      "reason": "ISL superset — ISLResponseV2.identity_evaluations is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5859633012 and 5860087988 (AI Quality rulings, R3 slice 1: a declared identity is evaluated in user units or withheld; only evaluated=true licenses a claim, R3-4). Additive and optional (absent when the graph declares no identity). Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "ISLResponseV2",

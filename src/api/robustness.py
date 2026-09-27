@@ -1547,6 +1547,7 @@ async def _analyze_robustness_v2_enhanced(
         # B1a: each non-root node's evaluation frame (anchored level / no level), with the
         # author of every anchored level and its per-option out-of-domain share.
         builder.set_node_levels(v1_response.node_levels)
+        builder.set_identity_evaluations(v1_response.identity_evaluations)
 
         # T1-6: Path decomposition passthrough (additive; request-gated by
         # include_path_decomposition so it only appears when asked for).
