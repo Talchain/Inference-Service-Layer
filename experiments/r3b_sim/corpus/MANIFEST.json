@@ -1,0 +1,22 @@
+{
+  "copied_verbatim": true,
+  "files": {
+    "INDEX.json": "df3840bebd6c781c0fe1c5b3d349d469beb2abd88ccfd703833f1090a65892e0",
+    "pj-20260927T180910Z-A.json": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+    "pj-20260927T180910Z-C.json": "f681794f4574809ef0173a7f99a8b37a8b256941a3e8d8b1f91511642a84d08b",
+    "pj-20260927T180910Z-E.json": "881ae28b3ce36b89dd0d649be49d251fa128ee16189dbe811baccefbce571d71",
+    "pj-20260927T181846Z-A.json": "98fa343d1c00acfb7428262cf32ec1993fbf6d72663f07cfcf13c8711a9d08d0",
+    "pj-20260927T181846Z-C.json": "5dd191bd6ca1f71306298b239b37632ee7acfbe97de5c5eed9aee5a2e88557e0",
+    "pj-20260927T181846Z-E.json": "c7d3d28d85e21dbb3570198c6e51ff0396193612a53f2b41635201e2ebc764fc",
+    "pj-20260927T182848Z-A.json": "6d218c48330904d89eb41be0fa9444f3bc249862915414f830d45f98992e76f9",
+    "pj-20260927T182848Z-C.json": "e88721f46fee8c1ae8ecfc3b4799dc2d7acf92b79772e5b82be2ba01034c3350",
+    "pj-20260927T182848Z-E.json": "d63d58425f3d585802b9ee824d2508be5e5e1c057a852f5fdb8fcaecfcbe6d06",
+    "pj-20260927T183807Z-A.json": "7d53d9031767056a19354ed5ef9fb512da7627fb4d43d2d76c536fc2269b3aba",
+    "pj-20260927T183807Z-C.json": "3e5895d3c4373cab04ce894eefcd2ac4c89d369e995de8194bbdbe32a4846153",
+    "pj-20260927T183807Z-E.json": "1696ccc086a77b6f1390b155685a43c70b39bd9840a93ed1049caf4d3cd26dae"
+  },
+  "source_branch": "dl/cloud-context-20260927",
+  "source_commit": "58ca52c22bf7165bd91a648f7e5dddeacfd16e44",
+  "source_path": "cloud-context-20260927/r3b-corpus/",
+  "source_repo": "Talchain/olumi-programme-docs"
+}

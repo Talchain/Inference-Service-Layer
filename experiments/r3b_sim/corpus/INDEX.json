@@ -1,0 +1,74 @@
+[
+ {
+  "file": "pj-20260927T183807Z-A.json",
+  "journey": "A",
+  "nodes": 19,
+  "edges": 26
+ },
+ {
+  "file": "pj-20260927T183807Z-C.json",
+  "journey": "C",
+  "nodes": 15,
+  "edges": 30
+ },
+ {
+  "file": "pj-20260927T183807Z-E.json",
+  "journey": "E",
+  "nodes": 14,
+  "edges": 27
+ },
+ {
+  "file": "pj-20260927T182848Z-A.json",
+  "journey": "A",
+  "nodes": 21,
+  "edges": 40
+ },
+ {
+  "file": "pj-20260927T182848Z-C.json",
+  "journey": "C",
+  "nodes": 13,
+  "edges": 28
+ },
+ {
+  "file": "pj-20260927T182848Z-E.json",
+  "journey": "E",
+  "nodes": 15,
+  "edges": 25
+ },
+ {
+  "file": "pj-20260927T181846Z-A.json",
+  "journey": "A",
+  "nodes": 18,
+  "edges": 26
+ },
+ {
+  "file": "pj-20260927T181846Z-C.json",
+  "journey": "C",
+  "nodes": 11,
+  "edges": 27
+ },
+ {
+  "file": "pj-20260927T181846Z-E.json",
+  "journey": "E",
+  "nodes": 13,
+  "edges": 22
+ },
+ {
+  "file": "pj-20260927T180910Z-A.json",
+  "journey": "A",
+  "nodes": 22,
+  "edges": 36
+ },
+ {
+  "file": "pj-20260927T180910Z-C.json",
+  "journey": "C",
+  "nodes": 13,
+  "edges": 27
+ },
+ {
+  "file": "pj-20260927T180910Z-E.json",
+  "journey": "E",
+  "nodes": 13,
+  "edges": 24
+ }
+]

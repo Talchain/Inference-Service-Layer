@@ -1,0 +1,483 @@
+{
+ "journey": "E",
+ "run": "pj-20260927T181846Z",
+ "turn_file": "E09-run2-final.json",
+ "brief_first_message": "Should we hire two senior engineers or four junior engineers to ship the new platform by Q3, while keeping annual salary spend under \u00a3400k?",
+ "graph_hash": "e323c2352c85cd8d",
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "decision_ship_the_new_platform",
+    "kind": "decision",
+    "label": "Decision: ship the new platform",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "ship_the_new_platform",
+    "kind": "goal",
+    "label": "ship the new platform",
+    "provenance": "from_brief",
+    "goal_threshold_unit": "binary shipped",
+    "goal_threshold_frame": "level"
+   },
+   {
+    "id": "hire_two_senior_engineers",
+    "kind": "option",
+    "label": "Hire two senior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "annual_salary_spend": {
+      "cap": 1000000,
+      "value": 0.24,
+      "source": "cee_hypothesis",
+      "raw_value": 240000,
+      "target_match": {
+       "node_id": "annual_salary_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "new_senior_engineers_hired": {
+      "value": 0.1,
+      "source": "brief_extraction"
+     }
+    }
+   },
+   {
+    "id": "hire_four_junior_engineers",
+    "kind": "option",
+    "label": "Hire four junior engineers",
+    "provenance": "from_brief",
+    "interventions": {
+     "annual_salary_spend": {
+      "cap": 1000000,
+      "unit": "GBP/year",
+      "value": 0.26,
+      "source": "cee_hypothesis",
+      "raw_value": 260000,
+      "target_match": {
+       "node_id": "annual_salary_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     },
+     "new_junior_engineers_hired": {
+      "value": 0.13333333333333333,
+      "source": "brief_extraction"
+     }
+    }
+   },
+   {
+    "id": "no_new_hires",
+    "kind": "option",
+    "label": "No new hires",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "new_senior_engineers_hired",
+    "kind": "factor",
+    "label": "New senior engineers hired",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 20,
+     "unit": "engineers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "new_junior_engineers_hired",
+    "kind": "factor",
+    "label": "New junior engineers hired",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 30,
+     "unit": "engineers",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "annual_salary_spend",
+    "kind": "factor",
+    "label": "Annual salary spend",
+    "category": "controllable",
+    "provenance": "user_set",
+    "scale_frame": 1000000,
+    "display_value": "\u00a30/year",
+    "observed_state": {
+     "unit": "GBP/year",
+     "value": 0,
+     "source": "user_assumption",
+     "raw_value": 0
+    }
+   },
+   {
+    "id": "senior_hiring_lead_time_risk",
+    "kind": "risk",
+    "label": "Senior hiring lead-time risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "junior_ramp_up_risk",
+    "kind": "risk",
+    "label": "Junior ramp-up risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "budget_cap_breach_risk",
+    "kind": "risk",
+    "label": "Budget cap breach risk",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "incremental_platform_delivery_capacity",
+    "kind": "outcome",
+    "label": "Incremental platform delivery\u2026",
+    "provenance": "ai_inferred",
+    "description": "Incremental platform delivery capacity"
+   },
+   {
+    "id": "c769839e",
+    "kind": "option",
+    "label": "Hire one senior engineer and two junior engineers",
+    "interventions": {
+     "annual_salary_spend": {
+      "unit": "GBP/year",
+      "value": 0.25,
+      "source": "cee_hypothesis",
+      "raw_value": 250000,
+      "target_match": {
+       "node_id": "annual_salary_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   }
+  ],
+  "edges": [
+   {
+    "to": "hire_two_senior_engineers",
+    "from": "decision_ship_the_new_platform",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "hire_four_junior_engineers",
+    "from": "decision_ship_the_new_platform",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "no_new_hires",
+    "from": "decision_ship_the_new_platform",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "hire_two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "new_senior_engineers_hired",
+    "from": "hire_two_senior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "hire_four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "new_junior_engineers_hired",
+    "from": "hire_four_junior_engineers",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "new_senior_engineers_hired",
+    "from": "no_new_hires",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "new_junior_engineers_hired",
+    "from": "no_new_hires",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "new_senior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "new_junior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "senior_hiring_lead_time_risk",
+    "from": "new_senior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "senior_hiring_lead_time_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "junior_ramp_up_risk",
+    "from": "new_junior_engineers_hired",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "junior_ramp_up_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "budget_cap_breach_risk",
+    "from": "annual_salary_spend",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_platform_delivery_capacity",
+    "from": "budget_cap_breach_risk",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "ship_the_new_platform",
+    "from": "incremental_platform_delivery_capacity",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "c769839e",
+    "from": "decision_ship_the_new_platform",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "new_senior_engineers_hired",
+    "from": "c769839e",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "new_junior_engineers_hired",
+    "from": "c769839e",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "annual_salary_spend",
+    "from": "c769839e",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   }
+  ],
+  "node_count": 13,
+  "edge_count": 22,
+  "goal_constraints": [
+   {
+    "unit": "GBP/year",
+    "label": "Annual salary spend",
+    "value": 400000,
+    "node_id": "annual_salary_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:annual_salary_spend:<="
+   }
+  ]
+ },
+ "analysis_result": null
+}

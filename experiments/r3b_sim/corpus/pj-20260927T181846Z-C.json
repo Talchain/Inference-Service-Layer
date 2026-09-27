@@ -1,0 +1,632 @@
+{
+ "journey": "C",
+ "run": "pj-20260927T181846Z",
+ "turn_file": "C10-run2-final.json",
+ "brief_first_message": "We need to reach \u00a3100k MRR within 6 months with a \u00a320k budget, while keeping monthly churn under 4%. Should we develop new features and increase our Pro plan price from \u00a349 to \u00a359 per month in the next release, or invest in additional advertising?",
+ "graph_hash": "b5c4a983c8f9df32",
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "decision_mrr",
+    "kind": "decision",
+    "label": "Decision: MRR",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "mrr",
+    "kind": "goal",
+    "label": "MRR",
+    "provenance": "from_brief",
+    "goal_threshold": 0.8,
+    "goal_threshold_cap": 125000,
+    "goal_threshold_raw": 100000,
+    "goal_threshold_unit": "GBP per month",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "features_59_pro_price",
+    "kind": "option",
+    "label": "Features + \u00a359 Pro price",
+    "provenance": "from_brief",
+    "interventions": {
+     "pro_plan_monthly_price": {
+      "value": 0.295,
+      "source": "brief_extraction"
+     },
+     "incremental_6_month_spend": {
+      "value": 0.4,
+      "source": "cee_hypothesis"
+     },
+     "incremental_advertising_spend_6_months": {
+      "value": 0,
+      "source": "cee_hypothesis"
+     },
+     "incremental_feature_investment_6_months": {
+      "value": 0.4,
+      "source": "cee_hypothesis"
+     }
+    }
+   },
+   {
+    "id": "additional_advertising",
+    "kind": "option",
+    "label": "Additional advertising",
+    "provenance": "from_brief",
+    "interventions": {
+     "pro_plan_monthly_price": {
+      "value": 0.245,
+      "source": "brief_extraction"
+     },
+     "incremental_6_month_spend": {
+      "value": 0.4,
+      "source": "cee_hypothesis"
+     },
+     "incremental_advertising_spend_6_months": {
+      "value": 0.4,
+      "source": "cee_hypothesis"
+     },
+     "incremental_feature_investment_6_months": {
+      "value": 0,
+      "source": "cee_hypothesis"
+     }
+    }
+   },
+   {
+    "id": "carry_on_as_now",
+    "kind": "option",
+    "label": "Carry on as now",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "pro_plan_monthly_price",
+    "kind": "factor",
+    "label": "Pro plan monthly price",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 200,
+     "unit": "GBP per month",
+     "value": 0.245,
+     "source": "brief_extraction",
+     "raw_value": 49,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "incremental_feature_investment_6_months",
+    "kind": "factor",
+    "label": "Incremental feature investment\u2026",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "description": "Incremental feature investment (6 months)",
+    "observed_state": {
+     "cap": 50000,
+     "unit": "GBP",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "incremental_advertising_spend_6_months",
+    "kind": "factor",
+    "label": "Incremental advertising spend\u2026",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "description": "Incremental advertising spend (6 months)",
+    "observed_state": {
+     "cap": 50000,
+     "unit": "GBP",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "incremental_6_month_spend",
+    "kind": "factor",
+    "label": "Incremental 6-month spend",
+    "category": "controllable",
+    "provenance": "ai_inferred",
+    "observed_state": {
+     "cap": 50000,
+     "unit": "GBP",
+     "value": 0,
+     "source": "cee_inference",
+     "raw_value": 0,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "monthly_churn",
+    "kind": "factor",
+    "label": "Monthly churn",
+    "category": "observable",
+    "provenance": "user_set",
+    "scale_frame": 100,
+    "display_value": "3%",
+    "observed_state": {
+     "unit": "%",
+     "value": 0.03,
+     "source": "user_assumption",
+     "raw_value": 3
+    }
+   },
+   {
+    "id": "b77d5881",
+    "kind": "option",
+    "label": "Split it 50/50 at this stage",
+    "interventions": {
+     "incremental_6_month_spend": {
+      "unit": "GBP",
+      "value": 0.6,
+      "source": "user_specified",
+      "raw_value": 30000,
+      "target_match": {
+       "node_id": "incremental_6_month_spend",
+       "confidence": "high",
+       "match_type": "exact_id"
+      }
+     }
+    }
+   }
+  ],
+  "edges": [
+   {
+    "to": "features_59_pro_price",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "additional_advertising",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "carry_on_as_now",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_plan_monthly_price",
+    "from": "features_59_pro_price",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_feature_investment_6_months",
+    "from": "features_59_pro_price",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_advertising_spend_6_months",
+    "from": "features_59_pro_price",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_6_month_spend",
+    "from": "features_59_pro_price",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_plan_monthly_price",
+    "from": "additional_advertising",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_feature_investment_6_months",
+    "from": "additional_advertising",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_advertising_spend_6_months",
+    "from": "additional_advertising",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_6_month_spend",
+    "from": "additional_advertising",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_plan_monthly_price",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_feature_investment_6_months",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_advertising_spend_6_months",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_6_month_spend",
+    "from": "carry_on_as_now",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "mrr",
+    "from": "pro_plan_monthly_price",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "pro_plan_monthly_price",
+    "strength": {
+     "std": 0.04,
+     "mean": 0.08
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 0.4,
+      "amount_unit": "percentage points",
+      "strength_mean": 0.08,
+      "per_source_change": 10,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP per month"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "mrr",
+    "from": "incremental_feature_investment_6_months",
+    "strength": {
+     "std": 0.049999999999999996,
+     "mean": 0.09999999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 5000,
+      "amount_unit": "GBP per month",
+      "strength_mean": 0.09999999999999999,
+      "per_source_change": 20000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "incremental_feature_investment_6_months",
+    "strength": {
+     "std": 0.0062499999999999995,
+     "mean": -0.012499999999999999
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -0.5,
+      "amount_unit": "percentage points",
+      "strength_mean": -0.012499999999999999,
+      "per_source_change": 20000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_6_month_spend",
+    "from": "incremental_feature_investment_6_months",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 20000,
+      "amount_unit": "GBP",
+      "strength_mean": 1,
+      "per_source_change": 20000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "mrr",
+    "from": "incremental_advertising_spend_6_months",
+    "strength": {
+     "std": 0.12,
+     "mean": 0.24
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 12000,
+      "amount_unit": "GBP per month",
+      "strength_mean": 0.24,
+      "per_source_change": 20000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "incremental_6_month_spend",
+    "from": "incremental_advertising_spend_6_months",
+    "strength": {
+     "std": 0.5,
+     "mean": 1
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 20000,
+      "amount_unit": "GBP",
+      "strength_mean": 1,
+      "per_source_change": 20000,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "GBP"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "mrr",
+    "from": "monthly_churn",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "b77d5881",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_feature_investment_6_months",
+    "from": "b77d5881",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_advertising_spend_6_months",
+    "from": "b77d5881",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "incremental_6_month_spend",
+    "from": "b77d5881",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   }
+  ],
+  "node_count": 11,
+  "edge_count": 27,
+  "goal_constraints": [
+   {
+    "unit": "GBP",
+    "label": "Incremental 6-month spend",
+    "value": 30000,
+    "node_id": "incremental_6_month_spend",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:incremental_6_month_spend:<="
+   },
+   {
+    "unit": "%",
+    "label": "Monthly churn",
+    "value": 4,
+    "node_id": "monthly_churn",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:monthly_churn:<=",
+    "provenance_unit_relabelled": {
+     "rule": "agent_lane_limit_unit_v1",
+     "pre_normalisation_unit": "percent",
+     "pre_normalisation_value": 4
+    }
+   }
+  ]
+ },
+ "analysis_result": null
+}

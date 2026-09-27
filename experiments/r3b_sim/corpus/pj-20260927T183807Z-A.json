@@ -1,0 +1,586 @@
+{
+ "journey": "A",
+ "run": "pj-20260927T183807Z",
+ "turn_file": "A16-run2-final.json",
+ "brief_first_message": "Given our goal of reaching \u00a3100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from \u00a349 to \u00a359 per month with the next Pro feature release?",
+ "graph_hash": "35d37db40cff6313",
+ "draft_graph": {
+  "nodes": [
+   {
+    "id": "decision_mrr",
+    "kind": "decision",
+    "label": "Decision: MRR",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "mrr",
+    "kind": "goal",
+    "label": "MRR",
+    "provenance": "from_brief",
+    "goal_threshold": 0.8,
+    "observed_state": {
+     "cap": 125000,
+     "unit": "GBP/month",
+     "value": 0.6,
+     "source": "brief_extraction",
+     "baseline": 0.6,
+     "raw_value": 75000
+    },
+    "goal_threshold_cap": 125000,
+    "goal_threshold_raw": 100000,
+    "goal_threshold_unit": "GBP/month",
+    "goal_threshold_frame": "level",
+    "goal_threshold_cap_provenance": "target_derived_headroom"
+   },
+   {
+    "id": "raise_pro_to_59",
+    "kind": "option",
+    "label": "Raise Pro to \u00a359",
+    "provenance": "from_brief",
+    "interventions": {
+     "pro_plan_price": {
+      "value": 0.295,
+      "source": "brief_extraction"
+     }
+    }
+   },
+   {
+    "id": "keep_pro_at_49",
+    "kind": "option",
+    "label": "Keep Pro at \u00a349",
+    "provenance": "ai_inferred",
+    "is_baseline": true
+   },
+   {
+    "id": "raise_pro_to_54",
+    "kind": "option",
+    "label": "Raise Pro to \u00a354",
+    "provenance": "ai_inferred",
+    "interventions": {
+     "pro_plan_price": {
+      "value": 0.27,
+      "source": "cee_hypothesis"
+     }
+    }
+   },
+   {
+    "id": "pro_plan_price",
+    "kind": "factor",
+    "label": "Pro plan price",
+    "category": "controllable",
+    "provenance": "from_brief",
+    "observed_state": {
+     "cap": 200,
+     "unit": "GBP/month",
+     "value": 0.245,
+     "source": "brief_extraction",
+     "raw_value": 49,
+     "declared_scale": "unit_interval"
+    }
+   },
+   {
+    "id": "monthly_churn",
+    "kind": "factor",
+    "label": "Monthly churn",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 100,
+    "observed_state": {
+     "unit": "%",
+     "value": 0.032,
+     "source": "cee_inference",
+     "raw_value": 3.2,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "pro_paying_subscribers",
+    "kind": "factor",
+    "label": "Pro paying subscribers",
+    "category": "observable",
+    "provenance": "ai_inferred",
+    "scale_frame": 5000,
+    "observed_state": {
+     "unit": "subscribers",
+     "value": 0.18,
+     "source": "cee_inference",
+     "raw_value": 900,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "monthly_underlying_mrr_growth",
+    "kind": "factor",
+    "label": "Monthly underlying MRR growth",
+    "category": "external",
+    "provenance": "ai_inferred",
+    "scale_frame": 20,
+    "observed_state": {
+     "unit": "%/month",
+     "value": 0.075,
+     "source": "cee_inference",
+     "raw_value": 1.5,
+     "extractionType": "inferred"
+    }
+   },
+   {
+    "id": "price_sensitivity",
+    "kind": "risk",
+    "label": "Price sensitivity",
+    "provenance": "ai_inferred"
+   },
+   {
+    "id": "pro_mrr",
+    "kind": "outcome",
+    "label": "Pro MRR",
+    "provenance": "ai_inferred",
+    "nonlinear_identity": {
+     "operation": "product",
+     "factor_ids": [
+      "pro_plan_price",
+      "pro_paying_subscribers"
+     ],
+     "stated_in_brief": false
+    }
+   },
+   {
+    "id": "5790c7cd",
+    "kind": "option",
+    "label": "Improve trial-to-Pro conversion",
+    "interventions": {}
+   },
+   {
+    "id": "fac_trial_to_pro_conversion",
+    "kind": "factor",
+    "label": "Trial-to-Pro conversion",
+    "category": "controllable"
+   },
+   {
+    "id": "fac_at_risk_account_coverage",
+    "kind": "factor",
+    "label": "At-risk account coverage",
+    "category": "controllable"
+   },
+   {
+    "id": "09b27084",
+    "kind": "option",
+    "label": "Retention intervention for at-risk accounts",
+    "interventions": {}
+   },
+   {
+    "id": "022fec74",
+    "kind": "option",
+    "label": "\u00a359 for new Pro customers; grandfather existing customers",
+    "interventions": {}
+   },
+   {
+    "id": "fac_new_pro_customer_price",
+    "kind": "factor",
+    "label": "New Pro customer price",
+    "category": "controllable"
+   },
+   {
+    "id": "fac_grandfather_existing_pro_customers",
+    "kind": "factor",
+    "label": "Grandfather existing Pro customers",
+    "category": "controllable"
+   },
+   {
+    "id": "risk_competitive_response_to_ai_feature_launch",
+    "kind": "risk",
+    "label": "Competitive response to AI feature launch"
+   }
+  ],
+  "edges": [
+   {
+    "to": "raise_pro_to_59",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "keep_pro_at_49",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "raise_pro_to_54",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_plan_price",
+    "from": "raise_pro_to_59",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_plan_price",
+    "from": "raise_pro_to_54",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_plan_price",
+    "from": "keep_pro_at_49",
+    "origin": "repair",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis",
+     "reasoning": "Connectivity repair wired this option to a factor another option targets; no effect value is implied"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_mrr",
+    "from": "pro_plan_price",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "pro_mrr",
+    "from": "pro_paying_subscribers",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "pro_plan_price",
+    "strength": {
+     "std": 0.08660254037844388,
+     "mean": 0.85
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_defaulted": true,
+    "exists_probability": 0.8,
+    "provenance_display": "user_set"
+   },
+   {
+    "to": "price_sensitivity",
+    "from": "pro_plan_price",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "price_sensitivity",
+    "strength": {
+     "std": 0.08660254037844388,
+     "mean": 0.85
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_defaulted": true,
+    "exists_probability": 0.8,
+    "provenance_display": "user_set"
+   },
+   {
+    "to": "pro_paying_subscribers",
+    "from": "monthly_churn",
+    "strength": {
+     "std": 0.09,
+     "mean": -0.18
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": -9,
+      "amount_unit": "subscribers",
+      "strength_mean": -0.18,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%"
+     }
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "mrr",
+    "from": "pro_mrr",
+    "strength": {
+     "std": 0.075,
+     "mean": 0.15
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_placeholder"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "mrr",
+    "from": "monthly_underlying_mrr_growth",
+    "strength": {
+     "std": 0.06,
+     "mean": 0.12
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis",
+     "magnitude": "olumi_estimate",
+     "natural_effect": {
+      "amount": 750,
+      "amount_unit": "GBP/month",
+      "strength_mean": 0.12,
+      "per_source_change": 1,
+      "strength_mean_frame": "edge_strength",
+      "per_source_change_unit": "%/month"
+     }
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "5790c7cd",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_paying_subscribers",
+    "from": "fac_trial_to_pro_conversion",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "fac_at_risk_account_coverage",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "fac_trial_to_pro_conversion",
+    "from": "5790c7cd",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "09b27084",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "fac_at_risk_account_coverage",
+    "from": "09b27084",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "022fec74",
+    "from": "decision_mrr",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "user_specified"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "pro_mrr",
+    "from": "fac_new_pro_customer_price",
+    "strength": {
+     "std": 0.125,
+     "mean": 0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "monthly_churn",
+    "from": "fac_grandfather_existing_pro_customers",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   },
+   {
+    "to": "fac_new_pro_customer_price",
+    "from": "022fec74",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "fac_grandfather_existing_pro_customers",
+    "from": "022fec74",
+    "strength": {
+     "std": 0.01,
+     "mean": 1
+    },
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "positive",
+    "exists_probability": 1
+   },
+   {
+    "to": "mrr",
+    "from": "risk_competitive_response_to_ai_feature_launch",
+    "strength": {
+     "std": 0.125,
+     "mean": -0.5
+    },
+    "defaulted": true,
+    "provenance": {
+     "source": "cee_hypothesis"
+    },
+    "effect_direction": "negative",
+    "exists_probability": 0.8
+   }
+  ],
+  "node_count": 19,
+  "edge_count": 26,
+  "goal_constraints": [
+   {
+    "unit": "%",
+    "label": "Monthly churn",
+    "value": 4,
+    "node_id": "monthly_churn",
+    "operator": "<=",
+    "provenance": "explicit",
+    "value_frame": "level",
+    "constraint_id": "agent-lane:monthly_churn:<="
+   }
+  ]
+ },
+ "analysis_result": null
+}
