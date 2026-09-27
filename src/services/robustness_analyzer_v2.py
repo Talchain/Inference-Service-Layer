@@ -8066,7 +8066,6 @@ class RobustnessAnalyzerV2:
                 clamped_high = True
                 evppi = decision_evpi_bound
 
-            below_resolution = evppi <= est.noise_floor
 
             # Clamp-vs-round ordering (hunter F-2): round(.,6) can nudge a clamped
             # value UP past the raw decision_evpi bound by <=5e-7, breaking the
@@ -8078,6 +8077,12 @@ class RobustnessAnalyzerV2:
             evppi_emitted = round(evppi, 6)
             if decision_evpi_bound is not None:
                 evppi_emitted = min(evppi_emitted, decision_evpi_bound)
+            # The status describes the values the WIRE carries (MG construction sweep, served CEE e7d28fd): deciding it
+            # on the unrounded estimate shipped {evppi: 0, noise_floor: 0, status: "resolved"} for a tiny raw above an
+            # even tinier floor, and the reply called that factor "most sensitive". A row that emits evppi <= its
+            # emitted floor is below resolution.
+            noise_floor_emitted = round(est.noise_floor, 6)
+            below_resolution = evppi_emitted <= noise_floor_emitted
 
             results.append(
                 {
@@ -8099,7 +8104,7 @@ class RobustnessAnalyzerV2:
                     # Per-factor ≤ total-EVPI clamp fired (raw exceeded decision_evpi).
                     "clamped_high": clamped_high,
                     # Permutation-null overfit floor; evppi ≤ floor = below_resolution.
-                    "noise_floor": round(est.noise_floor, 6),
+                    "noise_floor": noise_floor_emitted,
                     "status": "below_resolution" if below_resolution else "resolved",
                     # Disclosure: under active correlation the samples are joint
                     # copula draws, so this conditional-expectation EVPPI is honest
