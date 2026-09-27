@@ -433,3 +433,125 @@ class TestTheDisclosureOnTheV2Wire:
         assert entry["evaluated"] is False
         assert entry["withheld_reason"] == "identity_frame_missing"
         assert entry.get("level_source") is None
+
+
+# ---------------------------------------------------------------------------------------------------------
+# SUM (R3-2 shape, synthetic until CEE mints `sum` on 0e19bb82 — MG rung c): a spend tally is exactly
+# the sum of its parts, in user units. The expected tally: features £20,000 · advertising £20,000 ·
+# carry-on £0.
+# ---------------------------------------------------------------------------------------------------------
+
+
+def tally_request(tally_level: Optional[float]) -> Dict[str, Any]:
+    spend = {"frame": 100_000.0, "carrier": "cap"}
+    tally_state = (
+        None
+        if tally_level is None
+        else {"value": tally_level, "cap": 100_000, "source": "brief_extraction"}
+    )
+    return {
+        "request_id": "r3-2-sum",
+        "graph": {
+            "nodes": [
+                {
+                    "id": "features_spend",
+                    "kind": "factor",
+                    "label": "Features spend",
+                    "observed_state": {"value": 0.0, "cap": 100_000, "source": "brief_extraction"},
+                    "execution_frame": spend,
+                },
+                {
+                    "id": "advertising_spend",
+                    "kind": "factor",
+                    "label": "Advertising spend",
+                    "observed_state": {"value": 0.0, "cap": 100_000, "source": "brief_extraction"},
+                    "execution_frame": spend,
+                },
+                {
+                    "id": "total_spend",
+                    "kind": "outcome",
+                    "label": "Six-month spend",
+                    "observed_state": tally_state,
+                    "execution_frame": spend,
+                    "nonlinear_identity": {
+                        "operation": "sum",
+                        "factor_ids": ["features_spend", "advertising_spend"],
+                        "stated_in_brief": True,
+                    },
+                },
+            ],
+            "edges": [
+                # Belief strengths a 0.5 slope would use (R3-2c's mutant); the identity ignores them.
+                {
+                    "from": "features_spend",
+                    "to": "total_spend",
+                    "strength": {"mean": 0.5, "std": 0.1},
+                },
+                {
+                    "from": "advertising_spend",
+                    "to": "total_spend",
+                    "strength": {"mean": 0.5, "std": 0.1},
+                },
+            ],
+        },
+        "options": [
+            {"id": "features", "label": "Build features", "interventions": {"features_spend": 0.2}},
+            {
+                "id": "advertising",
+                "label": "Advertise",
+                "interventions": {"advertising_spend": 0.2},
+            },
+            {"id": "carry_on", "label": "Carry on", "interventions": {}},
+        ],
+        "goal_node_id": "total_spend",
+        "n_samples": 200,
+        "seed": 7,
+    }
+
+
+def tally_effects(d: Dict[str, Any]) -> Dict[str, float]:
+    evaluator = SCMEvaluatorV2(graph_of(d))
+    edges = means(d)
+    factors = {"features_spend": 0.0, "advertising_spend": 0.0}
+    today = evaluator.evaluate(edges, {}, "total_spend", factor_values=factors)
+    return {
+        o["id"]: (
+            evaluator.evaluate(edges, o["interventions"], "total_spend", factor_values=factors)
+            - today
+        )
+        * 100_000.0
+        for o in d["options"]
+    }
+
+
+class TestSum:
+    def test_a_tally_with_no_stated_level_is_the_sum_of_its_parts(self):
+        effects = tally_effects(tally_request(None))
+        assert effects == pytest.approx(
+            {"features": 20_000.0, "advertising": 20_000.0, "carry_on": 0.0}
+        )
+
+    def test_control_the_linear_model_reads_the_half_slope(self):
+        """R3-2c's mutant shape: the same graph undeclared gives the 0.5-slope £10,000, not £20,000."""
+        d = tally_request(None)
+        d["graph"]["nodes"][2].pop("nonlinear_identity")
+        assert tally_effects(d)["features"] == pytest.approx(10_000.0)
+
+    def test_a_stated_zero_tally_is_withheld_as_ruled(self):
+        """AIQ 5860087988 item 3 as ruled: a stated target of zero -> identity_zero_level. OPEN meaning
+        question for R3-2 (its tally is £0 today): see the PR body."""
+        (plan,) = resolve_identity_plans(graph_of(tally_request(0.0))).values()
+        assert plan.withheld_reason == rav2.IDENTITY_ZERO_LEVEL
+
+    def test_a_stated_nonzero_tally_moves_by_the_unscaled_sum(self):
+        d = tally_request(0.1)  # £10,000 stated
+        for node in d["graph"]["nodes"][:2]:
+            node["observed_state"]["value"] = 0.05  # £5,000 each: reconciles exactly
+        evaluator = SCMEvaluatorV2(graph_of(d))
+        factors = {"features_spend": 0.05, "advertising_spend": 0.05}
+        today = evaluator.evaluate(means(d), {}, "total_spend", factor_values=factors)
+        more = evaluator.evaluate(
+            means(d), {"features_spend": 0.25}, "total_spend", factor_values=factors
+        )
+        assert today * 100_000.0 == pytest.approx(10_000.0)
+        assert (more - today) * 100_000.0 == pytest.approx(20_000.0)
