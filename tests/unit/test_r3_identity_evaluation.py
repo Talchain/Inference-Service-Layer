@@ -327,3 +327,51 @@ class TestTheMonteCarloRun:
             - self._samples(response, "keep_current_49_price")
         ) * FRAMES[MRR]["frame"]
         assert 5_000.0 < float(diff.mean()) < 20_000.0
+
+
+# ---------------------------------------------------------------------------------------------------------
+# R3-5: the consumer matrix — every output that MOVES under an evaluated identity is named; an unnamed
+# move is RED. (Measured on the served wire, with and without CEE's declaration.)
+# ---------------------------------------------------------------------------------------------------------
+
+# RECOMPUTED on the identity: the option comparison and everything read from it.
+RECOMPUTED = {
+    "results",  # outcome samples, P(goal), win share per option
+    "recommendation_confidence",
+    "sensitivity",  # edge elasticities of the win share (all 0.0 here: £59 wins every draw)
+    "factor_sensitivity",
+    "robustness",  # fragile edges (none here: no draw flips the winner)
+    "edge_e_values",
+    "factor_flip_values",
+    "factor_evppi",  # R3-6, MEASURED: 0.0, below_resolution (see below)
+    "critiques",  # analysis critiques are recomputed on the new samples
+    "metadata",  # execution_time_ms differs on ANY two runs; edge_existence_rates move through the
+    # tie-break coupling (£59 no longer ties, so the edge stream is consumed differently)
+}
+
+
+class TestR3_5TheConsumerMatrix:
+    @pytest.fixture(scope="class")
+    def pair(self):
+        analyzer = rav2.RobustnessAnalyzerV2()
+        on = analyzer.analyze(RobustnessRequestV2.model_validate(wire(identity=PRODUCT)))
+        off = analyzer.analyze(RobustnessRequestV2.model_validate(wire(identity=None)))
+        return on.model_dump(), off.model_dump()
+
+    def test_every_move_is_named(self, pair):
+        on, off = pair
+        moved = {
+            k
+            for k in on
+            if json.dumps(on[k], sort_keys=True, default=str)
+            != json.dumps(off[k], sort_keys=True, default=str)
+        }
+        assert moved == RECOMPUTED
+
+    def test_r3_6_evppi_of_subscribers_is_measured(self, pair):
+        """R3-6: MEASURED, never predicted. With the identity £59 leads on every draw, so no single
+        figure can change which option leads: EVPPI(subscribers) is 0 and below resolution."""
+        on, _ = pair
+        (row,) = [r for r in on["factor_evppi"] if r["factor_id"] == SUBS]
+        assert row["evppi"] == 0.0
+        assert row["status"] == "below_resolution"

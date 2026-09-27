@@ -1698,6 +1698,14 @@ class SCMEvaluatorV2:
 
         # R3 slice 1: every declared identity's plan; only an EVALUATED one changes the
         # structural equation (a withheld one is left linear and withheld downstream).
+        self._status_quo_cache: Optional[
+            Tuple[
+                Dict[Tuple[str, str], float],
+                Optional[Dict[str, float]],
+                Optional[Dict[str, float]],
+                Dict[str, float],
+            ]
+        ] = None
         self.identity_plans: Dict[str, IdentityPlan] = resolve_identity_plans(graph)
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
@@ -1883,6 +1891,31 @@ class SCMEvaluatorV2:
 
         return node_values
 
+    def _status_quo(
+        self,
+        edge_strengths: Dict[Tuple[str, str], float],
+        base_values: Optional[Dict[str, float]],
+        factor_values: Optional[Dict[str, float]],
+    ) -> Dict[str, float]:
+        """This draw's no-intervention reading, without epsilon (it draws no random number).
+
+        Every option on a draw is evaluated against the SAME edge and factor draws, so the
+        reading is computed once per draw: a one-entry cache keyed on the very objects
+        passed (held, so an id can never be reused), never on their contents. A pure
+        function of its inputs, so caching it moves no number.
+        """
+        cached = self._status_quo_cache
+        if (
+            cached is not None
+            and cached[0] is edge_strengths
+            and cached[1] is base_values
+            and cached[2] is factor_values
+        ):
+            return cached[3]
+        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        self._status_quo_cache = (edge_strengths, base_values, factor_values, status_quo)
+        return status_quo
+
     def _framed_with_reference(
         self,
         edge_strengths: Dict[Tuple[str, str], float],
@@ -1896,7 +1929,7 @@ class SCMEvaluatorV2:
         framed = self._in_model_frame(edge_strengths, interventions, base_values, factor_values)
         if not self._evaluated_identities:
             return framed, None
-        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         return framed, status_quo
 
     def _identity_value(
@@ -2005,7 +2038,7 @@ class SCMEvaluatorV2:
         ]
         if not unchanged and not set_levels:
             return interventions
-        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         framed = dict(interventions)
         for node_id in unchanged:
             framed[node_id] = status_quo[node_id]
