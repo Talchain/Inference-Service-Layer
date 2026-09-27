@@ -2009,6 +2009,32 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "ExecutionFrameV2": {
+        "additionalProperties": false,
+        "description": "R3-8: the node's frame as PLoT resolved it (``resolveNodeFrame``: cap -> scale_frame ->\nthe value/raw_value pair). Runtime metadata for an identity's participants: user units are\n``normalised x frame``. Never persisted; never inferred by ISL.",
+        "properties": {
+          "carrier": {
+            "enum": [
+              "cap",
+              "scale_frame",
+              "pair"
+            ],
+            "title": "Carrier",
+            "type": "string"
+          },
+          "frame": {
+            "exclusiveMinimum": 0.0,
+            "title": "Frame",
+            "type": "number"
+          }
+        },
+        "required": [
+          "frame",
+          "carrier"
+        ],
+        "title": "ExecutionFrameV2",
+        "type": "object"
+      },
       "ExplanationMetadata": {
         "description": "Explanation metadata included in all responses.",
         "example": {
@@ -4480,6 +4506,17 @@
             "title": "Epsilon Std",
             "type": "number"
           },
+          "execution_frame": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionFrameV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "R3-8: user units = normalised x frame (PLoT-resolved)"
+          },
           "factor_type": {
             "anyOf": [
               {
@@ -4515,6 +4552,17 @@
             "title": "Label",
             "type": "string"
           },
+          "nonlinear_identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NonlinearIdentityV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "R3: this node is exactly the product/sum of named parents"
+          },
           "observed_state": {
             "anyOf": [
               {
@@ -4533,6 +4581,58 @@
           "label"
         ],
         "title": "NodeV2",
+        "type": "object"
+      },
+      "NonlinearIdentityV2": {
+        "additionalProperties": false,
+        "description": "R3 slice 1: the node is EXACTLY the product or the sum of named parents (an accounting\nidentity such as MRR = price x paying subscribers), not a guessed straight-line effect.\n\nCEE declares it and is its only minter; PLoT forwards it verbatim. ISL never infers an\nidentity from the graph's shape (AIQ 5859633012). Strict: an unknown operation or key is\nREFUSED (422), never dropped, because a dropped declaration is silently \"declared, not used\".",
+        "properties": {
+          "addends": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Parents added EXACTLY to the identity term (AIQ 5860087988 item 5). Only a declared addend is definitional; it is never inferred from an edge.",
+            "title": "Addends"
+          },
+          "factor_ids": {
+            "description": "The parents the node is the product/sum of",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Factor Ids",
+            "type": "array"
+          },
+          "operation": {
+            "description": "product | sum of factor_ids",
+            "enum": [
+              "product",
+              "sum"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "stated_in_brief": {
+            "description": "True when the brief itself states it",
+            "title": "Stated In Brief",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation",
+          "factor_ids",
+          "stated_in_brief"
+        ],
+        "title": "NonlinearIdentityV2",
         "type": "object"
       },
       "ObjectiveRanking": {

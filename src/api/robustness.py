@@ -79,6 +79,7 @@ from src.services.robustness_analyzer_v2 import (
     compute_effective_seed,
     compute_weighted_cost,
     get_max_cost_units,
+    identity_blocking_critiques,
     resolve_factor_central_value,
 )
 from src.utils.business_metrics import track_robustness_analysis
@@ -800,6 +801,10 @@ async def _analyze_robustness_v2_enhanced(
         validation = validator.validate()
 
         builder.add_critiques(validation.critiques)
+        # R3: a declared identity the decision depends on that cannot be computed exactly
+        # is a blocker (withheld, never approximated).
+        identity_blockers = identity_blocking_critiques(request)
+        builder.add_critiques(identity_blockers)
 
         # Build diagnostics if requested
         if include_diagnostics:
@@ -816,7 +821,7 @@ async def _analyze_robustness_v2_enhanced(
             )
             builder.set_diagnostics(diagnostics)
 
-        if validation.has_blockers:
+        if validation.has_blockers or identity_blockers:
             # Return 422 with unwrapped ISLV2Error422 (P2-ISL-3)
             logger.warning(
                 "robustness_v2_validation_blocked",
