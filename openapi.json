@@ -4289,7 +4289,7 @@
         "description": "One non-root node's evaluation frame.",
         "properties": {
           "frame": {
-            "description": "'anchored_level': the node holds an attested level; ISL evaluates it as that level plus the change its parents make from the same draw's status quo, so each of its samples is a LEVEL and the status quo reproduces the held level. 'no_level': the node is its parents' propagated sum (today's form); its samples are NOT levels and must never be shown as one.",
+            "description": "'anchored_level': the node holds an attested level; every level ISL reports for it (the goal band, a limit on it) is that level plus the option's change from the same draw's status quo, so the status quo reproduces the held level. 'no_level': the node is its parents' propagated sum; nothing reported for it is a level and must never be shown as one.",
             "enum": [
               "anchored_level",
               "no_level"
@@ -4362,7 +4362,7 @@
                 "type": "null"
               }
             ],
-            "description": "Anchored nodes whose level ISL reports (the goal band, a limit's target) and that have a domain: option_id -> the share of that option's draws whose level lies outside the domain. Reported levels (the goal band, limit probabilities) are clamped to the domain; win shares, rankings and differences are computed on the UNCLAMPED draws. A share above 0 means the model's own changes push the quantity somewhere it cannot go, in that share of futures.",
+            "description": "Anchored nodes whose level ISL reports (the goal band, a limit's target) and that have a domain: option_id -> the share of that option's draws whose level lies outside the domain. Reported levels (the goal band's p10/p50/p90, the level-frame probability_of_goal, a level limit's figures) are clamped to the domain; win shares, rankings and differences are computed on the UNCLAMPED draws. A share above 0 means the model's own changes push the quantity somewhere it cannot go, in that share of futures.",
             "title": "Level Out Of Domain Share"
           },
           "no_level_reason": {
@@ -4370,7 +4370,8 @@
               {
                 "enum": [
                   "no_observed_level",
-                  "source_not_attested"
+                  "source_not_attested",
+                  "epsilon_breaks_status_quo_reference"
                 ],
                 "type": "string"
               },
@@ -4378,7 +4379,7 @@
                 "type": "null"
               }
             ],
-            "description": "Present iff frame is 'no_level': 'no_observed_level' (the node states no level) or 'source_not_attested' (it states one, but with no source or a source that is not an attested author, so it is never used as an anchor).",
+            "description": "Present iff frame is 'no_level': 'no_observed_level' (the node states no level), 'source_not_attested' (it states one, but with no source or a source that is not an attested author, so it is never used as an anchor), or 'epsilon_breaks_status_quo_reference' (epsilon noise reaches the node, so a draw cannot be differenced against its status quo without carrying noise no option caused).",
             "title": "No Level Reason"
           },
           "node_id": {
@@ -4407,7 +4408,7 @@
                 "type": "null"
               }
             ],
-            "description": "Anchored nodes only: true when the request carried a parameter_uncertainty for this node. An anchored node's status quo is its held level on every draw, so that draw is not used for its level (the band, a limit on it, win shares). Edge and factor sensitivity and the fragile-edge gate are computed in the propagated-sum form, where it is still used.",
+            "description": "Anchored nodes only: true when the request carried a parameter_uncertainty for this node. Its draw sits in both an option's sample and the same draw's status quo, so it cancels from every level reported for the node: those levels rest on the held level, not on that distribution. The structural analyses still sample it, as before B1a.",
             "title": "Parameter Uncertainty Unused"
           }
         },

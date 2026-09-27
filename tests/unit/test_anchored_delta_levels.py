@@ -1,31 +1,36 @@
-"""B1a — ISL evaluates a NON-ROOT node that holds an attested level in ANCHORED-DELTA form.
+"""B1a — anchored-delta LEVELS for attested non-root nodes (round 2).
 
-Build train #70 5855068711 row B1; design MG 5855036638 + 5855037633; AIQ ruling 5855046894 (binding);
-MG invariant correction 5855062769. SCOPE CORRECTION (MG 5856099271, DL 5856103285): B1a does not change
-F-01 or any sign. F-01 lives at the PLoT seam (A3); N6 already read a setting on a non-root node against
-the same draw's status quo. B1a's exits: the status quo reproduces exactly, bands are real levels, and a
-limit on a derived node is scored against an anchored level. Nothing that is not a level moves (R7, R11).
+Build train #70 5855068711 row B1; design MG 5855036638 + 5855037633; AIQ rulings 5855046894 (who anchors,
+clamping) and 5856229075 (R4: structural outputs byte-identical, PERMANENTLY, for additive nodes). Scope
+correction MG 5856099271 / DL 5856103285: B1a changes no sign and does not touch F-01 (the PLoT seam, A3).
+Acceptance rows: AIQ ``aiq-p2-20260927/ACCEPTANCE-ROWS-R2R3-B5-20260927.md`` @364533c3, section 1 (B1a-1..7).
 
-THE RULE. For a non-root node whose ``observed_state`` carries a held level ``o`` stated or estimated by an
-ATTESTED author, on every draw::
+THE RULE. A NON-ROOT node whose ``observed_state`` holds a level ``o`` from an ATTESTED author, with no
+epsilon noise reaching it, is ANCHORED. Every level ISL reports for it is recovered per draw from TODAY's
+draws against the same draw's status quo (common random numbers)::
 
-    value = o + sum(strength * (parent - parent_sq))
+    level_i = o + (option_sample_i - status_quo_sample_i)
 
-where ``parent_sq`` is that parent's value in the SAME draw's status-quo evaluation (no interventions, no
-epsilon; common random numbers). So the status quo reproduces ``o`` on every draw, and every sample of the
-node is a LEVEL in its own frame. A non-root with no attested level keeps today's form and is flagged
-"no level". A ``do(x)`` still pins the node.
+so the status quo reproduces ``o`` on every draw. REPORT-ONLY (round 2): the evaluator and the Monte Carlo
+are today's, untouched, so win shares, regret, probability_of_goal, the limit block and every structural
+analysis are byte-identical to a run in which nothing is anchored. Round 1 anchored inside the evaluator,
+which zeroed edge/factor sensitivity and emptied fragile_edges on a6ed1bff (verifier blocker 1); that
+design is gone.
 
 THE FIXTURE is Paul's own persisted graph ``a6ed1bff`` as PLoT actually sent it to ISL, captured at
 2026-09-27T10:27:59Z through a local proxy and matched leaf-for-leaf against the staging sha8 capture
 (``tests/fixtures/anchored_delta/paul_a6ed1bff_plot_to_isl_request.json``, sha256 2ddc8367…1ca6). Three
-documented edits, each because the WIRE disagrees with the persisted graph (a data-contract defect that is
-NOT this slice's, reported separately):
+documented edits, each because the WIRE disagrees with the persisted graph (the A3 seam, not this slice):
 
 * ``6dbac00d`` sets ``monthly_new_pro_subscribers`` to 1 on the wire; the graph holds 0.09 (90/month).
 * ``ca47b368`` sets ``monthly_churn`` to 1 on the wire; the graph holds 0.025 (2.5%).
 * ``146aa89d`` (£59, grandfather existing customers) is absent from the wire; it is re-added with its
-  persisted price lever (``pro_plan_price`` 0.295), plus, for R5 only, its grandfathering switch.
+  persisted price lever (``pro_plan_price`` 0.295), plus, where named, its grandfathering switch.
+
+THE CONTRAST ("anchoring off") is the SAME request with ``level_anchor_source`` patched to attest nothing,
+so no node is anchored and every figure is today's. It differs from the pre-B1a engine only in the
+node_levels disclosure (all 'no_level'). The V2-wire rows run in the offload pool, which a patch cannot
+reach, so there the contrast strips every ``observed_state.source`` instead (same effect on anchoring).
 """
 
 from __future__ import annotations
@@ -38,14 +43,9 @@ from typing import Any, Dict, List
 import numpy as np
 import pytest
 
+import src.services.robustness_analyzer_v2 as rav2
 from src.models.robustness_v2 import RobustnessRequestV2
-from src.services.robustness_analyzer_v2 import (
-    DualUncertaintySampler,
-    FactorSampler,
-    RobustnessAnalyzerV2,
-    SCMEvaluatorV2,
-)
-from src.utils.rng import SeededRNG
+from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -55,7 +55,6 @@ FIXTURE = (
 )
 CAP_GBP = 125_000.0  # observed_state.cap of the goal node ``mrr`` (0.6 = £75,000)
 N_SAMPLES = 2_000
-SEED = 543524382  # the served request's own seed
 
 GOAL = "mrr"
 CHURN = "monthly_churn"
@@ -74,7 +73,11 @@ P54 = "increase_price_to_54"
 GRANDFATHER = "146aa89d"
 CONVERSION = "6dbac00d"
 RETENTION = "ca47b368"
-HOLD = "hold_no_change"  # a no-intervention option: the pure status quo, for exactness rows
+HOLD = "hold_no_change"  # no interventions: the pure status quo (V1 analyzer only)
+HOLD_NON_ROOTS = "hold_non_roots_at_today"  # sets two non-root nodes to exactly their held levels
+
+# The served five plus 146aa89d at its persisted price lever (no switch).
+SIX_OPTIONS = [KEEP, P59, P54, GRANDFATHER, CONVERSION, RETENTION]
 
 
 def _wire() -> Dict[str, Any]:
@@ -97,6 +100,7 @@ def paul_request(
         CONVERSION: {NEW_SUBS: 0.09},
         RETENTION: {CHURN: 0.025},
         HOLD: {},
+        HOLD_NON_ROOTS: {CHURN: 0.03, NEW_SUBS: 0.075},
     }
     wire_by_id = {o["id"]: o for o in d["options"]}
     d["options"] = [
@@ -117,9 +121,24 @@ def paul_request(
     return d
 
 
+SERVED_ANALYSES: Dict[str, Any] = {
+    "analysis_types": ["comparison", "sensitivity", "robustness"],
+    "include_e_values": True,
+    "include_voi": True,
+    "include_factor_flips": True,
+}
+
+
+def served_request(*, options: List[str], n_samples: int = N_SAMPLES, **kwargs) -> Dict[str, Any]:
+    """``paul_request`` with every analysis the served request asked for switched back on."""
+    d = paul_request(options=options, n_samples=n_samples, **kwargs)
+    d.update(copy.deepcopy(SERVED_ANALYSES))
+    return d
+
+
 def strip_sources(d: Dict[str, Any]) -> Dict[str, Any]:
-    """The same request with every observed_state.source removed: nothing is attested, so every node is
-    evaluated in today's (pre-B1a) form. The in-process contrast for the byte-identity rows."""
+    """The same request with every observed_state.source removed: nothing is attested, so nothing is
+    anchored. The contrast for rows that run through the offload pool."""
     out = copy.deepcopy(d)
     for node in out["graph"]["nodes"]:
         if node.get("observed_state"):
@@ -129,6 +148,13 @@ def strip_sources(d: Dict[str, Any]) -> Dict[str, Any]:
 
 def analyse(d: Dict[str, Any]):
     return RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+
+
+def analyse_unanchored(d: Dict[str, Any]):
+    """The SAME request with anchoring off: no author attests any level, so no node is anchored."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(rav2, "level_anchor_source", lambda node: None)
+        return analyse(d)
 
 
 def result(response, option_id: str):
@@ -146,561 +172,244 @@ def frame_of(response, node_id: str):
 
 
 def samples(response, option_id: str) -> np.ndarray:
+    """The option's REPORTED goal samples (levels, when the goal is anchored)."""
     return np.array(result(response, option_id).outcome_distribution.samples)
 
 
-def draws(request: RobustnessRequestV2, n: int):
-    """(edge strengths, factor values) pairs drawn exactly the way the analyzer draws them."""
-    sampler = DualUncertaintySampler(request.graph.edges, SeededRNG(SEED))
-    factors = FactorSampler(
-        request.graph.nodes, request.parameter_uncertainties, SeededRNG(SEED + 1)
-    )
-    return [(sampler.sample_edge_configuration(), factors.sample_factor_values()) for _ in range(n)]
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R1 — the status quo reproduces the held levels: MRR £75,000, churn 3%, subscribers 1,500
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestR1StatusQuoReproducesTheHeldLevels:
-    def test_every_status_quo_draw_is_the_held_level_exactly(self):
-        """Per draw, at the evaluator every analysis reads through: no interventions, same draws."""
-        request = RobustnessRequestV2.model_validate(paul_request(options=[HOLD]))
-        evaluator = SCMEvaluatorV2(request.graph)
-        targets = [GOAL, CHURN, SUBS, NEW_SUBS]
-        for edge_config, factor_values in draws(request, 200):
-            values = evaluator.evaluate_multi(
-                edge_strengths=edge_config,
-                interventions={},
-                target_nodes=targets,
-                factor_values=factor_values,
-            )
-            assert values == {GOAL: 0.6, CHURN: 0.03, SUBS: 0.15, NEW_SUBS: 0.075}
-
-    def test_the_status_quo_mrr_band_is_75k_on_every_draw(self):
-        response = analyse(paul_request(options=[HOLD, KEEP]))
-        hold = samples(response, HOLD)
-        assert np.all(
-            hold == 0.6
-        ), f"status-quo MRR draws off 0.6: min {hold.min()}, max {hold.max()}"
-        assert float(np.median(hold)) * CAP_GBP == 75_000.0
-
-    def test_keep_current_mrr_median_is_within_1e_6_of_the_held_level(self):
-        """Keep-current pins price at 0.245 against a price draw of sd 0.0001, so it is the status quo
-        up to that pin. Served n_samples."""
-        response = analyse(paul_request(options=[KEEP, P59], n_samples=10_000))
-        assert abs(float(np.median(samples(response, KEEP))) - 0.6) <= 1e-6
-
-    def test_the_held_levels_are_disclosed_with_their_author(self):
-        response = analyse(paul_request(options=[HOLD, KEEP]))
-        goal = frame_of(response, GOAL)
-        assert (goal.frame, goal.level, goal.level_anchor_source, goal.observed_source) == (
-            "anchored_level",
-            0.6,
-            "user_stated",
-            "brief_extraction",
-        )
-        for node_id, level in ((CHURN, 0.03), (SUBS, 0.15), (NEW_SUBS, 0.075)):
-            f = frame_of(response, node_id)
-            assert (f.frame, f.level, f.level_anchor_source, f.observed_source) == (
-                "anchored_level",
-                level,
-                "olumi_estimate",
-                "cee_inference",
-            ), node_id
-
-    def test_the_churn_limit_is_scored_at_its_level(self):
-        """The 'churn <= 4%' limit resolves (no refusal) and the retention option is read at the
-        level it sets, 2.5%, on every draw."""
-        response = analyse(paul_request(options=[HOLD, RETENTION]))
-        for option_id in (HOLD, RETENTION):
-            analysis = result(response, option_id).constraint_analysis
-            assert analysis is not None, f"constraint_analysis refused for {option_id}"
-            (row,) = [c for c in analysis.constraints if c.node_id == CHURN]
-            assert row.prob_satisfied == 1.0
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R2 — GUARD: B1a leaves option effects alone (retention above keep-current, conversion ~+£18)
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestR2NonRootSettingsScoreByTheirChangeFromToday:
-    """A GUARD row, not a RED-first one: on the persisted option levels both effects are already
-    right at 3717e36, because N6 (``_in_model_frame``) reads a setting on a non-root node against
-    the same-draw status quo. B1a changes levels, never an effect or a sign, and does not touch
-    F-01 (the PLoT seam, A3). These rows pin that anchoring keeps the effects as they were."""
-
-    def test_retention_mean_mrr_is_above_keep_current(self):
-        response = analyse(paul_request(options=[KEEP, RETENTION, CONVERSION]))
-        gap = float(np.mean(samples(response, RETENTION) - samples(response, KEEP))) * CAP_GBP
-        assert gap > 0.0, f"retention scored below keep-current by £{-gap:.2f}"
-        assert 5.0 < gap < 13.0, f"retention effect £{gap:.2f}, expected ~+£9"
-
-    def test_conversion_effect_is_about_18_pounds(self):
-        response = analyse(paul_request(options=[KEEP, RETENTION, CONVERSION]))
-        gap = float(np.mean(samples(response, CONVERSION) - samples(response, KEEP))) * CAP_GBP
-        assert 15.0 < gap < 21.0, f"conversion effect £{gap:.2f}, expected ~+£18"
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R3 — root-lever options: win shares BYTE-IDENTICAL to today's form on the same seed
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestR3RootLeverOptionsAreUnchanged:
-    OPTIONS = [KEEP, P59, P54, GRANDFATHER]
-
-    def test_win_shares_are_byte_identical_to_the_unanchored_form(self):
-        anchored = analyse(paul_request(options=self.OPTIONS))
-        today = analyse(strip_sources(paul_request(options=self.OPTIONS)))
-        assert {r.option_id: r.win_probability for r in anchored.results} == {
-            r.option_id: r.win_probability for r in today.results
-        }
-        assert anchored.recommended_option_id == today.recommended_option_id
-
-    def test_per_draw_differences_are_unchanged(self):
-        anchored = analyse(paul_request(options=self.OPTIONS))
-        today = analyse(strip_sources(paul_request(options=self.OPTIONS)))
-        for option_id in (P59, P54, GRANDFATHER):
-            a = samples(anchored, option_id) - samples(anchored, KEEP)
-            t = samples(today, option_id) - samples(today, KEEP)
-            assert np.max(np.abs(a - t)) <= 1e-12, option_id
-
-    def test_only_the_level_moves(self):
-        """CONTROL: the rows above are not passing because nothing changed. The levels did move."""
-        anchored = analyse(paul_request(options=self.OPTIONS))
-        today = analyse(strip_sources(paul_request(options=self.OPTIONS)))
-        assert abs(float(np.median(samples(anchored, KEEP))) - 0.6) < 1e-4
-        assert abs(float(np.median(samples(today, KEEP))) - 0.6) > 0.3
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R4 — an unattested non-root keeps today's form and is flagged
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestR4UnattestedNonRootsKeepTodaysFormAndAreFlagged:
-    def test_a_non_root_with_no_observed_level_is_flagged_no_level(self):
-        response = analyse(paul_request(options=[HOLD, KEEP]))
-        f = frame_of(response, PRICE_SENSITIVITY)
-        assert (f.frame, f.no_level_reason, f.level, f.level_anchor_source) == (
-            "no_level",
-            "no_observed_level",
-            None,
-            None,
-        )
-
-    def test_a_non_root_with_no_observed_level_is_evaluated_in_the_raw_form(self):
-        request = RobustnessRequestV2.model_validate(paul_request(options=[HOLD]))
-        evaluator = SCMEvaluatorV2(request.graph)
-        for edge_config, factor_values in draws(request, 50):
-            values = evaluator.evaluate_multi(
-                edge_strengths=edge_config,
-                interventions={},
-                target_nodes=[PRICE, PRICE_SENSITIVITY],
-                factor_values=factor_values,
-            )
-            raw = 0.0 + 0.0 + values[PRICE] * edge_config[(PRICE, PRICE_SENSITIVITY)]
-            assert values[PRICE_SENSITIVITY] == raw
-
-    def test_a_source_less_level_is_not_anchored_and_keeps_the_raw_form(self):
-        """AIQ: never anchor on a source-less value. Subscribers WITHOUT a source is flagged and computed
-        as today: its (sampled) base plus its parents' raw contributions."""
-        d = paul_request(options=[HOLD])
-        (subs,) = [n for n in d["graph"]["nodes"] if n["id"] == SUBS]
-        subs["observed_state"].pop("source")
-        response = analyse(d)
-        f = frame_of(response, SUBS)
-        assert (f.frame, f.no_level_reason, f.observed_source) == (
-            "no_level",
-            "source_not_attested",
-            None,
-        )
-
-        request = RobustnessRequestV2.model_validate(d)
-        evaluator = SCMEvaluatorV2(request.graph)
-        for edge_config, factor_values in draws(request, 50):
-            values = evaluator.evaluate_multi(
-                edge_strengths=edge_config,
-                interventions={},
-                target_nodes=[SUBS, CHURN, NEW_SUBS],
-                factor_values=factor_values,
-            )
-            # today's arithmetic, in its own association order: base + intercept + parents
-            parents = 0.0 + values[CHURN] * edge_config[(CHURN, SUBS)]
-            parents += values[NEW_SUBS] * edge_config[(NEW_SUBS, SUBS)]
-            assert values[SUBS] == factor_values[SUBS] + 0.0 + parents
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R5 — a level pushed out of its domain is disclosed; win shares are untouched
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestR5OutOfDomainLevelsAreDisclosedNeverAbsorbed:
-    OPTIONS = [KEEP, P59, GRANDFATHER, RETENTION]
-
-    def test_grandfathering_pushes_churn_below_zero_and_the_share_says_so(self):
-        response = analyse(paul_request(options=self.OPTIONS, grandfather_switch=True))
-        churn = frame_of(response, CHURN)
-        assert (churn.level_domain_min, churn.level_domain_max) == (0.0, None)
-        shares = churn.level_out_of_domain_share
-        assert shares is not None
-        assert shares[GRANDFATHER] > 0.5, shares
-        assert shares[KEEP] == 0.0
-        assert shares[RETENTION] == 0.0
-
-    def test_win_shares_are_computed_on_unclamped_draws(self):
-        anchored = analyse(paul_request(options=self.OPTIONS, grandfather_switch=True))
-        today = analyse(strip_sources(paul_request(options=self.OPTIONS, grandfather_switch=True)))
-        assert {r.option_id: r.win_probability for r in anchored.results} == {
-            r.option_id: r.win_probability for r in today.results
-        }
-        gap_a = samples(anchored, GRANDFATHER) - samples(anchored, KEEP)
-        gap_t = samples(today, GRANDFATHER) - samples(today, KEEP)
-        assert np.max(np.abs(gap_a - gap_t)) <= 1e-12
-
-    def test_the_reported_limit_level_is_clamped_to_the_domain(self):
-        """A limit reads the CLAMPED level (a churn below 0% counts as 0%), so every figure in the limit
-        block is about levels the quantity can take; the share above says how often that happened.
-        Against a floor 'churn >= 1%', grandfathering fails on the draws that push churn below zero,
-        and it fails by exactly 1 point (0% vs 1%), not by the ~48 points of an impossible level."""
-        d = paul_request(options=self.OPTIONS, grandfather_switch=True)
-        d["goal_constraints"].append(
-            {
-                "constraint_id": "floor-churn",
-                "node_id": CHURN,
-                "operator": ">=",
-                "value": 0.01,
-                "label": "Churn floor",
-                "value_frame": "level",
-            }
-        )
-        response = analyse(d)
-        analysis = result(response, GRANDFATHER).constraint_analysis
-        assert analysis is not None
-        (floor,) = [c for c in analysis.constraints if c.constraint_id == "floor-churn"]
-        assert 0.0 < floor.prob_satisfied < 0.5
-        assert floor.failure_margin_median == pytest.approx(0.01, abs=1e-12)
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R6 — an engine-defaulted root, a source-less value or an unknown source is never an anchor
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestR6OnlyAttestedLevelsAnchor:
-    def test_the_engine_defaulted_root_is_not_an_anchor(self):
-        response = analyse(paul_request(options=[HOLD, KEEP]))
-        assert GRANDFATHERED not in {f.node_id for f in response.node_levels or []}
-        assert "ROOT_NODE_DEFAULT_VALUE" in {w.code for w in response.inference_warnings}
-        assert all(
-            f.frame == "no_level" or f.level_anchor_source is not None for f in response.node_levels
-        )
-
-    @pytest.mark.parametrize("source", [None, "computed", "engine_default", ""])
-    def test_an_unattested_source_on_a_level_does_not_anchor(self, source):
-        d = paul_request(options=[HOLD])
-        (churn,) = [n for n in d["graph"]["nodes"] if n["id"] == CHURN]
-        if source is None:
-            churn["observed_state"].pop("source")
-        else:
-            churn["observed_state"]["source"] = source
-        response = analyse(d)
-        f = frame_of(response, CHURN)
-        assert (f.frame, f.level_anchor_source, f.no_level_reason) == (
-            "no_level",
-            None,
-            "source_not_attested",
-        )
-        request = RobustnessRequestV2.model_validate(d)
-        evaluator = SCMEvaluatorV2(request.graph)
-        for edge_config, factor_values in draws(request, 50):
-            values = evaluator.evaluate_multi(
-                edge_strengths=edge_config,
-                interventions={},
-                target_nodes=[CHURN, PRICE_SENSITIVITY, GRANDFATHERED],
-                factor_values=factor_values,
-            )
-            parents = 0.0 + values[PRICE_SENSITIVITY] * edge_config[(PRICE_SENSITIVITY, CHURN)]
-            parents += values[GRANDFATHERED] * edge_config[(GRANDFATHERED, CHURN)]
-            assert values[CHURN] == factor_values[CHURN] + 0.0 + parents
-
-    @pytest.mark.parametrize(
-        "source, author",
-        [
-            ("brief_extraction", "user_stated"),
-            ("explicit", "user_stated"),
-            ("user_override", "user_stated"),
-            ("user_confirmed", "user_ratified"),
-            ("cee_inference", "olumi_estimate"),
-            ("cee_repair", "olumi_estimate"),
-            ("system_repaired", "olumi_estimate"),
-        ],
-    )
-    def test_each_attested_author_anchors_and_is_named(self, source, author):
-        d = paul_request(options=[HOLD])
-        (churn,) = [n for n in d["graph"]["nodes"] if n["id"] == CHURN]
-        churn["observed_state"]["source"] = source
-        response = analyse(d)
-        f = frame_of(response, CHURN)
-        assert (f.frame, f.level_anchor_source, f.observed_source) == (
-            "anchored_level",
-            author,
-            source,
-        )
-
-
-# ---------------------------------------------------------------------------------------------------------
-# The wire: the served V2 envelope carries the frames, and the goal band is a level
-# ---------------------------------------------------------------------------------------------------------
-
-
-class TestTheV2EnvelopeCarriesTheLevelFrames:
-    """The served route (the V2 endpoint rejects an option with no interventions, so no HOLD here)."""
-
-    ENDPOINT = "/api/v1/robustness/analyze/v2"
-    HEADERS = {"X-ISL-Response-Version": "2"}
-    OPTIONS = [KEEP, P59, GRANDFATHER, RETENTION]
-
-    @pytest.fixture(scope="class")
-    def request_dict(self) -> Dict[str, Any]:
-        return paul_request(options=self.OPTIONS, grandfather_switch=True)
-
-    @pytest.fixture(scope="class")
-    def body(self, request_dict) -> Dict[str, Any]:
-        from fastapi.testclient import TestClient
-
-        from src.api.main import app
-
-        response = TestClient(app).post(self.ENDPOINT, json=request_dict, headers=self.HEADERS)
-        assert response.status_code == 200, response.text
-        return response.json()
-
-    def test_node_levels_reach_the_wire(self, body):
-        frames = {f["node_id"]: f for f in body.get("node_levels") or []}
-        assert frames[GOAL]["frame"] == "anchored_level"
-        assert frames[GOAL]["level_anchor_source"] == "user_stated"
-        assert frames[CHURN]["level_anchor_source"] == "olumi_estimate"
-        assert frames[PRICE_SENSITIVITY]["frame"] == "no_level"
-        assert frames[CHURN]["level_out_of_domain_share"][GRANDFATHER] > 0.5
-        assert GRANDFATHERED not in frames
-
-    def test_the_keep_current_band_is_at_the_held_level(self, body):
-        (keep,) = [o for o in body["options"] if o["id"] == KEEP]
-        band = keep["outcome"]
-        for key in ("p10", "p50", "p90"):
-            assert abs(band[key] - 0.6) < 1e-3, (key, band[key])
-
-    def test_the_goal_band_is_the_unclamped_band_clamped_to_the_goal_domain(
-        self, body, request_dict
-    ):
-        """Grandfathering pushes MRR below £0 in ~13% of draws: the unclamped p10 is negative, the
-        reported p10 is exactly 0, and every other percentile is untouched."""
-        v1 = analyse(request_dict)
-        shares = {f["node_id"]: f for f in body["node_levels"]}[GOAL]["level_out_of_domain_share"]
-        for option_id in self.OPTIONS:
-            raw = np.percentile(samples(v1, option_id), [10, 50, 90])
-            (wire,) = [o for o in body["options"] if o["id"] == option_id]
-            band = wire["outcome"]
-            assert [band["p10"], band["p50"], band["p90"]] == [
-                float(min(max(v, 0.0), 1.0)) for v in raw
-            ], option_id
-        raw_gf = np.percentile(samples(v1, GRANDFATHER), 10)
-        assert raw_gf < 0.0, "precondition: the grandfathering band must leave the domain"
-        assert shares[GRANDFATHER] > 0.1
-        assert shares[KEEP] == 0.0
-
-
-# =========================================================================================================
-# ROUND 2 (verifier CHANGES_REQUIRED on 504ffc30; MG #70 5856099271, DL 5856103285)
-#
-# SCOPE. B1a does NOT change F-01 or any sign: N6 (``_in_model_frame``) already reads a setting on a
-# non-root node against the same draw's status quo, and F-01 lives at the PLoT seam (A3). B1a's exits are:
-# the status quo reproduces exactly (R1), bands are real levels (R5 + wire), and a limit on a derived node
-# is scored against an anchored level (R1, R5, R9). Everything that is not a level stays as it was (R7).
-# =========================================================================================================
-
-SERVED_ANALYSES: Dict[str, Any] = {
-    "analysis_types": ["comparison", "sensitivity", "robustness"],
-    "include_e_values": True,
-    "include_voi": True,
-    "include_factor_flips": True,
-}
-
-
-# The options PLoT served on a6ed1bff (the wire carried five; 146aa89d was absent), at their persisted
-# levels. The V2 route refuses two options with identical interventions, so 146aa89d stays out here too.
-SERVED_OPTIONS = [KEEP, P59, P54, CONVERSION, RETENTION]
-
-
-def served_request(*, options: List[str], n_samples: int = N_SAMPLES, **kwargs) -> Dict[str, Any]:
-    """``paul_request`` with every analysis the served request asked for switched back on."""
-    d = paul_request(options=options, n_samples=n_samples, **kwargs)
-    d.update(copy.deepcopy(SERVED_ANALYSES))
-    return d
-
-
-def _json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True)
+def effect_gbp(response, option_id: str, reference: str = KEEP) -> float:
+    return float(np.mean(samples(response, option_id) - samples(response, reference))) * CAP_GBP
 
 
 def codes(response) -> set:
     return {w.code for w in response.inference_warnings}
 
 
+def _json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True)
+
+
+def everything_but_levels(response) -> Dict[str, Any]:
+    """The whole V1 response except what B1a is FOR (the reported goal distribution and the
+    node_levels disclosure) and the wall-clock timing."""
+    d = response.model_dump(mode="json", by_alias=True)
+    d.pop("node_levels", None)
+    d["_metadata"].pop("execution_time_ms")
+    for r in d["results"]:
+        r.pop("outcome_distribution")
+    return d
+
+
 # ---------------------------------------------------------------------------------------------------------
-# R7 — edge sensitivity, factor sensitivity and the fragile-edge gate are TODAY's, byte for byte
+# B1a-1 — the status quo reproduces the held levels: MRR £75,000, churn 3%, subscribers 1,500 (exact).
+# Mutant: anchoring off -> the ~£15k status quo returns.
 # ---------------------------------------------------------------------------------------------------------
 
 
-class TestR7SensitivityAndFragileGatesAreTodaysForm:
-    """Verifier blocker 1. Anchoring made these phases degenerate: each perturbs an edge or a factor on
-    the reference option and reads the goal, and an anchored goal differenced against the SAME draw's
-    status quo cancels the perturbation (edge sensitivity 0 everywhere, fragile_edges empty, factor
-    sensitivity 0 except an artefact on the price lever). They are not levels, so they are computed in
-    today's (propagated-sum) form, against today's baseline mean: byte-identical to the strip_sources run.
-    """
+class TestB1a1StatusQuoReproducesTheHeldLevels:
+    @pytest.fixture(scope="class")
+    def hold(self):
+        return analyse(paul_request(options=[HOLD, KEEP]))
 
-    # The served five plus 146aa89d at its persisted price lever (no switch): it ties 59 on every draw,
-    # which is what exercises conditional_winners on this graph. EVPC and the path decomposition are
-    # switched on so that no output in the list below is vacuously equal (None == None).
-    OPTIONS = [KEEP, P59, P54, GRANDFATHER, CONVERSION, RETENTION]
+    def test_the_status_quo_mrr_is_75k_on_every_draw(self, hold):
+        draws = samples(hold, HOLD)
+        assert np.all(draws == 0.6), f"status-quo MRR draws off 0.6: {draws.min()}..{draws.max()}"
+        assert float(np.median(draws)) * CAP_GBP == 75_000.0
+
+    def test_the_held_levels_are_disclosed_with_their_author(self, hold):
+        expected = {
+            GOAL: (0.6, "user_stated", "brief_extraction"),
+            CHURN: (0.03, "olumi_estimate", "cee_inference"),
+            SUBS: (0.15, "olumi_estimate", "cee_inference"),
+            NEW_SUBS: (0.075, "olumi_estimate", "cee_inference"),
+        }
+        for node_id, (level, author, source) in expected.items():
+            f = frame_of(hold, node_id)
+            assert (f.frame, f.level, f.level_anchor_source, f.observed_source) == (
+                "anchored_level",
+                level,
+                author,
+                source,
+            ), node_id
+
+    def test_the_status_quo_churn_is_exactly_3_percent_on_every_draw(self):
+        """Pinned from both sides: 'churn <= 3%' holds on every status-quo draw and 'churn <= 2.99999%'
+        on none, so the status-quo churn level is exactly 0.03 on every draw."""
+        d = paul_request(options=[HOLD, KEEP])
+        for cid, value in (("at-level", 0.03), ("just-below", 0.0299999)):
+            d["goal_constraints"].append(
+                {
+                    "constraint_id": cid,
+                    "node_id": CHURN,
+                    "operator": "<=",
+                    "value": value,
+                    "label": cid,
+                    "value_frame": "level",
+                }
+            )
+        analysis = result(analyse(d), HOLD).constraint_analysis
+        assert analysis is not None
+        by_id = {c.constraint_id: c.prob_satisfied for c in analysis.constraints}
+        assert (by_id["at-level"], by_id["just-below"]) == (1.0, 0.0)
+
+    def test_keep_current_is_75k_where_it_was_15k(self):
+        """Keep-current pins the price at its held £49 (PU sd 0.0001), so its band is the status quo up
+        to that pin. Before B1a the same draws read ~£15k (the propagated sum), which the contrast shows."""
+        d = paul_request(options=[KEEP, P59], n_samples=10_000)
+        anchored, today = analyse(d), analyse_unanchored(d)
+        assert abs(float(np.median(samples(anchored, KEEP))) - 0.6) <= 1e-6
+        assert abs(float(np.median(samples(today, KEEP))) * CAP_GBP - 15_000.0) < 1_000.0
+
+    def test_keep_current_reaches_the_wire_at_75k(self):
+        """The served V2 route: keep-current's p50 is £75,000 to within £1.25, and its p10/p90 to within
+        £25 (the price pin against a price PU of sd 0.0001, x strength ~0.5: measured 5.5e-5 at p10)."""
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        body = TestClient(app).post(
+            "/api/v1/robustness/analyze/v2",
+            json=paul_request(options=[KEEP, P59, RETENTION]),
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert body.status_code == 200, body.text
+        (keep,) = [o for o in body.json()["options"] if o["id"] == KEEP]
+        band = keep["outcome"]
+        assert abs(band["p50"] - 0.6) <= 1e-5, band
+        for key in ("p10", "p90"):
+            assert abs(band[key] - 0.6) <= 2e-4, (key, band[key])
+
+
+# ---------------------------------------------------------------------------------------------------------
+# B1a-2 — CONTROL: root-lever options are unchanged (£59 / £54; analytic EV +£2,480.6 / +£1,240.3).
+# ---------------------------------------------------------------------------------------------------------
+
+
+class TestB1a2RootLeverOptionsAreUnchanged:
+    """The Monte Carlo estimates of the two price effects on this seed are +£2,421.08 / +£1,210.54 at
+    n=10,000 (3717e36 and this branch alike); the analytic expected values the acceptance row quotes are
+    0.0198447 x £125,000 = +£2,480.6 and half that, +£1,240.3. What B1a must not move is the estimate."""
 
     @pytest.fixture(scope="class")
     def pair(self):
-        d = served_request(options=self.OPTIONS)
+        d = paul_request(options=[KEEP, P59, P54])
+        return analyse(d), analyse_unanchored(d)
+
+    def test_win_share_regret_and_goal_probability_are_byte_identical(self, pair):
+        anchored, today = pair
+        for option_id in (KEEP, P59, P54):
+            a, t = result(anchored, option_id), result(today, option_id)
+            assert (a.win_probability, a.pre_noise_expected_regret, a.probability_of_goal) == (
+                t.win_probability,
+                t.pre_noise_expected_regret,
+                t.probability_of_goal,
+            ), option_id
+
+    def test_the_price_effects_are_unchanged(self, pair):
+        anchored, today = pair
+        for option_id in (P59, P54):
+            assert abs(effect_gbp(anchored, option_id) - effect_gbp(today, option_id)) <= 1e-6
+
+    def test_only_the_level_moved(self, pair):
+        """CONTROL for the control: the rows above do not pass because nothing changed."""
+        anchored, today = pair
+        assert abs(float(np.median(samples(anchored, KEEP))) - 0.6) < 1e-4
+        assert abs(float(np.median(samples(today, KEEP))) - 0.6) > 0.3
+
+
+# ---------------------------------------------------------------------------------------------------------
+# B1a-3 — effects at the persisted levels: retention +£8.71, conversion +£17.56 (1e-6), retention >
+# keep-current. Mutant: a clamp on the difference path -> an effect moves.
+# ---------------------------------------------------------------------------------------------------------
+
+# EXECUTED at ISL 3717e36 (the pre-B1a engine, this session) on the request below: the served five plus
+# 146aa89d at its persisted price, persisted levels, n=10,000, the captured seed. MG EXEC 5856099271.
+CONVERSION_EFFECT_AT_BASE_GBP = 17.556688738482833
+RETENTION_EFFECT_AT_BASE_GBP = 8.707901425264417
+
+
+class TestB1a3EffectsAtThePersistedLevels:
+    @pytest.fixture(scope="class")
+    def persisted(self):
+        return analyse(paul_request(options=SIX_OPTIONS, n_samples=10_000))
+
+    def test_conversion_is_plus_17_56(self, persisted):
+        assert abs(effect_gbp(persisted, CONVERSION) - CONVERSION_EFFECT_AT_BASE_GBP) <= 1e-6
+
+    def test_retention_is_plus_8_71_and_above_keep_current(self, persisted):
+        effect = effect_gbp(persisted, RETENTION)
+        assert abs(effect - RETENTION_EFFECT_AT_BASE_GBP) <= 1e-6
+        assert effect > 0.0
+
+    def test_an_effect_whose_levels_leave_the_domain_is_unclamped(self):
+        """The discriminating arm. Grandfathering pushes MRR below £0 on some draws; its effect is the
+        UNCLAMPED difference, exactly today's. A clamp on the reported draws moves it."""
+        d = paul_request(options=[KEEP, P59, GRANDFATHER, RETENTION], grandfather_switch=True)
+        anchored, today = analyse(d), analyse_unanchored(d)
+        assert float(np.mean(samples(anchored, GRANDFATHER) < 0.0)) > 0.05, "precondition"
+        assert abs(effect_gbp(anchored, GRANDFATHER) - effect_gbp(today, GRANDFATHER)) <= 1e-6
+
+
+# ---------------------------------------------------------------------------------------------------------
+# B1a-4 — structural outputs byte-identical (AIQ 5856229075, permanent for additive nodes). Verifier
+# blocker 1: edge_sensitivity, factor_sensitivity, fragile_edges. Mutant: a structural consumer reads the
+# anchored levels -> RED.
+# ---------------------------------------------------------------------------------------------------------
+
+
+class TestB1a4StructuralOutputsAreByteIdentical:
+    """Every analysis the served request asks for, plus EVPC and the path decomposition, on the six
+    options (146aa89d ties 59 on every draw, which exercises conditional_winners at this n)."""
+
+    STRUCTURAL = [
+        "sensitivity",
+        "factor_sensitivity",
+        "robustness",
+        "conditional_winners",
+        "edge_e_values",
+        "factor_flip_values",
+        "p_win_sensitivity",
+        "factor_evppi",
+        "factor_evpc",
+        "path_decomposition",
+        "stability_thresholds",
+    ]
+
+    @pytest.fixture(scope="class")
+    def pair(self):
+        d = served_request(options=SIX_OPTIONS)
         d["include_path_decomposition"] = True
         d["control_candidates"] = [{"factor_id": PRICE, "values": [0.245, 0.27, 0.295]}]
-        anchored = analyse(d).model_dump(mode="json", by_alias=True)
-        today = analyse(strip_sources(d)).model_dump(mode="json", by_alias=True)
-        return anchored, today
+        return analyse(d), analyse_unanchored(d)
 
-    def test_edge_sensitivity_is_byte_identical_to_todays_form(self, pair):
+    def test_everything_but_the_reported_levels_is_byte_identical(self, pair):
         anchored, today = pair
-        assert _json(anchored["sensitivity"]) == _json(today["sensitivity"])
+        a, t = everything_but_levels(anchored), everything_but_levels(today)
+        assert a.keys() == t.keys()
+        for key in a:
+            assert _json(a[key]) == _json(t[key]), key
 
-    def test_factor_sensitivity_is_byte_identical_to_todays_form(self, pair):
-        anchored, today = pair
-        assert _json(anchored["factor_sensitivity"]) == _json(today["factor_sensitivity"])
-
-    @pytest.mark.parametrize(
-        "key", ["fragile_edges", "fragile_edges_enhanced", "robust_edges", "interpretation"]
-    )
-    def test_the_fragile_edge_gate_is_byte_identical_to_todays_form(self, pair, key):
-        anchored, today = pair
-        assert _json(anchored["robustness"][key]) == _json(today["robustness"][key])
-
-    def test_the_rows_above_are_not_vacuous(self, pair):
-        """CONTROL: today's phases are live on this graph, and the anchored run's levels did move."""
-        anchored, today = pair
-        assert max(abs(s["elasticity"]) for s in today["sensitivity"]) > 0.5
-        assert len(today["robustness"]["fragile_edges"]) >= 3
-        nonzero = [f for f in today["factor_sensitivity"] if abs(f["elasticity"]) > 1e-3]
-        assert len(nonzero) >= 3
-        keep_a, keep_t = (
-            np.median(next(r for r in x["results"] if r["option_id"] == KEEP)["outcome_distribution"]["samples"])
-            for x in (anchored, today)
-        )
-        assert abs(keep_a - 0.6) < 1e-4 and abs(keep_t - 0.6) > 0.3
-
-    def test_no_factor_sensitivity_row_reads_a_parameter_uncertainty_as_unused(self, pair):
-        """Deviation 2 of round 1 is gone from factor_sensitivity: no zero_outcome_diff artefacts from
-        anchoring, and the price lever is an intervention override again, not -0.162."""
+    @pytest.mark.parametrize("key", STRUCTURAL)
+    def test_each_structural_output_is_exercised(self, pair, key):
+        """Non-vacuity: None == None would pass the row above for free."""
         anchored, _ = pair
-        by_id = {f["node_id"]: f for f in anchored["factor_sensitivity"]}
-        assert by_id[PRICE]["elasticity"] == 0.0
-        assert by_id[PRICE]["zero_reason"] == "intervention_override"
-        assert by_id[SUBS]["elasticity"] > 0.1
+        assert getattr(anchored, key) not in (None, []), f"{key} is not exercised on this request"
 
-    # --- every OTHER robustness / sensitivity output: identical, or listed with its reason ---------
+    def test_the_verifier_three_are_live(self, pair):
+        """Blocker 1's three outputs are the non-degenerate ones (round 1 read 0 / 0 / empty)."""
+        anchored, _ = pair
+        assert max(abs(s.elasticity) for s in anchored.sensitivity) > 0.5
+        assert len(anchored.robustness.fragile_edges) >= 3
+        assert len([f for f in anchored.factor_sensitivity if abs(f.elasticity) > 1e-3]) >= 3
 
-    @pytest.mark.parametrize(
-        "key",
-        [
-            "edge_e_values",
-            "factor_flip_values",
-            "p_win_sensitivity",
-            "conditional_winners",
-            "path_decomposition",
-            "stability_thresholds",
-            "objective_ranking",
-            "recommended_option_id",
-            "recommendation_confidence",
-            "critiques",
-            "inference_warnings",
-        ],
-    )
-    def test_every_other_decision_output_is_byte_identical(self, pair, key):
+    def test_the_levels_did_move(self, pair):
+        """CONTROL: the byte-identity above is not because anchoring did nothing."""
         anchored, today = pair
-        assert anchored[key] not in (None, []), f"{key} is not exercised on this request"
-        assert _json(anchored[key]) == _json(today[key])
-
-    @pytest.mark.parametrize(
-        "key", ["is_robust", "confidence", "recommendation_stability", "stability_penalty_factor"]
-    )
-    def test_the_rest_of_the_robustness_block_is_byte_identical(self, pair, key):
-        anchored, today = pair
-        assert _json(anchored["robustness"][key]) == _json(today["robustness"][key])
-
-    @pytest.mark.parametrize("key", ["win_probability", "probability_of_goal", "constraint_analysis"])
-    def test_per_option_decision_figures_are_byte_identical(self, pair, key):
-        anchored, today = pair
-        for a, t in zip(anchored["results"], today["results"]):
-            assert a["option_id"] == t["option_id"]
-            assert _json(a[key]) == _json(t[key]), (a["option_id"], key)
-
-    def test_expected_regret_differs_only_in_rounding(self, pair):
-        """NOT byte-identical: regret is E[max - U], computed on the level draws. In exact arithmetic the
-        per-draw level offset is common to every option and cancels; in floating point the last bits move
-        (measured: <= 1e-16)."""
-        anchored, today = pair
-        for a, t in zip(anchored["results"], today["results"]):
-            assert abs(a["pre_noise_expected_regret"] - t["pre_noise_expected_regret"]) <= 1e-12
-
-    def test_factor_evpc_moves_only_by_the_level(self, pair):
-        """NOT byte-identical, for the same reason as EVPPI: ``baseline_max_expected_utility`` and
-        ``best_do_expected_utility`` are max E[goal], LEVELS, and move by the same offset; the EVPC (their
-        difference) and the best candidate value do not move."""
-        anchored, today = pair
-        (a,) = anchored["factor_evpc"]
-        (t,) = today["factor_evpc"]
-        for key in ("factor_id", "evpc", "best_candidate_value", "n_candidate_values", "method"):
-            assert a[key] == t[key], key
-        assert abs(a["evpc_raw"] - t["evpc_raw"]) <= 1e-9
-        shift = a["baseline_max_expected_utility"] - t["baseline_max_expected_utility"]
-        assert shift > 0.3
-        assert abs((a["best_do_expected_utility"] - t["best_do_expected_utility"]) - shift) <= 2e-6
-
-    def test_factor_evppi_moves_only_by_the_level(self, pair):
-        """NOT byte-identical: ``baseline_max_expected_utility`` and ``conditional_max_expected_utility``
-        are max E[goal], a LEVEL, so both move by the same level offset; the EVPPI itself (their
-        difference) is the same, up to rounding (evppi_raw can land on -0.0 instead of 0.0, which flips
-        clamped_low)."""
-        anchored, today = pair
-        by_a = {r["factor_id"]: r for r in anchored["factor_evppi"]}
-        by_t = {r["factor_id"]: r for r in today["factor_evppi"]}
-        assert by_a.keys() == by_t.keys() and by_a
-        for factor_id, a in by_a.items():
-            t = by_t[factor_id]
-            assert (a["status"], a["evppi"]) == (t["status"], t["evppi"]), factor_id
-            assert abs(a["evppi_raw"] - t["evppi_raw"]) <= 1e-9, factor_id
-            shift = a["baseline_max_expected_utility"] - t["baseline_max_expected_utility"]
-            assert shift > 0.3, factor_id  # the level offset (MRR ~0.62 vs ~0.14)
-            assert (
-                abs((a["conditional_max_expected_utility"] - t["conditional_max_expected_utility"]) - shift)
-                <= 2e-6
-            ), factor_id
+        assert abs(float(np.median(samples(anchored, KEEP))) - 0.6) < 1e-4
+        assert abs(float(np.median(samples(today, KEEP))) - 0.6) > 0.3
 
 
-class TestR7OnTheV2Wire:
-    """The same three surfaces as the verifier read them: the served V2 envelope."""
-
-    ENDPOINT = "/api/v1/robustness/analyze/v2"
-    HEADERS = {"X-ISL-Response-Version": "2"}
-    OPTIONS = SERVED_OPTIONS
+class TestB1a4OnTheV2Wire:
+    """The same outputs as PLoT reads them: the served V2 envelope."""
 
     @pytest.fixture(scope="class")
     def pair(self):
@@ -709,10 +418,14 @@ class TestR7OnTheV2Wire:
         from src.api.main import app
 
         client = TestClient(app)
-        d = served_request(options=self.OPTIONS)
+        d = served_request(options=[KEEP, P59, P54, CONVERSION, RETENTION])
         bodies = []
         for request_dict in (d, strip_sources(d)):
-            response = client.post(self.ENDPOINT, json=request_dict, headers=self.HEADERS)
+            response = client.post(
+                "/api/v1/robustness/analyze/v2",
+                json=request_dict,
+                headers={"X-ISL-Response-Version": "2"},
+            )
             assert response.status_code == 200, response.text
             bodies.append(response.json())
         return bodies
@@ -725,201 +438,324 @@ class TestR7OnTheV2Wire:
             ("robustness", "fragile_edges_v1"),
             ("robustness", "robust_edges"),
             ("factor_sensitivity",),
+            ("factor_evppi",),
+            ("p_win_sensitivity",),
         ],
     )
-    def test_is_byte_identical_to_todays_form(self, pair, path):
+    def test_is_byte_identical(self, pair, path):
         anchored, today = pair
         a, t = anchored, today
         for key in path:
             a, t = a.get(key), t.get(key)
         assert a not in (None, []), f"{'.'.join(path)} absent on the wire"
         if path == ("factor_sensitivity",):
-            # ``value_source`` echoes observed_state.source, which the strip_sources contrast
-            # removes; it is checked against the request below, and everything else here must match.
+            # ``value_source`` echoes observed_state.source, which the contrast removes.
             a = [{k: v for k, v in row.items() if k != "value_source"} for row in a]
             t = [{k: v for k, v in row.items() if k != "value_source"} for row in t]
         assert _json(a) == _json(t)
 
-    def test_factor_sensitivity_still_echoes_each_source(self, pair):
-        anchored, _ = pair
-        sources = {
-            n["id"]: (n.get("observed_state") or {}).get("source")
-            for n in served_request(options=self.OPTIONS)["graph"]["nodes"]
-        }
-        rows = anchored["factor_sensitivity"]
-        assert rows and all(row["value_source"] == sources[row["node_id"]] for row in rows)
+    def test_win_shares_and_goal_probabilities_are_byte_identical(self, pair):
+        anchored, today = pair
+        for a, t in zip(anchored["options"], today["options"]):
+            assert a["id"] == t["id"]
+            assert (a.get("win_probability"), a.get("probability_of_goal")) == (
+                t.get("win_probability"),
+                t.get("probability_of_goal"),
+            ), a["id"]
 
 
 # ---------------------------------------------------------------------------------------------------------
-# R8 / R9 / R10 — the three behaviours round 1 claimed without a row that fails on revert
+# B1a-5 — carry-on P(goal) = the status quo exactly (0 effect). The NON-ROOT half only; see the report:
+# CEE holds a status-quo option at its ROOT factors, which B1a (non-root anchoring) does not touch.
+# Mutant: the held-vs-sampled artefact returns (a non-root setting written as given, not against the same
+# draw's status quo).
 # ---------------------------------------------------------------------------------------------------------
 
 
-class TestR8AnAnchoredGoalGetsNoFalseBaseDisclosure:
-    """M6 (drop the anchored-goal branch of ``_build_goal_node_disclosures``) turns both rows RED."""
+class TestB1a5HoldingNonRootsAtTodayIsTheStatusQuo:
+    def test_goal_probability_and_band_equal_the_status_quo_exactly(self):
+        """'MRR >= £75,000' is met on every status-quo draw (the level IS £75,000). An option that sets
+        churn and new-subscriber intake to exactly their held levels changes nothing, so it meets it on
+        every draw too, and its band is £75,000 on every draw. Both nodes carry a PU (sd 0.1), so a
+        held-vs-sampled reading would put that spread into the option's 'effect'."""
+        d = paul_request(options=[HOLD, HOLD_NON_ROOTS])
+        d["goal_threshold"] = 0.6
+        response = analyse(d)
+        hold, carry_on = result(response, HOLD), result(response, HOLD_NON_ROOTS)
+        assert hold.probability_of_goal == 1.0
+        assert carry_on.probability_of_goal == hold.probability_of_goal
+        assert np.all(samples(response, HOLD_NON_ROOTS) == 0.6)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# B1a-6 — anchor sources: ANY held level anchors (incl. cee_inference) and is stamped; a source-less value
+# or an engine-defaulted root never anchors; an unattested non-root is FLAGGED. Mutant: anchoring a
+# source-less node -> RED.
+# ---------------------------------------------------------------------------------------------------------
+
+
+class TestB1a6OnlyAttestedLevelsAnchor:
+    @pytest.mark.parametrize(
+        "source, author",
+        [
+            ("brief_extraction", "user_stated"),
+            ("explicit", "user_stated"),
+            ("user_override", "user_stated"),
+            ("user_assumption", "user_stated"),
+            ("user_confirmed", "user_ratified"),
+            ("panel_elicited", "user_ratified"),
+            ("cee_inference", "olumi_estimate"),
+            ("cee_repair", "olumi_estimate"),
+            ("system_repaired", "olumi_estimate"),
+        ],
+    )
+    def test_each_attested_author_anchors_and_is_named(self, source, author):
+        d = paul_request(options=[HOLD])
+        (goal,) = [n for n in d["graph"]["nodes"] if n["id"] == GOAL]
+        goal["observed_state"]["source"] = source
+        response = analyse(d)
+        f = frame_of(response, GOAL)
+        assert (f.frame, f.level_anchor_source, f.observed_source) == (
+            "anchored_level",
+            author,
+            source,
+        )
+        assert np.all(samples(response, HOLD) == 0.6)
+
+    @pytest.mark.parametrize("source", [None, "computed", "engine_default", ""])
+    def test_an_unattested_level_is_flagged_and_never_anchors(self, source):
+        """The goal holds 0.6 but nothing attests it: its band stays the propagated sum (~0.12), exactly
+        today's, and the frame says why."""
+        d = paul_request(options=[HOLD, KEEP])
+        (goal,) = [n for n in d["graph"]["nodes"] if n["id"] == GOAL]
+        if source is None:
+            goal["observed_state"].pop("source")
+        else:
+            goal["observed_state"]["source"] = source
+        response, today = analyse(d), analyse_unanchored(d)
+        f = frame_of(response, GOAL)
+        assert (f.frame, f.level_anchor_source, f.no_level_reason, f.level) == (
+            "no_level",
+            None,
+            "source_not_attested",
+            None,
+        )
+        assert samples(response, HOLD).tolist() == samples(today, HOLD).tolist()
+        assert abs(float(np.median(samples(response, HOLD))) - 0.6) > 0.3
+
+    def test_a_node_with_no_level_is_flagged_no_observed_level(self):
+        f = frame_of(analyse(paul_request(options=[HOLD])), PRICE_SENSITIVITY)
+        assert (f.frame, f.no_level_reason, f.level, f.level_anchor_source) == (
+            "no_level",
+            "no_observed_level",
+            None,
+            None,
+        )
+
+    def test_the_engine_defaulted_root_is_not_an_anchor(self):
+        response = analyse(paul_request(options=[HOLD, KEEP]))
+        assert GRANDFATHERED not in {f.node_id for f in response.node_levels or []}
+        assert PRICE not in {f.node_id for f in response.node_levels or []}  # roots: never listed
+        assert "ROOT_NODE_DEFAULT_VALUE" in codes(response)
+
+    def test_epsilon_noise_reaching_a_held_level_refuses_the_anchor(self):
+        """The status-quo reference is drawn without epsilon, so noise that reaches the node would be
+        read as an effect (and its [0, 1] clamp as a change). Refused, with the level plan's own reason."""
+        d = paul_request(options=[HOLD, KEEP])
+        (churn,) = [n for n in d["graph"]["nodes"] if n["id"] == CHURN]
+        churn["epsilon_std"] = 0.01
+        response = analyse(d)
+        for node_id in (CHURN, SUBS, GOAL):  # churn and everything downstream of it
+            f = frame_of(response, node_id)
+            assert (f.frame, f.no_level_reason) == (
+                "no_level",
+                "epsilon_breaks_status_quo_reference",
+            ), node_id
+        assert frame_of(response, NEW_SUBS).frame == "anchored_level"  # not downstream of churn
+
+
+# ---------------------------------------------------------------------------------------------------------
+# B1a-7 — probability_of_goal is NOT double-anchored: the level plan already anchors per draw
+# (``baseline + (sample - status_quo_sample)``). Byte-identical. Mutant: double anchor -> RED.
+# ---------------------------------------------------------------------------------------------------------
+
+
+class TestB1a7GoalProbabilityIsNotDoubleAnchored:
+    def test_is_byte_identical_where_it_is_not_trivial(self):
+        """A threshold between the options' levels (MRR >= £77,000), so the probabilities are not all 0
+        or 1 and a second anchoring (which would add ~£60k to every level) cannot hide."""
+        d = paul_request(options=[KEEP, P59, P54, RETENTION])
+        d["goal_threshold"] = 0.616
+        anchored, today = analyse(d), analyse_unanchored(d)
+        probabilities = {r.option_id: r.probability_of_goal for r in anchored.results}
+        assert probabilities == {r.option_id: r.probability_of_goal for r in today.results}
+        assert 0.0 < probabilities[P59] < 1.0, probabilities
+        assert probabilities[KEEP] == 0.0
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Verifier blocker 2 — three behaviours round 1 claimed without a row that fails on revert.
+# ---------------------------------------------------------------------------------------------------------
+
+
+class TestAnAnchoredGoalGetsNoFalseBaseDisclosure:
+    """(2a). M6 (drop the anchored-goal branch of ``_build_goal_node_disclosures``) turns both RED."""
 
     def test_an_anchored_goal_with_a_pu_gets_neither_goal_base_disclosure(self):
         d = paul_request(options=[HOLD, KEEP])
         d["parameter_uncertainties"].append({"node_id": GOAL, "distribution": "normal", "std": 0.05})
-        today = codes(analyse(strip_sources(d)))
-        assert "GOAL_PU_BASE_ADDITIVE" in today  # CONTRAST: today's form states it, truly
+        assert "GOAL_PU_BASE_ADDITIVE" in codes(analyse_unanchored(d))  # CONTRAST: true of today
         anchored = analyse(d)
         assert not {"GOAL_PU_BASE_ADDITIVE", "GOAL_OBSERVED_VALUE_UNUSED"} & codes(anchored)
         assert frame_of(anchored, GOAL).parameter_uncertainty_unused is True
+        assert np.all(samples(anchored, HOLD) == 0.6)  # the PU draw cancels in the level
 
-    def test_an_anchored_goal_with_no_pu_and_no_threshold_gets_no_observed_value_unused(self):
+    def test_an_anchored_goal_with_no_threshold_gets_no_observed_value_unused(self):
         d = paul_request(options=[HOLD, KEEP])
         d.pop("goal_threshold", None)
         d.pop("goal_threshold_frame", None)
-        today = codes(analyse(strip_sources(d)))
-        assert "GOAL_OBSERVED_VALUE_UNUSED" in today  # CONTRAST
+        assert "GOAL_OBSERVED_VALUE_UNUSED" in codes(analyse_unanchored(d))  # CONTRAST
         assert not {"GOAL_PU_BASE_ADDITIVE", "GOAL_OBSERVED_VALUE_UNUSED"} & codes(analyse(d))
 
 
-class TestR9AnAnchoredLimitTargetGetsNoDefaultBase:
-    """M7 (drop ``and not is_anchored`` from the constraint default-base check) turns this RED."""
+class TestAnAnchoredLimitTargetGetsNoDefaultBase:
+    """(2b). M7 (drop ``and not is_anchored_level_target``) turns the first row RED."""
 
-    def test_an_anchored_limit_target_without_a_pu_gets_no_constraint_node_default_base(self):
+    @staticmethod
+    def _no_churn_pu(frame: str) -> Dict[str, Any]:
         d = paul_request(options=[HOLD, KEEP])
         d["parameter_uncertainties"] = [
             u for u in d["parameter_uncertainties"] if u["node_id"] != CHURN
         ]
-        today = analyse(strip_sources(d))
+        d["goal_constraints"][0]["value_frame"] = frame
+        return d
+
+    def test_an_anchored_level_limit_target_without_a_pu_gets_no_default_base(self):
+        d = self._no_churn_pu("level")
+        today = analyse_unanchored(d)
         assert "CONSTRAINT_NODE_DEFAULT_BASE" in codes(today)  # CONTRAST
+        assert any(
+            c.code.startswith("CONSTRAINT_NODE_DEFAULT_BASE")
+            for c in today.critiques
+            if CHURN in (c.affected_node_ids or [])
+        )
         anchored = analyse(d)
-        assert "CONSTRAINT_NODE_DEFAULT_BASE" not in codes(anchored)
         assert frame_of(anchored, CHURN).frame == "anchored_level"
-        today_critiques = {c.code for c in today.critiques if CHURN in (c.affected_node_ids or [])}
-        anchored_critiques = {
-            c.code for c in anchored.critiques if CHURN in (c.affected_node_ids or [])
-        }
-        assert any(code.startswith("CONSTRAINT_NODE_DEFAULT_BASE") for code in today_critiques)
-        assert not any(code.startswith("CONSTRAINT_NODE_DEFAULT_BASE") for code in anchored_critiques)
+        assert "CONSTRAINT_NODE_DEFAULT_BASE" not in codes(anchored)
+        assert not any(
+            c.code.startswith("CONSTRAINT_NODE_DEFAULT_BASE")
+            for c in anchored.critiques
+            if CHURN in (c.affected_node_ids or [])
+        )
+
+    def test_a_delta_limit_on_the_same_node_keeps_it(self):
+        """A 'delta' limit compares the raw samples, where the 0.0 offset is real."""
+        anchored = analyse(self._no_churn_pu("delta"))
+        assert frame_of(anchored, CHURN).frame == "anchored_level"
+        assert "CONSTRAINT_NODE_DEFAULT_BASE" in codes(anchored)
 
 
-class TestR10ALevelThresholdOutsideTheDomainGivesTheClampedProbability:
-    """M8 (drop the goal-domain clip in the level-frame probability) turns this RED."""
+class TestALevelThresholdOutsideTheDomainGivesTheClampedProbability:
+    """(2c). M8 (drop the goal-domain clip in the level-frame probability) turns this RED."""
 
     def test_a_threshold_below_the_floor_is_met_on_every_draw(self):
         """'MRR >= -£6,250' is below MRR's floor of £0: every LEVEL MRR can take meets it, so P = 1, even
-        though grandfathering's unclamped draws fall below it."""
+        though grandfathering's unclamped levels fall below it."""
         d = paul_request(options=[KEEP, P59, GRANDFATHER], grandfather_switch=True)
         d["goal_threshold"] = -0.05
         response = analyse(d)
-        raw = samples(response, GRANDFATHER)
-        assert float(np.mean(raw >= -0.05)) < 0.99, "precondition: unclamped draws below threshold"
+        assert float(np.mean(samples(response, GRANDFATHER) >= -0.05)) < 0.99, "precondition"
         assert result(response, GRANDFATHER).probability_of_goal == 1.0
         assert result(response, KEEP).probability_of_goal == 1.0
 
 
 # ---------------------------------------------------------------------------------------------------------
-# R11 — a do() on a NO-LEVEL child of an anchored node has today's effect (verifier: support_load)
+# Reported levels leave their domain: disclosed and clamped where REPORTED, never where differenced
 # ---------------------------------------------------------------------------------------------------------
 
-SUPPORT = "support_load"
-PIN_SUPPORT = "pin_support_load"
 
-
-def support_load_request(*, n_samples: int = N_SAMPLES) -> Dict[str, Any]:
-    """Paul's graph plus a NO-level node under anchored churn that feeds MRR, and an option pinning it."""
-    d = paul_request(options=[KEEP, P59, RETENTION], n_samples=n_samples)
-    d["graph"]["nodes"].append(
-        {"id": SUPPORT, "kind": "factor", "label": "Support load", "intercept": 0, "epsilon_std": 0}
-    )
-    d["graph"]["edges"] += [
-        {"from": CHURN, "to": SUPPORT, "exists_probability": 0.8, "strength": {"mean": 0.5, "std": 0.125}},
-        {"from": SUPPORT, "to": GOAL, "exists_probability": 0.8, "strength": {"mean": -0.3, "std": 0.1}},
-    ]
-    d["options"].append({"id": PIN_SUPPORT, "label": "Pin support load", "interventions": {SUPPORT: 0.01}})
-    return d
-
-
-class TestR11APinnedNoLevelChildOfAnAnchoredNodeKeepsTodaysEffect:
-    """A no-level node's samples are a propagated sum: a do(x) on it is written in THAT frame, today's.
-    Under anchoring its parents are levels, so its status quo moved; x is translated by exactly that
-    move, so the option's effect (and so every win share and tie) is today's."""
+class TestOutOfDomainLevelsAreDisclosedNeverAbsorbed:
+    OPTIONS = [KEEP, P59, GRANDFATHER, RETENTION]
 
     @pytest.fixture(scope="class")
-    def pair(self):
-        d = support_load_request()
-        return analyse(d), analyse(strip_sources(d))
+    def response(self):
+        d = paul_request(options=self.OPTIONS, grandfather_switch=True)
+        d["goal_constraints"].append(
+            {
+                "constraint_id": "floor-churn",
+                "node_id": CHURN,
+                "operator": ">=",
+                "value": 0.01,
+                "label": "Churn floor",
+                "value_frame": "level",
+            }
+        )
+        return analyse(d)
 
-    def test_the_per_draw_effect_is_todays(self, pair):
-        anchored, today = pair
-        for option_id in (PIN_SUPPORT, P59, RETENTION):
-            a = samples(anchored, option_id) - samples(anchored, KEEP)
-            t = samples(today, option_id) - samples(today, KEEP)
-            assert np.max(np.abs(a - t)) <= 1e-12, option_id
+    def test_the_share_of_levels_outside_the_domain_is_disclosed(self, response):
+        churn, goal = frame_of(response, CHURN), frame_of(response, GOAL)
+        assert (churn.level_domain_min, churn.level_domain_max) == (0.0, None)
+        assert (goal.level_domain_min, goal.level_domain_max) == (0.0, 1.0)
+        assert churn.level_out_of_domain_share is not None
+        assert churn.level_out_of_domain_share[GRANDFATHER] > 0.5
+        assert churn.level_out_of_domain_share[KEEP] == 0.0
+        assert churn.level_out_of_domain_share[RETENTION] == 0.0
+        assert goal.level_out_of_domain_share is not None
+        assert goal.level_out_of_domain_share[GRANDFATHER] > 0.05
+        assert goal.level_out_of_domain_share[KEEP] == 0.0
+        assert frame_of(response, SUBS).level_out_of_domain_share is None  # no level reported
 
-    def test_win_shares_are_byte_identical(self, pair):
-        anchored, today = pair
-        assert {r.option_id: r.win_probability for r in anchored.results} == {
-            r.option_id: r.win_probability for r in today.results
-        }
-
-    def test_the_node_is_flagged_no_level_and_the_levels_did_move(self, pair):
-        anchored, today = pair
-        f = frame_of(anchored, SUPPORT)
-        assert (f.frame, f.no_level_reason) == ("no_level", "no_observed_level")
-        assert abs(float(np.median(samples(anchored, KEEP))) - float(np.median(samples(today, KEEP)))) > 0.3
-
-
-# ---------------------------------------------------------------------------------------------------------
-# R12 — an unanchored parent with epsilon noise: the anchored child's status quo stays on its level
-# ---------------------------------------------------------------------------------------------------------
-
-
-def epsilon_graph_request() -> Dict[str, Any]:
-    """root (0.8) -> noisy no-level node (intercept 0.8, so raw 1.6; epsilon 0.05) -> anchored goal (0.3).
-    (An edge strength mean is capped at 1, hence the intercept.)"""
-    return {
-        "request_id": "b1a-r12-epsilon",
-        "graph": {
-            "nodes": [
-                {"id": "root", "kind": "factor", "label": "Root",
-                 "observed_state": {"value": 0.8, "source": "brief_extraction"},
-                 "intercept": 0, "epsilon_std": 0},
-                {"id": "noisy", "kind": "factor", "label": "Noisy", "intercept": 0.8, "epsilon_std": 0.05},
-                {"id": "goal", "kind": "goal", "label": "Goal",
-                 "observed_state": {"value": 0.3, "baseline": 0.3, "source": "brief_extraction"},
-                 "intercept": 0, "epsilon_std": 0},
-            ],
-            "edges": [
-                {"from": "root", "to": "noisy", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.01}},
-                {"from": "noisy", "to": "goal", "exists_probability": 1.0, "strength": {"mean": 0.5, "std": 0.01}},
-            ],
-        },
-        "options": [
-            {"id": "hold", "label": "Hold", "interventions": {}},
-            {"id": "lift", "label": "Lift root", "interventions": {"root": 0.9}},
-        ],
-        "goal_node_id": "goal",
-        "n_samples": 500,
-        "analysis_types": ["comparison"],
-        "seed": 7,
-    }
+    def test_a_limit_reads_the_clamped_level(self, response):
+        """Against 'churn >= 1%', grandfathering fails on the draws that push churn below zero, by exactly
+        1 point (0% vs 1%), not by the ~48 points of an impossible level."""
+        analysis = result(response, GRANDFATHER).constraint_analysis
+        assert analysis is not None
+        (floor,) = [c for c in analysis.constraints if c.constraint_id == "floor-churn"]
+        assert 0.0 < floor.prob_satisfied < 0.5
+        assert floor.failure_margin_median == pytest.approx(0.01, abs=1e-12)
 
 
-class TestR12AnAnchoredChildOfANoisyParentStaysOnItsLevel:
-    """Verifier M11. Today's form clamps a noisy node to [0, 1] after its noise; the status-quo reference
-    is noise-free. An anchored child differenced against an UNclamped reference drifted by
-    strength * (clamp(raw + e) - raw): here 0.5 * (1.0 - 1.6) = -0.3, i.e. the status quo read 0.0, not
-    0.3. The reference now carries the same clamp (without the noise) for the anchoring difference only."""
+class TestTheV2EnvelopeCarriesTheLevelFrames:
+    """The served route (it rejects an option with no interventions, so no HOLD here)."""
 
-    def test_the_status_quo_reproduces_the_level_on_every_draw(self):
-        from src.utils.rng import SeededRNG as _RNG
+    OPTIONS = [KEEP, P59, GRANDFATHER, RETENTION]
 
-        request = RobustnessRequestV2.model_validate(epsilon_graph_request())
-        evaluator = SCMEvaluatorV2(request.graph, epsilon_rng=_RNG(11))
-        for _ in range(200):
-            value = evaluator.evaluate(
-                edge_strengths={("root", "noisy"): 1.0, ("noisy", "goal"): 0.5},
-                interventions={},
-                goal_node="goal",
-            )
-            assert value == 0.3
+    @pytest.fixture(scope="class")
+    def request_dict(self) -> Dict[str, Any]:
+        return paul_request(options=self.OPTIONS, grandfather_switch=True)
 
-    def test_the_served_status_quo_band_is_the_level(self):
-        response = analyse(epsilon_graph_request())
-        hold = samples(response, "hold")
-        assert np.all(hold == 0.3), f"status quo off its level: min {hold.min()}, max {hold.max()}"
+    @pytest.fixture(scope="class")
+    def body(self, request_dict) -> Dict[str, Any]:
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        response = TestClient(app).post(
+            "/api/v1/robustness/analyze/v2",
+            json=request_dict,
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def test_node_levels_reach_the_wire(self, body):
+        frames = {f["node_id"]: f for f in body.get("node_levels") or []}
+        assert frames[GOAL]["frame"] == "anchored_level"
+        assert frames[GOAL]["level_anchor_source"] == "user_stated"
+        assert frames[CHURN]["level_anchor_source"] == "olumi_estimate"
+        assert frames[PRICE_SENSITIVITY]["frame"] == "no_level"
+        assert frames[CHURN]["level_out_of_domain_share"][GRANDFATHER] > 0.5
+        assert GRANDFATHERED not in frames
+
+    def test_the_goal_band_is_the_level_band_clamped_to_the_goal_domain(self, body, request_dict):
+        """Grandfathering pushes MRR below £0 on some draws: the unclamped p10 is negative, the reported
+        p10 is exactly 0, and every other percentile is untouched."""
+        v1 = analyse(request_dict)
+        for option_id in self.OPTIONS:
+            raw = np.percentile(samples(v1, option_id), [10, 50, 90])
+            (wire,) = [o for o in body["options"] if o["id"] == option_id]
+            band = wire["outcome"]
+            assert [band["p10"], band["p50"], band["p90"]] == [
+                float(min(max(v, 0.0), 1.0)) for v in raw
+            ], option_id
+        assert np.percentile(samples(v1, GRANDFATHER), 10) < 0.0, "precondition"
