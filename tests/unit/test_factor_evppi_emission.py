@@ -617,3 +617,56 @@ class TestFactorEvppiPartialDisclosure:
             req, pre_noise, factor_values, seed=1, decision_evpi_bound=None, correlation_active=False
         )
         assert {r["factor_id"] for r in rows} == {"fa"}  # fb dropped, fa kept, no crash
+
+
+class TestStatusDecidedOnEmittedValues:
+    """A row whose EMITTED evppi is 0 is never 'resolved' (served CEE e7d28fd, MG construction sweep 27 Sep).
+
+    Paul's pricing brief, runs paul-1 / paul-2: factor_evppi[monthly_churn_rate] reached the wire as
+    {evppi: 0, evppi_raw: 0, noise_floor: 0, status: 'resolved'}, and the Run reply said "The result is most
+    sensitive to monthly churn". status was decided on the UNROUNDED estimate (a tiny positive raw above an even
+    tinier floor) and the numbers were then emitted at 6 dp. The status must describe the values the wire carries.
+    """
+
+    def _patched(self, monkeypatch, raw, floor):
+        def fake(theta, option_outcomes, *, seed, **kw):
+            return FactorEvppiEstimate(
+                evppi_raw=raw,
+                conditional_max_expected_utility=0.0,
+                baseline_max_expected_utility=0.0,
+                noise_floor=floor,
+                degree_used=4,
+                n_samples=len(list(theta)),
+                degenerate=False,
+            )
+
+        monkeypatch.setattr(analyzer_mod, "factor_evppi_estimate", fake)
+
+    def test_served_shape_rounded_to_zero_is_below_resolution(self, monkeypatch):
+        self._patched(monkeypatch, raw=3e-8, floor=1e-8)
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=800))
+        theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+        assert theta["evppi"] == 0.0 and theta["noise_floor"] == 0.0
+        assert theta["status"] == "below_resolution"
+
+    def test_control_a_clearly_resolved_row_stays_resolved(self, monkeypatch):
+        self._patched(monkeypatch, raw=0.5, floor=0.01)
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=800))
+        theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+        assert theta["evppi"] > theta["noise_floor"]
+        assert theta["status"] == "resolved"
+
+    def test_boundary_equal_after_rounding_is_below_resolution(self, monkeypatch):
+        # raw 1.4e-6 > floor 0.6e-6 unrounded, but both EMIT as 1e-6: the wire cannot tell them apart.
+        self._patched(monkeypatch, raw=1.4e-6, floor=0.6e-6)
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=800))
+        theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+        assert theta["evppi"] == theta["noise_floor"] == 1e-6
+        assert theta["status"] == "below_resolution"
+
+    def test_boundary_distinct_after_rounding_is_resolved(self, monkeypatch):
+        self._patched(monkeypatch, raw=2e-6, floor=0.9e-6)
+        r = RobustnessAnalyzerV2().analyze(_mediator_request(n_samples=800))
+        theta = {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+        assert (theta["evppi"], theta["noise_floor"]) == (2e-6, 1e-6)
+        assert theta["status"] == "resolved"
