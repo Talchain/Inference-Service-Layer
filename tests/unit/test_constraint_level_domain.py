@@ -291,3 +291,47 @@ class TestAPartlyScoredBlockKeepsItsClamp:
             assert p.prob_satisfied == a.prob_satisfied
             assert p.level_out_of_domain_fraction == a.level_out_of_domain_fraction
             assert p.failure_margin_median == a.failure_margin_median
+
+
+# MG review of ISL #189 (#72): the rows above cannot tell the fix from the tempting wrong one (keep pairing with
+# `constraints` and skip the missing key): their `<=` limit is satisfied whether or not the floor clamp runs. A `>=`
+# limit AT the floor is: clamped, every ai draw sits on 0 (>= 0 holds); unclamped, they sit below it (it fails).
+def analyse_floor(order: str, with_refused: bool = True):
+    refused = GoalConstraint(constraint_id=ROOT_LIMIT, node_id="a", operator="<=", value=0.5, value_frame="level")
+    scored = GoalConstraint(constraint_id=LIMIT, node_id="c", operator=">=", value=0.0, value_frame="level", level_domain=UNIT)
+    limits = [scored] if not with_refused else ([refused, scored] if order == "refused_first" else [scored, refused])
+    return RobustnessAnalyzerV2().analyze(
+        RobustnessRequestV2(
+            request_id="level-domain-floor",
+            graph=GraphV2(
+                nodes=[
+                    NodeV2(id="a", kind="factor", label="AI availability"),
+                    NodeV2(
+                        id="c", kind="factor", label="Churn",
+                        observed_state=ObservedState(value=0.04, baseline=0.04, source="brief_extraction", cap=100.0),
+                    ),
+                    NodeV2(id="g", kind="outcome", label="Goal"),
+                ],
+                edges=[edge("a", "c", -0.5), edge("c", "g", -0.5)],
+            ),
+            options=[InterventionOption(id=oid, label=oid, interventions=iv) for oid, iv in {"hold": {}, "ai": {"a": 1.0}}.items()],
+            goal_node_id="g",
+            n_samples=500,
+            seed=11,
+            goal_constraints=limits,
+        )
+    )
+
+
+class TestTheClampFollowsItsOwnLimit:
+    def test_precondition_the_floor_limit_reads_the_clamped_level(self):
+        # Alone, the ai option's draws are all below churn's floor (out-of-domain 1.0) and clamped to it: >= 0 holds.
+        alone = row(analyse_floor("refused_first", with_refused=False), "ai")
+        assert alone.level_out_of_domain_fraction == 1.0
+        assert alone.prob_satisfied == 1.0
+
+    @pytest.mark.parametrize("order", ["refused_first", "scored_first"])
+    def test_a_refused_limit_never_takes_the_scored_limits_clamp(self, order):
+        alone, partial = analyse_floor(order, with_refused=False), analyse_floor(order)
+        for option_id in ("hold", "ai"):
+            assert row(partial, option_id).prob_satisfied == row(alone, option_id).prob_satisfied
