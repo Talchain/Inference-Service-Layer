@@ -565,6 +565,10 @@ def get_max_cost_units() -> int:
     return DEFAULT_MAX_COST_UNITS
 
 
+# AIQ 5880886200 (ISL #209): the relative band within which a goal draw is ON its threshold (|v − t| ≤ tol·max(1, |t|)).
+GOAL_THRESHOLD_TIE_TOLERANCE = 1e-9
+
+
 @dataclass(frozen=True)
 class WeightedCost:
     """Result of compute_weighted_cost: the total plus a per-term breakdown.
@@ -6721,10 +6725,13 @@ class RobustnessAnalyzerV2:
                 strict = request.goal_threshold_strict is True
                 minimise = request.goal_direction == "minimise"
 
+                # AIQ 5880886200: a draw within a relative GOAL_THRESHOLD_TIE_TOLERANCE of the threshold is ON it — not
+                # met when strict, met when not. A held option's compared level (the goal baseline, paired) and the
+                # threshold arrive by different arithmetic, so an exact comparison let one ulp decide 0% vs 100%.
                 def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
-                    if minimise:
-                        return values < threshold if strict else values <= threshold
-                    return values > threshold if strict else values >= threshold
+                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
+                    past = values < threshold if minimise else values > threshold
+                    return past & ~on if strict else past | on
 
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.

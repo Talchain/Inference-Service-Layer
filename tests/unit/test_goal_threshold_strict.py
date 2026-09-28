@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -53,6 +54,32 @@ class TestAnAtomOnTheThresholdIsNotPastIt:
         root = root.model_copy(update={"parameter_uncertainties": None})
         assert p_goal(root) == 1.0
         assert p_goal(root, goal_threshold_strict=True) == 0.0
+
+
+class TestATieAtTheThresholdIsOnIt:
+    """AIQ 5880886200: a held option's compared level (the goal baseline, paired) and the threshold arrive by different
+    arithmetic, so an exact comparison lets one ulp decide 0% vs 100% for that option. A draw within a relative 1e-9 of
+    the threshold is ON it: not met when strict, met when not. Both sides of the atom, both directions."""
+
+    def held_at(self, level: float) -> RobustnessRequestV2:
+        return build_request(
+            goal_threshold=0.8, goal_threshold_frame="level", baseline=level, goal_observed_value=level, option_interventions={}
+        )
+
+    @pytest.mark.parametrize("side", ["one ulp above", "one ulp below"])
+    def test_one_ulp_either_side_is_on_the_threshold(self, side):
+        level = float(np.nextafter(0.8, 1.0 if side == "one ulp above" else 0.0))
+        assert level != 0.8
+        held = self.held_at(level)
+        assert p_goal(held) == 1.0  # ">=": on the threshold is met
+        assert p_goal(held, goal_threshold_strict=True) == 0.0  # ">": on the threshold is not past it
+        assert p_goal(held, goal_direction="minimise") == 1.0  # "<="
+        assert p_goal(held, goal_direction="minimise", goal_threshold_strict=True) == 0.0  # "<"
+
+    def test_control_a_real_gap_is_not_a_tie(self):
+        above, below = self.held_at(0.8 + 1e-6), self.held_at(0.8 - 1e-6)
+        assert p_goal(above) == p_goal(above, goal_threshold_strict=True) == 1.0
+        assert p_goal(below) == p_goal(below, goal_threshold_strict=True) == 0.0
 
 
 class TestItChangesNothingElse:
