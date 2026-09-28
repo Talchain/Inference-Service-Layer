@@ -963,16 +963,27 @@ class DualUncertaintySampler:
     This enables Monte Carlo integration over both uncertainty dimensions.
     """
 
-    def __init__(self, edges: List[EdgeV2], rng: SeededRNG):
+    def __init__(
+        self,
+        edges: List[EdgeV2],
+        rng: SeededRNG,
+        fixed: Optional[Mapping[Tuple[str, str], float]] = None,
+    ):
         """
         Initialize sampler.
 
         Args:
             edges: List of edges with dual uncertainty
             rng: Seeded random number generator
+            fixed: R3-9 (AIQ #72 5866734772): an evaluated identity's DEFINITIONAL edges,
+                each held at its central strength. They draw nothing from ``rng``: a
+                definition's ignored existence/strength parameters must not move the
+                draws of every edge after it. None (every graph with no evaluated
+                identity) samples exactly as before.
         """
         self.edges = edges
         self.rng = rng
+        self._fixed: Mapping[Tuple[str, str], float] = fixed or {}
         self._existence_counts: Dict[Tuple[str, str], int] = defaultdict(int)
         self._sample_count = 0
 
@@ -989,6 +1000,10 @@ class DualUncertaintySampler:
 
         for edge in self.edges:
             edge_key = (edge.from_, edge.to)
+
+            if edge_key in self._fixed:
+                config[edge_key] = self._fixed[edge_key]
+                continue
 
             # Structural uncertainty: does edge exist?
             if self.rng.bernoulli(edge.exists_probability):
@@ -1025,11 +1040,13 @@ class DualUncertaintySampler:
         if self._sample_count == 0:
             return {}
 
+        # R3-9: a definition has no existence to estimate, so it is not listed.
         return {
             f"{edge.from_}->{edge.to}": (
                 self._existence_counts[(edge.from_, edge.to)] / self._sample_count
             )
             for edge in self.edges
+            if (edge.from_, edge.to) not in self._fixed
         }
 
 
@@ -1603,6 +1620,53 @@ def factor_centres(request: RobustnessRequestV2) -> Dict[str, float]:
         u.node_id: resolve_factor_central_value(nodes[u.node_id], u).value
         for u in request.parameter_uncertainties or []
         if u.node_id in nodes
+    }
+def identity_partials(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> Dict[Tuple[str, str], float]:
+    """R3-5 (AIQ #72 5867263914 RED 1, rows 5866603688): each operand and addend edge of an
+    EVALUATED identity, with the identity's own partial derivative at the centre, in the
+    normalised frames the structural walk multiplies. A structural reader that walked the
+    guessed slope on a definitional edge ranked a factor by a strength the evaluator never
+    reads (R3-9's class): on Paul's pricing brief it put price (slope 0.5) far above
+    subscribers (0.15), where the product itself gives subscribers the larger partial.
+
+        product operand i:  k * prod_{j != i}(level_j * frame_j) * frame_i / frame_node
+        sum operand, addend:  frame_i / frame_node
+
+    ``k`` is the evaluator's ONE central scale (1 for a sum, and for a product with no
+    stated level), read at the same sampler centres (``factor_centres``). Empty when nothing
+    is declared, so such a graph walks exactly as before.
+    """
+    if not any(node.nonlinear_identity is not None for node in graph.nodes):
+        return {}
+    evaluator = SCMEvaluatorV2(graph, factor_centres=factor_centres)
+    partials: Dict[Tuple[str, str], float] = {}
+    for node_id, plan in evaluator._evaluated_identities.items():
+        frame = plan.frames[node_id]
+        scale = evaluator._identity_scales.get(node_id, 1.0)
+        user = {i: plan.levels[i] * plan.frames[i] for i in plan.factor_ids}
+        for i in plan.factor_ids:
+            if plan.operation == "product":
+                others = math.prod(user[j] for j in plan.factor_ids if j != i)
+                partials[(i, node_id)] = scale * others * plan.frames[i] / frame
+            else:
+                partials[(i, node_id)] = plan.frames[i] / frame
+        for i in plan.addends:
+            partials[(i, node_id)] = plan.frames[i] / frame
+    return partials
+
+
+def definitional_strengths(graph: GraphV2) -> Dict[Tuple[str, str], float]:
+    """R3-9: each DEFINITIONAL edge (``definitional_edges``) at its central strength,
+    ``mean x exists_probability``. Every sampler holds them there instead of drawing them
+    (``DualUncertaintySampler(fixed=...)``). The evaluator never reads them. Empty when no
+    identity is evaluated."""
+    definitional = definitional_edges(graph)
+    return {
+        (edge.from_, edge.to): edge.strength.mean * edge.exists_probability
+        for edge in graph.edges
+        if (edge.from_, edge.to) in definitional
     }
 
 
@@ -2600,7 +2664,9 @@ class RobustnessAnalyzerV2:
         seed, _ = compute_effective_seed(request)
         rng_edge = SeededRNG(seed)
         rng_factor = SeededRNG(seed + 1)
-        sampler = DualUncertaintySampler(request.graph.edges, rng_edge)
+        sampler = DualUncertaintySampler(
+            request.graph.edges, rng_edge, definitional_strengths(request.graph)
+        )
         # B3-S1: build the Gaussian-copula plan when correlations are supplied.
         # Returns None (inert) otherwise — the sampler then draws every factor
         # independently, byte-identically to the pre-B3 path. `correlation_active`
@@ -6428,10 +6494,16 @@ class RobustnessAnalyzerV2:
         ref_option = request.options[0]
         baseline_mean = float(np.mean(baseline_outcomes[ref_option.id]))
 
+        # R3-9: a definition is neither a sensitivity target (no edge-level output lists
+        # it) nor drawn in the background of another edge's samples.
+        fixed = definitional_strengths(request.graph)
+
         for edge in request.graph.edges:
+            if (edge.from_, edge.to) in fixed:
+                continue
             # Existence sensitivity
             existence_sens = self._compute_existence_sensitivity(
-                request, edge, baseline_mean, rng, evaluator
+                request, edge, baseline_mean, rng, evaluator, fixed=fixed
             )
             sensitivities.append(
                 {
@@ -6445,7 +6517,7 @@ class RobustnessAnalyzerV2:
 
             # Magnitude sensitivity
             magnitude_sens = self._compute_magnitude_sensitivity(
-                request, edge, baseline_mean, rng, evaluator
+                request, edge, baseline_mean, rng, evaluator, fixed=fixed
             )
             sensitivities.append(
                 {
@@ -6483,6 +6555,7 @@ class RobustnessAnalyzerV2:
         baseline_mean: float,
         rng: SeededRNG,
         evaluator: SCMEvaluatorV2,
+        fixed: Optional[Mapping[Tuple[str, str], float]] = None,
     ) -> float:
         """
         Compute sensitivity to edge existence.
@@ -6498,7 +6571,7 @@ class RobustnessAnalyzerV2:
         outcomes_on = []
         for _ in range(n_sensitivity_samples):
             edge_config = self._sample_with_forced_existence(
-                request.graph.edges, edge, exists=True, rng=rng
+                request.graph.edges, edge, exists=True, rng=rng, fixed=fixed
             )
             outcome = evaluator.evaluate(
                 edge_strengths=edge_config,
@@ -6511,7 +6584,7 @@ class RobustnessAnalyzerV2:
         outcomes_off = []
         for _ in range(n_sensitivity_samples):
             edge_config = self._sample_with_forced_existence(
-                request.graph.edges, edge, exists=False, rng=rng
+                request.graph.edges, edge, exists=False, rng=rng, fixed=fixed
             )
             outcome = evaluator.evaluate(
                 edge_strengths=edge_config,
@@ -6539,6 +6612,7 @@ class RobustnessAnalyzerV2:
         baseline_mean: float,
         rng: SeededRNG,
         evaluator: SCMEvaluatorV2,
+        fixed: Optional[Mapping[Tuple[str, str], float]] = None,
     ) -> float:
         """
         Compute sensitivity to edge magnitude.
@@ -6554,7 +6628,7 @@ class RobustnessAnalyzerV2:
         outcomes_high = []
         for _ in range(n_sensitivity_samples):
             edge_config = self._sample_with_shifted_mean(
-                request.graph.edges, edge, shift=+edge.strength.std, rng=rng
+                request.graph.edges, edge, shift=+edge.strength.std, rng=rng, fixed=fixed
             )
             outcome = evaluator.evaluate(
                 edge_strengths=edge_config,
@@ -6567,7 +6641,7 @@ class RobustnessAnalyzerV2:
         outcomes_low = []
         for _ in range(n_sensitivity_samples):
             edge_config = self._sample_with_shifted_mean(
-                request.graph.edges, edge, shift=-edge.strength.std, rng=rng
+                request.graph.edges, edge, shift=-edge.strength.std, rng=rng, fixed=fixed
             )
             outcome = evaluator.evaluate(
                 edge_strengths=edge_config,
@@ -6594,6 +6668,7 @@ class RobustnessAnalyzerV2:
         target_edge: EdgeV2,
         exists: bool,
         rng: SeededRNG,
+        fixed: Optional[Mapping[Tuple[str, str], float]] = None,
     ) -> Dict[Tuple[str, str], float]:
         """Sample edge configuration with one edge's existence forced."""
         config = {}
@@ -6609,6 +6684,8 @@ class RobustnessAnalyzerV2:
                     )
                 else:
                     config[edge_key] = 0.0
+            elif fixed and edge_key in fixed:
+                config[edge_key] = fixed[edge_key]  # R3-9: a definition draws nothing
             else:
                 # Sample normally
                 if rng.bernoulli(edge.exists_probability):
@@ -6626,6 +6703,7 @@ class RobustnessAnalyzerV2:
         target_edge: EdgeV2,
         shift: float,
         rng: SeededRNG,
+        fixed: Optional[Mapping[Tuple[str, str], float]] = None,
     ) -> Dict[Tuple[str, str], float]:
         """
         Sample edge configuration with one edge's mean shifted.
@@ -6645,6 +6723,8 @@ class RobustnessAnalyzerV2:
                 config[edge_key] = _sample_edge_strength(
                     rng, edge.strength.mean + shift, edge.strength.std
                 )
+            elif fixed and edge_key in fixed:
+                config[edge_key] = fixed[edge_key]  # R3-9: a definition draws nothing
             else:
                 # OTHER EDGES: Sample normally (both existence and strength)
                 if rng.bernoulli(edge.exists_probability):
@@ -6951,7 +7031,10 @@ class RobustnessAnalyzerV2:
         # Compute structural influence for all factors
         factor_node_ids: List[str] = [s["node_id"] for s in sensitivities]
         influence_scores, influence_truncated = self._compute_structural_influence(
-            request.graph, factor_node_ids, request.goal_node_id
+            request.graph,
+            factor_node_ids,
+            request.goal_node_id,
+            factor_centres=factor_centres(request),
         )
         # N1 (Codex re-confirm, D-23.19): EXACT-OR-NULL. Normalized scores of a
         # truncated cohort are NOT lower bounds (the data-dependent max
@@ -7469,7 +7552,9 @@ class RobustnessAnalyzerV2:
         for i in range(n_iterations):
             # Deterministic seed derived from primary seed + bootstrap index
             boot_rng = SeededRNG(seed_offset + i)
-            boot_sampler = DualUncertaintySampler(request.graph.edges, boot_rng)
+            boot_sampler = DualUncertaintySampler(
+                request.graph.edges, boot_rng, definitional_strengths(request.graph)
+            )
             edge_config = boot_sampler.sample_edge_configuration()
 
             for uncertainty in param_uncertainties:
@@ -7534,6 +7619,7 @@ class RobustnessAnalyzerV2:
         factor_node_ids: List[str],
         goal_node_id: str,
         max_walk_calls_total: Optional[int] = None,
+        factor_centres: Optional[Mapping[str, float]] = None,
     ) -> Tuple[Dict[str, float], List[str]]:
         """
         Compute structural influence score for each factor based on causal path strengths.
@@ -7577,12 +7663,17 @@ class RobustnessAnalyzerV2:
             max_walk_calls_total = MAX_INFLUENCE_WALK_CALLS_TOTAL
 
         # Build adjacency list for path finding
+        # R3-5: an evaluated identity's operand/addend edge carries the identity's partial
+        # at the centre, not its guessed slope (``identity_partials``; empty otherwise).
+        partials = identity_partials(graph, factor_centres)
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
         for edge in graph.edges:
             from_node = edge.from_
             to_node = edge.to
             # Effective strength = mean * exists_probability
-            effective_strength = edge.strength.mean * edge.exists_probability
+            effective_strength = partials.get(
+                (from_node, to_node), edge.strength.mean * edge.exists_probability
+            )
             if from_node not in adjacency:
                 adjacency[from_node] = []
             adjacency[from_node].append((to_node, effective_strength))
@@ -8226,7 +8317,9 @@ class RobustnessAnalyzerV2:
             child_seed = int(
                 hashlib.sha256(f"{master_seed}:{tag}:{i}".encode()).hexdigest()[:8], 16
             )
-            sweep_sampler = DualUncertaintySampler(request.graph.edges, SeededRNG(child_seed))
+            sweep_sampler = DualUncertaintySampler(
+                request.graph.edges, SeededRNG(child_seed), definitional_strengths(request.graph)
+            )
             backgrounds.append(sweep_sampler.sample_edge_configuration())
         return backgrounds
 
@@ -9349,7 +9442,9 @@ class RobustnessAnalyzerV2:
         # Baseline: all uncertainties active
         baseline_rng_edge = SeededRNG(seed + 100)
         baseline_rng_factor = SeededRNG(seed + 101)
-        baseline_sampler = DualUncertaintySampler(request.graph.edges, baseline_rng_edge)
+        baseline_sampler = DualUncertaintySampler(
+            request.graph.edges, baseline_rng_edge, definitional_strengths(request.graph)
+        )
         baseline_factor_sampler = FactorSampler(
             request.graph.nodes, unique_uncertainties, baseline_rng_factor
         )
@@ -9398,7 +9493,9 @@ class RobustnessAnalyzerV2:
 
             perfect_rng_edge = SeededRNG(factor_seed)
             perfect_rng_factor = SeededRNG(factor_seed + 1)
-            perfect_sampler = DualUncertaintySampler(request.graph.edges, perfect_rng_edge)
+            perfect_sampler = DualUncertaintySampler(
+                request.graph.edges, perfect_rng_edge, definitional_strengths(request.graph)
+            )
             perfect_factor_sampler = FactorSampler(
                 request.graph.nodes,
                 modified_uncertainties if modified_uncertainties else None,
