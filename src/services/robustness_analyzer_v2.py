@@ -8987,7 +8987,10 @@ class RobustnessAnalyzerV2:
             # even tinier floor, and the reply called that factor "most sensitive". A row that emits evppi <= its
             # emitted floor is below resolution.
             noise_floor_emitted = round(est.noise_floor, 6)
-            below_resolution = evppi_emitted <= noise_floor_emitted
+            # Decision-relevance gate (utils/evppi.py): clearing the association floor is not
+            # enough; the rule learned from this factor must beat the best fixed option on
+            # held-out draws.
+            below_resolution = evppi_emitted <= noise_floor_emitted or not est.decision_gain_passes
 
             results.append(
                 {

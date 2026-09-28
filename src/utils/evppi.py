@@ -100,6 +100,17 @@ REGRESSION_EVPPI_NULL_PERMUTATIONS = 16
 # EVPPI is exactly 0 by construction.
 _MIN_DISTINCT_THETA = 2
 
+# Decision-relevance gate. The permutation floor tests theta<->U ASSOCIATION; a factor
+# that moves only an option that never wins is associated but cannot change the choice
+# (true EVPPI 0), and escaped as resolved in 28/200 seeds at n=2000 (52/200 at n=500).
+# The gate asks whether the decision rule LEARNED from theta on one half of the draws
+# beats the best fixed option on the other half (2-fold cross-fitting, one-sided z).
+# Under "theta cannot change the decision" that held-out gain has expectation <= 0 for
+# ANY learned rule, so the test is valid whatever the association. Study:
+# experiments/r3b_sim/evppi_gate/ (ISL r3b/sim-prototype).
+REGRESSION_EVPPI_CROSSFIT_FOLDS = 2
+REGRESSION_EVPPI_DECISION_GAIN_Z = 1.645
+
 
 @dataclass(frozen=True)
 class FactorEvppiEstimate:
@@ -118,6 +129,9 @@ class FactorEvppiEstimate:
     n_samples: int
     degenerate: bool
     """True when theta is (near-)constant, so EVPPI is 0 by construction."""
+    decision_gain_passes: bool = True
+    """Decision-relevance gate: the rule learned from theta beats the best fixed option on
+    held-out draws (see REGRESSION_EVPPI_DECISION_GAIN_Z). False = cannot be resolved."""
 
 
 def _effective_degree(theta: np.ndarray, degree: int) -> int:
@@ -125,6 +139,51 @@ def _effective_degree(theta: np.ndarray, degree: int) -> int:
     a factor with few distinct sampled values (min degree 1)."""
     n_distinct = int(np.unique(theta).size)
     return max(1, min(degree, n_distinct - 1))
+
+
+def _fit_predict(
+    theta_train: np.ndarray, outcomes_train: np.ndarray, theta_test: np.ndarray, degree: int
+) -> np.ndarray:
+    """Fit every option's conditional mean on the training draws (the same mapped,
+    column-scaled Vandermonde as ``_inner_expected_max``) and predict at the test draws.
+    Test draws are clipped to the training domain, so nothing is extrapolated."""
+    domain = [float(theta_train.min()), float(theta_train.max())]
+    vander = _npp.polyvander(_nppu.mapdomain(theta_train, domain, _FIT_WINDOW), degree)
+    col_scale = np.sqrt(np.square(vander).sum(axis=0))
+    col_scale[col_scale == 0] = 1.0
+    rcond = float(len(theta_train) * np.finfo(theta_train.dtype).eps)
+    coef, *_ = np.linalg.lstsq(vander / col_scale, outcomes_train, rcond=rcond)
+    clipped = np.clip(theta_test, domain[0], domain[1])
+    test_vander = _npp.polyvander(_nppu.mapdomain(clipped, domain, _FIT_WINDOW), degree)
+    return np.asarray((test_vander / col_scale) @ coef)
+
+
+def _decision_gain_passes(
+    theta: np.ndarray, outcome_matrix: np.ndarray, degree: int, seed: int
+) -> bool:
+    """Cross-fitted decision-relevance test (module docstring, REGRESSION_EVPPI_CROSSFIT_FOLDS).
+
+    For each fold, learn ``argmax_o E[U_o|theta]`` on the other folds and score it on this
+    fold against the option that is best on average in the training folds. The per-draw
+    gains are paired (common random numbers), so their mean has a plain standard error.
+    """
+    outcomes = np.asarray(outcome_matrix, dtype=float).T  # (n_samples, n_options)
+    n = theta.size
+    order = np.random.default_rng((seed, 1)).permutation(n)
+    folds = np.array_split(order, REGRESSION_EVPPI_CROSSFIT_FOLDS)
+    gain = np.empty(n)
+    for k, test in enumerate(folds):
+        train = np.concatenate([f for j, f in enumerate(folds) if j != k])
+        if np.unique(theta[train]).size < _MIN_DISTINCT_THETA:
+            return False
+        deg = _effective_degree(theta[train], degree)
+        best_fixed = int(np.argmax(outcomes[train].mean(axis=0)))
+        rule = np.argmax(_fit_predict(theta[train], outcomes[train], theta[test], deg), axis=1)
+        gain[test] = outcomes[test, rule] - outcomes[test, best_fixed]
+    std = float(gain.std(ddof=1)) if n > 1 else 0.0
+    if not np.isfinite(std) or std == 0.0:
+        return bool(gain.mean() > 0.0)
+    return bool(gain.mean() > REGRESSION_EVPPI_DECISION_GAIN_Z * std / np.sqrt(n))
 
 
 def _inner_expected_max(
@@ -210,6 +269,7 @@ def factor_evppi_estimate(
             degree_used=0,
             n_samples=n_samples,
             degenerate=True,
+            decision_gain_passes=False,
         )
 
     deg = _effective_degree(theta_arr, degree)
@@ -241,4 +301,5 @@ def factor_evppi_estimate(
         degree_used=deg,
         n_samples=n_samples,
         degenerate=False,
+        decision_gain_passes=_decision_gain_passes(theta_arr, matrix, degree, seed),
     )
