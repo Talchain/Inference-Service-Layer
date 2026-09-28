@@ -1790,6 +1790,8 @@ class SCMEvaluatorV2:
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
+        self._identity_scales: Dict[str, float] = {}
+        self._identity_scales = self._central_identity_scales()
 
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
@@ -2017,6 +2019,43 @@ class SCMEvaluatorV2:
         status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         return framed, status_quo
 
+    def _central_identity_scales(self) -> Dict[str, float]:
+        """AIQ #72 5866317942: ONE constant per evaluated product with a stated level,
+        ``k = (o - A - L) / term``, every figure at TODAY's levels in user units and each
+        remaining belief edge at its EFFECTIVE strength ``mean x exists_probability`` (the
+        central strength this module uses everywhere: structural influence, flip means). That
+        is the expected ``L`` the ratio form's per-draw numerator averaged, so the served mean
+        is kept. With the addend declared (R3-1) ``k = (75,000 - 1,000) / 73,500`` exactly.
+        Computed once per graph, so no draw divides by its own sampled status-quo term. A
+        graph with no evaluated product never propagates here."""
+        products = {
+            node_id: plan
+            for node_id, plan in self._evaluated_identities.items()
+            if plan.operation == "product" and plan.target_level is not None
+        }
+        if not products:
+            return {}
+        means = {
+            (edge.from_, edge.to): edge.strength.mean * edge.exists_probability
+            for edge in self.graph.edges
+        }
+        # Today at the centre. An identity node reads itself as the reference here, so its
+        # own scale never enters (term == term_sq): no scale is needed to compute the scales.
+        today = self._propagate(means, {}, None, None, noise=False)
+        scales: Dict[str, float] = {}
+        for node_id, plan in products.items():
+            assert plan.target_level is not None  # filtered above
+            frame = plan.frames[node_id]
+            believed = [p for p in self._parents[node_id] if p not in plan.participants]
+            linear = frame * math.fsum(means.get((p, node_id), 0.0) * today[p] for p in believed)
+            addends = math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
+            # Non-zero: every operand level is non-zero (identity_zero_level withholds otherwise).
+            term = _identity_term(
+                plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
+            )
+            scales[node_id] = (plan.target_level * frame - addends - linear) / term
+        return scales
+
     def _identity_value(
         self,
         plan: IdentityPlan,
@@ -2029,16 +2068,19 @@ class SCMEvaluatorV2:
         Each participant is read at its LEVEL (a root's sample is its level; a non-root
         with a held level ``o_i`` sits at ``o_i + (sample - status-quo sample)``, B1a),
         converted to user units through its execution frame, combined, and the result is
-        renormalised into the node's frame. Product (AIQ 5860087988, ratio form)::
+        renormalised into the node's frame. Product (AIQ #72 5866317942)::
 
-            T = A + L + (o - A_sq - L_sq) * term / term_sq
+            T = o + k * (term - term_sq) + (A - A_sq) + (L - L_sq)
 
-        sum: ``T = o + (A - A_sq) + (L - L_sq) + (term - term_sq)``; with no stated ``o``
-        (item 4) ``T = term + A + L``. ``A`` is the declared addends (exact), ``L`` the
-        node's remaining belief-edge parents (still sampled, item 5). At the status quo
-        ``T = o`` on every draw. Operand/addend edges are definitional: their sampled
-        strengths never enter. A zero or non-finite status-quo term gives NaN (the draw
-        is uninformative), never a guessed figure.
+        with ONE constant ``k = (o - A - L) / term`` at the centre
+        (``_central_identity_scales``). At the centre this is the ratio form of AIQ 5860087988
+        exactly; per draw it never divides by the SAMPLED status-quo term, whose near-zero
+        draws contradict the stated ``o`` and exploded the tails (MG ISL #187 5861838085:
+        std 11.3 at price std 0.2). sum: ``T = o + (A - A_sq) + (L - L_sq) + (term - term_sq)``;
+        with no stated ``o`` (item 4) ``T = term + A + L``. ``A`` is the declared addends
+        (exact), ``L`` the node's remaining belief-edge parents (still sampled, item 5). At
+        the status quo ``T = o`` on every draw. Operand/addend edges are definitional: their
+        sampled strengths never enter.
         """
         node_id = plan.node_id
         frame = plan.frames[node_id]
@@ -2065,15 +2107,11 @@ class SCMEvaluatorV2:
             edge_strengths.get((p, node_id), 0.0) * reference.get(p, 0.0) for p in believed
         )
         if plan.target_level is None:
-            result = term + addend + linear
-        elif plan.operation == "product":
-            if term_sq == 0.0 or not math.isfinite(term_sq):
-                return float("nan")
-            stated = plan.target_level * frame
-            result = addend + linear + (stated - addend_sq - linear_sq) * (term / term_sq)
-        else:
-            stated = plan.target_level * frame
-            result = stated + (addend - addend_sq) + (linear - linear_sq) + (term - term_sq)
+            return (term + addend + linear) / frame
+        stated = plan.target_level * frame
+        # A sum is unscaled. While the scales are computed, term == term_sq (see above).
+        scale = self._identity_scales.get(node_id, 1.0)
+        result = stated + scale * (term - term_sq) + (addend - addend_sq) + (linear - linear_sq)
         return result / frame
 
     def _in_model_frame(

@@ -111,9 +111,10 @@ class TestR3_1TheProductAtUnchangedSubscribers:
 
     def test_without_the_addend_the_whole_75k_scales(self):
         """Undeclared, other MRR growth stays a sampled belief edge (AIQ item 5): the product term is
-        anchored at o - L_sq, the edge's own contribution, measured rather than asserted."""
+        anchored at o - L, the edge's EXPECTED contribution (AIQ #72 5866317942: one central k)."""
         d = wire(identity=PRODUCT)
-        belief = 0.4 * 0.02 * FRAMES[MRR]["frame"]  # other_mrr_growth -> mrr at its mean, £
+        # other_mrr_growth -> mrr at its effective strength, mean 0.4 x exists_probability 0.8, £800
+        belief = 0.8 * 0.4 * 0.02 * FRAMES[MRR]["frame"]
         expected = (75_000.0 - belief) * (59.0 / 49.0 - 1.0)
         assert abs(query_gbp(d, AT_59_SUBS_HELD) - expected) <= 1e-6
 
@@ -834,18 +835,17 @@ class TestTheTypedIdentityOnTheCritique:
 
 
 # ---------------------------------------------------------------------------------------------------------
-# DL ISL #187 (not blocking): a draw whose status-quo product term is 0 is NaN ("uninformative") in
-# ``_identity_value``. The aggregator DROPS it: the wire's mean is the finite draws' mean, n_valid_samples
-# counts only them, and no option wins that draw. It is never averaged in.
+# DL ISL #187 (not blocking): a NaN draw is DROPPED by the aggregator: the wire's mean is the finite draws'
+# mean, n_valid_samples counts only them, and no option wins that draw. It is never averaged in. (A zero
+# status-quo product term no longer produces one: AIQ #72 5866317942, below. A non-finite factor draw does.)
 # ---------------------------------------------------------------------------------------------------------
 
 
 class TestANaNIdentityDrawIsDroppedNotAveraged:
     N_SAMPLES, EVERY = 200, 10
 
-    def _zero_price_every_tenth_draw(self, monkeypatch):
-        """Today's price reads 0 on every tenth factor draw: the status-quo term is 0 on that draw and
-        ``_identity_value`` returns NaN for every option (the REAL term_sq == 0 path)."""
+    def _price_every_tenth_draw(self, monkeypatch, value: float):
+        """Today's price reads ``value`` on every tenth factor draw (the same draw for every option)."""
         original = rav2.FactorSampler.sample_factor_values
         calls = {"n": 0}
 
@@ -853,18 +853,18 @@ class TestANaNIdentityDrawIsDroppedNotAveraged:
             values = original(sampler)
             calls["n"] += 1
             if calls["n"] % self.EVERY == 0:
-                values[PRICE] = 0.0
+                values[PRICE] = value
             return values
 
         monkeypatch.setattr(rav2.FactorSampler, "sample_factor_values", sample)
         return calls
 
-    def test_a_zero_status_quo_term_draw_is_dropped_not_averaged(self, monkeypatch):
+    def test_a_non_finite_draw_is_dropped_not_averaged(self, monkeypatch):
         import numpy as np
 
         d = wire()
         d["n_samples"] = self.N_SAMPLES
-        calls = self._zero_price_every_tenth_draw(monkeypatch)
+        calls = self._price_every_tenth_draw(monkeypatch, float("nan"))
         v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
         calls["n"] = 0
         v2 = v2_body(d)
@@ -889,3 +889,77 @@ class TestANaNIdentityDrawIsDroppedNotAveraged:
         assert sum(o["win_probability"] for o in v2["options"]) == pytest.approx(
             (self.N_SAMPLES - n_nan) / self.N_SAMPLES
         )
+
+    def test_a_zero_status_quo_term_draw_is_finite(self, monkeypatch):
+        """AIQ #72 5866317942: no draw divides by its own status-quo term, so a draw on which today's
+        price reads 0 is an ordinary (finite) draw, not an uninformative one. It was NaN under the
+        ratio form."""
+        import numpy as np
+
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        self._price_every_tenth_draw(monkeypatch, 0.0)
+        v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+        for result in v1.results:
+            assert np.isfinite(np.array(result.outcome_distribution.samples)).all()
+
+
+# ---------------------------------------------------------------------------------------------------------
+# AIQ #72 5866317942 (MG ISL #187 5861838085 follow-up 2): the product is scaled by ONE central constant
+# k = (o - A - L) / term, never by a sampled status-quo draw's own term. The ratio form divided by that
+# draw's term; a draw near 0 contradicts the stated o and the division amplified it (MG: std 11.3 at price
+# std 0.2; measured here at base 14f1a3a, 10,000 draws: std 230.9, mean -2.44).
+# ---------------------------------------------------------------------------------------------------------
+
+
+def with_price_std(d: Dict[str, Any], std: float) -> Dict[str, Any]:
+    (price,) = [u for u in d["parameter_uncertainties"] if u["node_id"] == PRICE]
+    price["std"] = std
+    return d
+
+
+def option_samples(d: Dict[str, Any]) -> Dict[str, Any]:
+    import numpy as np
+
+    response = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+    return {r.option_id: np.array(r.outcome_distribution.samples) for r in response.results}
+
+
+class TestTheCentralScale:
+    SERVED_59_GBP, SERVED_59_SE = 14_381.96, 13.31  # base 14f1a3a, served wire (R3-1-MC)
+
+    @pytest.fixture(scope="class")
+    def served(self):
+        return option_samples(wire(identity=PRODUCT))
+
+    @pytest.fixture(scope="class")
+    def wide(self):
+        return option_samples(with_price_std(wire(identity=PRODUCT), 0.2))
+
+    def test_k_is_the_reconciliation_factor(self):
+        """With the addend declared, k = (75,000 - 1,000) / 73,500 (Paul's figures), one number."""
+        evaluator = SCMEvaluatorV2(graph_of(wire()))
+        assert evaluator._identity_scales == {MRR: pytest.approx(74_000.0 / 73_500.0, rel=1e-12)}
+
+    def test_a_sum_and_an_ungraphed_identity_have_no_scale(self):
+        assert SCMEvaluatorV2(graph_of(tally_request(0.0)))._identity_scales == {}
+        assert SCMEvaluatorV2(graph_of(wire(identity=None)))._identity_scales == {}
+
+    def test_a_wide_price_keeps_the_tails_finite_and_the_mean(self, served, wide):
+        """MG's table, at price std 0.2 (£40 on £49): the £59 option's spread is the difference form's
+        (subscribers x the price spread, about 0.48 of the frame), NOT 11.3; its mean does not move.
+        Mutant: the sampled denominator -> std 230.9 -> RED."""
+        import numpy as np
+
+        at_59 = wide["increase_price_to_59"]
+        assert np.isfinite(at_59).all()
+        difference_form = (74_000.0 / 73_500.0) * 1_500.0 * (0.2 * 200.0) / FRAMES[MRR]["frame"]
+        assert 0.5 * difference_form < float(at_59.std()) < 1.5 * difference_form
+        assert float(at_59.mean()) == pytest.approx(float(served["increase_price_to_59"].mean()), abs=0.005)
+
+    def test_the_served_59_effect_stays_within_3_se(self, served):
+        """Paul's served wire (price std 1e-4): the £59 effect is +£14,381.96 at base; one central k keeps
+        it within 3 SE. Mutant: k with each belief edge at its bare mean (not x exists_probability) moves
+        it by £50, 3.8 SE -> RED."""
+        diff = (served["increase_price_to_59"] - served["keep_current_49_price"]) * FRAMES[MRR]["frame"]
+        assert abs(float(diff.mean()) - self.SERVED_59_GBP) < 3 * self.SERVED_59_SE
