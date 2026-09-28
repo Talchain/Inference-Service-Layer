@@ -1344,3 +1344,83 @@ class TestTheScaleRange:
         assert at_centre.withheld_reason == rav2.IDENTITY_SCALE_OUT_OF_RANGE and at_base.evaluated
         assert (at_centre.scale < 0.5) if side == "below" else (at_centre.scale > 2.0)
         assert definitions_of(d) == {}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# R3-9 x the scale guard, pinned at the SOURCE (Paul, #72 14:4xZ): "evaluated" now depends on k, and k on the
+# sampler centres, so a reader that omits them decides a different identity set from the evaluator's. That
+# seam bit three times (DL #193 CHANGES_REQUIRED, the bare-mean k, #197 x #199). Every call in src/ to a plan
+# reader or the evaluator must pass the centres, and every sampler must pass the fixed set.
+# ---------------------------------------------------------------------------------------------------------
+
+import ast  # noqa: E402
+
+SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
+CENTRE_READERS = {
+    "resolve_identity_plans",
+    "definitional_edges",
+    "definitional_strengths",
+    "identity_evaluations",
+}
+
+
+def _callee(node: ast.Call) -> Optional[str]:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return None
+
+
+def unwired_calls(source: str, where: str) -> Tuple[Dict[str, int], list]:
+    """(calls seen per callee, the calls that drop the centres or the fixed set)."""
+    seen: Dict[str, int] = {}
+    bad = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _callee(node)
+        keywords = {kw.arg for kw in node.keywords}
+        if name in CENTRE_READERS:
+            ok = len(node.args) >= 2 or "factor_centres" in keywords
+        elif name == "SCMEvaluatorV2":
+            ok = len(node.args) >= 3 or "factor_centres" in keywords
+        elif name == "DualUncertaintySampler":
+            ok = len(node.args) >= 3 or "fixed" in keywords
+        else:
+            continue
+        seen[name] = seen.get(name, 0) + 1
+        if not ok:
+            bad.append(f"{where}:{node.lineno} {name}")
+    return seen, bad
+
+
+class TestTheCentresAreWiredAtEveryReader:
+    def test_every_reader_passes_the_centres_and_every_sampler_the_fixed_set(self):
+        seen: Dict[str, int] = {}
+        bad: list = []
+        for path in sorted(SRC_ROOT.rglob("*.py")):
+            counts, missing = unwired_calls(path.read_text(), str(path.relative_to(SRC_ROOT)))
+            for name, n in counts.items():
+                seen[name] = seen.get(name, 0) + n
+            bad.extend(missing)
+        # Non-vacuity: the scan sees the call sites it guards (5 samplers, the evaluator, the readers).
+        assert seen.get("DualUncertaintySampler", 0) >= 5, seen
+        assert seen.get("SCMEvaluatorV2", 0) >= 4, seen
+        assert seen.get("definitional_strengths", 0) >= 5, seen
+        assert all(seen.get(name, 0) >= 1 for name in CENTRE_READERS), seen
+        assert bad == [], bad
+
+    @pytest.mark.parametrize(
+        "mutant",
+        [
+            "plans = resolve_identity_plans(request.graph)",
+            "fixed = definitional_edges(graph)",
+            "evaluator = SCMEvaluatorV2(request.graph, epsilon_rng=rng)",
+            "sampler = DualUncertaintySampler(request.graph.edges, rng)",
+        ],
+    )
+    def test_the_scan_catches_a_dropped_argument(self, mutant):
+        """Mutant rows: each shape the seam took, with the centres or the fixed set dropped -> caught."""
+        _, bad = unwired_calls(mutant, "mutant")
+        assert len(bad) == 1, bad
