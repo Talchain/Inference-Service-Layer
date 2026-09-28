@@ -1195,6 +1195,12 @@ def fifty_nine_first(d: Dict[str, Any]) -> Dict[str, Any]:
     return d
 
 
+def definitions_of(d: Dict[str, Any]) -> Dict[Tuple[str, str], float]:
+    """``definitional_strengths`` as every sampler calls it: at the request's own sampler centres."""
+    request = RobustnessRequestV2.model_validate(d)
+    return rav2.definitional_strengths(request.graph, rav2.factor_centres(request))
+
+
 class TestDefinitionsDrawNothing:
     @pytest.mark.parametrize("order", [lambda d: d, fifty_nine_first], ids=["served", "59_first"])
     def test_a_definitions_ignored_parameters_move_nothing(self, order):
@@ -1213,7 +1219,7 @@ class TestDefinitionsDrawNothing:
     def test_definitions_consume_no_draws(self):
         """Belief edges draw exactly what they would if the definitional edges were not in the graph."""
         graph = graph_of(wire(identity=PRODUCT))
-        fixed = rav2.definitional_strengths(graph)
+        fixed = definitions_of(wire(identity=PRODUCT))
         assert set(fixed) == set(DEFINITIONS)
         with_defs = rav2.DualUncertaintySampler(graph.edges, rav2.SeededRNG(7), fixed)
         without = rav2.DualUncertaintySampler(
@@ -1226,22 +1232,21 @@ class TestDefinitionsDrawNothing:
 
     def test_a_definition_sits_at_its_central_strength_and_lists_no_existence_rate(self):
         graph = graph_of(wire(identity=PRODUCT))
-        assert rav2.definitional_strengths(graph) == {
+        fixed = definitions_of(wire(identity=PRODUCT))
+        assert fixed == {
             (PRICE, MRR): pytest.approx(0.5 * 0.8),
             (SUBS, MRR): pytest.approx(0.15 * 0.8),
         }
-        sampler = rav2.DualUncertaintySampler(
-            graph.edges, rav2.SeededRNG(7), rav2.definitional_strengths(graph)
-        )
+        sampler = rav2.DualUncertaintySampler(graph.edges, rav2.SeededRNG(7), fixed)
         sampler.sample_edge_configuration()
         rates = sampler.get_existence_rates()
         assert f"{PRICE}->{MRR}" not in rates and f"{SUBS}->{MRR}" not in rates
         assert f"{OTHER}->{MRR}" in rates  # an undeclared addend is still a belief
 
     def test_no_evaluated_identity_no_fixed_edges(self):
-        assert rav2.definitional_strengths(graph_of(wire(identity=None))) == {}
+        assert definitions_of(wire(identity=None)) == {}
         frames = {k: v for k, v in FRAMES.items() if k != PRICE}  # identity_frame_missing: withheld
-        assert rav2.definitional_strengths(graph_of(wire(frames=frames))) == {}
+        assert definitions_of(wire(frames=frames)) == {}
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -1310,3 +1315,32 @@ class TestTheScaleRange:
         (entry,) = rav2.identity_evaluations(graph)
         assert not entry.evaluated and entry.withheld_reason == "identity_scale_out_of_range"
         assert rav2.definitional_edges(graph) == set()  # withheld: its edges stay beliefs
+
+    @pytest.mark.parametrize(
+        "k, churn_mean, side",
+        [(0.52, 1.0, "below"), (1.97, -1.0, "above")],
+        ids=["centre_k_below_0.5", "centre_k_above_2"],
+    )
+    def test_the_samplers_hold_nothing_the_evaluator_withheld(self, k, churn_mean, side):
+        """R3-9 x the scale guard: ``definitional_strengths`` decides "evaluated" at the SAME sampler
+        centres as the evaluator. churn (non-root, sampled, not a participant) carries L only at its centre
+        (3%), so k crosses the band edge between base 0 and the centre: 0.519 -> 0.468, or 1.971 -> 2.022.
+        The evaluator withholds the identity, so its edges are beliefs and must be drawn. Mutant: the
+        samplers' fixed set read without the centres holds all three edges -> RED."""
+        d = with_belief_parent(k)
+        d["graph"]["edges"].append(
+            {
+                "from": "monthly_churn",
+                "to": MRR,
+                "strength": {"mean": churn_mean, "std": 0.1},
+                "exists_probability": 1.0,
+            }
+        )
+        request = RobustnessRequestV2.model_validate(d)
+        centres = rav2.factor_centres(request)
+        at_centre = resolve_identity_plans(request.graph, centres)[MRR]
+        at_base = resolve_identity_plans(request.graph)[MRR]
+        # Non-vacuity: the seam is live on this graph (the two readings disagree).
+        assert at_centre.withheld_reason == rav2.IDENTITY_SCALE_OUT_OF_RANGE and at_base.evaluated
+        assert (at_centre.scale < 0.5) if side == "below" else (at_centre.scale > 2.0)
+        assert definitions_of(d) == {}
