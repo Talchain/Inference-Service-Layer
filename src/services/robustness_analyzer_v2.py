@@ -1647,7 +1647,10 @@ def identity_blocking_critiques(
             seed=seed,
             node_id=plan.node_id,
             operation=plan.operation,
-            participants=", ".join(plan.participants),
+            # MG ISL #187 5861838085 (6): the addends are named apart from the operands; the
+            # typed ``identity.participants`` below is unchanged (CEE reads it).
+            operands=", ".join(plan.factor_ids),
+            addends=f" plus {', '.join(plan.addends)}" if plan.addends else "",
             reason=plan.withheld_reason,
             detail=detail,
         )
@@ -3160,7 +3163,12 @@ class RobustnessAnalyzerV2:
             # an anchored band is exactly a point wherever the option changes nothing (the
             # status quo reproduces its held level on every draw), which is not degenerate.
             # float(np.std(...)) over the same list is what the band's std was until B1a.
-            if float(np.std(option_outcomes[result.option_id])) < ZERO_VARIANCE_TOLERANCE:
+            # MG ISL #187 5861838085 (3): over the FINITE draws only. One NaN draw made the
+            # std NaN, the comparison False, and the critique silently vanished.
+            draws = np.asarray(option_outcomes[result.option_id], dtype=float)
+            finite_draws = draws[np.isfinite(draws)]
+            # No finite draw: there is no spread to read, so no degeneracy is claimed.
+            if finite_draws.size and float(np.std(finite_draws)) < ZERO_VARIANCE_TOLERANCE:
                 critiques.append(
                     DEGENERATE_OPTION_ZERO_VARIANCE.build(
                         option_label=option_labels.get(result.option_id, result.option_id),

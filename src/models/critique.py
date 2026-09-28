@@ -293,12 +293,14 @@ SEED_INVALID = CritiqueDefinition(
 # R3 slice 1 (AIQ #70 5860087988 item 2): a declared accounting identity on the path to the
 # goal or a limit that cannot be computed EXACTLY is WITHHELD, never approximated by the
 # linear model. The whole analysis is withheld, so no number that depends on it can leak.
+# MG ISL #187 5861838085 (6): ``operands`` are the factor_ids; ``addends`` is " plus <addends>",
+# empty when none are declared, so an addend is never listed as a factor of the product.
 IDENTITY_NOT_EVALUATED = CritiqueDefinition(
     code="IDENTITY_NOT_EVALUATED",
     severity="blocker",
     source="validation",
     message_template=(
-        "{node_id} is declared as the {operation} of {participants} but cannot be computed "
+        "{node_id} is declared as the {operation} of {operands}{addends} but cannot be computed "
         "exactly ({reason}{detail}); the analysis is withheld rather than approximated"
     ),
     default_suggestion=(

@@ -833,6 +833,50 @@ class TestTheTypedIdentityOnTheCritique:
         assert identity.stated == 75_000.0
         json.dumps(identity.model_dump(), allow_nan=False)  # strict JSON: raises on NaN/Infinity
 
+    def test_a_numpy_float32_figure_is_screened_too(self):
+        """MG ISL #187 5861838085 (5): np.float32 is not a Python float, so a float32 NaN passed the
+        isinstance check and reached the model as NaN."""
+        import numpy as np
+
+        from src.models.response_v2 import CritiqueIdentityV2
+
+        identity = CritiqueIdentityV2(
+            node_id=MRR,
+            operation="product",
+            participants=[PRICE, SUBS],
+            withheld_reason="identity_inconsistent",
+            reconstructed=np.float32("nan"),
+            stated=np.float32(1.5),
+            mismatch_share=np.float64("inf"),
+        )
+        assert identity.reconstructed is None
+        assert identity.stated == 1.5 and isinstance(identity.stated, float)
+        assert identity.mismatch_share is None
+        json.dumps(identity.model_dump(), allow_nan=False)
+
+    def test_the_message_names_an_addend_as_an_addend(self):
+        """MG ISL #187 5861838085 (6): MRR = price x subscribers + other MRR growth. The message listed
+        the addend inside the product; the typed ``participants`` (CEE reads it) is unchanged."""
+        critique = identity_critique(blocked_422(inconsistent_wire()))
+        assert critique["message"].startswith(
+            f"{MRR} is declared as the product of {PRICE}, {SUBS} plus {OTHER} but cannot be "
+            "computed exactly (identity_inconsistent"
+        )
+        assert f"{SUBS}, {OTHER}" not in critique["message"]
+        assert critique["identity"]["participants"] == [PRICE, SUBS, OTHER]
+
+    def test_without_addends_the_message_is_unchanged(self):
+        d = wire(identity=PRODUCT)
+        (subs,) = [n for n in d["graph"]["nodes"] if n["id"] == SUBS]
+        subs["observed_state"].update(value=0.1, raw_value=1_000)
+        critique = identity_critique(blocked_422(d))
+        assert critique["message"] == (
+            f"{MRR} is declared as the product of {PRICE}, {SUBS} but cannot be computed exactly "
+            "(identity_inconsistent: its parts give 49,000.00 where the stated level is 75,000.00, "
+            "34.7% apart); the analysis is withheld rather than approximated"
+        )
+        assert critique["identity"]["participants"] == [PRICE, SUBS]
+
 
 # ---------------------------------------------------------------------------------------------------------
 # DL ISL #187 (not blocking): a NaN draw is DROPPED by the aggregator: the wire's mean is the finite draws'
@@ -902,6 +946,59 @@ class TestANaNIdentityDrawIsDroppedNotAveraged:
         v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
         for result in v1.results:
             assert np.isfinite(np.array(result.outcome_distribution.samples)).all()
+
+    # MG ISL #187 5861838085 (4): the legacy V1 body carries those NaN draws raw (outcome_distribution
+    # mean/std/median/CI and samples); starlette renders with allow_nan=False, so the run was a 500.
+
+    @staticmethod
+    def _v1(d: Dict[str, Any]) -> Any:
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        return TestClient(app, raise_server_exceptions=False).post(
+            "/api/v1/robustness/analyze/v2", json=d, headers={"X-ISL-Response-Version": "1"}
+        )
+
+    def test_the_v1_body_renders_a_nan_draw_as_null_not_a_500(self, monkeypatch):
+        def refuse(token: str) -> Any:
+            raise ValueError(f"not strict JSON: {token}")
+
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        self._price_every_tenth_draw(monkeypatch, float("nan"))
+        response = self._v1(d)
+        assert response.status_code == 200, response.text[:300]
+        body = json.loads(response.text, parse_constant=refuse)
+
+        n_nan = self.N_SAMPLES // self.EVERY
+        for result in body["results"]:
+            samples = result["outcome_distribution"]["samples"]
+            assert sum(s is None for s in samples) == n_nan
+            assert all(math.isfinite(s) for s in samples if s is not None)
+            assert result["outcome_distribution"]["mean"] is None  # NaN in, null out
+
+    def test_without_nan_draws_the_v1_body_is_byte_identical(self, monkeypatch):
+        """The same request with no NaN draw renders exactly what FastAPI rendered from the returned
+        model before the fix (response_model=None: jsonable_encoder, then JSONResponse)."""
+        from fastapi.encoders import jsonable_encoder
+        from fastapi.responses import JSONResponse
+
+        import src.api.robustness as route
+
+        returned: Dict[str, Any] = {}
+        run_offloaded = route.run_offloaded
+
+        async def capture(*args: Any, **kwargs: Any) -> Any:
+            returned["response"] = await run_offloaded(*args, **kwargs)
+            return returned["response"]
+
+        monkeypatch.setattr(route, "run_offloaded", capture)
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        response = self._v1(d)
+        assert response.status_code == 200, response.text[:300]
+        assert response.content == JSONResponse(content=jsonable_encoder(returned["response"])).body
 
 
 # ---------------------------------------------------------------------------------------------------------

@@ -12,6 +12,7 @@ P2 Brief Alignment:
 """
 
 import math
+import numbers
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
@@ -165,7 +166,9 @@ class CritiqueIdentityV2(BaseModel):
     @classmethod
     def _finite_or_none(cls, value: Any) -> Any:
         """A figure that is not a finite number is not known: None, never NaN/Infinity."""
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        # MG ISL #187 5861838085 (5): numbers.Real, not (int, float): np.float32 is not a
+        # Python float, so a float32 NaN passed the check and reached the model as NaN.
+        if isinstance(value, numbers.Real) and not isinstance(value, bool):
             return value if math.isfinite(value) else None
         return value
 

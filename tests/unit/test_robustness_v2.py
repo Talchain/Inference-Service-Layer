@@ -4250,6 +4250,70 @@ class TestDegenerateOptionZeroVariance:
         ]
         assert len(zero_var_critiques) == 0
 
+    def test_nan_draws_do_not_hide_the_critique(self, monkeypatch):
+        """MG ISL #187 5861838085 (3): one NaN draw made np.std NaN, the tolerance check False,
+        and the critique vanished. The isolated option is 0.0 on every finite draw; on every
+        10th draw its (not intervened) connected_node reads NaN, so that draw is NaN for it."""
+        import src.services.robustness_analyzer_v2 as rav2
+
+        original = rav2.FactorSampler.sample_factor_values
+        calls = {"n": 0}
+
+        def sample(sampler):
+            values = original(sampler)
+            calls["n"] += 1
+            if calls["n"] % 10 == 0:
+                values["connected_node"] = float("nan")
+            return values
+
+        monkeypatch.setattr(rav2.FactorSampler, "sample_factor_values", sample)
+
+        graph = GraphV2(
+            nodes=[
+                NodeV2(id="isolated_node", kind="factor", label="Isolated"),
+                NodeV2(id="connected_node", kind="factor", label="Connected"),
+                NodeV2(id="goal", kind="outcome", label="Goal"),
+            ],
+            edges=[
+                EdgeV2(
+                    **{"from": "connected_node", "to": "goal"},
+                    exists_probability=1.0,
+                    strength=StrengthDistribution(mean=1.0, std=0.1),
+                ),
+            ],
+        )
+        request = RobustnessRequestV2(
+            request_id="zero-variance-nan-draws",
+            graph=graph,
+            options=[
+                InterventionOption(
+                    id="opt_isolated",
+                    label="Isolated Option",
+                    interventions={"isolated_node": 1.0},
+                ),
+                InterventionOption(
+                    id="opt_connected",
+                    label="Connected Option",
+                    interventions={"connected_node": 1.0},
+                ),
+            ],
+            goal_node_id="goal",
+            n_samples=100,
+            seed=42,
+        )
+
+        response = RobustnessAnalyzerV2().analyze(request)
+
+        isolated = next(r for r in response.results if r.option_id == "opt_isolated")
+        samples = np.array(isolated.outcome_distribution.samples)
+        finite = samples[np.isfinite(samples)]
+        assert int((~np.isfinite(samples)).sum()) == 10  # the NaN draws reached the option
+        assert finite.size == 90 and np.all(finite == finite[0])  # degenerate on the rest
+        zero_var_critiques = [
+            c for c in response.critiques if c.code == "DEGENERATE_OPTION_ZERO_VARIANCE"
+        ]
+        assert [c.affected_option_ids for c in zero_var_critiques] == [["opt_isolated"]]
+
 
 # =============================================================================
 # Test High Tie Rate Critiques
