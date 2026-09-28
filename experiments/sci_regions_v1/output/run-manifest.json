@@ -1,0 +1,290 @@
+{
+ "baseline": {
+  "models": {
+   "X_gross_reading": {
+    "margins_at_zero_response": {
+     "beats_keep_current": 21986.410255,
+     "churn_limit": 1.5,
+     "goal": 16988.709337
+    },
+    "thresholds": {
+     "beats_keep_current": 2.793468,
+     "churn_limit": 1.5,
+     "goal": 2.086491
+    }
+   },
+   "X_net_reading": {
+    "margins_at_zero_response": {
+     "beats_keep_current": 23778.21173,
+     "churn_limit": 1.5,
+     "goal": 22298.21173
+    },
+    "thresholds": {
+     "beats_keep_current": 2.527803,
+     "churn_limit": 1.5,
+     "goal": 2.349588
+    }
+   }
+  },
+  "status": "MATCH",
+  "stored_sha256": "e0992f86971f7f981e2d0c06d4ed6b06e8a4bd18df1ce8028aa68ddfd059de6e"
+ },
+ "elapsed_seconds": 23.309,
+ "evaluations": {
+  "r3b": 3608,
+  "synthetic": 57546
+ },
+ "peak_rss_mib": 520.203,
+ "r3b": [
+  {
+   "elapsed_seconds": 0.2296,
+   "errors": 0,
+   "evaluated": 122,
+   "grid": 11,
+   "model": "X_net_reading",
+   "path": "r3b-X_net_reading-11.json"
+  },
+  {
+   "elapsed_seconds": 0.2431,
+   "errors": 0,
+   "evaluated": 122,
+   "grid": 11,
+   "model": "X_gross_reading",
+   "path": "r3b-X_gross_reading-11.json"
+  },
+  {
+   "elapsed_seconds": 3.1095,
+   "errors": 0,
+   "evaluated": 1682,
+   "grid": 41,
+   "model": "X_net_reading",
+   "path": "r3b-X_net_reading-41.json"
+  },
+  {
+   "elapsed_seconds": 3.2253,
+   "errors": 0,
+   "evaluated": 1682,
+   "grid": 41,
+   "model": "X_gross_reading",
+   "path": "r3b-X_gross_reading-41.json"
+  }
+ ],
+ "schema": "SCI-REGIONS-run-manifest-v1",
+ "source_commit": "fdb51e84a673993de7cddb85d5b963741941b80a",
+ "status": "COMPLETE",
+ "synthetic": [
+  {
+   "case": "F1",
+   "elapsed_seconds": 0.066,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F1",
+   "elapsed_seconds": 0.41,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F2",
+   "elapsed_seconds": 0.0369,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F2",
+   "elapsed_seconds": 0.4379,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F3",
+   "elapsed_seconds": 0.0477,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F3",
+   "elapsed_seconds": 0.7111,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F4",
+   "elapsed_seconds": 0.0413,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F4",
+   "elapsed_seconds": 0.4942,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F5",
+   "elapsed_seconds": 0.0353,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F5",
+   "elapsed_seconds": 0.4472,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F6",
+   "elapsed_seconds": 0.043,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F6",
+   "elapsed_seconds": 0.4725,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F8",
+   "elapsed_seconds": 0.0358,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F8",
+   "elapsed_seconds": 0.4232,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F9",
+   "elapsed_seconds": 0.0291,
+   "evaluated": 66,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F9",
+   "elapsed_seconds": 0.3129,
+   "evaluated": 861,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F11",
+   "elapsed_seconds": 0.0357,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F11",
+   "elapsed_seconds": 0.4733,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": [
+    "A island absent on 41x41; this does not certify B between points"
+   ]
+  },
+  {
+   "case": "F13",
+   "elapsed_seconds": 0.0349,
+   "evaluated": 121,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 11,
+   "points": 121,
+   "topology_failures": []
+  },
+  {
+   "case": "F13",
+   "elapsed_seconds": 0.5109,
+   "evaluated": 1681,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 41,
+   "points": 1681,
+   "topology_failures": []
+  },
+  {
+   "case": "F11",
+   "elapsed_seconds": 10.4263,
+   "evaluated": 40401,
+   "false_confident_preference": 0,
+   "false_feasible": 0,
+   "grid": 201,
+   "points": 40401,
+   "topology_failures": []
+  }
+ ],
+ "unrun": []
+}

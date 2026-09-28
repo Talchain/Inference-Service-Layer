@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://olumi.example/research/sci-regions/RegionRequestV1",
+  "title": "RegionRequestV1 (offline research only)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "source", "case", "option_ids", "option_labels", "baseline_id", "comparison_set", "axes", "fixed_assumptions", "goal", "objective", "constraints", "execution", "comparison"],
+  "properties": {
+    "schema_version": {"const": "RegionRequestV1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "source": {"$ref": "#/definitions/source"},
+    "case": {"type": "string", "minLength": 1},
+    "option_ids": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "option_labels": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "baseline_id": {"type": "string", "minLength": 1},
+    "comparison_set": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "axes": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"$ref": "#/definitions/axis"}},
+    "fixed_assumptions": {"type": "array", "items": {"$ref": "#/definitions/fixed"}},
+    "goal": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/goal"}]},
+    "objective": {"oneOf": [{"type": "null"}, {"$ref": "#/definitions/objective"}]},
+    "constraints": {"type": "array", "items": {"$ref": "#/definitions/constraint"}},
+    "execution": {"$ref": "#/definitions/execution"},
+    "comparison": {"$ref": "#/definitions/comparison"}
+  },
+  "definitions": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "commit", "graph_sha256", "mapping_sha256", "tier", "model_id", "evaluator_sha256", "adapter_version"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+        "graph_sha256": {"$ref": "#/definitions/hash"},
+        "mapping_sha256": {"$ref": "#/definitions/hash"},
+        "tier": {"enum": ["SYNTHETIC", "T0", "T1", "T2", "X"]},
+        "model_id": {"type": "string", "minLength": 1},
+        "evaluator_sha256": {"$ref": "#/definitions/hash"},
+        "adapter_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "axis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "label", "unit", "role", "operation", "binding", "grid_values", "domain_source", "valid_min", "valid_max", "joint_support"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "label": {"type": "string", "minLength": 1},
+        "unit": {"type": "string", "minLength": 1},
+        "role": {"enum": ["UNCERTAIN_PARAMETER", "SCENARIO_ASSUMPTION", "ACTION_LEVER", "PREFERENCE_PARAMETER", "TARGET_THRESHOLD"]},
+        "operation": {"enum": ["FIX_SCENARIO_PARAMETER", "CONDITION_ON_OBSERVATION", "APPLY_DECLARED_INTERVENTION", "CHANGE_PREFERENCE", "CHANGE_TARGET"]},
+        "binding": {"type": "string", "minLength": 1},
+        "grid_values": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "number"}},
+        "domain_source": {"type": "string", "minLength": 1},
+        "valid_min": {"type": "number"},
+        "valid_max": {"type": "number"},
+        "joint_support": {"type": ["string", "null"]}
+      }
+    },
+    "fixed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "value", "source"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "value": {"type": ["string", "number", "boolean"]}, "source": {"type": "string", "minLength": 1}}
+    },
+    "goal": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "metric", "unit", "operator", "limit", "temporal_rule"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "metric": {"type": "string", "minLength": 1}, "unit": {"type": "string", "minLength": 1}, "operator": {"enum": [">=", "<=", ">", "<"]}, "limit": {"type": "number"}, "temporal_rule": {"enum": ["POINT", "FIRST_PASSAGE_BY_H", "TERMINAL"]}}
+    },
+    "objective": {
+      "type": "object", "additionalProperties": false,
+      "required": ["metric", "unit", "direction", "functional", "temporal_rule", "delta", "delta_source"],
+      "properties": {"metric": {"type": "string", "minLength": 1}, "unit": {"type": "string", "minLength": 1}, "direction": {"enum": ["MAXIMISE", "MINIMISE"]}, "functional": {"enum": ["POINT_VALUE", "EXPECTED_VALUE", "PROBABILITY_OF_EVENT"]}, "temporal_rule": {"enum": ["POINT", "FIRST_PASSAGE_BY_H", "TERMINAL"]}, "delta": {"type": "number", "minimum": 0}, "delta_source": {"type": "string", "minLength": 1}}
+    },
+    "constraint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "metric", "unit", "operator", "limit", "temporal_rule", "enforcement"],
+      "properties": {"id": {"type": "string", "minLength": 1}, "metric": {"type": "string", "minLength": 1}, "unit": {"type": "string", "minLength": 1}, "operator": {"enum": [">=", "<=", ">", "<"]}, "limit": {"type": "number"}, "temporal_rule": {"enum": ["POINT", "EACH_MONTH", "FIRST_PASSAGE_BY_H", "TERMINAL"]}, "enforcement": {"enum": ["DETERMINISTIC_HARD", "UNIVERSAL", "CHANCE"]}}
+    },
+    "execution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["seed", "numeric_policy", "max_seconds", "max_memory_mib", "max_evaluations", "draw_count", "confidence_scope"],
+      "properties": {"seed": {"type": "integer"}, "numeric_policy": {"enum": ["EXACT_RATIONAL", "FLOAT64_RECORDED"]}, "max_seconds": {"type": "number", "exclusiveMinimum": 0}, "max_memory_mib": {"type": "integer", "minimum": 1}, "max_evaluations": {"type": "integer", "minimum": 1}, "draw_count": {"const": 1}, "confidence_scope": {"const": "NOT_APPLICABLE"}}
+    },
+    "comparison": {
+      "type": "object", "additionalProperties": false,
+      "required": ["baseline_status", "reference_id", "differences"],
+      "properties": {"baseline_status": {"enum": ["PINNED_LOCAL", "UNAVAILABLE"]}, "reference_id": {"type": ["string", "null"]}, "differences": {"type": "array", "items": {"type": "string"}}}
+    }
+  }
+}

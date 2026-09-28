@@ -1,0 +1,21 @@
+{
+  "controls": {
+    "dropped_unsupported_option": true,
+    "execution_order_reproducibility": true,
+    "filled_forbidden_domain": true,
+    "ignored_constraint": true,
+    "interpolated_exact_boundary": true,
+    "overlap_as_tie": true,
+    "parameter_to_intervention": true,
+    "stale_criterion_cache": true,
+    "stale_evaluator_identity": true,
+    "stale_fixed_assumption_cache": true,
+    "wrong_unit": true
+  },
+  "not_run": [
+    "random-stream reuse (no Monte Carlo in this slice)",
+    "learned safe box (no learned summary in this slice)"
+  ],
+  "schema": "SCI-REGIONS-mutant-evidence-v1",
+  "status": "PASS"
+}

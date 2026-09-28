@@ -1,0 +1,17 @@
+{
+  "version": "sci-regions-fixtures-v1",
+  "status": "frozen_before_candidate_code",
+  "coordinate_domain": "inclusive endpoints; independent axes unless joint support is stated",
+  "cases": {
+    "F1": {"x": ["0", "1"], "y": ["0", "1"], "difference": "x-y", "expectation": "A iff x>y; B iff x<y; exact tie iff x=y"},
+    "F2": {"x": ["0", "1"], "y": ["0", "1"], "difference": "x-y", "delta": "1/10", "expectation": "practical equivalence iff |x-y|<=1/10 except exact equality"},
+    "F3": {"x": ["0", "1"], "y": ["0", "1"], "difference": "x-y", "goal": "outcome>=3/5", "A_constraint": "y<=2/5", "B_constraint": "x<=2/5", "expectation": "no feasible option iff x>2/5 and y>2/5"},
+    "F4": {"x": ["0", "1"], "y": ["0", "1"], "difference": "x-y", "A_constraint": "y<=2/5", "B_constraint": "unsupported", "expectation": "A failure cannot imply no feasible option"},
+    "F5": {"x": ["-1", "1"], "y": ["-1", "1"], "difference": "x*y", "expectation": "quadrant interaction"},
+    "F6": {"x": ["-1", "1"], "y": ["-1", "1"], "difference": "x*x-1/4", "expectation": "A at both x extremes, B in centre"},
+    "F8": {"x": ["0", "1"], "y": ["0", "1"], "difference": "2", "expectation": "A dominates; region adds no decision information"},
+    "F9": {"x": ["0", "1"], "y": ["0", "1"], "difference": "x-y", "joint_support": "x+y<=1", "expectation": "unsupported domain is outside, not infeasible"},
+    "F11": {"x": ["0", "1"], "y": ["0", "1"], "difference": "1/40000-(x-1/80)^2-(y-1/80)^2", "expectation": "small A island absent on 41x41 grid, present on 201x201 reference"},
+    "F13": {"x": ["0", "1"], "y": ["0", "1"], "difference": "x-y+c", "fixed_c": "0", "expectation": "unit conversion and transpose preserve mapped truth; changing c changes identity"}
+  }
+}
