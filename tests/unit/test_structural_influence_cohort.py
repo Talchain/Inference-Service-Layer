@@ -25,7 +25,7 @@ import pytest
 
 import src.services.robustness_analyzer_v2 as rav2
 from src.models.robustness_v2 import RobustnessRequestV2
-from tests.unit.test_r3_identity_evaluation import MRR, OTHER, PRICE, PRODUCT, SUBS, v2_body, wire
+from tests.unit.test_r3_identity_evaluation import MRR, OTHER, PRICE, PRODUCT, SUBS, WITH_ADDEND, v2_body, wire
 
 GRANDFATHERED = "fac_existing_customers_grandfathered"
 ALL_FACTORS = [PRICE, SUBS, "monthly_churn", "monthly_new_pro_subscribers", OTHER, GRANDFATHERED]
@@ -121,6 +121,30 @@ def unobserved_leads() -> Dict[str, Any]:
             {"from": f"g_path_{i}", "to": MRR, "strength": {"mean": -1.0, "std": 0.01}, "exists_probability": 1.0}
         )
     return d
+
+
+class TestTheServedIdentityShapeWithItsAddend:
+    """Paul's SERVED identity is ``product(price, subscribers)`` + ``addends: [other_mrr_growth]``
+    (``WITH_ADDEND``), not the addend-free ``PRODUCT`` the rows above use. R3 SCIENCE's local wire witness
+    (#72 5875435465) caught R3-B's stated P1 figures coming from ``PRODUCT``; this pins the served shape."""
+
+    def test_the_served_shape_is_evaluated_and_its_list_is_the_one_walk_over_six(self):
+        d = wire(identity=WITH_ADDEND)
+        body = envelope(d)
+        assert [e["evaluated"] for e in body["identity_evaluations"] if e["node_id"] == MRR] == [True]
+        assert by_node(body["structural_influence"], "influence_score") == pytest.approx(
+            walk(d, ALL_FACTORS), abs=1e-12
+        )
+
+    def test_the_addend_moves_exactly_other_and_grandfathered(self):
+        served = by_node(envelope(wire(identity=WITH_ADDEND))["structural_influence"], "influence_score")
+        free = by_node(envelope(wire(identity=PRODUCT))["structural_influence"], "influence_score")
+        assert {k: round(v, 6) for k, v in served.items()} == {
+            SUBS: 1.0, PRICE: 0.638133, "monthly_churn": 0.12, "monthly_new_pro_subscribers": 0.08,
+            OTHER: 0.101351, GRANDFATHERED: 0.149351,
+        }
+        moved = sorted(k for k in served if round(served[k], 6) != round(free[k], 6))
+        assert moved == sorted([OTHER, GRANDFATHERED])
 
 
 class TestWhenTheUnobservedFactorLeads:
