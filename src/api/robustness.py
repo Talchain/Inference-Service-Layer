@@ -1002,6 +1002,7 @@ async def _analyze_robustness_v2_enhanced(
                             near_miss_fraction=c.near_miss_fraction,
                             binding=c.binding,
                             level_out_of_domain_fraction=c.level_out_of_domain_fraction,
+                            frame_verdict=c.frame_verdict,
                         )
                         for c in ca.constraints
                     ],

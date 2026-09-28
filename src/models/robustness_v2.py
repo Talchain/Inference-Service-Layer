@@ -162,6 +162,33 @@ class StrengthDistribution(BaseModel):
     model_config = {"extra": "ignore", "json_schema_extra": {"example": {"mean": 0.5, "std": 0.1}}}
 
 
+# R1 S2 (DL #72 5871412823; schemas 0.61.0 `GoalThresholdFrame`, APPENDED values): the frame a
+# target is STATED in. 'level' and legacy 'delta' keep their meanings. 'change_abs' = a change from
+# today in the node's own (normalised, scale-only) unit: "+2 points", "maintain" (>= 0).
+# 'change_rel' = a relative change from today, as a fraction ("+10%" = 0.10), read on the node's
+# `raw_range`. One Literal for both channels, so they cannot drift apart.
+TargetFrame = Literal["level", "delta", "change_abs", "change_rel"]
+CHANGE_FRAMES = ("change_abs", "change_rel")
+
+
+class RawRange(BaseModel):
+    """R1 S2 (wire 5872798858): the raw user-unit range a node's normalised values map from,
+    ``v_n = (v - min) / (max - min)`` (PLoT's intervention normaliser). One copy per NODE, shared by
+    the goal and every limit on it. Read only for a 'change_rel' target, where a relative change is
+    relative to RAW zero: b_raw = b_n * (max - min) + min."""
+
+    min: float = Field(..., description="Raw value that normalises to 0")
+    max: float = Field(..., description="Raw value that normalises to 1")
+
+    @model_validator(mode="after")
+    def finite_and_increasing(self) -> "RawRange":
+        if not (math.isfinite(self.min) and math.isfinite(self.max)):
+            raise ValueError("raw_range bounds must be finite")
+        if not self.max > self.min:
+            raise ValueError("raw_range.max must exceed raw_range.min")
+        return self
+
+
 class ObservedState(BaseModel):
     """
     Observed state for quantitative factor nodes.
@@ -533,6 +560,16 @@ class NodeV2(BaseModel):
     execution_frame: Optional[ExecutionFrameV2] = Field(
         None, description="R3-8: user units = normalised x frame (PLoT-resolved)"
     )
+    # R1 S2 (schemas 0.61.0 `NodeV3Schema.quantity_frame`): what the node's value MEASURES.
+    # 'change' = the value IS a change from today (0 today by definition), so any target on it is
+    # compared on its own paired change and a relative target on it is refused (CHANGE_OF_A_CHANGE).
+    # Absent = 'level'.
+    quantity_frame: Optional[Literal["level", "change"]] = Field(
+        None, description="What the node measures: 'level' | 'change' (R1). Absent = 'level'."
+    )
+    raw_range: Optional[RawRange] = Field(
+        None, description="Raw user-unit range of the node's normalisation (R1; read by 'change_rel')."
+    )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -812,7 +849,7 @@ class GoalConstraint(BaseModel):
     # Absent = NOT STAMPED, which is REFUSED (fail-closed), never assumed. A
     # defaulted frame is a manufactured attestation — the exact fabrication class
     # 2.258 / 2.286 exist to kill.
-    value_frame: Optional[Literal["level", "delta"]] = Field(
+    value_frame: Optional[TargetFrame] = Field(
         None,
         description=(
             "Declares which frame this constraint's `value` is expressed in. "
@@ -1053,7 +1090,7 @@ class RobustnessRequestV2(BaseModel):
     #
     # Mirrors @talchain/schemas 0.31.0 `z.enum(['level','delta']).optional()`.
     # Absent = NOT STAMPED, which is refused (fail-closed), never assumed.
-    goal_threshold_frame: Optional[Literal["level", "delta"]] = Field(
+    goal_threshold_frame: Optional[TargetFrame] = Field(
         None,
         description="Declares which frame goal_threshold is expressed in. "
         "'delta' = already in the goal SAMPLES' own frame (change from the model's "
@@ -1702,6 +1739,9 @@ class ConstraintResult(BaseModel):
     )
     level_out_of_domain_fraction: Optional[float] = Field(
         None, ge=0, le=1, description="Share of draws whose level is outside the request's level_domain"
+    )
+    frame_verdict: Literal["scored", "estimate_only"] = Field(
+        "scored", description="R1: 'estimate_only' for a change_rel on a base the user did not state"
     )
 
 

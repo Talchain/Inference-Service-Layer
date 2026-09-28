@@ -541,6 +541,16 @@
             "description": "Median distance from threshold when constraint fails",
             "title": "Failure Margin Median"
           },
+          "frame_verdict": {
+            "default": "scored",
+            "description": "R1: 'estimate_only' for a change_rel on a base the user did not state",
+            "enum": [
+              "scored",
+              "estimate_only"
+            ],
+            "title": "Frame Verdict",
+            "type": "string"
+          },
           "label": {
             "anyOf": [
               {
@@ -655,6 +665,16 @@
             ],
             "description": "Median distance from threshold when constraint fails (positive = failing by this amount)",
             "title": "Failure Margin Median"
+          },
+          "frame_verdict": {
+            "default": "scored",
+            "description": "R1 (schemas 0.61.0): whether prob_satisfied scores the user's own target. 'estimate_only' only for a 'change_rel' limit measured on a base the user did not state (observed_state.source is not a user class): the relative target was turned into a change on Olumi's estimate of today.",
+            "enum": [
+              "scored",
+              "estimate_only"
+            ],
+            "title": "Frame Verdict",
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -3615,7 +3635,9 @@
               {
                 "enum": [
                   "level",
-                  "delta"
+                  "delta",
+                  "change_abs",
+                  "change_rel"
                 ],
                 "type": "string"
               },
@@ -4823,6 +4845,33 @@
               }
             ],
             "description": "Observed state for quantitative factor nodes (value, baseline, unit, source)"
+          },
+          "quantity_frame": {
+            "anyOf": [
+              {
+                "enum": [
+                  "level",
+                  "change"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the node measures: 'level' | 'change' (R1). Absent = 'level'.",
+            "title": "Quantity Frame"
+          },
+          "raw_range": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RawRange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw user-unit range of the node's normalisation (R1; read by 'change_rel')."
           }
         },
         "required": [
@@ -6060,6 +6109,27 @@
         "title": "RangeFitRefusalPayload",
         "type": "object"
       },
+      "RawRange": {
+        "description": "R1 S2 (wire 5872798858): the raw user-unit range a node's normalised values map from,\n``v_n = (v - min) / (max - min)`` (PLoT's intervention normaliser). One copy per NODE, shared by\nthe goal and every limit on it. Read only for a 'change_rel' target, where a relative change is\nrelative to RAW zero: b_raw = b_n * (max - min) + min.",
+        "properties": {
+          "max": {
+            "description": "Raw value that normalises to 1",
+            "title": "Max",
+            "type": "number"
+          },
+          "min": {
+            "description": "Raw value that normalises to 0",
+            "title": "Min",
+            "type": "number"
+          }
+        },
+        "required": [
+          "min",
+          "max"
+        ],
+        "title": "RawRange",
+        "type": "object"
+      },
       "RecoveryHints": {
         "description": "Recovery hints for error resolution.",
         "properties": {
@@ -6595,7 +6665,9 @@
               {
                 "enum": [
                   "level",
-                  "delta"
+                  "delta",
+                  "change_abs",
+                  "change_rel"
                 ],
                 "type": "string"
               },

@@ -1062,13 +1062,18 @@ class TestConsumptionPredicate:
         """DRIFT GUARD (trap 12). The predicate treats 'level' as the only
         baseline-consuming frame. If a third frame is ever added to the model,
         this REDs instead of silently landing on the wrong side of it."""
-        assert _declared_frames() == {"level", "delta"}, (
+        assert _declared_frames() == {"level", "delta", "change_abs", "change_rel"}, (
             "goal_threshold_frame gained or lost a value — re-derive whether it "
             "reads observed_state.baseline and update "
             "RobustnessAnalyzerV2._goal_baseline_was_consumed"
         )
 
-    @pytest.mark.parametrize("frame,consumed", [("level", True), ("delta", False)])
+    # R1 S2: a change_abs goal with a baseline IS the level plan at b + c (it reads the baseline);
+    # change_rel reads it too but needs a raw_range this fixture does not carry (see the paired row
+    # below and tests/unit/test_r1_target_frames.py for change_rel).
+    @pytest.mark.parametrize(
+        "frame,consumed", [("level", True), ("delta", False), ("change_abs", True)]
+    )
     def test_predicate_classifies_each_declared_frame(self, frame, consumed):
         request = build_request(goal_threshold=0.2, goal_threshold_frame=frame, baseline=0.7)
         value, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(request)
@@ -1095,6 +1100,15 @@ class TestConsumptionPredicate:
         assert plan.level_threshold is None, "fixture control: the root limb returns the identity"
         assert plan.delta_threshold == 0.9
 
+        assert RobustnessAnalyzerV2._goal_baseline_was_consumed(request, plan) is False
+
+    def test_a_paired_change_goal_is_not_baseline_consumption(self):
+        """R1 S2: with no baseline a change_abs goal is the paired change (baseline 0 by
+        construction), so observed_state.baseline was never read."""
+        request = build_request(goal_threshold=0.1, goal_threshold_frame="change_abs", baseline=None)
+        plan, warning = RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(request)
+        assert plan is not None and warning is None, "fixture control: a paired change resolves"
+        assert plan.change_frame is True
         assert RobustnessAnalyzerV2._goal_baseline_was_consumed(request, plan) is False
 
     def test_unresolved_threshold_is_never_consumed(self):
