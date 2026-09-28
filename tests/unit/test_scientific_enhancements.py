@@ -547,7 +547,7 @@ class TestEVPIBelowResolutionLabelling:
         for entry in response.p_win_sensitivity:
             assert entry["status"] == "below_resolution"
 
-    def test_negative_intermediate_clamped_to_zero_on_wire(self):
+    def test_negative_intermediate_clamped_to_zero_on_wire(self, former_truncated_edge_sampler):
         """F1 producer clamp: negative intermediate EVPI → 0.0 on the wire.
 
         EVPI is definitionally non-negative (Howard); a negative difference of
@@ -557,6 +557,9 @@ class TestEVPIBelowResolutionLabelling:
         (e.g. fac_tech_lead -0.004). The emitted evpi must be clamped to 0.0,
         flagged evpi_clamped=True, and labelled below_resolution; the raw
         components stay auditable via perfect_metric / current_metric.
+
+        The fixture's negative intermediate was found under the former +/-1 strength bound, so it
+        runs under that sampler; the clamp itself does not depend on it (AIQ #72 5868664986).
         """
         graph = _make_graph()
         request = _make_request(graph, include_voi=True, include_uncertainties=True, n_samples=500)

@@ -146,6 +146,7 @@ class TestTheHarnessCanSeeAPresence:
     nothing it says about an absence counts. Both are pinned to the values
     measured on the untouched control path, so a harness that silently stopped
     computing EVPI/EVPPI would fail here rather than passing every absence test.
+    Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
     """
 
     def test_control_reproduces_the_reference_decision_evpi_and_evppi(
@@ -155,13 +156,13 @@ class TestTheHarnessCanSeeAPresence:
         assert resp.status_code == 200, resp.text[:600]
         body = _strict_parse(resp)
 
-        assert body.get("decision_evpi") == pytest.approx(0.9908, abs=1e-4), (
-            f"control decision_evpi drifted from the reference 0.9908; "
+        assert body.get("decision_evpi") == pytest.approx(1.5934, abs=1e-4), (
+            f"control decision_evpi drifted from the reference 1.5934; "
             f"got {body.get('decision_evpi')!r}"
         )
         rows = {r["factor_id"]: r["evppi"] for r in (body.get("factor_evppi") or [])}
-        assert rows.get("f_info") == pytest.approx(0.0497, abs=1e-4), (
-            f"control factor_evppi[f_info] drifted from the reference 0.0497; "
+        assert rows.get("f_info") == pytest.approx(0.2163, abs=1e-4), (
+            f"control factor_evppi[f_info] drifted from the reference 0.2163; "
             f"got {rows!r}"
         )
 

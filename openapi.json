@@ -2491,9 +2491,39 @@
             "title": "Regression Degree",
             "type": "integer"
           },
+          "spread_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user",
+                  "template"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spread Source"
+          },
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "status_reason": {
+            "anyOf": [
+              {
+                "enum": [
+                  "at_or_below_noise_floor",
+                  "decision_gain_not_significant"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Reason"
           },
           "units": {
             "title": "Units",
@@ -5570,6 +5600,22 @@
             ],
             "description": "Minimum value for uniform distribution",
             "title": "Range Min"
+          },
+          "spread_source": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user",
+                  "template"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who set this spread: 'user' (the user's own figure or range) or 'template' (Olumi's default spread). Echoed on factor_evppi so advice can say whose range it is (AIQ #72 5867782904). Absent = the caller did not say; ISL never infers it.",
+            "title": "Spread Source"
           },
           "std": {
             "anyOf": [

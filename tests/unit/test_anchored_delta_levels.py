@@ -192,6 +192,20 @@ def effect_gbp(response, option_id: str, reference: str = KEEP) -> float:
     return float(np.mean(samples(response, option_id) - samples(response, reference))) * CAP_GBP
 
 
+def with_the_served_truncated_sampler(fn, *args):
+    """The edge-strength sampler ISL served before AIQ #72 5868664986: draws truncated to +/-1 in
+    normalised units. Rows pinned to numbers SERVED (or measured) under it run it, so their constants
+    keep their provenance; the rows for the unbounded sampler are in test_edge_strength_unbounded.py.
+    """
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            rav2,
+            "_sample_edge_strength",
+            lambda rng, mean, std: rng.truncated_normal(mean, std, -1.0, 1.0),
+        )
+        return fn(*args)
+
+
 def without_the_no_change_rule(fn, *args):
     """B1a-5 switched off: every setting is held, even one equal to today's level (the engine before)."""
     with pytest.MonkeyPatch.context() as mp:
@@ -388,8 +402,11 @@ class TestB1a3EffectsAtThePersistedLevels:
 
     @pytest.fixture(scope="class")
     def persisted(self):
+        """Measured under the served truncated sampler, so it runs that sampler."""
         d = paul_request(options=SIX_OPTIONS, n_samples=10_000)
-        return analyse(d), without_the_no_change_rule(analyse, d)
+        return with_the_served_truncated_sampler(
+            lambda: (analyse(d), without_the_no_change_rule(analyse, d))
+        )
 
     def test_conversion_is_plus_17_56(self, persisted):
         _, before = persisted
@@ -455,9 +472,12 @@ class TestB1a4StructuralOutputsAreByteIdentical:
         # conditional_winners and fragile_edges are GATED outputs, so whether they appear at n=2000
         # depends on the realisation: at the captured seed they vanish once B1a-5's exact carry-on ties
         # re-draw the edge stream (TestB1a5NamedMoves), and at seed 3 they vanish with B1a-5 OFF. Seed 1
-        # exercises every one of them with B1a-5 on AND off, so the non-vacuity rows below guard the
-        # byte-identity row rather than one lucky draw.
-        d["seed"] = 1
+        # exercised every one of them under the truncated sampler; the unbounded sampler (AIQ #72
+        # 5868664986) no longer re-draws out-of-range strengths, so seed 1's stream loses
+        # conditional_winners. Seed 3 is the first (searched 1-80) at which every one of them is
+        # exercised AND the verifier three are live (seed 2 leaves 2 fragile edges), so the non-vacuity
+        # rows below guard the byte-identity row rather than one lucky draw.
+        d["seed"] = 3
         return analyse(d), analyse_unanchored(d)
 
     def test_everything_but_the_reported_levels_is_byte_identical(self, pair):
@@ -884,12 +904,15 @@ class TestB1aOnTheServedWire:
 
     @pytest.fixture(scope="class")
     def pair(self):
+        """Compared with AIQ's SERVED numbers, so it runs the sampler they were served under."""
         d = served_wire()
-        return analyse(d), analyse_unanchored(d)
+        return with_the_served_truncated_sampler(lambda: (analyse(d), analyse_unanchored(d)))
 
     @pytest.fixture(scope="class")
     def served_today(self):
-        return without_the_no_change_rule(analyse_unanchored, served_wire())
+        return with_the_served_truncated_sampler(
+            without_the_no_change_rule, analyse_unanchored, served_wire()
+        )
 
     def test_b1a_1_keep_current_sits_at_the_held_75k(self, pair):
         anchored, _ = pair
