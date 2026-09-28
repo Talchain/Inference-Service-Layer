@@ -1,0 +1,202 @@
+{
+ "independent_null n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 0,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 0,
+  "degree 2": 0,
+  "5 repeated splits": 0,
+  "gate_alone(current)": 0,
+  "floor_only(current rule)": 8
+ },
+ "independent_null n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 0,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 0,
+  "degree 2": 0,
+  "5 repeated splits": 0,
+  "gate_alone(current)": 0,
+  "floor_only(current rule)": 10
+ },
+ "dominated_dependent n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 1,
+  "full-sample comparator": 1,
+  "held-out comparator": 1,
+  "no clipping": 1,
+  "degree 2": 1,
+  "5 repeated splits": 1,
+  "gate_alone(current)": 1,
+  "floor_only(current rule)": 52
+ },
+ "dominated_dependent n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 0,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 0,
+  "degree 2": 0,
+  "5 repeated splits": 0,
+  "gate_alone(current)": 0,
+  "floor_only(current rule)": 28
+ },
+ "close_null (tie-ish) n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 5,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 5,
+  "degree 2": 3,
+  "5 repeated splits": 3,
+  "gate_alone(current)": 16,
+  "floor_only(current rule)": 13
+ },
+ "close_null (tie-ish) n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 5,
+  "full-sample comparator": 1,
+  "held-out comparator": 0,
+  "no clipping": 5,
+  "degree 2": 4,
+  "5 repeated splits": 2,
+  "gate_alone(current)": 17,
+  "floor_only(current rule)": 11
+ },
+ "close_dominated n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 10,
+  "full-sample comparator": 2,
+  "held-out comparator": 1,
+  "no clipping": 9,
+  "degree 2": 6,
+  "5 repeated splits": 5,
+  "gate_alone(current)": 18,
+  "floor_only(current rule)": 28
+ },
+ "close_dominated n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 2,
+  "full-sample comparator": 1,
+  "held-out comparator": 1,
+  "no clipping": 2,
+  "degree 2": 1,
+  "5 repeated splits": 1,
+  "gate_alone(current)": 4,
+  "floor_only(current rule)": 28
+ },
+ "common_shift_null n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 2,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 2,
+  "degree 2": 4,
+  "5 repeated splits": 1,
+  "gate_alone(current)": 11,
+  "floor_only(current rule)": 13
+ },
+ "common_shift_null n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 0,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 0,
+  "degree 2": 1,
+  "5 repeated splits": 0,
+  "gate_alone(current)": 1,
+  "floor_only(current rule)": 11
+ },
+ "three_opt_null n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 5,
+  "full-sample comparator": 1,
+  "held-out comparator": 1,
+  "no clipping": 5,
+  "degree 2": 3,
+  "5 repeated splits": 2,
+  "gate_alone(current)": 13,
+  "floor_only(current rule)": 15
+ },
+ "three_opt_null n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 3,
+  "full-sample comparator": 0,
+  "held-out comparator": 0,
+  "no clipping": 3,
+  "degree 2": 4,
+  "5 repeated splits": 1,
+  "gate_alone(current)": 11,
+  "floor_only(current rule)": 9
+ },
+ "true_positive_0.083 n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 180,
+  "full-sample comparator": 180,
+  "held-out comparator": 180,
+  "no clipping": 178,
+  "degree 2": 186,
+  "5 repeated splits": 188,
+  "gate_alone(current)": 180,
+  "floor_only(current rule)": 200
+ },
+ "true_positive_0.083 n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 200,
+  "full-sample comparator": 200,
+  "held-out comparator": 200,
+  "no clipping": 200,
+  "degree 2": 200,
+  "5 repeated splits": 200,
+  "gate_alone(current)": 200,
+  "floor_only(current rule)": 200
+ },
+ "moderate_0.042 n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 77,
+  "full-sample comparator": 77,
+  "held-out comparator": 77,
+  "no clipping": 77,
+  "degree 2": 81,
+  "5 repeated splits": 69,
+  "gate_alone(current)": 77,
+  "floor_only(current rule)": 193
+ },
+ "moderate_0.042 n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 187,
+  "full-sample comparator": 187,
+  "held-out comparator": 187,
+  "no clipping": 187,
+  "degree 2": 187,
+  "5 repeated splits": 190,
+  "gate_alone(current)": 187,
+  "floor_only(current rule)": 200
+ },
+ "weak_tail_0.004 n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 12,
+  "full-sample comparator": 12,
+  "held-out comparator": 12,
+  "no clipping": 10,
+  "degree 2": 5,
+  "5 repeated splits": 6,
+  "gate_alone(current)": 12,
+  "floor_only(current rule)": 120
+ },
+ "weak_tail_0.004 n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 26,
+  "full-sample comparator": 26,
+  "held-out comparator": 26,
+  "no clipping": 25,
+  "degree 2": 28,
+  "5 repeated splits": 19,
+  "gate_alone(current)": 26,
+  "floor_only(current rule)": 179
+ },
+ "nonlinear_U_0.05 n=500": {
+  "current (train comparator, clip, deg4, 1 split)": 192,
+  "full-sample comparator": 189,
+  "held-out comparator": 183,
+  "no clipping": 192,
+  "degree 2": 194,
+  "5 repeated splits": 194,
+  "gate_alone(current)": 192,
+  "floor_only(current rule)": 200
+ },
+ "nonlinear_U_0.05 n=2000": {
+  "current (train comparator, clip, deg4, 1 split)": 200,
+  "full-sample comparator": 200,
+  "held-out comparator": 200,
+  "no clipping": 200,
+  "degree 2": 200,
+  "5 repeated splits": 200,
+  "gate_alone(current)": 200,
+  "floor_only(current rule)": 200
+ }
+}
