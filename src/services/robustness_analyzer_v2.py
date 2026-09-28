@@ -5701,9 +5701,9 @@ class RobustnessAnalyzerV2:
             },
             refuse=refuse,
         )
-        anchor = plan.level_from_identity if plan is not None else None
-        if anchor is None:
+        if plan is None or plan.level_from_identity is None:
             return plan, warning
+        anchor = plan.level_from_identity
         # Proposal (3): the goal's level today was not stated, so say whose it is and what it
         # is, in user units. Rides as 'warning' because PLoT hides 'info', and an Olumi
         # estimate presented as the user's base is the one reading this must prevent.
