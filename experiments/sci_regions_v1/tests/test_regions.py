@@ -124,8 +124,10 @@ def test_r3b_frozen_replay_and_competitive_response():
 
 def test_saved_results_and_offline_view():
     from pathlib import Path
+    from zipfile import ZipFile
     output = Path(__file__).resolve().parent.parent / "output"
-    result = json.loads((output / "r3b-X_net_reading-41.json").read_text())
+    with ZipFile(output / "results.zip") as archive:
+        result = json.loads(archive.read("r3b-X_net_reading-41.json"))
     validate_result(result)
     assert result["manifest"]["source_verified"]
     assert result["metrics"]["false_feasible"] is None
