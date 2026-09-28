@@ -727,8 +727,9 @@ class TestDualUncertaintySampler:
         assert "a->b" in rates
         assert 0.65 < rates["a->b"] < 0.75
 
-    def test_edge_strength_clamped_high_mean_high_variance(self):
-        """B5.27: Sampled strengths must be bounded to [-1, 1] (positive tail)."""
+    def test_edge_strength_high_mean_high_variance_is_not_truncated(self):
+        """AIQ #72 5868664986 supersedes B5.27's bound on DRAWS: a normalised strength's
+        magnitude depends on the frame, so draws keep their tail and their mean."""
         edges = [
             EdgeV2(
                 **{"from": "a", "to": "b"},
@@ -742,12 +743,11 @@ class TestDualUncertaintySampler:
         configs = sampler.sample_n_configurations(10000)
         strengths = [c[("a", "b")] for c in configs]
 
-        assert all(
-            -1.0 <= s <= 1.0 for s in strengths
-        ), f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
+        assert max(strengths) > 1.0, "the positive tail beyond +1 is kept"
+        assert abs(np.mean(strengths) - 0.8) < 0.015
 
-    def test_edge_strength_clamped_negative_tail(self):
-        """B5.27: Sampled strengths must be bounded to [-1, 1] (negative tail)."""
+    def test_edge_strength_negative_tail_is_not_truncated(self):
+        """AIQ #72 5868664986: the negative tail beyond -1 is kept too (mean preserved)."""
         edges = [
             EdgeV2(
                 **{"from": "a", "to": "b"},
@@ -761,9 +761,8 @@ class TestDualUncertaintySampler:
         configs = sampler.sample_n_configurations(10000)
         strengths = [c[("a", "b")] for c in configs]
 
-        assert all(
-            -1.0 <= s <= 1.0 for s in strengths
-        ), f"Strength out of bounds: min={min(strengths)}, max={max(strengths)}"
+        assert min(strengths) < -1.0, "the negative tail beyond -1 is kept"
+        assert abs(np.mean(strengths) - (-0.9)) < 0.025
 
     def test_edge_strength_clamp_preserves_low_variance(self):
         """B5.27: Clamping should not materially alter well-centred distributions."""
