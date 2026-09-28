@@ -6,9 +6,10 @@ uncertainty. Structural influence is a property of every factor with a path to t
 its value is uncertain, so a factor with no observed value had no score and a consumer could not show
 ISL's influence for every factor (a UI shows producer influence only when EVERY factor carries one).
 
-When an accounting identity is EVALUATED, the envelope carries this list: every factor node of the graph,
-one cohort, one normalisation, with the identity walked at its own partials (#195). It is absent
-otherwise, so a response without an evaluated identity is byte-identical.
+The envelope carries this list on EVERY graph where the factor phase runs (the ONE influence algorithm,
+AIQ #72 5872951506): every factor node of the graph, one cohort, one normalisation, with an evaluated
+identity walked at its own partials (#195). ``factor_sensitivity`` stays byte-identical. It is absent
+only when the factor phase does not run (no parameter uncertainty).
 
 Shared by the internal (V1) response and the V2 wire envelope, as ``IdentityEvaluation`` is. It lives in
 its own module because ``response_v2`` cannot import ``robustness_v2`` (circular).

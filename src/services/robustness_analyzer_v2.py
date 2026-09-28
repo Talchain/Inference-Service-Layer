@@ -3544,7 +3544,7 @@ class RobustnessAnalyzerV2:
         # correlated factors. Omitted (absent, not fabricated) with the
         # correlation_model disclosure marker naming the reason.
         factor_sensitivity: List[FactorSensitivityResult] = []
-        structural_influence: List[StructuralInfluence] = []  # R3-5: evaluated identity only
+        structural_influence: List[StructuralInfluence] = []  # R3-5: every factor node, every graph
         if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
             if correlation_active:
                 suppressed_attributions.append(SUPPRESSED_ATTR_FACTOR_SENSITIVITY)
@@ -7529,13 +7529,14 @@ class RobustnessAnalyzerV2:
 
         # Compute structural influence for all factors
         factor_node_ids: List[str] = [s["node_id"] for s in sensitivities]
-        # R3-5 (DL #72 5872746926, AIQ 5872728325): when an identity is EVALUATED the SAME walk (one
+        # R3-5 (DL #72 5872746926, AIQ 5872728325) and ONE influence algorithm (AIQ 5872951506): on EVERY
+        # graph (an evaluated identity walked at its own partials) the SAME walk (one
         # pool, priced as `structural_influence`) continues past the uncertainty cohort to every other
         # factor node, so a factor with no observed value gets a score too. The cohort is walked first
         # and in the same order, so its raw sums and truncation are exactly today's; it is re-normalised
         # over itself below, so factor_sensitivity is byte-identical.
         every_factor: List[str] = []
-        if structural_influence_out is not None and evaluator._evaluated_identities:
+        if structural_influence_out is not None:
             in_cohort = set(factor_node_ids)
             every_factor = factor_node_ids + [
                 str(n.id) for n in request.graph.nodes if n.kind == "factor" and str(n.id) not in in_cohort
@@ -8273,8 +8274,11 @@ class RobustnessAnalyzerV2:
         for node_id in factor_node_ids:
             budget_hit = False
             path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
-            # Sum of absolute path strengths (multiple paths add)
-            raw_influences[node_id] = sum(abs(s) for s in path_strengths)
+            # EXPECTED NET effect (AIQ ruling #72 5875853496): signed path products — each already
+            # ∏(mean × exists_probability) — summed, THEN the magnitude, so offsetting channels
+            # cancel. Gross reach (Σ|path|) would call a factor a major driver when moving it barely
+            # moves the goal at its central estimates.
+            raw_influences[node_id] = abs(math.fsum(path_strengths))
             # An exhausted pool trips budget_hit on the factor's first walk call,
             # so factors that start after exhaustion are truncated too.
             if budget_hit:

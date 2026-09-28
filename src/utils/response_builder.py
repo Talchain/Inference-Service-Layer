@@ -299,7 +299,7 @@ class ResponseBuilder:
     def set_structural_influence(
         self, structural_influence: Optional[List[StructuralInfluence]]
     ) -> None:
-        """R3-5: structural influence over every factor node (evaluated identity only)."""
+        """R3-5: structural influence over every factor node, on every graph (AIQ 5872951506)."""
         self.structural_influence = structural_influence
 
     def set_node_levels(self, node_levels: Optional[List[NodeLevelFrame]]) -> None:

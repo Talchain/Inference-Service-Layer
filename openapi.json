@@ -4253,7 +4253,7 @@
                 "type": "null"
               }
             ],
-            "description": "Every factor node's structural influence on the goal: one cohort, one normalisation, an evaluated identity walked at its own partials. Present only when an identity was evaluated; absent otherwise.",
+            "description": "Every factor node's structural influence on the goal: one cohort, one normalisation, an evaluated identity walked at its own partials. Present on every graph where the factor phase runs; absent when it does not (no parameter uncertainty).",
             "title": "Structural Influence"
           },
           "timestamp": {
@@ -7154,7 +7154,7 @@
                 "type": "null"
               }
             ],
-            "description": "Every factor node's structural influence, one cohort and one normalisation. Present only when an identity was evaluated; absent otherwise.",
+            "description": "Every factor node's structural influence, one cohort and one normalisation. Present on every graph where the factor phase runs; absent when it does not.",
             "title": "Structural Influence"
           }
         },
