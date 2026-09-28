@@ -16,7 +16,7 @@ ROWS. (1) the served £59 option: p90 > 1.0 on the 0-1 frame (> £125,000), mean
 (node_levels[churn].level_out_of_domain_share and the limit's level_out_of_domain_fraction); (3) mutant: the cap
 read as a ceiling turns row 1 RED; (4) PLoT's '%' {0, 1} is that meaning ONLY on a 100-point frame (DL ISL #196
 5869037504): off it, [0, 1] is the frame, so no ceiling (the DL's probe, churn 19.8% on a 20-point frame with
-"<= 21%", keeps 0.733 / 0.6905); mutant: the domain applied regardless of frame turns row 4 RED.
+"<= 21%", keeps 0.731 / 0.6765 at da0dfb7); mutant: the domain applied regardless of frame turns row 4 RED.
 
 FIXTURE: ``journey_a_run3_status_quo_held_plot_c0f0a9a.json`` (``_provenance`` inside), the served ISL request,
 unedited. The DERIVED rows (``steep_churn_request``) are labelled as such: churn is held near 100% and one edge
@@ -65,7 +65,9 @@ STEEP_LIMIT = 0.99  # derived rows only: "churn <= 99%"
 # rebase: it was 1.0109026581600915 at 14f1a3a; ISL #193 (a1fa8ae, one central constant for a product identity)
 # moved it by ~£0.33 on plain staging, without this change. This change does not move it (the mean was never
 # clamped): the same value at a1fa8ae and on this branch.
-P59_MEAN_AT_STAGING = 1.0109000416302791
+# RE-PINNED on the merge of staging da0dfb7 (DL ISL #196 condition 1, 5871479347): the ISL train (#195, #197, #200)
+# moved it on plain staging, without this change; measured on the merged tree and equal to the DL's plain-train column.
+P59_MEAN_AT_STAGING = 1.0091303702058092
 
 
 def served_request() -> Dict[str, Any]:
@@ -297,7 +299,9 @@ FRAME20_LIMIT = 21.0 / 20.0  # "churn <= 21%" on that frame
 FRAME100_LIMIT = 1.01  # control: "churn <= 101%" on the 100-point frame ({0.99, 99})
 # Measured at plain staging a1fa8ae and at base 14f1a3a (identical) through the V2 route and the analyzer: the
 # probe's prob_satisfied with no ceiling. At d6defb4 (this PR before the guard) it was 1.0 for every option.
-FRAME20_PROB_WITHOUT_A_CEILING = {KEEP: 1.0, P59: 0.733, P54: 0.6905}
+# RE-PINNED on the merge of staging da0dfb7 (was 0.733 / 0.6905): the ISL train moved it on plain staging, without
+# this change (DL 5871479347 plain-train column).
+FRAME20_PROB_WITHOUT_A_CEILING = {KEEP: 1.0, P59: 0.731, P54: 0.6765}
 # The control's prob_satisfied at base/staging (no ceiling on a capless '%' node then): 0.546 / 0.509.
 FRAME100_PROB_AT_STAGING = {KEEP: 1.0, P59: 0.546, P54: 0.509}
 

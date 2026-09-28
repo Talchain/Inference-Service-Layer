@@ -184,12 +184,17 @@ def test_row3b_a_money_level_limit_at_or_above_the_frame_is_no_longer_certain(va
 #     goal 0.8   £59  0.71   -> 0.7105
 #     goal 1.0   £54  0.3695 -> 0.369
 #     limit 0.9  £54  0.486  -> 0.4855
+# RE-PINNED on the merge of staging da0dfb7 (DL ISL #196 condition 1, 5871479347): the ISL train (#195, #197, #200)
+# moved all six on PLAIN staging, without this change — measured at da0dfb7 itself (this file, plain tree):
+#     goal 0.8   £59 / £54  0.7105 / 0.641  -> 0.69   / 0.6205
+#     goal 1.0   £59 / £54  0.493  / 0.369  -> 0.4705 / 0.357
+#     limit 0.9  £59 / £54  0.385  / 0.4855 -> 0.403  / 0.5055
 GOAL_PROBABILITY_AT_BASE = {
-    0.8: {KEEP: 0.0, P59: 0.7105, P54: 0.641},  # inside the domain: "MRR >= £100,000"
-    1.0: {KEEP: 0.0, P59: 0.493, P54: 0.369},  # at the frame, '>=': a clamped draw still meets it
+    0.8: {KEEP: 0.0, P59: 0.69, P54: 0.6205},  # inside the domain: "MRR >= £100,000"
+    1.0: {KEEP: 0.0, P59: 0.4705, P54: 0.357},  # at the frame, '>=': a clamped draw still meets it
 }
 LIMIT_PROBABILITY_AT_BASE = {
-    0.9: {KEEP: 1.0, P59: 0.385, P54: 0.4855},  # inside the domain: "MRR <= £112,500"
+    0.9: {KEEP: 1.0, P59: 0.403, P54: 0.5055},  # inside the domain: "MRR <= £112,500"
 }
 
 
