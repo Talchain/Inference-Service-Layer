@@ -797,7 +797,9 @@ class TestOutOfDomainLevelsAreDisclosedNeverAbsorbed:
     def test_the_share_of_levels_outside_the_domain_is_disclosed(self, response):
         churn, goal = frame_of(response, CHURN), frame_of(response, GOAL)
         assert (churn.level_domain_min, churn.level_domain_max) == (0.0, None)
-        assert (goal.level_domain_min, goal.level_domain_max) == (0.0, 1.0)
+        # MRR is money: a floor, no ceiling. Its cap is CEE's normalisation frame, not a limit (AIQ #72
+        # 5866289608; tests/unit/test_level_domain_from_unit_meaning.py). Its share counts levels below 0.
+        assert (goal.level_domain_min, goal.level_domain_max) == (0.0, None)
         assert churn.level_out_of_domain_share is not None
         assert churn.level_out_of_domain_share[GRANDFATHER] > 0.5
         assert churn.level_out_of_domain_share[KEEP] == 0.0

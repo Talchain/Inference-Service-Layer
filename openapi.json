@@ -3588,7 +3588,7 @@
                 "type": "null"
               }
             ],
-            "description": "The levels the target quantity can physically take, in the frame of `value` (e.g. {min: 0, max: 1} for a percentage). Report-only: for a 'level' constraint ISL returns, per option, the share of draws whose level falls outside it (`level_out_of_domain_fraction`), so the caller can tell a check that rests on impossible levels from a real one. Never changes a probability."
+            "description": "The levels the target quantity can physically take, in the frame of `value` (e.g. {min: 0, max: 1} for a percentage): the caller's unit meaning. For a 'level' constraint ISL returns, per option, the share of draws whose level falls outside it (`level_out_of_domain_fraction`, report-only), so the caller can tell a check that rests on impossible levels from a real one. When the target node is ANCHORED (node_levels) and its frame is 100 points, it is also that node's level domain: the levels ISL reports for the node, this limit's included, are clamped to it."
           },
           "node_id": {
             "description": "ID of the node this constraint applies to (must exist in graph)",
@@ -4622,7 +4622,7 @@
                 "type": "null"
               }
             ],
-            "description": "Anchored nodes only: the highest level, in its own frame. 1 when the node carries a cap (its level is a share of that cap); absent otherwise.",
+            "description": "Anchored nodes only: the highest level, in its own frame, from the UNIT's meaning (AIQ #72 5866289608): the level_domain.max of a 'level' limit on the node (PLoT sends 1 for a '%' limit), and ONLY when the node's frame (execution_frame, else observed_state.cap, else the value/raw_value pair) is 100 points: off a 100-point frame PLoT's {0, 1} means [0, frame], the frame, not 100%, so no ceiling is stated. Absent otherwise (money, counts). ISL does not read observed_state.cap as a ceiling.",
             "title": "Level Domain Max"
           },
           "level_domain_min": {
@@ -4634,7 +4634,7 @@
                 "type": "null"
               }
             ],
-            "description": "Anchored nodes only: the lowest level the quantity can take, in its own frame. 0 when the held level is non-negative (AIQ 5855046894 (2)); absent otherwise.",
+            "description": "Anchored nodes only: the lowest level the quantity can take, in its own frame: the caller's unit meaning when a 'level' limit on the node carries a level_domain; otherwise 0 when the held level is non-negative (AIQ 5855046894 (2)); absent otherwise.",
             "title": "Level Domain Min"
           },
           "level_out_of_domain_share": {
