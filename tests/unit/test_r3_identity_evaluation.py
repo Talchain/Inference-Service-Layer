@@ -1054,6 +1054,30 @@ class TestTheCentralScale:
         assert 0.5 * difference_form < float(at_59.std()) < 1.5 * difference_form
         assert float(at_59.mean()) == pytest.approx(float(served["increase_price_to_59"].mean()), abs=0.005)
 
+    def test_a_sampled_non_root_parent_is_read_at_its_centre_in_k(self):
+        """DL ISL #193 CHANGES_REQUIRED: churn is non-root, uncertain and not an operand. With a
+        churn -> MRR edge, k was computed with churn at base 0 while every draw reads it at its centre
+        (3%): the £59 effect fell to +£14,389.35 (16 SE). Base 14f1a3a gives +£14,673.50 (SE £17.31).
+        Mutant: k computed with no factor centres -> RED."""
+        d = wire(identity=PRODUCT)
+        d["graph"]["edges"].append(
+            {
+                "from": "monthly_churn",
+                "to": MRR,
+                "strength": {"mean": -0.5, "std": 0.1},
+                "exists_probability": 0.8,
+            }
+        )
+        samples = option_samples(d)
+        diff = (samples["increase_price_to_59"] - samples["keep_current_49_price"]) * FRAMES[MRR]["frame"]
+        assert abs(float(diff.mean()) - 14_673.50) < 3 * 17.31
+
+    def test_k_reads_the_sampler_centres(self):
+        request = RobustnessRequestV2.model_validate(wire(identity=PRODUCT))
+        centres = rav2.factor_centres(request)
+        assert centres[SUBS] == 0.15 and centres[PRICE] == 0.245
+        assert "monthly_churn" in centres
+
     def test_the_served_59_effect_stays_within_3_se(self, served):
         """Paul's served wire (price std 1e-4): the £59 effect is +£14,381.96 at base; one central k keeps
         it within 3 SE. Mutant: k with each belief edge at its bare mean (not x exists_probability) moves
