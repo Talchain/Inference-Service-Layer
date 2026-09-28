@@ -149,7 +149,7 @@ class CritiqueIdentityV2(BaseModel):
     withheld_reason: str = Field(
         ...,
         description="identity_frame_missing | identity_operand_missing | "
-        "identity_zero_level | identity_inconsistent",
+        "identity_zero_level | identity_inconsistent | identity_scale_out_of_range",
     )
     reconstructed: Optional[float] = Field(
         None, description="What the identity's inputs give today, user units"
