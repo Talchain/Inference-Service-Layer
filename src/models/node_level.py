@@ -78,15 +78,18 @@ class NodeLevelFrame(BaseModel):
     level_domain_min: Optional[float] = Field(
         None,
         description=(
-            "Anchored nodes only: the lowest level the quantity can take, in its own frame. 0 when "
-            "the held level is non-negative (AIQ 5855046894 (2)); absent otherwise."
+            "Anchored nodes only: the lowest level the quantity can take, in its own frame: the "
+            "caller's unit meaning when a 'level' limit on the node carries a level_domain; otherwise "
+            "0 when the held level is non-negative (AIQ 5855046894 (2)); absent otherwise."
         ),
     )
     level_domain_max: Optional[float] = Field(
         None,
         description=(
-            "Anchored nodes only: the highest level, in its own frame. 1 when the node carries a cap "
-            "(its level is a share of that cap); absent otherwise."
+            "Anchored nodes only: the highest level, in its own frame, from the UNIT's meaning, never "
+            "the frame (AIQ #72 5866289608): the level_domain.max of a 'level' limit on the node (PLoT "
+            "sends 1 for a '%' limit); absent otherwise (money, counts). observed_state.cap is a "
+            "normalisation frame and is not read."
         ),
     )
     level_out_of_domain_share: Optional[Dict[str, float]] = Field(

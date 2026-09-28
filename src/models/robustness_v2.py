@@ -826,11 +826,13 @@ class GoalConstraint(BaseModel):
         None,
         description=(
             "The levels the target quantity can physically take, in the frame of "
-            "`value` (e.g. {min: 0, max: 1} for a percentage). Report-only: for a "
-            "'level' constraint ISL returns, per option, the share of draws whose "
-            "level falls outside it (`level_out_of_domain_fraction`), so the caller "
-            "can tell a check that rests on impossible levels from a real one. "
-            "Never changes a probability."
+            "`value` (e.g. {min: 0, max: 1} for a percentage): the caller's unit "
+            "meaning. For a 'level' constraint ISL returns, per option, the share of "
+            "draws whose level falls outside it (`level_out_of_domain_fraction`, "
+            "report-only), so the caller can tell a check that rests on impossible "
+            "levels from a real one. When the target node is ANCHORED (node_levels), "
+            "it is also that node's level domain: the levels ISL reports for the node, "
+            "this limit's included, are clamped to it."
         ),
     )
 

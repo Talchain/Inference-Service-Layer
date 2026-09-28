@@ -479,7 +479,6 @@ _OBSERVED_STATE_MENTION_MANIFEST = {
     "_analyze_robustness_v2_enhanced",  # Track S provenance echo (source/type)
     # --- B1a anchored-delta attestation (provenance and presence, never a value) ---
     "level_anchor_source",  # reads observed_state.source: WHO attests a held level
-    "anchored_level_domain",  # reads observed_state.cap for PRESENCE: capped frame -> <= 1
     "todays_level_is_attested",  # B1a-5: reads observed_state.source, WHO attests today's level
     "_node_level_frames",  # echoes observed_state.source into the node_levels disclosure
 }

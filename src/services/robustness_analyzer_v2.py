@@ -53,6 +53,7 @@ from src.models.robustness_v2 import (
     GraphV2,
     InferenceWarning,
     InterventionOption,
+    LevelDomain,
     NodeV2,
     ObjectiveRanking,
     OptionResult,
@@ -1138,18 +1139,46 @@ def todays_level_is_attested(node: NodeV2) -> bool:
     return source is not None and source in LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE
 
 
-def anchored_level_domain(node: NodeV2, level: float) -> Tuple[Optional[float], Optional[float]]:
+def anchored_level_domain(
+    level: float, unit_domain: Optional[LevelDomain] = None
+) -> Tuple[Optional[float], Optional[float]]:
     """The levels an anchored quantity can take, in its own frame (AIQ 5855046894 (2)).
 
-    ``>= 0``, unless the held level is itself negative (then the quantity is evidently
-    signed and has no floor here); ``<= 1`` when the node carries a ``cap`` (its level
-    is a share of that cap), unless the held level already exceeds 1. The cap is read
-    for its PRESENCE only.
+    The bounds come from the UNIT's meaning, never from the frame (AIQ #72 5866289608).
+    ``observed_state.cap`` is NOT read: it is a normalisation frame (MRR's £125,000).
+    CEE's factor enricher mints one only for non-'%' quantities above 1 (money, counts),
+    so reading its presence as a ceiling clamped money at its frame. ISL does not parse unit strings (the caller owns
+    units); the unit meaning it receives is ``unit_domain``: the ``level_domain`` PLoT
+    mints for a '%' LEVEL limit on this node (``levelDomainFor``: percent/share ->
+    [0, 1]), in the node's level frame.
+
+    * ceiling: the unit's, when it states one; otherwise none (money, counts).
+    * floor: the unit's, when it states one; otherwise ``>= 0`` unless the held level is
+      itself negative (then the quantity is evidently signed and has no floor here).
+
+    A stated bound the held level already breaks is not applied (a 110% net revenue
+    retention held above a [0, 1] domain keeps no ceiling), so the status quo always
+    reproduces its own level.
     """
-    observed = node.observed_state
-    lower = 0.0 if level >= 0.0 else None
-    upper = 1.0 if observed is not None and observed.cap is not None and level <= 1.0 else None
+    lower: Optional[float] = 0.0 if level >= 0.0 else None
+    upper: Optional[float] = None
+    if unit_domain is not None:
+        if unit_domain.min is not None and level >= unit_domain.min:
+            lower = unit_domain.min
+        if unit_domain.max is not None and level <= unit_domain.max:
+            upper = unit_domain.max
     return lower, upper
+
+
+def unit_level_domains(request: RobustnessRequestV2) -> Dict[str, LevelDomain]:
+    """Per node, the unit meaning the caller sent for it: the ``level_domain`` of the first
+    'level' limit on that node that carries one (PLoT mints only ``{0, 1}``, for a '%'
+    limit). A 'delta' limit's domain is ignored, as everywhere else: a change has none."""
+    domains: Dict[str, LevelDomain] = {}
+    for constraint in request.goal_constraints or []:
+        if constraint.value_frame == "level" and constraint.level_domain is not None:
+            domains.setdefault(constraint.node_id, constraint.level_domain)
+    return domains
 
 
 def resolve_factor_central_value(
@@ -4427,6 +4456,7 @@ class RobustnessAnalyzerV2:
         no level at all.
         """
         noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
+        unit_domains = unit_level_domains(request)
         frames: List[NodeLevelFrame] = []
         for node in request.graph.nodes:
             if not parent_map.get(node.id):
@@ -4445,7 +4475,7 @@ class RobustnessAnalyzerV2:
                 reason = None
             if reason is None:
                 assert level is not None and author is not None
-                low, high = anchored_level_domain(node, level)
+                low, high = anchored_level_domain(level, unit_domains.get(node.id))
                 frames.append(
                     NodeLevelFrame(
                         node_id=node.id,
