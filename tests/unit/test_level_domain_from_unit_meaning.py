@@ -14,7 +14,9 @@ in the node's own level frame. So a node's ceiling (and floor, where stated) com
 ROWS. (1) the served £59 option: p90 > 1.0 on the 0-1 frame (> £125,000), mean unchanged (1.0109 -> £126,363);
 (2) a '%' node (monthly churn) bounded to [0, 1] by its limit's unit meaning, with the out-of-domain share disclosed
 (node_levels[churn].level_out_of_domain_share and the limit's level_out_of_domain_fraction); (3) mutant: the cap
-read as a ceiling turns row 1 RED.
+read as a ceiling turns row 1 RED; (4) PLoT's '%' {0, 1} is that meaning ONLY on a 100-point frame (DL ISL #196
+5869037504): off it, [0, 1] is the frame, so no ceiling (the DL's probe, churn 19.8% on a 20-point frame with
+"<= 21%", keeps 0.733 / 0.6905); mutant: the domain applied regardless of frame turns row 4 RED.
 
 FIXTURE: ``journey_a_run3_status_quo_held_plot_c0f0a9a.json`` (``_provenance`` inside), the served ISL request,
 unedited. The DERIVED rows (``steep_churn_request``) are labelled as such: churn is held near 100% and one edge
@@ -33,10 +35,11 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pytest
 
-from src.models.robustness_v2 import LevelDomain, RobustnessRequestV2
+from src.models.robustness_v2 import LevelDomain, NodeV2, RobustnessRequestV2
 from src.services.robustness_analyzer_v2 import (
     RobustnessAnalyzerV2,
     anchored_level_domain,
+    node_level_frame,
     unit_level_domains,
 )
 
@@ -58,8 +61,11 @@ CHURN_LIMIT = "agent-lane:monthly_churn:<="
 STEEP_HELD = 0.99  # derived rows only: churn held at 99%
 STEEP_LIMIT = 0.99  # derived rows only: "churn <= 99%"
 
-# Measured at base 14f1a3a through the V2 route (the served card's "mean £126,363").
-P59_MEAN_AT_BASE = 1.0109026581600915
+# Measured at plain staging a1fa8ae through the V2 route (the served card's "mean £126,363"). RE-PINNED on the
+# rebase: it was 1.0109026581600915 at 14f1a3a; ISL #193 (a1fa8ae, one central constant for a product identity)
+# moved it by ~£0.33 on plain staging, without this change. This change does not move it (the mean was never
+# clamped): the same value at a1fa8ae and on this branch.
+P59_MEAN_AT_STAGING = 1.0109000416302791
 
 
 def served_request() -> Dict[str, Any]:
@@ -69,25 +75,30 @@ def served_request() -> Dict[str, Any]:
 
 
 def steep_churn_request(
-    *, level_domain: bool = True, churn_cap: Optional[float] = None
+    *,
+    level_domain: bool = True,
+    churn_cap: Optional[float] = None,
+    churn_raw_value: float = STEEP_HELD * 100,
+    limit_value: float = STEEP_LIMIT,
 ) -> Dict[str, Any]:
     """DERIVED from the served request, so that churn's LEVELS leave [0, 1] and a ceiling has something to bind
     on: churn is held at 99% (was 3%), ``price_related_cancellation_risk -> monthly_churn`` is as steep as an edge
     can be (strength -1, the engine's bound; was 0.0075), and the limit reads "churn <= 99%" so that the draws
     that fail it are the ones pushed toward or past 100%. Optionally the limit loses its unit meaning
     (``level_domain``), or churn carries a cap (the '%'-with-cap-100 shape CEE's graph-data-integrity transform
-    allows)."""
+    allows), or churn's ``raw_value`` puts it on another frame (the pair ``{0.99, raw}`` is ``raw / 0.99`` points)
+    with the limit restated in that frame (``limit_value``)."""
     d = served_request()
     (edge,) = [e for e in d["graph"]["edges"] if e["from"] == RISK and e["to"] == CHURN]
     edge["strength"] = {"mean": -1.0, "std": 0.05}
     (churn,) = [n for n in d["graph"]["nodes"] if n["id"] == CHURN]
     churn["observed_state"].update(
-        value=STEEP_HELD, baseline=STEEP_HELD, raw_value=STEEP_HELD * 100
+        value=STEEP_HELD, baseline=STEEP_HELD, raw_value=churn_raw_value
     )
     if churn_cap is not None:
         churn["observed_state"]["cap"] = churn_cap
     (limit,) = [c for c in d["goal_constraints"] if c["constraint_id"] == CHURN_LIMIT]
-    limit["value"] = STEEP_LIMIT
+    limit["value"] = limit_value
     if not level_domain:
         limit.pop("level_domain")
     d["n_samples"] = 2_000
@@ -167,7 +178,7 @@ class TestRow1TheServedMoneyGoalIsNotClampedAtItsCap:
     def test_the_59_option_mean_is_unchanged_and_below_its_p90(self, served_wire):
         """The mean was never clamped; with the ceiling gone, mean <= p90 holds by itself."""
         outcome = wire_option(served_wire, P59)["outcome"]
-        assert outcome["mean"] == pytest.approx(P59_MEAN_AT_BASE, abs=1e-12)
+        assert outcome["mean"] == pytest.approx(P59_MEAN_AT_STAGING, abs=1e-12)
         assert outcome["mean"] <= outcome["p90"], outcome
 
     def test_the_goal_band_is_its_own_percentiles_floored_at_zero(self, served_wire, served_v1):
@@ -272,6 +283,86 @@ class TestRow2APercentNodeIsBoundedByItsUnitMeaning:
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Row 4 — PLoT's '%' {0, 1} is the unit's meaning ONLY on a 100-point frame (DL ISL #196 5869037504)
+# ---------------------------------------------------------------------------------------------------------
+#
+# PLoT sends level_domain {0, 1} for EVERY '%' level limit (``levelDomainFor``), including the deferred '%' rung
+# where the target's own frame is not 100 points. There [0, 1] means [0, frame]: on a 20-point frame it is
+# [0%, 20%], the FRAME, not the unit's [0%, 100%]. Read as a ceiling it certified "churn <= 21%" for every draw.
+# DERIVED (the DL's probe ``pct_frame20_le21``): churn held at 19.8% on a 20-point pair frame
+# ({value 0.99, raw_value 19.8}), the limit "<= 21%" restated in that frame (21 / 20 = 1.05).
+
+FRAME20_RAW = 19.8  # {0.99, 19.8}: a 20-point pair frame (19.8 / 0.99)
+FRAME20_LIMIT = 21.0 / 20.0  # "churn <= 21%" on that frame
+FRAME100_LIMIT = 1.01  # control: "churn <= 101%" on the 100-point frame ({0.99, 99})
+# Measured at plain staging a1fa8ae and at base 14f1a3a (identical) through the V2 route and the analyzer: the
+# probe's prob_satisfied with no ceiling. At d6defb4 (this PR before the guard) it was 1.0 for every option.
+FRAME20_PROB_WITHOUT_A_CEILING = {KEEP: 1.0, P59: 0.733, P54: 0.6905}
+# The control's prob_satisfied at base/staging (no ceiling on a capless '%' node then): 0.546 / 0.509.
+FRAME100_PROB_AT_STAGING = {KEEP: 1.0, P59: 0.546, P54: 0.509}
+
+
+class TestRow4APercentDomainIsTheUnitMeaningOnlyOnA100PointFrame:
+    @pytest.fixture(scope="class")
+    def frame20(self):
+        return analyse(
+            steep_churn_request(churn_raw_value=FRAME20_RAW, limit_value=FRAME20_LIMIT)
+        )
+
+    @pytest.fixture(scope="class")
+    def frame20_without_domain(self):
+        return analyse(
+            steep_churn_request(
+                churn_raw_value=FRAME20_RAW, limit_value=FRAME20_LIMIT, level_domain=False
+            )
+        )
+
+    @pytest.fixture(scope="class")
+    def frame100(self):
+        return analyse(steep_churn_request(limit_value=FRAME100_LIMIT))
+
+    def test_the_probe_is_not_a_certified_pass(self, frame20):
+        """RED at d6defb4: prob_satisfied 1.0 for every option (churn clamped at 1.0 = 20% <= 21%)."""
+        got = {o: churn_limit_row(frame20, o).prob_satisfied for o in (KEEP, P59, P54)}
+        assert got == FRAME20_PROB_WITHOUT_A_CEILING
+
+    def test_off_a_100_point_frame_the_limit_reads_as_if_no_domain_were_sent(
+        self, frame20, frame20_without_domain
+    ):
+        """Bound by identity: on a 20-point frame the '%' domain moves nothing the node reports — every option's
+        probability and failure margin equal the same request's with the limit's level_domain removed."""
+        for option_id in (KEEP, P59, P54):
+            with_domain = churn_limit_row(frame20, option_id)
+            without = churn_limit_row(frame20_without_domain, option_id)
+            assert with_domain.prob_satisfied == without.prob_satisfied, option_id
+            assert with_domain.failure_margin_median == without.failure_margin_median, option_id
+        assert churn_limit_row(frame20, P59).prob_satisfied < 1.0
+
+    def test_off_a_100_point_frame_the_node_states_a_floor_and_no_ceiling(self, frame20):
+        """RED at d6defb4: (0.0, 1.0) — the frame (20%) stated as the ceiling."""
+        frame = frame_of(frame20, CHURN)
+        assert (frame.level_domain_min, frame.level_domain_max) == (0.0, None)
+
+    def test_control_on_a_100_point_frame_the_domain_is_kept(self, frame100):
+        """CONTROL: the same shape on a 100-point pair frame ({0.99, 99}) keeps [0, 1] = [0%, 100%], so
+        "churn <= 101%" cannot fail (it read 0.546 / 0.509 at staging, on impossible levels above 100%)."""
+        frame = frame_of(frame100, CHURN)
+        assert (frame.level_domain_min, frame.level_domain_max) == (0.0, 1.0)
+        got = {o: churn_limit_row(frame100, o).prob_satisfied for o in (KEEP, P59, P54)}
+        assert got == {KEEP: 1.0, P59: 1.0, P54: 1.0}
+        assert got != FRAME100_PROB_AT_STAGING
+
+    def test_unit_meaning_is_withheld_for_a_node_off_a_100_point_frame(self):
+        """RED at d6defb4: the 20-point node's limit domain was taken as its unit meaning."""
+        d = steep_churn_request(churn_raw_value=FRAME20_RAW, limit_value=FRAME20_LIMIT)
+        assert unit_level_domains(RobustnessRequestV2.model_validate(d)) == {}
+        control = steep_churn_request(limit_value=FRAME100_LIMIT)
+        assert unit_level_domains(RobustnessRequestV2.model_validate(control)) == {
+            CHURN: LevelDomain(min=0.0, max=1.0)
+        }
+
+
+# ---------------------------------------------------------------------------------------------------------
 # The rule itself, one row per shape
 # ---------------------------------------------------------------------------------------------------------
 
@@ -308,6 +399,39 @@ UNIT_PERCENT = LevelDomain(min=0.0, max=1.0)
 )
 def test_the_domain_is_the_unit_meaning_and_the_sign_rule(level, unit_domain, expected):
     assert anchored_level_domain(level, unit_domain) == expected
+
+
+def _node(observed: Optional[Dict[str, Any]], execution_frame: Optional[Dict[str, Any]] = None) -> NodeV2:
+    d: Dict[str, Any] = {"id": "n", "kind": "factor", "label": "n"}
+    if observed is not None:
+        d["observed_state"] = observed
+    if execution_frame is not None:
+        d["execution_frame"] = execution_frame
+    return NodeV2.model_validate(d)
+
+
+@pytest.mark.parametrize(
+    ("observed", "execution_frame", "expected"),
+    [
+        pytest.param({"value": 0.03, "raw_value": 3}, None, 100.0, id="served churn pair {0.03, 3}: 100"),
+        pytest.param({"value": 0.07, "raw_value": 7}, None, 100.0, id="float tail 7/0.07: coherent, 100"),
+        pytest.param({"value": 0.99, "raw_value": 19.8}, None, 19.8 / 0.99, id="pair {0.99, 19.8}: 20"),
+        pytest.param({"value": 0.2, "cap": 100}, None, 100.0, id="cap 100"),
+        pytest.param({"value": 0.2, "cap": 20, "raw_value": 20}, None, 20.0, id="cap 20 outranks a 100 pair"),
+        pytest.param(
+            {"value": 0.03, "raw_value": 3},
+            {"frame": 20, "carrier": "scale_frame"},
+            20.0,
+            id="PLoT's execution_frame (scale_frame 20) outranks a 100 pair",
+        ),
+        pytest.param({"value": 0.03}, None, None, id="no raw_value, no cap: unresolved"),
+        pytest.param({"value": 0.0, "raw_value": 0}, None, None, id="value 0: scale-ambiguous"),
+        pytest.param({"value": 0.5, "raw_value": 0.5}, None, None, id="{x, x}: not a frame"),
+        pytest.param(None, None, None, id="no observed_state"),
+    ],
+)
+def test_the_node_frame_is_plots_reader_on_the_rungs_isl_can_see(observed, execution_frame, expected):
+    assert node_level_frame(_node(observed, execution_frame)) == expected
 
 
 def test_only_a_level_limit_carries_unit_meaning_for_its_node():

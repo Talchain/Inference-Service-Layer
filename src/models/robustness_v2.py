@@ -830,9 +830,9 @@ class GoalConstraint(BaseModel):
             "meaning. For a 'level' constraint ISL returns, per option, the share of "
             "draws whose level falls outside it (`level_out_of_domain_fraction`, "
             "report-only), so the caller can tell a check that rests on impossible "
-            "levels from a real one. When the target node is ANCHORED (node_levels), "
-            "it is also that node's level domain: the levels ISL reports for the node, "
-            "this limit's included, are clamped to it."
+            "levels from a real one. When the target node is ANCHORED (node_levels) "
+            "and its frame is 100 points, it is also that node's level domain: the "
+            "levels ISL reports for the node, this limit's included, are clamped to it."
         ),
     )
 

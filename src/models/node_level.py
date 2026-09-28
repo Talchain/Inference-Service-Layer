@@ -88,11 +88,10 @@ class NodeLevelFrame(BaseModel):
         description=(
             "Anchored nodes only: the highest level, in its own frame, from the UNIT's meaning (AIQ "
             "#72 5866289608): the level_domain.max of a 'level' limit on the node (PLoT sends 1 for a "
-            "'%' limit); absent otherwise (money, counts). ISL does not read observed_state.cap as a "
-            "ceiling. EXCEPTION, PLoT's deferred '%' rung: when a '%' target's own frame (its cap, else "
-            "scale_frame, else the value/raw_value pair) is not 100 percentage points, PLoT "
-            "(levelDomainFor) still sends {0, 1}, and on that frame [0, 1] means [0, frame], so this "
-            "ceiling is then the frame (e.g. 20%), not 100%."
+            "'%' limit), and ONLY when the node's frame (execution_frame, else observed_state.cap, "
+            "else the value/raw_value pair) is 100 points: off a 100-point frame PLoT's {0, 1} means "
+            "[0, frame], the frame, not 100%, so no ceiling is stated. Absent otherwise (money, "
+            "counts). ISL does not read observed_state.cap as a ceiling."
         ),
     )
     level_out_of_domain_share: Optional[Dict[str, float]] = Field(

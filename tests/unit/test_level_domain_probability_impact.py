@@ -12,11 +12,16 @@ Both are corrections: the head's figures ARE the share of the analyzer's own (un
 what the rows bind to. Where the threshold sits INSIDE [0, 1], or exactly at the frame for a '>=' comparison, a
 clamp at 1.0 cannot change a comparison, so the figures are byte-identical at base and head (the controls).
 
-Measured at base 14f1a3a and head 4bb0519 with this file's configuration (seed 972664972, n_samples 2000):
+Measured at plain staging a1fa8ae and on this branch rebased onto it, with this file's configuration (seed
+972664972, n_samples 2000); the same figures as at base 14f1a3a -> head 4bb0519 before the rebase:
     goal_threshold 1.1   £59 probability_of_goal   0.0 -> 0.358   (£54 0.0 -> 0.232)
     mrr <= 1.1 limit     £59 prob_satisfied        1.0 -> 0.642   (£54 1.0 -> 0.768)
     mrr <= 1.0 limit     £59 prob_satisfied        1.0 -> 0.507   (at the frame: a '<=' moves)
     goal_threshold 1.0   £59 probability_of_goal   0.493 == 0.493 (at the frame: a '>=' does not)
+
+NOT byte-identical, and not claimed: the limit's FAILURE MARGIN. Inside the frame (mrr <= 0.9) the probabilities
+are identical, but a failing draw is no longer clipped at 1.0, so failure_margin_median for £59 moves 0.100 ->
+0.239 (the median failing level was 1.0, the clip; it is now the draw's own). That is the same correction.
 
 FIXTURE: the served journey A run 3 ISL request (``_provenance`` inside), with only the run's size, analysis set,
 threshold and one added limit changed, as each row states.
@@ -173,13 +178,18 @@ def test_row3b_a_money_level_limit_at_or_above_the_frame_is_no_longer_certain(va
 # CONTROLS — where a clamp at 1.0 cannot change a comparison, the figures are byte-identical at base and head
 # ---------------------------------------------------------------------------------------------------------
 
-# Measured at base 14f1a3a through the analyzer, this file's configuration; identical at head 4bb0519.
+# Measured at plain staging a1fa8ae through the analyzer, this file's configuration; identical on this branch.
+# RE-PINNED on the rebase (was measured at 14f1a3a): ISL #193 (a1fa8ae, one central constant for a product
+# identity) moved three figures by one draw in 2,000 on plain staging, without this change:
+#     goal 0.8   £59  0.71   -> 0.7105
+#     goal 1.0   £54  0.3695 -> 0.369
+#     limit 0.9  £54  0.486  -> 0.4855
 GOAL_PROBABILITY_AT_BASE = {
-    0.8: {KEEP: 0.0, P59: 0.71, P54: 0.641},  # inside the domain: "MRR >= £100,000"
-    1.0: {KEEP: 0.0, P59: 0.493, P54: 0.3695},  # at the frame, '>=': a clamped draw still meets it
+    0.8: {KEEP: 0.0, P59: 0.7105, P54: 0.641},  # inside the domain: "MRR >= £100,000"
+    1.0: {KEEP: 0.0, P59: 0.493, P54: 0.369},  # at the frame, '>=': a clamped draw still meets it
 }
 LIMIT_PROBABILITY_AT_BASE = {
-    0.9: {KEEP: 1.0, P59: 0.385, P54: 0.486},  # inside the domain: "MRR <= £112,500"
+    0.9: {KEEP: 1.0, P59: 0.385, P54: 0.4855},  # inside the domain: "MRR <= £112,500"
 }
 
 
