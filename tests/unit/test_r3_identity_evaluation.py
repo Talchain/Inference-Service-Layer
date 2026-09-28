@@ -1196,6 +1196,12 @@ def fifty_nine_first(d: Dict[str, Any]) -> Dict[str, Any]:
     return d
 
 
+def definitions_of(d: Dict[str, Any]) -> Dict[Tuple[str, str], float]:
+    """``definitional_strengths`` as every sampler calls it: at the request's own sampler centres."""
+    request = RobustnessRequestV2.model_validate(d)
+    return rav2.definitional_strengths(request.graph, rav2.factor_centres(request))
+
+
 class TestDefinitionsDrawNothing:
     @pytest.mark.parametrize("order", [lambda d: d, fifty_nine_first], ids=["served", "59_first"])
     def test_a_definitions_ignored_parameters_move_nothing(self, order):
@@ -1214,7 +1220,7 @@ class TestDefinitionsDrawNothing:
     def test_definitions_consume_no_draws(self):
         """Belief edges draw exactly what they would if the definitional edges were not in the graph."""
         graph = graph_of(wire(identity=PRODUCT))
-        fixed = rav2.definitional_strengths(graph)
+        fixed = definitions_of(wire(identity=PRODUCT))
         assert set(fixed) == set(DEFINITIONS)
         with_defs = rav2.DualUncertaintySampler(graph.edges, rav2.SeededRNG(7), fixed)
         without = rav2.DualUncertaintySampler(
@@ -1227,19 +1233,195 @@ class TestDefinitionsDrawNothing:
 
     def test_a_definition_sits_at_its_central_strength_and_lists_no_existence_rate(self):
         graph = graph_of(wire(identity=PRODUCT))
-        assert rav2.definitional_strengths(graph) == {
+        fixed = definitions_of(wire(identity=PRODUCT))
+        assert fixed == {
             (PRICE, MRR): pytest.approx(0.5 * 0.8),
             (SUBS, MRR): pytest.approx(0.15 * 0.8),
         }
-        sampler = rav2.DualUncertaintySampler(
-            graph.edges, rav2.SeededRNG(7), rav2.definitional_strengths(graph)
-        )
+        sampler = rav2.DualUncertaintySampler(graph.edges, rav2.SeededRNG(7), fixed)
         sampler.sample_edge_configuration()
         rates = sampler.get_existence_rates()
         assert f"{PRICE}->{MRR}" not in rates and f"{SUBS}->{MRR}" not in rates
         assert f"{OTHER}->{MRR}" in rates  # an undeclared addend is still a belief
 
     def test_no_evaluated_identity_no_fixed_edges(self):
-        assert rav2.definitional_strengths(graph_of(wire(identity=None))) == {}
+        assert definitions_of(wire(identity=None)) == {}
         frames = {k: v for k, v in FRAMES.items() if k != PRICE}  # identity_frame_missing: withheld
-        assert rav2.definitional_strengths(graph_of(wire(frames=frames))) == {}
+        assert definitions_of(wire(frames=frames)) == {}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# AIQ #72 5868227452 (DL ISL #193 non-blocking note): the ONE central scale k must lie in [0.5, 2], else the
+# product is withheld as ``identity_scale_out_of_range``. A belief parent of MRR carrying L at the centre gives
+# k = (o - A - L) / term = (74,000 - L) / 73,500 with the addend declared; the reconciliation (which ignores L)
+# still passes, so only this check can catch it.
+# ---------------------------------------------------------------------------------------------------------
+
+
+def with_belief_parent(k: float) -> Dict[str, Any]:
+    """The addend wire plus a root belief parent ``promo`` (level 1.0, certain edge) whose central
+    contribution L = 125,000 x mean puts the scale at ``k``."""
+    d = wire(identity=WITH_ADDEND)
+    d["graph"]["nodes"].append(
+        {
+            "id": "promo",
+            "kind": "factor",
+            "label": "Promotion",
+            "observed_state": {"value": 1.0, "source": "brief_extraction"},
+        }
+    )
+    mean = (74_000.0 - k * 73_500.0) / FRAMES[MRR]["frame"]
+    d["graph"]["edges"].append(
+        {"from": "promo", "to": MRR, "strength": {"mean": mean, "std": 0.01}, "exists_probability": 1.0}
+    )
+    return d
+
+
+class TestTheScaleRange:
+    def test_the_served_scale_is_evaluated(self):
+        (plan,) = resolve_identity_plans(graph_of(wire())).values()
+        assert plan.evaluated and plan.scale == pytest.approx(74_000.0 / 73_500.0, rel=1e-12)
+
+    @pytest.mark.parametrize("k", [0.49, 2.01, 0.0, -0.1], ids=["0.49", "2.01", "L=o-A", "L>o-A"])
+    def test_a_scale_outside_half_to_two_is_withheld(self, k):
+        (plan,) = resolve_identity_plans(graph_of(with_belief_parent(k))).values()
+        assert plan.withheld_reason == rav2.IDENTITY_SCALE_OUT_OF_RANGE
+        assert plan.scale == pytest.approx(k, abs=1e-9)
+        assert plan.mismatch_share == pytest.approx(500.0 / 75_000.0)  # it DID reconcile (0.67%)
+
+    @pytest.mark.parametrize("k", [0.51, 1.99])
+    def test_a_scale_inside_is_evaluated(self, k):
+        (plan,) = resolve_identity_plans(graph_of(with_belief_parent(k))).values()
+        assert plan.evaluated and plan.scale == pytest.approx(k, abs=1e-9)
+
+    def test_on_the_decision_path_it_is_the_blocked_422_naming_the_scale(self):
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        response = TestClient(app).post(
+            "/api/v1/robustness/analyze/v2",
+            json=with_belief_parent(2.01),
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422, response.text[:300]
+        (critique,) = [
+            c for c in response.json()["critiques"] if c["code"] == "IDENTITY_NOT_EVALUATED"
+        ]
+        assert critique["identity"]["withheld_reason"] == "identity_scale_out_of_range"
+        assert "2.010, outside [0.5, 2]" in critique["message"]
+
+    def test_the_disclosure_and_the_filter_read_the_same_decision(self):
+        graph = graph_of(with_belief_parent(0.49))
+        (entry,) = rav2.identity_evaluations(graph)
+        assert not entry.evaluated and entry.withheld_reason == "identity_scale_out_of_range"
+        assert rav2.definitional_edges(graph) == set()  # withheld: its edges stay beliefs
+
+    @pytest.mark.parametrize(
+        "k, churn_mean, side",
+        [(0.52, 1.0, "below"), (1.97, -1.0, "above")],
+        ids=["centre_k_below_0.5", "centre_k_above_2"],
+    )
+    def test_the_samplers_hold_nothing_the_evaluator_withheld(self, k, churn_mean, side):
+        """R3-9 x the scale guard: ``definitional_strengths`` decides "evaluated" at the SAME sampler
+        centres as the evaluator. churn (non-root, sampled, not a participant) carries L only at its centre
+        (3%), so k crosses the band edge between base 0 and the centre: 0.519 -> 0.468, or 1.971 -> 2.022.
+        The evaluator withholds the identity, so its edges are beliefs and must be drawn. Mutant: the
+        samplers' fixed set read without the centres holds all three edges -> RED."""
+        d = with_belief_parent(k)
+        d["graph"]["edges"].append(
+            {
+                "from": "monthly_churn",
+                "to": MRR,
+                "strength": {"mean": churn_mean, "std": 0.1},
+                "exists_probability": 1.0,
+            }
+        )
+        request = RobustnessRequestV2.model_validate(d)
+        centres = rav2.factor_centres(request)
+        at_centre = resolve_identity_plans(request.graph, centres)[MRR]
+        at_base = resolve_identity_plans(request.graph)[MRR]
+        # Non-vacuity: the seam is live on this graph (the two readings disagree).
+        assert at_centre.withheld_reason == rav2.IDENTITY_SCALE_OUT_OF_RANGE and at_base.evaluated
+        assert (at_centre.scale < 0.5) if side == "below" else (at_centre.scale > 2.0)
+        assert definitions_of(d) == {}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# R3-9 x the scale guard, pinned at the SOURCE (Paul, #72 14:4xZ): "evaluated" now depends on k, and k on the
+# sampler centres, so a reader that omits them decides a different identity set from the evaluator's. That
+# seam bit three times (DL #193 CHANGES_REQUIRED, the bare-mean k, #197 x #199). Every call in src/ to a plan
+# reader or the evaluator must pass the centres, and every sampler must pass the fixed set.
+# ---------------------------------------------------------------------------------------------------------
+
+import ast  # noqa: E402
+
+SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
+CENTRE_READERS = {
+    "resolve_identity_plans",
+    "definitional_edges",
+    "definitional_strengths",
+    "identity_evaluations",
+}
+
+
+def _callee(node: ast.Call) -> Optional[str]:
+    if isinstance(node.func, ast.Name):
+        return node.func.id
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr
+    return None
+
+
+def unwired_calls(source: str, where: str) -> Tuple[Dict[str, int], list]:
+    """(calls seen per callee, the calls that drop the centres or the fixed set)."""
+    seen: Dict[str, int] = {}
+    bad = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _callee(node)
+        keywords = {kw.arg for kw in node.keywords}
+        if name in CENTRE_READERS:
+            ok = len(node.args) >= 2 or "factor_centres" in keywords
+        elif name == "SCMEvaluatorV2":
+            ok = len(node.args) >= 3 or "factor_centres" in keywords
+        elif name == "DualUncertaintySampler":
+            ok = len(node.args) >= 3 or "fixed" in keywords
+        else:
+            continue
+        seen[name] = seen.get(name, 0) + 1
+        if not ok:
+            bad.append(f"{where}:{node.lineno} {name}")
+    return seen, bad
+
+
+class TestTheCentresAreWiredAtEveryReader:
+    def test_every_reader_passes_the_centres_and_every_sampler_the_fixed_set(self):
+        seen: Dict[str, int] = {}
+        bad: list = []
+        for path in sorted(SRC_ROOT.rglob("*.py")):
+            counts, missing = unwired_calls(path.read_text(), str(path.relative_to(SRC_ROOT)))
+            for name, n in counts.items():
+                seen[name] = seen.get(name, 0) + n
+            bad.extend(missing)
+        # Non-vacuity: the scan sees the call sites it guards (5 samplers, the evaluator, the readers).
+        assert seen.get("DualUncertaintySampler", 0) >= 5, seen
+        assert seen.get("SCMEvaluatorV2", 0) >= 4, seen
+        assert seen.get("definitional_strengths", 0) >= 5, seen
+        assert all(seen.get(name, 0) >= 1 for name in CENTRE_READERS), seen
+        assert bad == [], bad
+
+    @pytest.mark.parametrize(
+        "mutant",
+        [
+            "plans = resolve_identity_plans(request.graph)",
+            "fixed = definitional_edges(graph)",
+            "evaluator = SCMEvaluatorV2(request.graph, epsilon_rng=rng)",
+            "sampler = DualUncertaintySampler(request.graph.edges, rng)",
+        ],
+    )
+    def test_the_scan_catches_a_dropped_argument(self, mutant):
+        """Mutant rows: each shape the seam took, with the centres or the fixed set dropped -> caught."""
+        _, bad = unwired_calls(mutant, "mutant")
+        assert len(bad) == 1, bad
