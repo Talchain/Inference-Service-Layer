@@ -1586,7 +1586,20 @@ def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
     return plans
 
 
-def identity_partials(graph: GraphV2) -> Dict[Tuple[str, str], float]:
+def factor_centres(request: RobustnessRequestV2) -> Dict[str, float]:
+    """Each sampled factor's central value, from THE resolver the sampler agrees with
+    (``resolve_factor_central_value``): what a draw reads it at, on average. The identity
+    scale ``k`` is computed at these (DL ISL #193 CHANGES_REQUIRED): a non-root, uncertain,
+    non-operand parent read at base 0 instead put ``k`` 4.7% off on a churn -> MRR shape."""
+    nodes = {node.id: node for node in request.graph.nodes}
+    return {
+        u.node_id: resolve_factor_central_value(nodes[u.node_id], u).value
+        for u in request.parameter_uncertainties or []
+        if u.node_id in nodes
+    }
+def identity_partials(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> Dict[Tuple[str, str], float]:
     """R3-5 (AIQ #72 5867263914 RED 1, rows 5866603688): each operand and addend edge of an
     EVALUATED identity, with the identity's own partial derivative at the centre, in the
     normalised frames the structural walk multiplies. A structural reader that walked the
@@ -1598,11 +1611,12 @@ def identity_partials(graph: GraphV2) -> Dict[Tuple[str, str], float]:
         sum operand, addend:  frame_i / frame_node
 
     ``k`` is the evaluator's ONE central scale (1 for a sum, and for a product with no
-    stated level). Empty when nothing is declared, so such a graph walks exactly as before.
+    stated level), read at the same sampler centres (``factor_centres``). Empty when nothing
+    is declared, so such a graph walks exactly as before.
     """
     if not any(node.nonlinear_identity is not None for node in graph.nodes):
         return {}
-    evaluator = SCMEvaluatorV2(graph)
+    evaluator = SCMEvaluatorV2(graph, factor_centres=factor_centres)
     partials: Dict[Tuple[str, str], float] = {}
     for node_id, plan in evaluator._evaluated_identities.items():
         frame = plan.frames[node_id]
@@ -1778,7 +1792,12 @@ class SCMEvaluatorV2:
     - Providing value-aware robustness analysis
     """
 
-    def __init__(self, graph: GraphV2, epsilon_rng: Optional[SeededRNG] = None):
+    def __init__(
+        self,
+        graph: GraphV2,
+        epsilon_rng: Optional[SeededRNG] = None,
+        factor_centres: Optional[Mapping[str, float]] = None,
+    ):
         """
         Initialize evaluator.
 
@@ -1788,6 +1807,9 @@ class SCMEvaluatorV2:
                 noise.  When provided and a node has epsilon_std > 0, adds
                 N(0, epsilon_std) after computing the structural equation.
                 Node values are clamped to [0, 1] after epsilon noise.
+            factor_centres: each sampled factor's central value (``factor_centres``),
+                read by an evaluated product's ONE scale ``k``. Without it a sampled
+                non-root parent is read at base 0 while every draw reads its centre.
         """
         self.graph = graph
         self._epsilon_rng = epsilon_rng
@@ -1827,7 +1849,7 @@ class SCMEvaluatorV2:
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
         self._identity_scales: Dict[str, float] = {}
-        self._identity_scales = self._central_identity_scales()
+        self._identity_scales = self._central_identity_scales(dict(factor_centres or {}))
 
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
@@ -2055,7 +2077,7 @@ class SCMEvaluatorV2:
         status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         return framed, status_quo
 
-    def _central_identity_scales(self) -> Dict[str, float]:
+    def _central_identity_scales(self, factor_centres: Dict[str, float]) -> Dict[str, float]:
         """AIQ #72 5866317942: ONE constant per evaluated product with a stated level,
         ``k = (o - A - L) / term``, every figure at TODAY's levels in user units and each
         remaining belief edge at its EFFECTIVE strength ``mean x exists_probability`` (the
@@ -2075,9 +2097,10 @@ class SCMEvaluatorV2:
             (edge.from_, edge.to): edge.strength.mean * edge.exists_probability
             for edge in self.graph.edges
         }
-        # Today at the centre. An identity node reads itself as the reference here, so its
+        # Today at the centre: every sampled factor at the centre its draws read
+        # (``factor_centres``). An identity node reads itself as the reference here, so its
         # own scale never enters (term == term_sq): no scale is needed to compute the scales.
-        today = self._propagate(means, {}, None, None, noise=False)
+        today = self._propagate(means, {}, None, factor_centres, noise=False)
         scales: Dict[str, float] = {}
         for node_id, plan in products.items():
             assert plan.target_level is not None  # filtered above
@@ -2622,7 +2645,9 @@ class RobustnessAnalyzerV2:
         # so existing graphs with default epsilon_std=0.0 are unaffected.
         has_epsilon = any(n.epsilon_std > 0 for n in request.graph.nodes)
         rng_epsilon = SeededRNG(seed + 3) if has_epsilon else None
-        evaluator = SCMEvaluatorV2(request.graph, epsilon_rng=rng_epsilon)
+        evaluator = SCMEvaluatorV2(
+            request.graph, epsilon_rng=rng_epsilon, factor_centres=factor_centres(request)
+        )
 
         self.logger.info(
             "robustness_v2_analysis_started",
@@ -4215,7 +4240,11 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Dict[str, List[float]] = {
             node_id: [] for node_id in (status_quo_reference_nodes or [])
         }
-        sq_evaluator = SCMEvaluatorV2(request.graph) if status_quo_reference_nodes else None
+        sq_evaluator = (
+            SCMEvaluatorV2(request.graph, factor_centres=factor_centres(request))
+            if status_quo_reference_nodes
+            else None
+        )
 
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
@@ -6961,7 +6990,10 @@ class RobustnessAnalyzerV2:
         # Compute structural influence for all factors
         factor_node_ids: List[str] = [s["node_id"] for s in sensitivities]
         influence_scores, influence_truncated = self._compute_structural_influence(
-            request.graph, factor_node_ids, request.goal_node_id
+            request.graph,
+            factor_node_ids,
+            request.goal_node_id,
+            factor_centres=factor_centres(request),
         )
         # N1 (Codex re-confirm, D-23.19): EXACT-OR-NULL. Normalized scores of a
         # truncated cohort are NOT lower bounds (the data-dependent max
@@ -7544,6 +7576,7 @@ class RobustnessAnalyzerV2:
         factor_node_ids: List[str],
         goal_node_id: str,
         max_walk_calls_total: Optional[int] = None,
+        factor_centres: Optional[Mapping[str, float]] = None,
     ) -> Tuple[Dict[str, float], List[str]]:
         """
         Compute structural influence score for each factor based on causal path strengths.
@@ -7589,7 +7622,7 @@ class RobustnessAnalyzerV2:
         # Build adjacency list for path finding
         # R3-5: an evaluated identity's operand/addend edge carries the identity's partial
         # at the centre, not its guessed slope (``identity_partials``; empty otherwise).
-        partials = identity_partials(graph)
+        partials = identity_partials(graph, factor_centres)
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
         for edge in graph.edges:
             from_node = edge.from_
@@ -9551,7 +9584,11 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Dict[str, List[float]] = {
             node_id: [] for node_id in sq_reference_nodes
         }
-        sq_evaluator = SCMEvaluatorV2(request.graph) if sq_reference_nodes else None
+        sq_evaluator = (
+            SCMEvaluatorV2(request.graph, factor_centres=factor_centres(request))
+            if sq_reference_nodes
+            else None
+        )
 
         for i in range(n_samples):
             # F7: periodic wall-clock deadline re-check (mirrors the E-value
