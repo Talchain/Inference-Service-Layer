@@ -6742,6 +6742,8 @@ class RobustnessAnalyzerV2:
                     if goal_domain is not None and not goal_threshold_plan.change_frame:
                         # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
+                    # A plan with no delta threshold is a level plan: both are set at one site.
+                    assert goal_threshold_plan.level_threshold is not None
                     meets = meets_threshold(compared, goal_threshold_plan.level_threshold)
 
                 # 2.477(j) — FINITENESS GATE. This comparison used to run over the
