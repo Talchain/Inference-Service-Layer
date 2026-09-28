@@ -1672,12 +1672,19 @@ def identity_partials(
     return partials
 
 
-def definitional_strengths(graph: GraphV2) -> Dict[Tuple[str, str], float]:
+def definitional_strengths(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]]
+) -> Dict[Tuple[str, str], float]:
     """R3-9: each DEFINITIONAL edge (``definitional_edges``) at its central strength,
     ``mean x exists_probability``. Every sampler holds them there instead of drawing them
     (``DualUncertaintySampler(fixed=...)``). The evaluator never reads them. Empty when no
-    identity is evaluated."""
-    definitional = definitional_edges(graph)
+    identity is evaluated.
+
+    ``factor_centres`` is REQUIRED (pass ``None`` only when nothing is sampled): "evaluated"
+    includes the scale check, and ``k`` read without the sampler centres can land on the other
+    side of [0.5, 2] from the evaluator's, which would hold the edges of an identity the
+    evaluator withheld (they are beliefs then, and must be drawn)."""
+    definitional = definitional_edges(graph, factor_centres)
     return {
         (edge.from_, edge.to): edge.strength.mean * edge.exists_probability
         for edge in graph.edges
@@ -2706,7 +2713,9 @@ class RobustnessAnalyzerV2:
         rng_edge = SeededRNG(seed)
         rng_factor = SeededRNG(seed + 1)
         sampler = DualUncertaintySampler(
-            request.graph.edges, rng_edge, definitional_strengths(request.graph)
+            request.graph.edges,
+            rng_edge,
+            definitional_strengths(request.graph, factor_centres(request)),
         )
         # B3-S1: build the Gaussian-copula plan when correlations are supplied.
         # Returns None (inert) otherwise — the sampler then draws every factor
@@ -6538,7 +6547,7 @@ class RobustnessAnalyzerV2:
 
         # R3-9: a definition is neither a sensitivity target (no edge-level output lists
         # it) nor drawn in the background of another edge's samples.
-        fixed = definitional_strengths(request.graph)
+        fixed = definitional_strengths(request.graph, factor_centres(request))
 
         for edge in request.graph.edges:
             if (edge.from_, edge.to) in fixed:
@@ -7602,12 +7611,13 @@ class RobustnessAnalyzerV2:
         result: Dict[str, List[float]] = {
             u.node_id: [] for u in param_uncertainties if node_map.get(u.node_id)
         }
+        fixed = definitional_strengths(request.graph, factor_centres(request))
 
         for i in range(n_iterations):
             # Deterministic seed derived from primary seed + bootstrap index
             boot_rng = SeededRNG(seed_offset + i)
             boot_sampler = DualUncertaintySampler(
-                request.graph.edges, boot_rng, definitional_strengths(request.graph)
+                request.graph.edges, boot_rng, fixed
             )
             edge_config = boot_sampler.sample_edge_configuration()
 
@@ -8367,12 +8377,13 @@ class RobustnessAnalyzerV2:
         place and a test can observe both call sites.
         """
         backgrounds: List[Dict[Tuple[str, str], float]] = []
+        fixed = definitional_strengths(request.graph, factor_centres(request))
         for i in range(n_seeds):
             child_seed = int(
                 hashlib.sha256(f"{master_seed}:{tag}:{i}".encode()).hexdigest()[:8], 16
             )
             sweep_sampler = DualUncertaintySampler(
-                request.graph.edges, SeededRNG(child_seed), definitional_strengths(request.graph)
+                request.graph.edges, SeededRNG(child_seed), fixed
             )
             backgrounds.append(sweep_sampler.sample_edge_configuration())
         return backgrounds
@@ -9494,10 +9505,11 @@ class RobustnessAnalyzerV2:
             return None
 
         # Baseline: all uncertainties active
+        fixed = definitional_strengths(request.graph, factor_centres(request))
         baseline_rng_edge = SeededRNG(seed + 100)
         baseline_rng_factor = SeededRNG(seed + 101)
         baseline_sampler = DualUncertaintySampler(
-            request.graph.edges, baseline_rng_edge, definitional_strengths(request.graph)
+            request.graph.edges, baseline_rng_edge, fixed
         )
         baseline_factor_sampler = FactorSampler(
             request.graph.nodes, unique_uncertainties, baseline_rng_factor
@@ -9548,7 +9560,7 @@ class RobustnessAnalyzerV2:
             perfect_rng_edge = SeededRNG(factor_seed)
             perfect_rng_factor = SeededRNG(factor_seed + 1)
             perfect_sampler = DualUncertaintySampler(
-                request.graph.edges, perfect_rng_edge, definitional_strengths(request.graph)
+                request.graph.edges, perfect_rng_edge, fixed
             )
             perfect_factor_sampler = FactorSampler(
                 request.graph.nodes,
