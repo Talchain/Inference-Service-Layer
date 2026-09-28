@@ -6,6 +6,7 @@ Only the block between the GENERATED markers is rewritten; the narrative is hand
 from __future__ import annotations
 
 import json
+import statistics
 from typing import Any
 
 from .corpus import ROOT, load_graph
@@ -28,6 +29,7 @@ CURRENT = {
     "evppi": "NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution "
     "finding, AIC 5858555342)",
     "gaps": "Not reported by the engine",
+    "sensitivity": "NOT IN CORPUS",
     "assumptions": "N/A",
     "runtime": "NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5)",
 }
@@ -108,6 +110,48 @@ def _models_line(models: list[dict[str, Any]], semantics: str) -> str:
             f"{m['model']} [{sc}]: " + ("; ".join(comp) if comp else "no option computable")
         )
     return "<br>".join(lines)
+
+
+def sensitivity_rank(
+    models: list[dict[str, Any]], top: int = 3
+) -> dict[str, list[tuple[str, float, int]]]:
+    """Per template-draw model: parameters ranked by the median, across scenarios, of the
+    largest |Spearman rho| (parameter vs outcome at H) over the model's decision options."""
+    per: dict[str, dict[str, list[float]]] = {}
+    for m in models:
+        if not m["template_draws"] or m["evppi"].get("status") != "computed":
+            continue
+        for pid, v in m["evppi"]["parameters"].items():
+            rho = [abs(x) for x in v["spearman_vs_outcome_at_H"].values() if x is not None]
+            if rho:
+                per.setdefault(m["model"], {}).setdefault(pid, []).append(max(rho))
+    out = {}
+    for model, params in sorted(per.items()):
+        ranked = sorted(
+            ((pid, statistics.median(v), len(v)) for pid, v in params.items()),
+            key=lambda t: (-t[1], t[0]),
+        )
+        out[model] = [(pid, round(med, 2), n) for pid, med, n in ranked[:top]]
+    return out
+
+
+def _sensitivity(models: list[dict[str, Any]]) -> str:
+    ranks = sensitivity_rank(models)
+    parts = [
+        f"{model}: "
+        + ", ".join(f"`{pid}` {med:.2f}" for pid, med, _ in rows)
+        + f" (median over {rows[0][2]} scenario{'s' if rows[0][2] > 1 else ''})"
+        for model, rows in ranks.items()
+        if rows
+    ]
+    skipped = sorted(
+        {
+            f"{m['model']}: {m['evppi'].get('status')} ({m['evppi'].get('reason', '')})"
+            for m in models
+            if m["template_draws"] and m["evppi"].get("status") != "computed"
+        }
+    )
+    return "<br>".join(parts + skipped)
 
 
 def graph_table(gid: str, g: dict[str, Any], runtime: dict[str, float]) -> list[str]:
@@ -206,6 +250,21 @@ def graph_table(gid: str, g: dict[str, Any], runtime: dict[str, float]) -> list[
             CURRENT["evppi"],
             "NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1)",
             f"T2 resolved: ISL-status {s['T2']['evppi_resolved_isl']}, strict {s['T2']['evppi_resolved_strict']}; X resolved: ISL-status {s['X']['evppi_resolved_isl']}, strict {s['X']['evppi_resolved_strict']}",
+        ),
+        (
+            "Sensitivity rank (\\|Spearman ρ\\| vs outcome at H)",
+            CURRENT["sensitivity"],
+            "NOT_COMPUTABLE (no admissible uncertainty at T0/T1)",
+            "T2: "
+            + (_sensitivity(t2_models) or "no template-draw model")
+            + "; X: "
+            + (_sensitivity(tx["models"]) or "no template-draw model")
+            + (
+                ". `amount:` = effect size, `exists:` = link existence. Spreads are templates"
+                " (31/31), so the ranks reflect template uncertainty, not elicited uncertainty"
+                if sensitivity_rank(t2_models) or sensitivity_rank(tx["models"])
+                else ""
+            ),
         ),
         (
             "Required semantic gaps",

@@ -160,6 +160,14 @@ Every one of these results carries 5–9 named defaults or assumptions (`n_defau
   - A tail artefact then reads as "resolved". In A-180910Z X, EVPPI(feature → perception) is £38.27 at seed 20260927, then £0.79, £0 and £0.18 at other seeds / 50k draws, on a £98k outcome.
   - Under the strict rule, 0 of 12 graphs have a stable resolved EVPPI at any tier.
   - Where the decision is clear-cut, EVPPI is legitimately 0 (e.g. A-183807Z: £59 beats keep-current in every draw). That is a valid result.
+- **Sensitivity rank** (|Spearman ρ| between each uncertain parameter and the outcome at H, median over scenarios; per-graph rows below):
+  - it is computable only in Mode X, in 4 of 12 graphs. T0/T1 have no admissible uncertainty, and the one T2 model has a single computable option;
+  - the top-ranked parameter is:
+    - A-180910Z: the feature release → perception effect (0.42);
+    - A-181846Z: the price → churn-rate effect (0.66);
+    - A-183807Z: the churn → subscribers effect (0.67);
+    - C-183807Z: the feature investment → paid-acquisition effect (0.52);
+  - every spread is a template, so this ranks template uncertainty, not what users are actually unsure about.
 - **Spread sweep** (sd/mean ∈ {0.1, 0.25, 0.5, 1}, existence ∈ {1, 0.8}):
   - P(goal) for £49 + feature moves from 1.0 to 0.36–0.51, driven purely by template spreads.
   - The only "resolved" EVPPIs appear at sd/mean = 1.
@@ -236,6 +244,23 @@ The table comes from `sim/breakeven.py` → `breakeven.json`: Mode X, `prototype
 - **Elapsed:** ~3–5 days, set by serial DL review, served witnesses and Paul's decision, not by code.
 - The remaining full-B rows stay blocked by information, not code: lags, non-template uncertainty, work-to-completion, and effects on every decisive link.
 
+## Supporting detail for the decision bullets
+**Bullet 2 (usable without invented assumptions):**
+- 0 of 12 graphs have a strict (T0/T1) time path.
+- Strict tiers yield only identity values and static limit verdicts, which the H=0 control reproduces.
+- T2 adds one single-option trajectory.
+- Whole-decision ranking is 0/12 at every tier.
+
+**Bullet 3 (production requirements):**
+- Price → churn is not fully quantified in 4/4 A graphs.
+- MVP B needs 2 user facts and Paul's call on showing T2 verdicts with 2 disclosed defaults. It can report the churn response at which a verdict flips instead of assuming one (see "MVP B").
+
+**Bullet 4 (R3-A):** the served K=16 floor can collapse to 0 (see "Scientific checks").
+
+**Bullet 5 (served comparison):**
+- The served `analysis_result` is absent from the corpus (12/12 null).
+- The pj-x3 question is dynamics (loops, lags) versus the missing semantics measured here (horizon, flows, effects).
+
 ## Per-graph evaluation
 
 <!-- BEGIN GENERATED: per-graph tables (sim/report.py) -->
@@ -254,6 +279,7 @@ The table comes from `sim/breakeven.py` → `breakeven.json`: Mode X, `prototype
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 5/6 limit cells, 3/6 identity cells; top causes: OPTION_LEVELS_MISSING x6, REQUIRES_T2 x4, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x2 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['keep_current_pricing', '59_with_feature_release']: X computed; X goal verdict flips across assumptions for 49_with_feature_release, 59_with_feature_release |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 6, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: X_gross_reading: `amount:feature_release_availability->feature_value_perception` 0.42, `exists:feature_release_availability->feature_value_perception` 0.38, `amount:feature_value_perception->monthly_net_pro_additions` 0.24 (median over 6 scenarios)<br>X_net_reading: `amount:feature_release_availability->feature_value_perception` 0.42, `exists:feature_release_availability->feature_value_perception` 0.38, `amount:feature_value_perception->monthly_net_pro_additions` 0.24 (median over 6 scenarios). `amount:` = effect size, `exists:` = link existence. Spreads are templates (31/31), so the ranks reflect template uncertainty, not elicited uncertainty |
 | Required semantic gaps | Not reported by the engine | FLOW_NET_VS_GROSS_AMBIGUOUS, ONSET_UNSPECIFIED, OPTION_LEVELS_MISSING, REQUIRES_T1, REQUIRES_T2, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING, SUM_CARRIER_ABSENT | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: conditional:links_exist, level_persistence, linear_scaling, no_lag, onset_month_0, rate_persistence, template_uncertainty; X assumptions: X_feature_competitive_mrr, X_price_churn_direct, X_price_churn_via_sensitivity, X_reading_gross_additions_persist, X_reading_net_additions_are_net, X_sum_mrr |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 5.5 ms (T0 + T1, all options) | T2 5.7 ms; X 5.18 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -274,6 +300,7 @@ Mode X deadline outcomes (point, links exist): X_net_reading [X_feature_competit
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 2/8 limit cells, 0/0 identity cells; top causes: STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x2 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['features_pro_price', 'additional_advertising']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | INFLOW_MISSING, ONSET_UNSPECIFIED, REQUIRES_T1, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING, UNQUANTIFIED_NODE | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 2.2 ms (T0 + T1, all options) | T2 4.9 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -292,6 +319,7 @@ Mode X deadline outcomes (point, links exist): X_net_reading [X_feature_competit
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 0/4 limit cells, 0/0 identity cells; top causes: — | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['hire_2_senior_engineers', 'hire_4_junior_engineers']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | GOAL_NOT_QUANTIFIED, HORIZON_AMBIGUOUS, INTERNAL_INCONSISTENCY, REQUIRES_T1, UNQUANTIFIED_NODE | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 1.9 ms (T0 + T1, all options) | T2 3.9 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -310,6 +338,7 @@ Mode X deadline outcomes (point, links exist): X_net_reading [X_feature_competit
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 4/6 limit cells, 0/6 identity cells; top causes: STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x6, FRAME_MISSING x5, REQUIRES_T2 x2 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['keep_pro_at_49', 'raise_pro_to_59_at_release']: X computed; X goal verdict flips across assumptions for raise_pro_to_59_at_release |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: X_static_at_month_12: `amount:pro_plan_price->monthly_churn_rate` 0.66, `exists:pro_plan_price->monthly_churn_rate` 0.46 (median over 4 scenarios). `amount:` = effect size, `exists:` = link existence. Spreads are templates (31/31), so the ranks reflect template uncertainty, not elicited uncertainty |
 | Required semantic gaps | Not reported by the engine | FRAME_MISSING, GOAL_TEMPORAL_SEMANTICS_AMBIGUOUS, HORIZON_BAKED_INTO_NODE, REQUIRES_T1, REQUIRES_T2, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING, STOCK_LEVEL_MISSING, SUM_CARRIER_ABSENT | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: conditional:links_exist, linear_scaling, no_lag, onset_month_0, template_uncertainty; X assumptions: X_churn_to_subscribers_m12, X_month12_nodes_are_forecast_at_H, X_price_churn_via_sensitivity, X_sum_mrr_month12 |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 3.8 ms (T0 + T1, all options) | T2 5.3 ms; X 0.19 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -330,6 +359,7 @@ Mode X deadline outcomes (point, links exist): X_static_at_month_12 [X_churn_to_
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 0/8 limit cells, 0/0 identity cells; top causes: — | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['features_59_pro_price', 'additional_advertising']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | BASELINE_MISSING, REQUIRES_T1, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING, SUM_CARRIER_ABSENT | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 1.9 ms (T0 + T1, all options) | T2 5.9 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -348,6 +378,7 @@ Mode X deadline outcomes (point, links exist): X_static_at_month_12 [X_churn_to_
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 0/4 limit cells, 0/0 identity cells; top causes: — | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['hire_two_senior_engineers', 'hire_four_junior_engineers']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | GOAL_NOT_QUANTIFIED, HORIZON_AMBIGUOUS, REQUIRES_T1, UNQUANTIFIED_NODE | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 1.7 ms (T0 + T1, all options) | T2 3.1 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -366,6 +397,7 @@ Mode X deadline outcomes (point, links exist): X_static_at_month_12 [X_churn_to_
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 6/7 limit cells, 7/7 identity cells; top causes: FRAME_MISSING x5, OPTION_LEVELS_MISSING x4, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x3, REQUIRES_T2 x1 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['carry_on_as_now', '59_with_feature_release']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | FRAME_MISSING, IDENTITY_INCOMPLETE, INFLOW_MISSING, OPTION_LEVELS_MISSING, REQUIRES_T1, REQUIRES_T2, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 3.8 ms (T0 + T1, all options) | T2 6.0 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -384,6 +416,7 @@ Mode X deadline outcomes (point, links exist): X_static_at_month_12 [X_churn_to_
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 2/8 limit cells, 4/4 identity cells; top causes: IDENTITY_INCONSISTENT_WITH_HELD_LEVEL x4, REQUIRES_T2 x1, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x1 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['features_59_price', 'advertising_investment']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | EFFECT_TIMING_UNSPECIFIED, IDENTITY_INCONSISTENT_WITH_HELD_LEVEL, INFLOW_MISSING, REQUIRES_T1, REQUIRES_T2, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 2.1 ms (T0 + T1, all options) | T2 5.7 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -402,6 +435,7 @@ Mode X deadline outcomes (point, links exist): X_static_at_month_12 [X_churn_to_
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 4/4 limit cells, 2/8 identity cells; top causes: OPTION_LEVELS_MISSING x3, UNIT_UNVERIFIABLE x3 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['hire_2_senior_engineers', 'hire_4_junior_engineers']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | GOAL_NOT_QUANTIFIED, HORIZON_AMBIGUOUS, OPTION_LEVELS_MISSING, REQUIRES_T1, SUM_CARRIER_ABSENT, UNIT_UNVERIFIABLE, UNQUANTIFIED_NODE | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 2.7 ms (T0 + T1, all options) | T2 2.7 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -420,6 +454,7 @@ Mode X deadline outcomes (point, links exist): X_static_at_month_12 [X_churn_to_
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 5/6 limit cells, 3/6 identity cells; top causes: OPTION_LEVELS_MISSING x6, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x4 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['keep_pro_at_49', 'raise_pro_to_59']: X computed; X goal verdict flips across assumptions for raise_pro_to_59 |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: T2_growth: NOT_COMPUTABLE (FEWER_THAN_2_COMPARABLE_OPTIONS); X: X_uplift_flat: `amount:monthly_churn->pro_paying_subscribers` 0.67, `exists:monthly_churn->pro_paying_subscribers` 0.46 (median over 2 scenarios)<br>X_uplift_grows: `amount:monthly_churn->pro_paying_subscribers` 0.67, `exists:monthly_churn->pro_paying_subscribers` 0.46 (median over 2 scenarios). `amount:` = effect size, `exists:` = link existence. Spreads are templates (31/31), so the ranks reflect template uncertainty, not elicited uncertainty |
 | Required semantic gaps | Not reported by the engine | IDENTITY_INCOMPLETE, OPTION_LEVELS_MISSING, RATE_PERSISTENCE_UNSPECIFIED, REQUIRES_T1, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: no_lag, onset_month_0, rate_persistence; X defaults: conditional:links_exist, linear_scaling, no_lag, onset_month_0, rate_persistence, template_uncertainty; X assumptions: X_growth_applies_to_uplift, X_growth_excludes_uplift, X_price_churn_direct, X_price_churn_via_sensitivity, X_pro_mrr_in_mrr |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 2.2 ms (T0 + T1, all options) | T2 8.3 ms; X 0.24 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -440,6 +475,7 @@ Mode X deadline outcomes (point, links exist): X_uplift_grows [X_price_churn_dir
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 3/10 limit cells, 5/5 identity cells; top causes: STOCK_LEVEL_MISSING x4, OPTION_LEVELS_MISSING x3, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING x1 | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['feature_59_price', 'advertising_investment']: X computed |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 1, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: X_inversion: `amount:feature_investment->paid_pro_acquisition_rate` 0.52, `exists:feature_investment->paid_pro_acquisition_rate` 0.37, `amount:feature_investment->pro_monthly_churn` 0.35 (median over 4 scenarios). `amount:` = effect size, `exists:` = link existence. Spreads are templates (31/31), so the ranks reflect template uncertainty, not elicited uncertainty |
 | Required semantic gaps | Not reported by the engine | OPTION_LEVELS_MISSING, OPTION_TARGET_INVALID, REQUIRES_T1, STATIC_COEFFICIENT_NO_TEMPORAL_MEANING, STOCK_LEVEL_MISSING | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: conditional:links_exist, level_persistence, no_lag, onset_month_0, rate_persistence, template_uncertainty; X assumptions: X_price_churn_via_sensitivity, X_spend_total_to_acquisition, X_subscribers_by_identity_inversion |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 3.0 ms (T0 + T1, all options) | T2 6.5 ms; X 0.82 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -460,6 +496,7 @@ Mode X deadline outcomes (point, links exist): X_inversion [X_price_churn_via_se
 | Unsupported claims withheld | NOT IN CORPUS; missing semantics are defaulted, not withheld (CODE) | T1 withheld: 0/5 limit cells, 0/0 identity cells; top causes: — | Taint: an unquantified link whose source moves withholds its target |
 | Decision-relevant option separation | NOT IN CORPUS | Not computable at T0/T1 (goal withheld) | Whole ranking: T2 withheld, X withheld; brief pair ['two_senior_engineers', 'four_junior_engineers']: X withheld |
 | EVPPI / information-value result | NOT IN CORPUS (programme-wide: 87% of 114 served runs had no above-resolution finding, AIC 5858555342) | NOT_COMPUTABLE (UNCERTAINTY_NOT_SPECIFIED: no admissible uncertainty at T0/T1) | T2 resolved: ISL-status 0, strict 0; X resolved: ISL-status 0, strict 0 |
+| Sensitivity rank (\|Spearman ρ\| vs outcome at H) | NOT IN CORPUS | NOT_COMPUTABLE (no admissible uncertainty at T0/T1) | T2: no template-draw model; X: no template-draw model |
 | Required semantic gaps | Not reported by the engine | GOAL_NOT_QUANTIFIED, HORIZON_AMBIGUOUS, REQUIRES_T1, UNQUANTIFIED_NODE | From the frozen mapping plus engine withholding |
 | Prototype-only assumptions | N/A | None (strict) | T2 goal-model defaults: none (no T2 goal model); X defaults: none; X assumptions: none |
 | Runtime | NOT IN CORPUS (served Run 6.7-8.0 s end to end, ledger X5) | 2.5 ms (T0 + T1, all options) | T2 4.3 ms; X 0.00 s (all scenarios, point + 2,000-draw MC, strict EVPPI reruns) |
@@ -467,30 +504,8 @@ Mode X deadline outcomes (point, links exist): X_inversion [X_price_churn_via_se
 <!-- END GENERATED -->
 
 ## Decision evidence (for Paul, via the Delivery Lead)
-1. **What B genuinely adds.** A monthly time path. It can turn a month-0 miss into a month-12 hit (A-183807Z £59: £84,000 → £100,432 if the uplift compounds). It can also expose flows that contradict held levels (C-183807Z's own figures imply MRR falls to £65,430). A static engine cannot state either.
-2. **How much of that is usable from today's model data without invented assumptions: none.**
-   - 0 of 12 graphs have a strict (T0/T1) time path.
-   - Strict tiers yield only identity values and static limit verdicts, which the H=0 control reproduces.
-   - T2 adds one single-option trajectory.
-   - Whole-decision ranking is 0/12 at every tier.
-   - In 3 of the 4 graphs where Mode X makes the brief's choice computable, the verdict flips with unsupported semantics.
-3. **What production B would require.**
-   - Typed horizons (12/12).
-   - Stock/flow/rate roles with gross/net (≥6/12).
-   - User-confirmed start stocks (44/67 levels are estimates).
-   - User-unit effects on the decisive links (price → churn is not fully quantified in 4/4 A graphs).
-   - Non-template uncertainty (31/31 are templates), onsets and lags, work-to-completion (4/4 E), and a `sum` carrier.
-   - Full B: about 8–13 engineer-weeks at human pace (ESTIMATE). The larger cost is the elicitation burden in the table above.
-   - MVP B (one stock, journeys A and C, = R3-A slice 2): ~1–2 agent-days of code and ~3–5 days elapsed (ESTIMATE). It needs 2 user facts and Paul's call on showing T2 verdicts with 2 disclosed defaults. It can report the churn response at which a verdict flips instead of assuming one (see "MVP B").
-4. **Cheap wins for R3-A.**
-   - The taint/withhold rule, with "at unchanged X" conditional statements.
-   - The identity-versus-held-level consistency check.
-   - A typed horizon with static-at-H evaluation where the model already carries month-H nodes.
-   - A single-stock closed form (level × (1 + g)^H) only where a typed %/month rate exists.
-   - An EVPPI seed/draw-stability gate: the served K=16 floor can collapse to 0.
-5. **What the Delivery Lead should compare with the actual served R3-A result before Paul decides.**
-   - The served `analysis_result` for these same 12 runs, which is absent from the corpus.
-   - Whether R3-A's served identity values match these closed forms (+£12,000 at unchanged subscribers; £58,800).
-   - Whether R3-A withholds price-option MRR when price → churn has no user-unit effect, or still applies the additive coefficient.
-   - R3-A's post-slice-1 no-finding rate under a seed-stability gate.
-   - Whether the remaining pj-x3 FAILs are dynamics (loops, lags) or, as measured here, missing semantics (horizon, flows, effects).
+1. **What B genuinely adds:** a monthly time path. It can turn a month-0 miss into a deadline hit (A-183807Z £59: £84,000 → £100,432 if the uplift compounds) and expose flows that contradict held levels (C-183807Z's own figures imply MRR falls to £65,430). A static engine can state neither.
+2. **Usable from today's model data without invented assumptions: none.** There are 0/12 strict time paths, 0/12 whole-decision rankings and 0 B-unique strong results. In 3 of the 4 graphs where Mode X makes the brief's choice computable, the verdict flips with unsupported semantics.
+3. **What production B would require:** typed horizons (12/12), stock/flow roles with gross/net (≥6/12), user-confirmed start stocks (44/67 levels are estimates), user-unit effects on the decisive links, non-template uncertainty (31/31 are templates), onsets and lags, work-to-completion (4/4 E) and a `sum` carrier. Elicitation is the larger cost. Engineering ESTIMATES: full B is about 8–13 engineer-weeks at human pace; an MVP (one stock, journeys A and C, = R3-A slice 2) is ~1–2 agent-days of code and ~3–5 days elapsed.
+4. **Cheap wins for R3-A:** the taint/withhold rule with "at unchanged X" statements; the identity-versus-held-level check; a typed horizon with static-at-H evaluation where month-H nodes exist; a single-stock closed form only where a typed %/month rate exists; and a seed/draw-stability gate on "resolved" EVPPI.
+5. **What the Delivery Lead should compare with R3-A's actual served result before Paul decides:** the served `analysis_result` for these 12 runs; whether R3-A's identity values match the closed forms here (+£12,000 at unchanged subscribers; £58,800); whether R3-A withholds price-option MRR when price → churn has no user-unit effect; R3-A's no-finding rate under a stability gate; and whether the remaining pj-x3 FAILs are dynamics or missing semantics.

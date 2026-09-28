@@ -367,3 +367,52 @@ def test_breakeven_is_labelled_mode_x_and_matches_the_committed_file() -> None:
     )
     assert out["goal"]["semantics"] == "attain_by_H"
     assert json.loads((ROOT / "breakeven.json").read_text()) == json.loads(json.dumps(out))
+
+
+# ------------------------------------------------------------------ reporting (brief format)
+
+
+def test_sensitivity_rank_matches_a_direct_recomputation_and_the_summary() -> None:
+    import re
+    import statistics
+
+    from sim.corpus import ROOT
+    from sim.report import sensitivity_rank
+
+    results = json.loads((ROOT / "results.json").read_text())
+    tops = {}
+    for gid, g in results["graphs"].items():
+        models = g["tiers"]["X"]["models"]
+        ranks = sensitivity_rank(models)
+        direct: dict[tuple[str, str], list[float]] = {}
+        for m in models:
+            if m["template_draws"] and m["evppi"]["status"] == "computed":
+                for pid, v in m["evppi"]["parameters"].items():
+                    rho = [abs(x) for x in v["spearman_vs_outcome_at_H"].values() if x is not None]
+                    if rho:
+                        direct.setdefault((m["model"], pid), []).append(max(rho))
+        for model, rows in ranks.items():
+            for pid, med, n in rows:
+                assert med == round(statistics.median(direct[(model, pid)]), 2)
+                assert n == len(direct[(model, pid)])
+            tops[gid] = max(tops.get(gid, 0.0), rows[0][1])
+    # The hand-written summary in EVALUATION.md states these top values.
+    assert tops == {
+        "pj-20260927T180910Z-A": 0.42,
+        "pj-20260927T181846Z-A": 0.66,
+        "pj-20260927T183807Z-A": 0.67,
+        "pj-20260927T183807Z-C": 0.52,
+    }
+    text = (ROOT / "EVALUATION.md").read_text()
+    for v in tops.values():
+        assert re.search(rf"\({v:.2f}\)", text)
+
+
+def test_evaluation_ends_with_at_most_five_unnested_bullets() -> None:
+    from sim.corpus import ROOT
+
+    text = (ROOT / "EVALUATION.md").read_text().rstrip("\n")
+    last = text[text.rindex("\n## ") + 1 :].splitlines()[1:]
+    bullets = [ln for ln in last if ln.strip()]
+    assert 1 <= len(bullets) <= 5
+    assert all(ln[:1].isdigit() or ln.startswith("- ") for ln in bullets)

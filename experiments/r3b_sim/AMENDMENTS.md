@@ -24,3 +24,8 @@ These are additions only. The frozen files are unchanged, and `results.json` is 
    - **Engine change:** `sim/run.py` gains `model_evals()`, which is extracted unchanged from `simulate()` so that the churn-limit threshold comes from the engine rather than from hand arithmetic.
    - **Tests:** 3 new tests. Each threshold flips its verdict, the churn threshold matches the hand calculation (4 − 2.5 = 1.5 pp), and the committed file equals a fresh run.
    - **Effect:** no strict result changed, and the answer is unchanged.
+5. **Reporting to the brief's format.**
+   - **Sensitivity rank:** the per-parameter Spearman values were already computed in `results.json` but were never shown. `sim/report.py` now generates a per-graph sensitivity-rank row, and "Scientific checks" summarises it.
+   - **Decision section:** it now ends `EVALUATION.md` with exactly 5 bullets and no nested bullets, as the brief requires. The former sub-bullet detail moves unchanged to "Supporting detail for the decision bullets".
+   - **Tests:** 2 new tests. One checks the rank against a direct recomputation and against the summary's figures; the other checks the five-bullet ending.
+   - **Effect:** `results.json` is unchanged, and no result moved.
