@@ -1133,3 +1133,88 @@ class TestInfluenceReadsTheIdentity:
     def test_a_withheld_identity_keeps_its_belief_edges(self):
         frames = {k: v for k, v in FRAMES.items() if k != PRICE}  # identity_frame_missing
         assert rav2.identity_partials(graph_of(wire(frames=frames))) == {}
+
+
+# ---------------------------------------------------------------------------------------------------------
+# R3-9 (engine; AIQ #72 5866734772, DL order 5867659507 item 3): an evaluated identity's DEFINITIONAL edges
+# draw nothing from any RNG. They were still drawn (and ignored), so their existence/strength parameters
+# shifted the draws of every edge after them: measured at base, perturbing price -> MRR and subscribers -> MRR
+# moved results, edge_e_values, factor_evppi, factor_flip_values and edge_existence_rates.
+# ---------------------------------------------------------------------------------------------------------
+
+
+DEFINITIONS = ((PRICE, MRR), (SUBS, MRR))
+
+
+def with_definitions_perturbed(d: Dict[str, Any]) -> Dict[str, Any]:
+    d = copy.deepcopy(d)
+    for edge in d["graph"]["edges"]:
+        if (edge["from"], edge["to"]) in DEFINITIONS:
+            edge["exists_probability"] = 0.3
+            edge["strength"] = {"mean": 0.9, "std": 0.05}
+    return d
+
+
+def dumped(d: Dict[str, Any]) -> Dict[str, Any]:
+    d = copy.deepcopy(d)
+    d["n_samples"] = 500
+    out = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d)).model_dump()
+    out["metadata"].pop("execution_time_ms")  # differs on ANY two runs
+    return json.loads(json.dumps(out, sort_keys=True, default=str))
+
+
+def fifty_nine_first(d: Dict[str, Any]) -> Dict[str, Any]:
+    """Edge sensitivity reads the FIRST option. Served, that is keep-current, whose MRR is the stated
+    £75,000 on every draw, so no edge's sensitivity can move; £59 first makes them readable."""
+    d = copy.deepcopy(d)
+    d["options"].sort(key=lambda option: option["id"] != "increase_price_to_59")
+    return d
+
+
+class TestDefinitionsDrawNothing:
+    @pytest.mark.parametrize("order", [lambda d: d, fifty_nine_first], ids=["served", "59_first"])
+    def test_a_definitions_ignored_parameters_move_nothing(self, order):
+        d = order(wire(identity=PRODUCT))
+        assert dumped(with_definitions_perturbed(d)) == dumped(d)
+
+    def test_the_59_first_variant_reads_edge_sensitivity(self):
+        """Non-vacuity for the row above: with £59 first, belief edges carry non-zero sensitivity."""
+        rows = dumped(fifty_nine_first(wire(identity=PRODUCT)))["sensitivity"]
+        assert any(abs(row["elasticity"]) > 0 for row in rows)
+
+    def test_control_without_the_identity_they_are_beliefs_and_move_the_results(self):
+        d = wire(identity=None)
+        assert dumped(with_definitions_perturbed(d))["results"] != dumped(d)["results"]
+
+    def test_definitions_consume_no_draws(self):
+        """Belief edges draw exactly what they would if the definitional edges were not in the graph."""
+        graph = graph_of(wire(identity=PRODUCT))
+        fixed = rav2.definitional_strengths(graph)
+        assert set(fixed) == set(DEFINITIONS)
+        with_defs = rav2.DualUncertaintySampler(graph.edges, rav2.SeededRNG(7), fixed)
+        without = rav2.DualUncertaintySampler(
+            [e for e in graph.edges if (e.from_, e.to) not in fixed], rav2.SeededRNG(7)
+        )
+        for _ in range(50):
+            drawn = with_defs.sample_edge_configuration()
+            assert {k: v for k, v in drawn.items() if k not in fixed} == without.sample_edge_configuration()
+            assert {k: drawn[k] for k in fixed} == fixed
+
+    def test_a_definition_sits_at_its_central_strength_and_lists_no_existence_rate(self):
+        graph = graph_of(wire(identity=PRODUCT))
+        assert rav2.definitional_strengths(graph) == {
+            (PRICE, MRR): pytest.approx(0.5 * 0.8),
+            (SUBS, MRR): pytest.approx(0.15 * 0.8),
+        }
+        sampler = rav2.DualUncertaintySampler(
+            graph.edges, rav2.SeededRNG(7), rav2.definitional_strengths(graph)
+        )
+        sampler.sample_edge_configuration()
+        rates = sampler.get_existence_rates()
+        assert f"{PRICE}->{MRR}" not in rates and f"{SUBS}->{MRR}" not in rates
+        assert f"{OTHER}->{MRR}" in rates  # an undeclared addend is still a belief
+
+    def test_no_evaluated_identity_no_fixed_edges(self):
+        assert rav2.definitional_strengths(graph_of(wire(identity=None))) == {}
+        frames = {k: v for k, v in FRAMES.items() if k != PRICE}  # identity_frame_missing: withheld
+        assert rav2.definitional_strengths(graph_of(wire(frames=frames))) == {}
