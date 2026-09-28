@@ -10411,7 +10411,11 @@ class RobustnessAnalyzerV2:
                     if constraint.value_frame == "level" and constraint.node_id in level_domains
                     else resolved_values[index]
                 )
-                for index, constraint in enumerate(constraints)
+                # The series are keyed by position in `scored` (B5): pairing them with the
+                # full `constraints` list read a refused limit's domain onto another limit's
+                # draws and then a key that does not exist (served journey C, KeyError: 1,
+                # DL #72 5862819400). When every limit is scored, `scored` IS `constraints`.
+                for index, constraint in enumerate(scored)
             }
 
         # T3: Per-constraint and joint probability
