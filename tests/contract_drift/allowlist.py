@@ -80,6 +80,17 @@ _REF_UNRELATED = (
     "Enumerated exactly so any NEW same-named-key collision still fails."
 )
 
+_REF_R1_S2_PIN_BUMP_0_61 = (
+    "R1 S2 contract pin bump 0.38.0 -> 0.61.0 (DL #72 5873128912; drift delta "
+    "previewed R3 SCIENCE #72 5873947845). SAME CLASS as _REF_UNRELATED, on "
+    "seams added in schemas 0.40.0 that ISL never reads or emits: "
+    "UiDirectiveBlock.source (0.40.0 §2, UiDirectiveSource "
+    "'ladder'|'gate'|'composer', UI gesture provenance) and the collab "
+    "ElicitationRound / Disagreement status lifecycles (0.40.0 §4, "
+    "boundary/collab.ts). ISL's CritiqueV2.source and OptionResultV2.status "
+    "are unrelated vocabularies under the same key names."
+)
+
 _REF_ANALYSIS_FACT_STATUS = (
     "ROADMAP 2.160 contract-alignment lane 2026-07-30 (contract pin bumped "
     "0.20.0 -> 0.30.0). SAME CLASS as _REF_UNRELATED, on a seam that did not "
@@ -296,6 +307,31 @@ ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
             "index.UnavailableFactSchema.status",
             "ACCEPTED-UNRELATED-SEAM",
             _REF_ANALYSIS_FACT_STATUS,
+        ),
+        # ------------------------------------------------------------------
+        # Unrelated-seam name reuse NEW in the 0.38.0 -> 0.61.0 contract span
+        # (R1 S2). All three arrive with schemas 0.40.0; ISL reads none of them.
+        # ------------------------------------------------------------------
+        AllowlistEntry(
+            "CritiqueV2",
+            "source",
+            "boundary.UiDirectiveBlockSchema.source",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_R1_S2_PIN_BUMP_0_61,
+        ),
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "boundary.DisagreementSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_R1_S2_PIN_BUMP_0_61,
+        ),
+        AllowlistEntry(
+            "OptionResultV2",
+            "status",
+            "boundary.ElicitationRoundSchema.status",
+            "ACCEPTED-UNRELATED-SEAM",
+            _REF_R1_S2_PIN_BUMP_0_61,
         ),
     }
 )

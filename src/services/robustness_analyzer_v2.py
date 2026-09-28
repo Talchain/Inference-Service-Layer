@@ -21,7 +21,7 @@ import time
 import uuid
 from collections import defaultdict, deque
 from types import MappingProxyType
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import (
     Any,
     Callable,
@@ -43,6 +43,7 @@ from src.models.identity_evaluation import IdentityEvaluation, IdentityReconcili
 from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReason
 from src.models.structural_influence import StructuralInfluence
 from src.models.robustness_v2 import (
+    CHANGE_FRAMES,
     BucketResult,
     ClampMetrics,
     ConditionalWinner,
@@ -57,6 +58,7 @@ from src.models.robustness_v2 import (
     InterventionOption,
     LevelDomain,
     NodeV2,
+    ObservedState,
     ObjectiveRanking,
     OptionResult,
     OutcomeDistribution,
@@ -638,7 +640,10 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
     # fields a consumer can read directly — `goal_threshold` present AND
     # `goal_threshold_frame == "level"` — over-charges only the requests the
     # resolver then refuses, and can never under-charge one it accepts.
-    if request.goal_threshold is not None and request.goal_threshold_frame == "level":
+    if request.goal_threshold is not None and request.goal_threshold_frame in (
+        "level",
+        *CHANGE_FRAMES,
+    ):
         terms["status_quo"] = W_STATUS_QUO_COEF * S * W
 
     # EVPI (p_win sensitivity) — priced on the DEDUPLICATED factor count (uniqueness
@@ -1144,6 +1149,36 @@ LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE: Mapping[str, LevelAnchorSource] = Mappin
 )
 
 
+# R1 S2 (schemas 0.61.0, decision (b): DL #69 5873822541, MG #72 5873982221, AIQ 5874002941): WHOSE
+# base a 'change_rel' target is read on comes from the target node's ``observed_state.source``; no wire
+# carries a separate owner field. Exactly the classes the 0.61.0 CHANGELOG documents. Anything else
+# (``user_assumption``, an unknown literal, no source) is UNKNOWN, which reads as not the user's: the
+# fail-safe direction. Deliberately narrower than B1a's anchor map above, which answers a different
+# question (whether a level exists), not whether a relative target scores the user's own figure.
+BASELINE_OWNER_BY_OBSERVED_SOURCE: Mapping[str, Literal["user", "olumi"]] = MappingProxyType(
+    {
+        "brief_extraction": "user",
+        "explicit": "user",
+        "user_override": "user",
+        "user_confirmed": "user",
+        "user": "user",
+        "user_edited": "user",
+        "user_calibration": "user",
+        "panel_elicited": "user",
+        "cee_inference": "olumi",
+        "inferred": "olumi",
+        "cee_repair": "olumi",
+    }
+)
+
+
+def baseline_owner(observed: Optional[ObservedState]) -> Optional[Literal["user", "olumi"]]:
+    """Who stated a node's baseline (R1), from its ``observed_state.source``; None when unknown."""
+    if observed is None or observed.source is None:
+        return None
+    return BASELINE_OWNER_BY_OBSERVED_SOURCE.get(observed.source)
+
+
 def level_anchor_source(node: NodeV2) -> Optional[LevelAnchorSource]:
     """Who attests the level a node holds (B1a), or None when nothing attests it.
 
@@ -1263,7 +1298,7 @@ def unit_level_domains(request: RobustnessRequestV2) -> Dict[str, LevelDomain]:
     nodes = {node.id: node for node in request.graph.nodes}
     domains: Dict[str, LevelDomain] = {}
     for constraint in request.goal_constraints or []:
-        if constraint.value_frame != "level" or constraint.level_domain is None:
+        if constraint.value_frame in (None, "delta") or constraint.level_domain is None:
             continue
         if node_level_frame(nodes.get(constraint.node_id)) != PERCENT_POINTS_FRAME:
             continue
@@ -2462,6 +2497,14 @@ class PhaseDeadline:
         return round((time.monotonic() - self.t0) * 1000.0, 1)
 
 
+# R1 S2: refusals a consumer keys on BY NAME (R&C's CEE ask, #72 5871316082). Every other refusal keeps
+# its channel's generic code (GOAL_THRESHOLD_NOT_CONVERTIBLE / CONSTRAINT_NOT_CONVERTIBLE).
+R1_NAMED_REFUSAL_CODES: Dict[str, str] = {
+    "goal_base_missing": "GOAL_BASE_MISSING",
+    "change_of_a_change": "CHANGE_OF_A_CHANGE",
+}
+
+
 @dataclass(frozen=True)
 class GoalThresholdPlan:
     """HOW ``probability_of_goal`` must be computed for one request (ROADMAP 2.286).
@@ -2520,6 +2563,17 @@ class GoalThresholdPlan:
     level_threshold: Optional[float] = None
     goal_baseline: Optional[float] = None
     pinned_levels: Tuple[Tuple[str, float], ...] = ()
+    # R1 S2: the series compared is a CHANGE from today (the paired Δ, or x − today for a pinned
+    # option), never a level, so no level domain may clip it. False on every level/delta plan.
+    change_frame: bool = False
+    # R1 S2: 'estimate_only' only for a 'change_rel' target on a base the user did not state.
+    frame_verdict: str = "scored"
+    # R1 S2: the limit channel compares the STATED value, so a change-stated plan maps its series
+    # (levels, or the paired change) into the stated frame: (series − stated_origin) × stated_scale.
+    # change_abs: origin = the base (0 for a pure change), scale 1. change_rel: scale = span / b_raw,
+    # which turns a normalised change into a fraction of today's raw level.
+    stated_origin: float = 0.0
+    stated_scale: float = 1.0
 
     @property
     def needs_status_quo_reference(self) -> bool:
@@ -2958,7 +3012,7 @@ class RobustnessAnalyzerV2:
                 # for it, so it is withheld. A 'delta' limit on the same node compares
                 # the raw samples, where the 0.0 offset is real, and keeps the warning.
                 is_anchored_level_target = node_id in anchored_levels and all(
-                    constraint.value_frame == "level"
+                    constraint.value_frame in ("level", *CHANGE_FRAMES)
                     for constraint in request.goal_constraints or []
                     if constraint.node_id == node_id
                 )
@@ -5266,8 +5320,9 @@ class RobustnessAnalyzerV2:
         """
         return (
             goal_threshold_plan is not None
-            and (request.goal_threshold_frame == "level")
+            and (request.goal_threshold_frame in ("level", *CHANGE_FRAMES))
             and goal_threshold_plan.level_threshold is not None
+            and not goal_threshold_plan.change_frame
         )
 
     @staticmethod
@@ -5549,7 +5604,8 @@ class RobustnessAnalyzerV2:
             }
             detail.update(extra)
             return None, InferenceWarning(
-                code=(
+                code=R1_NAMED_REFUSAL_CODES.get(reason)
+                or (
                     "GOAL_THRESHOLD_FRAME_UNSPECIFIED"
                     if reason == "frame_not_stamped"
                     else "GOAL_THRESHOLD_NOT_CONVERTIBLE"
@@ -5691,6 +5747,27 @@ class RobustnessAnalyzerV2:
                     f"probability, so {omitted_field} is omitted rather than "
                     f"guessed. Stamp 'level' or 'delta'."
                 ),
+            )
+
+        # R1 S2: a change frame, or ANY non-delta target on a node that measures a change, is
+        # resolved by the change rules (which route a base-known change_abs back through the
+        # level limb below, so the two cannot drift apart).
+        r1_node = next((n for n in request.graph.nodes if n.id == target_id), None)
+        r1_measures_change = r1_node is not None and r1_node.quantity_frame == "change"
+        if frame in CHANGE_FRAMES or (frame == "level" and r1_measures_change):
+            return RobustnessAnalyzerV2._resolve_change_threshold(
+                request,
+                target_id=target_id,
+                threshold=threshold,
+                frame=frame,
+                frame_field=frame_field,
+                value_label=value_label,
+                noun=noun,
+                omitted_field=omitted_field,
+                reasons=reasons,
+                operand_names=operand_names,
+                refuse=refuse,
+                pinned_options_are_levels=pinned_options_are_levels,
             )
 
         if frame == "delta":
@@ -6019,21 +6096,7 @@ class RobustnessAnalyzerV2:
         # disconnected branch cannot perturb these samples, and refusing on it
         # would be over-refusal, which has its own cost (a user sees "not
         # available" for an answer ISL could have given honestly).
-        parents_of: Dict[str, List[str]] = defaultdict(list)
-        for edge in request.graph.edges:
-            parents_of[edge.to].append(edge.from_)
-        influencers = {target_id}
-        frontier = [target_id]
-        while frontier:
-            for parent in parents_of[frontier.pop()]:
-                if parent not in influencers:
-                    influencers.add(parent)
-                    frontier.append(parent)
-        noisy = sorted(
-            node.id
-            for node in request.graph.nodes
-            if node.id in influencers and node.epsilon_std > 0
-        )
+        noisy = RobustnessAnalyzerV2._noisy_influencers(request, target_id)
         if noisy:
             return refuse(
                 "epsilon_breaks_status_quo_reference",
@@ -6063,6 +6126,268 @@ class RobustnessAnalyzerV2:
                 level_threshold=threshold,
                 goal_baseline=baseline,
                 pinned_levels=set_levels,
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _noisy_influencers(request: RobustnessRequestV2, target_id: str) -> List[str]:
+        """Nodes with ``epsilon_std > 0`` that can reach ``target_id`` (itself included). A paired
+        status-quo difference would carry their per-evaluation noise, so every plan that differences
+        against the status quo (level, and R1's change) refuses when this is non-empty."""
+        parents_of: Dict[str, List[str]] = defaultdict(list)
+        for edge in request.graph.edges:
+            parents_of[edge.to].append(edge.from_)
+        influencers = {target_id}
+        frontier = [target_id]
+        while frontier:
+            for parent in parents_of[frontier.pop()]:
+                if parent not in influencers:
+                    influencers.add(parent)
+                    frontier.append(parent)
+        return sorted(
+            node.id
+            for node in request.graph.nodes
+            if node.id in influencers and node.epsilon_std > 0
+        )
+
+    @staticmethod
+    def _resolve_change_threshold(
+        request: RobustnessRequestV2,
+        *,
+        target_id: str,
+        threshold: float,
+        frame: str,
+        frame_field: str,
+        value_label: str,
+        noun: str,
+        omitted_field: str,
+        reasons: Dict[str, str],
+        operand_names: Dict[str, str],
+        refuse: Callable[..., Tuple[Optional["GoalThresholdPlan"], Any]],
+        pinned_options_are_levels: bool,
+    ) -> Tuple[Optional["GoalThresholdPlan"], Any]:
+        """R1 S2: a target stated as a CHANGE from today (DL #72 5871412823; meaning AIQ 5871459631).
+
+        ``change_abs`` c on a LEVEL node:
+          * a known base b (a non-root with ``observed_state.baseline``) -> THE SAME level resolver at
+            b + c. P then equals the level twin's by construction: the clip, the pinned exact compare
+            and the epsilon refusal all apply unchanged. No second arithmetic (AIQ Q-A).
+          * otherwise -> the paired change, Δ = option − status quo on the same draw, against c. A
+            pinned option is compared at ``x − today`` exactly (a root's today is its central value,
+            never the status-quo draw, which would give ~0.5 where the answer is 1). An unpinned root
+            has Δ = 0 on every draw.
+        A CHANGE node (``quantity_frame == 'change'``) is 0 today by definition, so any 'level' or
+        'change_abs' target on it is the paired change with today = 0 (AIQ Q-B); 'change_rel' on it is
+        refused by name (CHANGE_OF_A_CHANGE).
+        ``change_rel`` r on a level node is a change of ``r · b_raw`` in raw units, where
+        ``b_raw = b_n (max − min) + min`` on the node's ``raw_range`` (a relative change is relative to
+        RAW zero; ``b_n (1 + r)`` is right only when min = 0). No base -> GOAL_BASE_MISSING; no
+        raw_range, or b_raw = 0 ("20% of nothing") -> refused by name. It is ``scored`` only on a base
+        the USER stated (``baseline_owner``, read from ``observed_state.source``); otherwise ``estimate_only``.
+        """
+        node = next((n for n in request.graph.nodes if n.id == target_id), None)
+        if node is None:
+            return refuse(
+                reasons["node_missing"],
+                f"nodes[{target_id}]",
+                f"{noun} '{target_id}' is not present in the graph.",
+            )
+        if not math.isfinite(threshold):
+            return refuse(
+                "non_finite_conversion_input",
+                frame_field,
+                f"Comparison inputs must all be finite ({value_label}={threshold}).",
+            )
+        measures_change = node.quantity_frame == "change"
+        observed = node.observed_state
+        verdict = "scored"
+
+        if frame == "change_rel":
+            if measures_change:
+                return refuse(
+                    "change_of_a_change",
+                    frame_field,
+                    (
+                        f"{noun} '{target_id}' measures a change from today, so a relative change "
+                        f"of it (a change of a change) has no base to be relative to. "
+                        f"{omitted_field} is omitted; state the target as 'change_abs'."
+                    ),
+                )
+            base_n = status_quo_level(node)
+            if base_n is None:
+                return refuse(
+                    "goal_base_missing",
+                    f"nodes[{target_id}].observed_state.baseline",
+                    (
+                        f"A relative target on {noun.lower()} '{target_id}' needs today's level, "
+                        f"and the node carries none. {omitted_field} is omitted rather than "
+                        f"measured against a guessed base."
+                    ),
+                )
+            raw_range = node.raw_range
+            if raw_range is None:
+                return refuse(
+                    "change_rel_raw_range_missing",
+                    f"nodes[{target_id}].raw_range",
+                    (
+                        f"A relative target is relative to the quantity's RAW zero, and "
+                        f"{noun.lower()} '{target_id}' carries no raw_range to find it. "
+                        f"{omitted_field} is omitted rather than assuming the range starts at 0."
+                    ),
+                )
+            span = raw_range.max - raw_range.min
+            base_raw = base_n * span + raw_range.min
+            if not math.isfinite(base_raw) or abs(base_raw) <= 1e-12 * max(
+                1.0, abs(raw_range.min), abs(raw_range.max)
+            ):
+                return refuse(
+                    "change_rel_base_zero",
+                    f"nodes[{target_id}].observed_state.baseline",
+                    (
+                        f"Today's level of {noun.lower()} '{target_id}' is {base_raw} in raw units, "
+                        f"so a relative change of it is undefined. {omitted_field} is omitted."
+                    ),
+                    base_raw=base_raw,
+                )
+            change = threshold * base_raw / span
+            stated_scale = span / base_raw
+            verdict = "scored" if baseline_owner(observed) == "user" else "estimate_only"
+        else:
+            change = threshold
+            stated_scale = 1.0
+
+        is_root = not any(edge.to == target_id for edge in request.graph.edges)
+        if (
+            not measures_change
+            and not is_root
+            and observed is not None
+            and observed.baseline is not None
+        ):
+            plan, warning = RobustnessAnalyzerV2._resolve_threshold_in_sample_frame(
+                request,
+                target_id=target_id,
+                threshold=observed.baseline + change,
+                frame="level",
+                frame_field=frame_field,
+                value_label=value_label,
+                noun=noun,
+                omitted_field=omitted_field,
+                reasons=reasons,
+                operand_names=operand_names,
+                refuse=refuse,
+                pinned_options_are_levels=pinned_options_are_levels,
+            )
+            if plan is None:
+                return None, warning
+            return (
+                replace(
+                    plan,
+                    frame_verdict=verdict,
+                    stated_origin=observed.baseline,
+                    stated_scale=stated_scale,
+                ),
+                warning,
+            )
+
+        pinned_levels = {
+            option.id: option.interventions[target_id]
+            for option in request.options
+            if target_id in option.interventions
+        }
+        if pinned_levels and not pinned_options_are_levels:
+            return refuse(
+                reasons["pinned_by_intervention"],
+                "options[].interventions",
+                (
+                    f"At least one option intervenes directly on {noun.lower()} "
+                    f"'{target_id}', and this channel does not score a target an option sets."
+                ),
+            )
+        limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
+        set_changes: Tuple[Tuple[str, float], ...] = ()
+        if pinned_levels:
+            if measures_change:
+                today: Optional[float] = 0.0
+            elif is_root:
+                anchor = resolve_factor_central_value(
+                    node,
+                    next(
+                        (
+                            pu
+                            for pu in (request.parameter_uncertainties or [])
+                            if pu.node_id == target_id
+                        ),
+                        None,
+                    ),
+                )
+                today = (
+                    None if anchor.source == FACTOR_VALUE_SOURCE_DEFAULT_ZERO else anchor.value
+                )
+            else:
+                today = status_quo_level(node)
+            if today is None:
+                return refuse(
+                    "goal_base_missing",
+                    f"nodes[{target_id}].observed_state",
+                    (
+                        f"An option sets {noun.lower()} '{target_id}', and its change is the level "
+                        f"it sets less today's level, which the node does not carry. "
+                        f"{omitted_field} is omitted."
+                    ),
+                )
+            set_changes = tuple(sorted((oid, x - today) for oid, x in pinned_levels.items()))
+            if not all(math.isfinite(v) for _, v in set_changes):
+                return refuse(
+                    "non_finite_conversion_input",
+                    "options[].interventions",
+                    f"Comparison inputs must all be finite (pinned changes={dict(set_changes)}).",
+                )
+        operands = {operand_names["threshold"]: change, **{f"pinned_change[{o}]": v for o, v in set_changes}}
+        out_of_domain = {name: v for name, v in operands.items() if abs(v) > limit}
+        if out_of_domain:
+            return refuse(
+                reasons["values_outside_normalised_domain"],
+                frame_field,
+                (
+                    f"Change operands {sorted(out_of_domain)} exceed |{limit}|, so they are not "
+                    f"changes of a normalised value; raw units were probably sent."
+                ),
+                out_of_domain=out_of_domain,
+                domain_limit=limit,
+            )
+        if set_changes and len(set_changes) == len(request.options):
+            return (
+                GoalThresholdPlan(
+                    delta_threshold=change,
+                    pinned_levels=set_changes,
+                    change_frame=True,
+                    frame_verdict=verdict,
+                    stated_scale=stated_scale,
+                ),
+                None,
+            )
+        noisy = RobustnessAnalyzerV2._noisy_influencers(request, target_id)
+        if noisy:
+            return refuse(
+                "epsilon_breaks_status_quo_reference",
+                f"nodes[{target_id}].epsilon_std",
+                (
+                    f"Nodes {noisy} carry epsilon_std > 0 and can influence '{target_id}'. A change "
+                    f"is resolved by differencing each option's sample against the same draw's "
+                    f"status quo, which would carry noise no option caused. {omitted_field} is "
+                    f"omitted."
+                ),
+                noisy_node_ids=noisy,
+            )
+        return (
+            GoalThresholdPlan(
+                level_threshold=change,
+                goal_baseline=0.0,
+                pinned_levels=set_changes,
+                change_frame=True,
+                frame_verdict=verdict,
+                stated_scale=stated_scale,
             ),
             None,
         )
@@ -6162,7 +6487,8 @@ class RobustnessAnalyzerV2:
                 }
                 detail.update(extra)
                 return None, InferenceWarning(
-                    code=(
+                    code=R1_NAMED_REFUSAL_CODES.get(reason)
+                    or (
                         "CONSTRAINT_FRAME_UNSPECIFIED"
                         if reason == "frame_not_stamped"
                         else "CONSTRAINT_NOT_CONVERTIBLE"
@@ -6406,7 +6732,7 @@ class RobustnessAnalyzerV2:
                     effect = samples_array - np.array(status_quo_outcomes)
                     compared = goal_threshold_plan.goal_baseline + effect
                     goal_domain = level_domains.get(request.goal_node_id)
-                    if goal_domain is not None:
+                    if goal_domain is not None and not goal_threshold_plan.change_frame:
                         # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
                     meets = (
@@ -6596,6 +6922,7 @@ class RobustnessAnalyzerV2:
                             near_miss_fraction=c["near_miss_fraction"],
                             binding=c["binding"],
                             level_out_of_domain_fraction=c["level_out_of_domain_fraction"],
+                            frame_verdict=c["frame_verdict"],
                         )
                         for c in analysis_dict["constraints"]
                     ]
@@ -10811,7 +11138,9 @@ class RobustnessAnalyzerV2:
                         else level
                         for level in resolved_values[index]
                     ]
-                    if constraint.value_frame == "level" and constraint.node_id in level_domains
+                    if constraint.node_id in level_domains
+                    and constraint.value_frame != "delta"
+                    and not scored_plans[index].change_frame
                     else resolved_values[index]
                 )
                 # The series are keyed by position in `scored` (B5): pairing them with the
@@ -10820,6 +11149,18 @@ class RobustnessAnalyzerV2:
                 # DL #72 5862819400). When every limit is scored, `scored` IS `constraints`.
                 for index, constraint in enumerate(scored)
             }
+
+        # R1 S2: every comparison below reads the limit's STATED value (``constraint.threshold``),
+        # so a limit stated as a change is compared in ITS frame: (level − origin) × scale, AFTER the
+        # clip above (a base-anchored change_abs is clipped as a level, exactly like its level twin).
+        # Identity for every level/delta plan (origin 0, scale 1).
+        for index in list(resolved_values):
+            plan = scored_plans[index]
+            if plan.stated_origin != 0.0 or plan.stated_scale != 1.0:
+                resolved_values[index] = [
+                    (value - plan.stated_origin) * plan.stated_scale
+                    for value in resolved_values[index]
+                ]
 
         # T3: Per-constraint and joint probability
         probabilities = self._compute_constraint_probabilities(
@@ -10894,6 +11235,8 @@ class RobustnessAnalyzerV2:
                     "level_out_of_domain_fraction": self._level_out_of_domain_fraction(
                         unclamped_values[c_idx], constraint, informative
                     ),
+                    # R1 S2: 'estimate_only' only for a change_rel on a base the user did not state.
+                    "frame_verdict": scored_plans[c_idx].frame_verdict,
                 }
             )
 
