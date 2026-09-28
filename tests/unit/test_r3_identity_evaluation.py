@@ -347,7 +347,7 @@ RECOMPUTED = {
     "factor_evppi",  # R3-6, MEASURED: 0.0, below_resolution (see below)
     "critiques",  # analysis critiques are recomputed on the new samples
     "identity_evaluations",  # the new disclosure itself (absent when nothing is declared)
-    "structural_influence",  # R3-5: every factor node's influence (absent without an evaluated identity)
+    "structural_influence",  # R3-5: every factor node's influence (on every graph; the identity moves it)
     "metadata",  # execution_time_ms differs on ANY two runs; edge_existence_rates move through the
     # tie-break coupling (£59 no longer ties, so the edge stream is consumed differently)
 }
@@ -1123,20 +1123,23 @@ def central_slope(d: Dict[str, Any], operand: str, h: float = 1e-4) -> float:
 class TestInfluenceReadsTheIdentity:
     def test_subscribers_rank_above_price_on_the_served_wire(self):
         """The product's partials at today's levels: subscribers k x £49 x 10,000/125,000 = 3.96 against
-        price k x 1,500 x 200/125,000 = 2.42 (plus price's path through new subscribers)."""
+        price k x 1,500 x 200/125,000 = 2.42, less price's NEGATIVE path through new subscribers (a higher
+        price wins fewer). Influence is the expected NET effect (AIQ #72 5875853496), so that path offsets:
+        price 0.586 (it was 0.638 under gross reach, which added it)."""
         scores = influence(wire(identity=PRODUCT))
         assert max(scores, key=scores.get) == SUBS
         assert scores[SUBS] == 1.0
-        assert scores[PRICE] == pytest.approx(0.638, abs=5e-4)
+        assert scores[PRICE] == pytest.approx(0.586, abs=5e-4)
         assert scores[OTHER] == pytest.approx(0.081, abs=5e-4)  # still a belief edge: 0.4 x 0.8 / 3.96
 
     def test_control_no_declaration_walks_the_slopes_exactly_as_at_base(self):
-        """Base 14f1a3a, the same wire with no declaration: price 1.000 · other 0.794 · subscribers 0.298."""
+        """The same wire with no declaration, NET (AIQ #72 5875853496): price 1.000 · other 0.806 ·
+        subscribers 0.302 (gross reach at base 14f1a3a gave 0.794 · 0.298)."""
         assert rav2.identity_partials(graph_of(wire(identity=None))) == {}
         scores = influence(wire(identity=None))
         assert scores[PRICE] == 1.0
-        assert scores[OTHER] == pytest.approx(0.794, abs=5e-4)
-        assert scores[SUBS] == pytest.approx(0.298, abs=5e-4)
+        assert scores[OTHER] == pytest.approx(0.806, abs=5e-4)
+        assert scores[SUBS] == pytest.approx(0.302, abs=5e-4)
 
     @pytest.mark.parametrize("identity", [PRODUCT, WITH_ADDEND], ids=["no_addend", "addend"])
     @pytest.mark.parametrize("operand", [PRICE, SUBS])

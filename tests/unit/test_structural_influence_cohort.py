@@ -8,21 +8,24 @@ nodes, 5 parameter uncertainties) ``fac_existing_customers_grandfathered`` has n
 had no score, and PLoT could not publish ISL's influence for every row: the UI shows producer influence
 only when EVERY factor carries one (DGAI ``useResultsSectionData.ts:2958``).
 
-When an identity is EVALUATED, the V2 envelope carries a top-level ``structural_influence`` list: every
-factor node, one cohort, one normalisation, with #195's identity partials. ``factor_sensitivity`` is
-byte-identical. Without an evaluated identity the key is absent, so the response is byte-identical.
+The V2 envelope carries a top-level ``structural_influence`` list: every factor node, one cohort, one
+normalisation, with #195's identity partials where an identity is evaluated. ``factor_sensitivity`` is
+byte-identical.
+
+ONE influence algorithm (AIQ end state, #72 5872951506; census 5875292873): the list is emitted on EVERY
+graph where the factor phase runs, not only under an evaluated identity, so PLoT can retire its signed-sum
+walk as the authority. It is absent only when the factor phase does not run (no parameter uncertainty).
 """
 
 from __future__ import annotations
 
-import json
 from typing import Any, Dict, List
 
 import pytest
 
 import src.services.robustness_analyzer_v2 as rav2
 from src.models.robustness_v2 import RobustnessRequestV2
-from tests.unit.test_r3_identity_evaluation import MRR, OTHER, PRICE, PRODUCT, SUBS, v2_body, wire
+from tests.unit.test_r3_identity_evaluation import MRR, OTHER, PRICE, PRODUCT, SUBS, WITH_ADDEND, v2_body, wire
 
 GRANDFATHERED = "fac_existing_customers_grandfathered"
 ALL_FACTORS = [PRICE, SUBS, "monthly_churn", "monthly_new_pro_subscribers", OTHER, GRANDFATHERED]
@@ -120,6 +123,31 @@ def unobserved_leads() -> Dict[str, Any]:
     return d
 
 
+class TestTheServedIdentityShapeWithItsAddend:
+    """Paul's SERVED identity is ``product(price, subscribers)`` + ``addends: [other_mrr_growth]``
+    (``WITH_ADDEND``), not the addend-free ``PRODUCT`` the rows above use. R3 SCIENCE's local wire witness
+    (#72 5875435465) caught R3-B's stated P1 figures coming from ``PRODUCT``; this pins the served shape."""
+
+    def test_the_served_shape_is_evaluated_and_its_list_is_the_one_walk_over_six(self):
+        d = wire(identity=WITH_ADDEND)
+        body = envelope(d)
+        assert [e["evaluated"] for e in body["identity_evaluations"] if e["node_id"] == MRR] == [True]
+        assert by_node(body["structural_influence"], "influence_score") == pytest.approx(
+            walk(d, ALL_FACTORS), abs=1e-12
+        )
+
+    def test_the_addend_moves_exactly_other_and_grandfathered(self):
+        served = by_node(envelope(wire(identity=WITH_ADDEND))["structural_influence"], "influence_score")
+        free = by_node(envelope(wire(identity=PRODUCT))["structural_influence"], "influence_score")
+        # NET and discounted (AIQ 5875853496). Under gross reach price was 0.638133, grandfathered 0.149351.
+        assert {k: round(v, 6) for k, v in served.items()} == {
+            SUBS: 1.0, PRICE: 0.586357, "monthly_churn": 0.12, "monthly_new_pro_subscribers": 0.08,
+            OTHER: 0.101351, GRANDFATHERED: 0.053351,
+        }
+        moved = sorted(k for k in served if round(served[k], 6) != round(free[k], 6))
+        assert moved == sorted([OTHER, GRANDFATHERED])
+
+
 class TestWhenTheUnobservedFactorLeads:
     def test_factor_sensitivity_is_still_exactly_its_own_five_row_walk(self):
         d = unobserved_leads()
@@ -134,13 +162,61 @@ class TestWhenTheUnobservedFactorLeads:
         assert by_node(body["factor_sensitivity"], "influence_score")[SUBS] == 1.0
 
 
-class TestAbsentWithoutAnEvaluatedIdentity:
-    def test_c0_has_no_structural_influence_key(self, c0):
-        assert "structural_influence" not in c0
+def factor_ids(d: Dict[str, Any]) -> List[str]:
+    return [n["id"] for n in d["graph"]["nodes"] if n["kind"] == "factor"]
 
-    def test_a_withheld_identity_has_no_structural_influence_key(self):
-        body = envelope(declared_but_unused())
+
+class TestEveryGraphCarriesTheOneAlgorithm:
+    """AIQ 5872951506: ONE authority, ISL's structural_influence, for every graph."""
+
+    def test_c0_carries_structural_influence_over_every_factor_node(self, c0):
+        assert "identity_evaluations" not in c0  # precondition: C0 declares no identity
+        assert sorted(by_node(c0["structural_influence"], "influence_score")) == sorted(ALL_FACTORS)
+
+    def test_c0_scores_are_the_one_walk_over_every_factor(self, c0):
+        d = wire(identity=None)
+        assert by_node(c0["structural_influence"], "influence_score") == pytest.approx(
+            walk(d, ALL_FACTORS), abs=1e-12
+        )
+
+    def test_c0_price_leads_and_the_unobserved_factor_is_a_close_second(self, c0):
+        """Net and discounted (AIQ 5875853496): C0's top two are price (1.0) and the unobserved factor
+        (0.9933). Under gross reach the unobserved factor led. The normalisation-leak mutant is caught by
+        ``TestWhenTheUnobservedFactorLeads`` (where it leads by construction), not here."""
+        rows = sorted(c0["structural_influence"], key=lambda r: r["influence_rank"])
+        assert [r["node_id"] for r in rows[:2]] == [PRICE, GRANDFATHERED]
+        assert rows[0]["influence_score"] == 1.0
+        assert rows[1]["influence_score"] == pytest.approx(0.993314, abs=1e-6)
+
+    def test_c0_factor_sensitivity_is_byte_identical_to_its_own_cohort_walk(self, c0):
+        d = wire(identity=None)
+        cohort = [r["node_id"] for r in c0["factor_sensitivity"]]
+        assert GRANDFATHERED not in cohort
+        assert by_node(c0["factor_sensitivity"], "influence_score") == walk(d, cohort)
+
+    def test_c0_ranks_follow_the_scores(self, c0):
+        rows = sorted(c0["structural_influence"], key=lambda r: r["influence_rank"])
+        assert [r["influence_rank"] for r in rows] == list(range(1, len(ALL_FACTORS) + 1))
+        scores = [r["influence_score"] for r in rows]
+        assert scores == sorted(scores, reverse=True)
+
+    def test_p1_and_c0_differ_at_the_top_the_identity_partials_still_move_it(self, p1, c0):
+        top = lambda b: max(by_node(b["structural_influence"], "influence_score").items(), key=lambda kv: kv[1])[0]
+        assert top(p1) == SUBS and top(c0) == PRICE
+
+    def test_a_withheld_identity_carries_it_too_over_every_factor_node(self):
+        d = declared_but_unused()
+        body = envelope(d)
         assert [e["evaluated"] for e in body["identity_evaluations"]] == [False]
+        assert by_node(body["structural_influence"], "influence_score") == pytest.approx(
+            walk(d, factor_ids(d)), abs=1e-12
+        )
+
+    def test_absent_only_when_the_factor_phase_does_not_run(self):
+        d = wire(identity=None)
+        d["parameter_uncertainties"] = []
+        body = envelope(d)
+        assert "factor_sensitivity" not in body or not body["factor_sensitivity"]
         assert "structural_influence" not in body
 
 
@@ -169,7 +245,9 @@ class TestOnePoolAndTruncation:
         assert all(r.get("influence_score") is None and r.get("influence_rank") is None for r in rows)
 
 
-def test_c0_serialises_byte_identically_whatever_the_new_model_field():
-    """exclude_none: an unset optional is ABSENT on the wire, so C0's JSON carries no new key at all."""
-    body = envelope(wire(identity=None))
-    assert "structural_influence" not in json.dumps(body)
+def test_c0_truncated_withholds_every_score_and_rank(monkeypatch):
+    """Exact-or-null holds on every graph, not only under an identity."""
+    monkeypatch.setattr(rav2, "MAX_INFLUENCE_WALK_CALLS_TOTAL", 3)
+    rows = envelope(wire(identity=None))["structural_influence"]
+    assert sorted(r["node_id"] for r in rows) == sorted(ALL_FACTORS)
+    assert all(r.get("influence_score") is None and r.get("influence_rank") is None for r in rows)
