@@ -1144,7 +1144,7 @@ def anchored_level_domain(
 ) -> Tuple[Optional[float], Optional[float]]:
     """The levels an anchored quantity can take, in its own frame (AIQ 5855046894 (2)).
 
-    The bounds come from the UNIT's meaning, never from the frame (AIQ #72 5866289608).
+    The bounds come from the UNIT's meaning, not from the frame (AIQ #72 5866289608).
     ``observed_state.cap`` is NOT read: it is a normalisation frame (MRR's £125,000).
     CEE's factor enricher mints one only for non-'%' quantities above 1 (money, counts),
     so reading its presence as a ceiling clamped money at its frame. ISL does not parse unit strings (the caller owns
@@ -1159,6 +1159,12 @@ def anchored_level_domain(
     A stated bound the held level already breaks is not applied (a 110% net revenue
     retention held above a [0, 1] domain keeps no ceiling), so the status quo always
     reproduces its own level.
+
+    EXCEPTION, PLoT's deferred '%' rung (not changed here): when a '%' target's own frame
+    (its cap, else scale_frame, else the value/raw_value pair) is not 100 percentage
+    points, ``levelDomainFor`` still sends {0, 1}, and on that frame [0, 1] means
+    [0, frame]. The ceiling applied here is then the frame (e.g. 20%), not 100%. Sending
+    {0, 100/extent} instead is PLoT's call, open.
     """
     lower: Optional[float] = 0.0 if level >= 0.0 else None
     upper: Optional[float] = None

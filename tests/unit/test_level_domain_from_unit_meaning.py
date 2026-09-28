@@ -1,4 +1,4 @@
-"""An anchored level's domain comes from the UNIT's meaning, never from the frame (AIQ #72 5866289608).
+"""An anchored level's domain comes from the UNIT's meaning, not from the frame (AIQ #72 5866289608).
 
 THE FINDING (served journey A run 3; CEE a4f4d2b · PLoT c0f0a9a · ISL 9b8aa34). The £59 option's card read
 "90th percentile £125,000.00" beside "mean £126,363". ``anchored_level_domain`` gave any node that carried an
@@ -201,8 +201,9 @@ class TestRow1TheServedMoneyGoalIsNotClampedAtItsCap:
             assert outcome[key] == pytest.approx(0.6, abs=1e-12), (key, outcome)
 
     def test_contrast_probability_of_goal_is_the_unclamped_comparison(self, served_v1):
-        """The ceiling never reached the goal verdict: a threshold inside the domain is met or missed the
-        same way on clamped and unclamped levels. 'MRR >= £100,000' (0.8) over the analyzer's own levels.
+        """At the served threshold the ceiling never reached the goal verdict: a threshold inside the domain
+        is met or missed the same way on clamped and unclamped levels. 'MRR >= £100,000' (0.8) over the
+        analyzer's own levels. ABOVE the frame it did (0.0 at base): test_level_domain_probability_impact.py.
         """
         for option_id in (KEEP, P59, P54):
             levels = np.asarray(
