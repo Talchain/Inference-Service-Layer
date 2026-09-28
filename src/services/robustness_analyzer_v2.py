@@ -40,6 +40,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from src.models.identity_evaluation import IdentityEvaluation, IdentityReconciliation
 from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReason
+from src.models.structural_influence import StructuralInfluence
 from src.models.robustness_v2 import (
     BucketResult,
     ClampMetrics,
@@ -503,7 +504,7 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     # Request-wide walk pool MAX_INFLUENCE_WALK_CALLS_TOTAL charged 1:1
     # (~0.77µs/call measured ≈ 1 unit/call); exact-or-null scores (N1),
     # truncation disclosed via STRUCTURAL_INFLUENCE_TRUNCATED.
-    "_compute_structural_influence": "priced:structural_influence",
+    "_compute_structural_influence": "priced:structural_influence,structural_influence_identity",
     "_compute_path_decomposition": "priced:path_decomposition",
     "_compute_robustness": "bounded: post-processing of existing samples; heavy child is _compute_alternative_winners",
     "_compute_edge_e_values": "priced:e_values",
@@ -660,6 +661,10 @@ def compute_weighted_cost(request: RobustnessRequestV2) -> WeightedCost:
         # the correlation-suppressed case — conservative, and the term is small.
         if request.parameter_uncertainties:
             terms["structural_influence"] = MAX_INFLUENCE_WALK_CALLS_TOTAL
+            # R3-5: the every-factor walk, a second pool, runs only under an evaluated identity;
+            # charged wherever one is DECLARED (declared ⊇ evaluated, conservative).
+            if any(node.nonlinear_identity is not None for node in request.graph.nodes):
+                terms["structural_influence_identity"] = MAX_INFLUENCE_WALK_CALLS_TOTAL
 
         # Alternative winners / marginal switch (ROADMAP 2.356). Gated on the
         # SENSITIVITY phase, not on a flag of its own: the fragile set is derived
@@ -3321,6 +3326,7 @@ class RobustnessAnalyzerV2:
         # correlated factors. Omitted (absent, not fabricated) with the
         # correlation_model disclosure marker naming the reason.
         factor_sensitivity: List[FactorSensitivityResult] = []
+        structural_influence: List[StructuralInfluence] = []  # R3-5: evaluated identity only
         if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
             if correlation_active:
                 suppressed_attributions.append(SUPPRESSED_ATTR_FACTOR_SENSITIVITY)
@@ -3333,7 +3339,12 @@ class RobustnessAnalyzerV2:
                 suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
                 factor_sensitivity = self._compute_factor_sensitivity(
-                    request, option_outcomes, rng_factor, evaluator, critiques=critiques
+                    request,
+                    option_outcomes,
+                    rng_factor,
+                    evaluator,
+                    critiques=critiques,
+                    structural_influence_out=structural_influence,
                 )
 
         # Compute conditional winners (factor-partitioned win probabilities).
@@ -4077,6 +4088,7 @@ class RobustnessAnalyzerV2:
             range_fit_disclosures=range_fit_disclosures,
             node_levels=node_level_frames or None,
             identity_evaluations=identity_evaluations(request.graph) or None,
+            structural_influence=structural_influence or None,
         )
 
         self.logger.info(
@@ -6806,6 +6818,7 @@ class RobustnessAnalyzerV2:
         rng: SeededRNG,
         evaluator: SCMEvaluatorV2,
         critiques: Optional[List[CritiqueV2]] = None,
+        structural_influence_out: Optional[List[StructuralInfluence]] = None,
     ) -> List[FactorSensitivityResult]:
         """
         Compute sensitivity to factor node values.
@@ -7079,6 +7092,44 @@ class RobustnessAnalyzerV2:
             }
         else:
             influence_rank_map = {s["node_id"]: None for s in sensitivities}
+
+        # R3-5 (DL #72 5872746926, AIQ 5872728325): when an identity is EVALUATED, publish structural
+        # influence over EVERY factor node — one cohort, one normalisation. The cohort above is only the
+        # factors with an uncertainty, so a factor with no observed value had no score and no consumer
+        # could show ISL's influence for every factor. A SECOND walk with its own pool (priced as
+        # `structural_influence_identity`), so factor_sensitivity above is byte-identical. Exact-or-null.
+        if structural_influence_out is not None and evaluator._evaluated_identities:
+            every_factor = [str(n.id) for n in request.graph.nodes if n.kind == "factor"]
+            every_scores, every_truncated = self._compute_structural_influence(
+                request.graph,
+                every_factor,
+                request.goal_node_id,
+                factor_centres=factor_centres(request),
+            )
+            if every_truncated:
+                if not influence_truncated and critiques is not None:
+                    critiques.append(
+                        STRUCTURAL_INFLUENCE_TRUNCATED.build(
+                            factor_ids=", ".join(sorted(every_truncated)),
+                            budget=MAX_INFLUENCE_WALK_CALLS_TOTAL,
+                            affected_node_ids=sorted(every_truncated),
+                            seed=rng.seed,
+                        )
+                    )
+                structural_influence_out.extend(
+                    StructuralInfluence(node_id=node_id) for node_id in every_factor
+                )
+            else:
+                ranked = sorted(every_factor, key=lambda node_id: every_scores[node_id], reverse=True)
+                rank_of = {node_id: i + 1 for i, node_id in enumerate(ranked)}
+                structural_influence_out.extend(
+                    StructuralInfluence(
+                        node_id=node_id,
+                        influence_score=every_scores[node_id],
+                        influence_rank=rank_of[node_id],
+                    )
+                    for node_id in every_factor
+                )
 
         # --- Bootstrap stability analysis (3C) ---
         # Measures stability of attribution under model and sampling uncertainty:
