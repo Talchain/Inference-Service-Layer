@@ -152,9 +152,23 @@ MAX_DECOMPOSITION_PATHS = 20000
 # `structural_influence` term whenever the phase can run. Worst wall ≈ 0.3-0.5s.
 MAX_INFLUENCE_WALK_CALLS_TOTAL = 400_000
 
-# Edge strength bounds from schema v2.6
+# Edge strength bounds from schema v2.6. They bound the edge MEAN (parse-time clamp) and the
+# flip-threshold search ranges over that mean. They do NOT bound sampled strengths: a normalised
+# strength's magnitude depends on the node's frame (cap), so a +/-1 cut on draws removed real
+# user-unit effect frame-dependently (-30% of journey A's GBP59 effect under a x2 frame; a
+# 0.85 +/- 0.2 edge lost 23% of its mass). AIQ ruling #72 5868664986: the magnitude bound on draws
+# goes; the sign behaviour (draws may cross zero) is unchanged. See _sample_edge_strength.
 EDGE_STRENGTH_MIN = -1.0
 EDGE_STRENGTH_MAX = 1.0
+
+
+def _sample_edge_strength(rng: SeededRNG, mean: float, std: float) -> float:
+    """One sampled edge strength: Normal(mean, std), with no magnitude bound (AIQ #72 5868664986).
+
+    It consumes exactly one normal draw, the same draw the former truncated sampler accepted
+    first, so a graph whose draws never reach +/-1 is byte-identical to before.
+    """
+    return rng.normal(mean, std)
 
 # B3-S1: sqrt(2) for the Gaussian-copula uniform coupling Phi(y) = 0.5*erfc(-y/√2).
 _SQRT2 = math.sqrt(2.0)
@@ -993,16 +1007,9 @@ class DualUncertaintySampler:
 
             # Structural uncertainty: does edge exist?
             if self.rng.bernoulli(edge.exists_probability):
-                # Parametric uncertainty: what's the effect size?
-                # Truncated normal via rejection sampling — avoids three-mode
-                # artefacts (probability mass spikes at boundaries) that np.clip
-                # would introduce.  Falls back to clamped mean after 100 attempts.
-                strength = self.rng.truncated_normal(
-                    edge.strength.mean,
-                    edge.strength.std,
-                    EDGE_STRENGTH_MIN,
-                    EDGE_STRENGTH_MAX,
-                )
+                # Parametric uncertainty: what's the effect size? Unbounded normal
+                # (AIQ #72 5868664986): a frame-unit bound has no user meaning.
+                strength = _sample_edge_strength(self.rng, edge.strength.mean, edge.strength.std)
                 config[edge_key] = strength
                 self._existence_counts[edge_key] += 1
             else:
@@ -6672,11 +6679,8 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # Force this edge's existence
                 if exists:
-                    config[edge_key] = rng.truncated_normal(
-                        edge.strength.mean,
-                        edge.strength.std,
-                        EDGE_STRENGTH_MIN,
-                        EDGE_STRENGTH_MAX,
+                    config[edge_key] = _sample_edge_strength(
+                        rng, edge.strength.mean, edge.strength.std
                     )
                 else:
                     config[edge_key] = 0.0
@@ -6685,11 +6689,8 @@ class RobustnessAnalyzerV2:
             else:
                 # Sample normally
                 if rng.bernoulli(edge.exists_probability):
-                    config[edge_key] = rng.truncated_normal(
-                        edge.strength.mean,
-                        edge.strength.std,
-                        EDGE_STRENGTH_MIN,
-                        EDGE_STRENGTH_MAX,
+                    config[edge_key] = _sample_edge_strength(
+                        rng, edge.strength.mean, edge.strength.std
                     )
                 else:
                     config[edge_key] = 0.0
@@ -6719,22 +6720,16 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # TARGET EDGE: Force to exist and apply shifted mean
                 # This isolates magnitude sensitivity from existence sensitivity
-                config[edge_key] = rng.truncated_normal(
-                    edge.strength.mean + shift,
-                    edge.strength.std,
-                    EDGE_STRENGTH_MIN,
-                    EDGE_STRENGTH_MAX,
+                config[edge_key] = _sample_edge_strength(
+                    rng, edge.strength.mean + shift, edge.strength.std
                 )
             elif fixed and edge_key in fixed:
                 config[edge_key] = fixed[edge_key]  # R3-9: a definition draws nothing
             else:
                 # OTHER EDGES: Sample normally (both existence and strength)
                 if rng.bernoulli(edge.exists_probability):
-                    config[edge_key] = rng.truncated_normal(
-                        edge.strength.mean,
-                        edge.strength.std,
-                        EDGE_STRENGTH_MIN,
-                        EDGE_STRENGTH_MAX,
+                    config[edge_key] = _sample_edge_strength(
+                        rng, edge.strength.mean, edge.strength.std
                     )
                 else:
                     config[edge_key] = 0.0
@@ -10091,13 +10086,8 @@ class RobustnessAnalyzerV2:
                 # Edge doesn't exist in this sample → effective strength is 0
                 sampled_strength = 0.0
             else:
-                # Truncated normal — rejection sampling within schema bounds
-                sampled_strength = rng.truncated_normal(
-                    edge.strength.mean,
-                    edge.strength.std,
-                    EDGE_STRENGTH_MIN,
-                    EDGE_STRENGTH_MAX,
-                )
+                # Same sampling law as the main sampler (_sample_edge_strength)
+                sampled_strength = _sample_edge_strength(rng, edge.strength.mean, edge.strength.std)
 
             # Build counterfactual config: this edge sampled, others at baseline
             counterfactual_config = baseline_config.copy()
