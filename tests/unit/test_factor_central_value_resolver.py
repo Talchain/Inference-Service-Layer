@@ -457,6 +457,12 @@ _VALUE_READ_ALLOWED = {
         "The goal's observed_state.baseline/value for threshold frame "
         "conversion. Not a factor central value."
     ),
+    "_resolve_change_threshold": (
+        "R1 S2: a target stated as a CHANGE from today reads the target node's "
+        "observed_state.baseline as TODAY'S level (the base of change_abs / "
+        "change_rel) and observed_state.source as WHOSE base it is "
+        "(frame_verdict). Not a factor central value."
+    ),
 }
 
 # Every function anywhere in the scanned files that mentions ``observed_state``
@@ -471,6 +477,7 @@ _OBSERVED_STATE_MENTION_MANIFEST = {
     "status_quo_level",
     "_build_goal_node_disclosures",
     "_resolve_threshold_in_sample_frame",
+    "_resolve_change_threshold",  # R1 S2: today's level (baseline) + whose base (source)
     # --- presence / provenance checks (never a central value) -------------
     "analyze",  # ROOT_NODE_DEFAULT_VALUE eligibility
     "_compute_factor_flip_values",  # flip-row eligibility: does it carry data?

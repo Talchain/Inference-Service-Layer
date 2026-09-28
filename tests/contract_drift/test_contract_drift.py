@@ -588,7 +588,8 @@ def test_voi_family_domains_are_accepted_by_the_contract() -> None:
 # ============================================================================
 
 VALUE_FRAME = "value_frame"
-VALUE_FRAME_DOMAIN = frozenset({"level", "delta"})
+# R1 S2 (schemas 0.61.0, APPENDED): the change frames join the shared vocabulary.
+VALUE_FRAME_DOMAIN = frozenset({"level", "delta", "change_abs", "change_rel"})
 
 
 def test_goal_constraint_is_paired_with_the_contract_constraint_schema() -> None:

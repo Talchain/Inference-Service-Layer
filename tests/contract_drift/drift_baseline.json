@@ -3,11 +3,11 @@
     "purpose": "Ratchet baseline of KNOWN two-way drift (omissions + supersets) between ISL V2 response models and @talchain/schemas. Any drift NOT listed here fails CI loud. Add a new entry ONLY with a decision ref by re-running the refresh script on an intentional change; otherwise fix the drift.",
     "generated_by": "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline",
     "source_repo": "Talchain/olumi-schemas",
-    "source_ref": "v0.38.0",
+    "source_ref": "v0.61.0",
     "package_name": "@talchain/schemas",
-    "package_version": "0.38.0",
-    "omission_count": 50,
-    "superset_count": 83
+    "package_version": "0.61.0",
+    "omission_count": 51,
+    "superset_count": 82
   },
   "omissions": [
     {
@@ -226,6 +226,13 @@
       "prop": "results",
       "required": false,
       "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits results (PLoT may synthesise it, or the contract has it ahead of ISL)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "contract_location": "boundary.AnalysisEnrichmentSchema",
+      "prop": "run_provenance",
+      "required": false,
+      "reason": "optional in contract (boundary.AnalysisEnrichmentSchema) — ISL omits run_provenance (PLoT may synthesise it, or the contract has it ahead of ISL). DECISION REF: R1 S2 pin bump 0.38.0 -> 0.61.0 (DL #72 5873128912; preview R3 SCIENCE 5873947845). run_provenance arrives with schemas 0.58.0 (#66) as an optional CEE->UI envelope field; ISL has never emitted it and reads nothing from it, so its absence from ISL's response changes nothing ISL accepts or emits."
     },
     {
       "isl_model": "InferenceWarning",
@@ -586,11 +593,6 @@
       "isl_model": "ISLResponseV2",
       "prop": "build",
       "reason": "ISL superset — ISLResponseV2.build is not present in the paired contract schema (ISL emits ahead of contract adoption)"
-    },
-    {
-      "isl_model": "ISLResponseV2",
-      "prop": "conditional_winners",
-      "reason": "ISL superset — ISLResponseV2.conditional_winners is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",

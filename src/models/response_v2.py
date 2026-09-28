@@ -586,6 +586,15 @@ class ConstraintResultV2(BaseModel):
             "cannot take (e.g. a churn rate below 0%)."
         ),
     )
+    frame_verdict: Literal["scored", "estimate_only"] = Field(
+        "scored",
+        description=(
+            "R1 (schemas 0.61.0): whether prob_satisfied scores the user's own target. "
+            "'estimate_only' only for a 'change_rel' limit measured on a base the user "
+            "did not state (observed_state.source is not a user class): the relative "
+            "target was turned into a change on Olumi's estimate of today."
+        ),
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property
