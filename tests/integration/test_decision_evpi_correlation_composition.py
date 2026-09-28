@@ -69,8 +69,9 @@ def _post(client, correlations):
 
 # Seed-42 deterministic captures (n=2000). Not load-bearing for the composition
 # proof (the structural invariants below are), but a strong regression pin.
-_DECISION_EVPI_ABSENT = 0.17814637228838173
-_DECISION_EVPI_RHO_09 = 0.05684256141885782
+# Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
+_DECISION_EVPI_ABSENT = 0.1877487350325459
+_DECISION_EVPI_RHO_09 = 0.06462098792650497
 
 
 class TestDecisionEvpiUnderCorrelation:
