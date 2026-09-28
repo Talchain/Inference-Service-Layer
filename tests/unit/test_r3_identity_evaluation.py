@@ -1084,3 +1084,76 @@ class TestTheCentralScale:
         it by £50, 3.8 SE -> RED."""
         diff = (served["increase_price_to_59"] - served["keep_current_49_price"]) * FRAMES[MRR]["frame"]
         assert abs(float(diff.mean()) - self.SERVED_59_GBP) < 3 * self.SERVED_59_SE
+
+
+# ---------------------------------------------------------------------------------------------------------
+# R3-5 RED 1 (AIQ #72 5867263914; rows 5866603688): structural influence walks an evaluated identity's
+# operand/addend edges at the identity's own partial derivative at the centre, never at the guessed slope
+# the evaluator ignores. Measured on the served wire at base: the scores were IDENTICAL with and without the
+# identity (price 1.000 · other growth 0.794 · subscribers 0.298).
+# ---------------------------------------------------------------------------------------------------------
+
+
+def influence(d: Dict[str, Any]) -> Dict[str, float]:
+    request = RobustnessRequestV2.model_validate(d)
+    factors = [u.node_id for u in request.parameter_uncertainties or []]
+    scores, truncated = rav2.RobustnessAnalyzerV2()._compute_structural_influence(
+        request.graph, factors, request.goal_node_id, factor_centres=rav2.factor_centres(request)
+    )
+    assert truncated == []
+    return scores
+
+
+def central_slope(d: Dict[str, Any], operand: str, h: float = 1e-4) -> float:
+    """d(MRR)/d(operand) through the evaluator itself, at today's levels, in normalised frames: the
+    operand set h either side of today (price held at today, so its path into subscribers is cut)."""
+    evaluator = SCMEvaluatorV2(graph_of(d))
+    edges, factors = means(d), roots_at_today(d)
+    today = {PRICE: 0.245, SUBS: 0.15, OTHER: 0.02}
+    held = {PRICE: today[PRICE], SUBS: today[SUBS]}
+
+    def at(value: float) -> float:
+        return evaluator.evaluate(edges, {**held, operand: value}, MRR, factor_values=factors)
+
+    return (at(today[operand] + h) - at(today[operand] - h)) / (2 * h)
+
+
+class TestInfluenceReadsTheIdentity:
+    def test_subscribers_rank_above_price_on_the_served_wire(self):
+        """The product's partials at today's levels: subscribers k x £49 x 10,000/125,000 = 3.96 against
+        price k x 1,500 x 200/125,000 = 2.42 (plus price's path through new subscribers)."""
+        scores = influence(wire(identity=PRODUCT))
+        assert max(scores, key=scores.get) == SUBS
+        assert scores[SUBS] == 1.0
+        assert scores[PRICE] == pytest.approx(0.638, abs=5e-4)
+        assert scores[OTHER] == pytest.approx(0.081, abs=5e-4)  # still a belief edge: 0.4 x 0.8 / 3.96
+
+    def test_control_no_declaration_walks_the_slopes_exactly_as_at_base(self):
+        """Base 14f1a3a, the same wire with no declaration: price 1.000 · other 0.794 · subscribers 0.298."""
+        assert rav2.identity_partials(graph_of(wire(identity=None))) == {}
+        scores = influence(wire(identity=None))
+        assert scores[PRICE] == 1.0
+        assert scores[OTHER] == pytest.approx(0.794, abs=5e-4)
+        assert scores[SUBS] == pytest.approx(0.298, abs=5e-4)
+
+    @pytest.mark.parametrize("identity", [PRODUCT, WITH_ADDEND], ids=["no_addend", "addend"])
+    @pytest.mark.parametrize("operand", [PRICE, SUBS])
+    def test_each_partial_is_the_evaluators_own_slope(self, identity, operand):
+        d = wire(identity=identity)
+        partial = rav2.identity_partials(graph_of(d))[(operand, MRR)]
+        assert partial == pytest.approx(central_slope(d, operand), rel=1e-6)
+
+    def test_a_declared_addend_moves_one_for_one_in_user_units(self):
+        partials = rav2.identity_partials(graph_of(wire(identity=WITH_ADDEND)))
+        assert partials[(OTHER, MRR)] == pytest.approx(50_000.0 / 125_000.0, rel=1e-12)
+        k = 74_000.0 / 73_500.0
+        assert partials[(PRICE, MRR)] == pytest.approx(k * 1_500.0 * 200.0 / 125_000.0, rel=1e-12)
+        assert partials[(SUBS, MRR)] == pytest.approx(k * 49.0 * 10_000.0 / 125_000.0, rel=1e-12)
+
+    def test_a_sum_moves_one_for_one(self):
+        partials = rav2.identity_partials(graph_of(tally_request(0.0)))
+        assert partials == {("features_spend", "total_spend"): 1.0, ("advertising_spend", "total_spend"): 1.0}
+
+    def test_a_withheld_identity_keeps_its_belief_edges(self):
+        frames = {k: v for k, v in FRAMES.items() if k != PRICE}  # identity_frame_missing
+        assert rav2.identity_partials(graph_of(wire(frames=frames))) == {}

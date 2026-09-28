@@ -1597,6 +1597,40 @@ def factor_centres(request: RobustnessRequestV2) -> Dict[str, float]:
         for u in request.parameter_uncertainties or []
         if u.node_id in nodes
     }
+def identity_partials(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> Dict[Tuple[str, str], float]:
+    """R3-5 (AIQ #72 5867263914 RED 1, rows 5866603688): each operand and addend edge of an
+    EVALUATED identity, with the identity's own partial derivative at the centre, in the
+    normalised frames the structural walk multiplies. A structural reader that walked the
+    guessed slope on a definitional edge ranked a factor by a strength the evaluator never
+    reads (R3-9's class): on Paul's pricing brief it put price (slope 0.5) far above
+    subscribers (0.15), where the product itself gives subscribers the larger partial.
+
+        product operand i:  k * prod_{j != i}(level_j * frame_j) * frame_i / frame_node
+        sum operand, addend:  frame_i / frame_node
+
+    ``k`` is the evaluator's ONE central scale (1 for a sum, and for a product with no
+    stated level), read at the same sampler centres (``factor_centres``). Empty when nothing
+    is declared, so such a graph walks exactly as before.
+    """
+    if not any(node.nonlinear_identity is not None for node in graph.nodes):
+        return {}
+    evaluator = SCMEvaluatorV2(graph, factor_centres=factor_centres)
+    partials: Dict[Tuple[str, str], float] = {}
+    for node_id, plan in evaluator._evaluated_identities.items():
+        frame = plan.frames[node_id]
+        scale = evaluator._identity_scales.get(node_id, 1.0)
+        user = {i: plan.levels[i] * plan.frames[i] for i in plan.factor_ids}
+        for i in plan.factor_ids:
+            if plan.operation == "product":
+                others = math.prod(user[j] for j in plan.factor_ids if j != i)
+                partials[(i, node_id)] = scale * others * plan.frames[i] / frame
+            else:
+                partials[(i, node_id)] = plan.frames[i] / frame
+        for i in plan.addends:
+            partials[(i, node_id)] = plan.frames[i] / frame
+    return partials
 
 
 def definitional_edges(graph: GraphV2) -> set:
@@ -6956,7 +6990,10 @@ class RobustnessAnalyzerV2:
         # Compute structural influence for all factors
         factor_node_ids: List[str] = [s["node_id"] for s in sensitivities]
         influence_scores, influence_truncated = self._compute_structural_influence(
-            request.graph, factor_node_ids, request.goal_node_id
+            request.graph,
+            factor_node_ids,
+            request.goal_node_id,
+            factor_centres=factor_centres(request),
         )
         # N1 (Codex re-confirm, D-23.19): EXACT-OR-NULL. Normalized scores of a
         # truncated cohort are NOT lower bounds (the data-dependent max
@@ -7539,6 +7576,7 @@ class RobustnessAnalyzerV2:
         factor_node_ids: List[str],
         goal_node_id: str,
         max_walk_calls_total: Optional[int] = None,
+        factor_centres: Optional[Mapping[str, float]] = None,
     ) -> Tuple[Dict[str, float], List[str]]:
         """
         Compute structural influence score for each factor based on causal path strengths.
@@ -7582,12 +7620,17 @@ class RobustnessAnalyzerV2:
             max_walk_calls_total = MAX_INFLUENCE_WALK_CALLS_TOTAL
 
         # Build adjacency list for path finding
+        # R3-5: an evaluated identity's operand/addend edge carries the identity's partial
+        # at the centre, not its guessed slope (``identity_partials``; empty otherwise).
+        partials = identity_partials(graph, factor_centres)
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
         for edge in graph.edges:
             from_node = edge.from_
             to_node = edge.to
             # Effective strength = mean * exists_probability
-            effective_strength = edge.strength.mean * edge.exists_probability
+            effective_strength = partials.get(
+                (from_node, to_node), edge.strength.mean * edge.exists_probability
+            )
             if from_node not in adjacency:
                 adjacency[from_node] = []
             adjacency[from_node].append((to_node, effective_strength))
