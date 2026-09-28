@@ -1214,7 +1214,7 @@
             "title": "Stated"
           },
           "withheld_reason": {
-            "description": "identity_frame_missing | identity_operand_missing | identity_zero_level | identity_inconsistent",
+            "description": "identity_frame_missing | identity_operand_missing | identity_zero_level | identity_inconsistent | identity_scale_out_of_range",
             "title": "Withheld Reason",
             "type": "string"
           }
@@ -4346,7 +4346,8 @@
                   "identity_frame_missing",
                   "identity_operand_missing",
                   "identity_zero_level",
-                  "identity_inconsistent"
+                  "identity_inconsistent",
+                  "identity_scale_out_of_range"
                 ],
                 "type": "string"
               },

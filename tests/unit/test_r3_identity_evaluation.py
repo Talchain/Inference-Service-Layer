@@ -1084,3 +1084,71 @@ class TestTheCentralScale:
         it by £50, 3.8 SE -> RED."""
         diff = (served["increase_price_to_59"] - served["keep_current_49_price"]) * FRAMES[MRR]["frame"]
         assert abs(float(diff.mean()) - self.SERVED_59_GBP) < 3 * self.SERVED_59_SE
+
+
+# ---------------------------------------------------------------------------------------------------------
+# AIQ #72 5868227452 (DL ISL #193 non-blocking note): the ONE central scale k must lie in [0.5, 2], else the
+# product is withheld as ``identity_scale_out_of_range``. A belief parent of MRR carrying L at the centre gives
+# k = (o - A - L) / term = (74,000 - L) / 73,500 with the addend declared; the reconciliation (which ignores L)
+# still passes, so only this check can catch it.
+# ---------------------------------------------------------------------------------------------------------
+
+
+def with_belief_parent(k: float) -> Dict[str, Any]:
+    """The addend wire plus a root belief parent ``promo`` (level 1.0, certain edge) whose central
+    contribution L = 125,000 x mean puts the scale at ``k``."""
+    d = wire(identity=WITH_ADDEND)
+    d["graph"]["nodes"].append(
+        {
+            "id": "promo",
+            "kind": "factor",
+            "label": "Promotion",
+            "observed_state": {"value": 1.0, "source": "brief_extraction"},
+        }
+    )
+    mean = (74_000.0 - k * 73_500.0) / FRAMES[MRR]["frame"]
+    d["graph"]["edges"].append(
+        {"from": "promo", "to": MRR, "strength": {"mean": mean, "std": 0.01}, "exists_probability": 1.0}
+    )
+    return d
+
+
+class TestTheScaleRange:
+    def test_the_served_scale_is_evaluated(self):
+        (plan,) = resolve_identity_plans(graph_of(wire())).values()
+        assert plan.evaluated and plan.scale == pytest.approx(74_000.0 / 73_500.0, rel=1e-12)
+
+    @pytest.mark.parametrize("k", [0.49, 2.01, 0.0, -0.1], ids=["0.49", "2.01", "L=o-A", "L>o-A"])
+    def test_a_scale_outside_half_to_two_is_withheld(self, k):
+        (plan,) = resolve_identity_plans(graph_of(with_belief_parent(k))).values()
+        assert plan.withheld_reason == rav2.IDENTITY_SCALE_OUT_OF_RANGE
+        assert plan.scale == pytest.approx(k, abs=1e-9)
+        assert plan.mismatch_share == pytest.approx(500.0 / 75_000.0)  # it DID reconcile (0.67%)
+
+    @pytest.mark.parametrize("k", [0.51, 1.99])
+    def test_a_scale_inside_is_evaluated(self, k):
+        (plan,) = resolve_identity_plans(graph_of(with_belief_parent(k))).values()
+        assert plan.evaluated and plan.scale == pytest.approx(k, abs=1e-9)
+
+    def test_on_the_decision_path_it_is_the_blocked_422_naming_the_scale(self):
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        response = TestClient(app).post(
+            "/api/v1/robustness/analyze/v2",
+            json=with_belief_parent(2.01),
+            headers={"X-ISL-Response-Version": "2"},
+        )
+        assert response.status_code == 422, response.text[:300]
+        (critique,) = [
+            c for c in response.json()["critiques"] if c["code"] == "IDENTITY_NOT_EVALUATED"
+        ]
+        assert critique["identity"]["withheld_reason"] == "identity_scale_out_of_range"
+        assert "2.010, outside [0.5, 2]" in critique["message"]
+
+    def test_the_disclosure_and_the_filter_read_the_same_decision(self):
+        graph = graph_of(with_belief_parent(0.49))
+        (entry,) = rav2.identity_evaluations(graph)
+        assert not entry.evaluated and entry.withheld_reason == "identity_scale_out_of_range"
+        assert rav2.definitional_edges(graph) == set()  # withheld: its edges stay beliefs
