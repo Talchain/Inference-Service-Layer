@@ -30,6 +30,7 @@ from typing import (
     Mapping,
     NamedTuple,
     Optional,
+    Sequence,
     Tuple,
     cast,
 )
@@ -37,6 +38,7 @@ from typing import (
 import numpy as np
 from pydantic import ValidationError as PydanticValidationError
 
+from src.models.identity_evaluation import IdentityEvaluation, IdentityReconciliation
 from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReason
 from src.models.robustness_v2 import (
     BucketResult,
@@ -97,10 +99,11 @@ from src.models.critique import (
     GOAL_ANCESTOR_DATA_GAP,
     DEGENERATE_OPTION_ZERO_VARIANCE,
     HIGH_TIE_RATE,
+    IDENTITY_NOT_EVALUATED as IDENTITY_NOT_EVALUATED_CRITIQUE,
     MARGINAL_SWITCH_TRUNCATED,
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
-from src.models.response_v2 import CritiqueV2
+from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
 from src.services.range_fit import resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
@@ -1444,6 +1447,283 @@ class FactorSampler:
 # =============================================================================
 
 
+# ---------------------------------------------------------------------------
+# R3 slice 1: accounting identities (AIQ #70 5859633012, 5860087988; R3-8)
+# ---------------------------------------------------------------------------
+
+# AIQ 5860087988 item 1: the ONE reconciliation tolerance. The stated level and the level
+# the identity's own inputs give may differ by compound rounding of two-significant-figure
+# figures ("about 1,500" is +/-3.3%); a real contradiction is far above 5%.
+IDENTITY_RECONCILIATION_TOLERANCE = 0.05
+
+# Why a declared identity is NOT evaluated. It is then WITHHELD, never approximated by
+# the linear model (AIQ 5860087988 item 2: a fallback is a decision-grade number known
+# to ignore the identity).
+IDENTITY_FRAME_MISSING = "identity_frame_missing"
+IDENTITY_OPERAND_MISSING = "identity_operand_missing"
+IDENTITY_ZERO_LEVEL = "identity_zero_level"
+IDENTITY_INCONSISTENT = "identity_inconsistent"
+
+
+@dataclass(frozen=True)
+class IdentityPlan:
+    """How ONE declared identity is evaluated, decided once per graph.
+
+    Every figure here is in the node's own normalised frame except the three
+    reconciliation figures, which are in USER units (``normalised x execution_frame``,
+    R3-8), because that is the only place a product of operands means anything.
+    """
+
+    node_id: str
+    operation: str
+    factor_ids: Tuple[str, ...]
+    addends: Tuple[str, ...]
+    frames: Mapping[str, float]
+    levels: Mapping[str, float]
+    target_level: Optional[float]
+    withheld_reason: Optional[str]
+    reconstructed: Optional[float] = None
+    stated: Optional[float] = None
+    mismatch_share: Optional[float] = None
+
+    @property
+    def evaluated(self) -> bool:
+        return self.withheld_reason is None
+
+    @property
+    def participants(self) -> Tuple[str, ...]:
+        return self.factor_ids + self.addends
+
+
+def _identity_term(operation: str, values: Sequence[float]) -> float:
+    if operation == "product":
+        return float(math.prod(values))
+    return float(math.fsum(values))
+
+
+def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
+    """One plan per node that DECLARES an identity (ISL never infers one from the graph).
+
+    Checked in this order, and the first failure withholds it:
+    1. every participant and the node carry an ``execution_frame`` (R3-8), else
+       ``identity_frame_missing``: a frame is never inferred from "compatible" operands;
+    2. every participant has a level today (``status_quo_level``), else
+       ``identity_operand_missing``;
+    3. a product has no zero operand and no zero stated target, else
+       ``identity_zero_level`` (its ratio and relative check are undefined there);
+    4. with a stated target ``o``, in user units, else ``identity_inconsistent``:
+       product ``|o - (term + addends)| / |o| <= 5%``; sum (no ratio, so 0 is an ordinary
+       level) ``|o - (term + addends)| <= 5% x max(|o|, sum|parts|)``.
+    A node with no stated level is evaluated from its inputs (AIQ 5860087988 item 4).
+    """
+    nodes = {node.id: node for node in graph.nodes}
+    plans: Dict[str, IdentityPlan] = {}
+    for node in graph.nodes:
+        identity = node.nonlinear_identity
+        if identity is None:
+            continue
+        factor_ids = tuple(identity.factor_ids)
+        addends = tuple(identity.addends or ())
+        participants = factor_ids + addends
+        frames: Dict[str, float] = {}
+        for node_id in (node.id, *participants):
+            frame = nodes[node_id].execution_frame
+            if frame is not None:
+                frames[node_id] = frame.frame
+        levels: Dict[str, float] = {}
+        for node_id in participants:
+            level = status_quo_level(nodes[node_id])
+            if level is not None:
+                levels[node_id] = level
+        target_level = status_quo_level(node)
+
+        def plan(reason: Optional[str], **reconciliation: Optional[float]) -> IdentityPlan:
+            return IdentityPlan(
+                node_id=node.id,
+                operation=identity.operation,
+                factor_ids=factor_ids,
+                addends=addends,
+                frames=MappingProxyType(dict(frames)),
+                levels=MappingProxyType(dict(levels)),
+                target_level=target_level,
+                withheld_reason=reason,
+                **reconciliation,
+            )
+
+        if len(frames) != len(participants) + 1:
+            plans[node.id] = plan(IDENTITY_FRAME_MISSING)
+            continue
+        if len(levels) != len(participants):
+            plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
+            continue
+        if identity.operation == "product" and (
+            any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0
+        ):
+            plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
+            continue
+        if target_level is None:
+            plans[node.id] = plan(None)
+            continue
+        parts = [levels[i] * frames[i] for i in participants]
+        reconstructed = _identity_term(
+            identity.operation, [levels[i] * frames[i] for i in factor_ids]
+        ) + math.fsum(levels[i] * frames[i] for i in addends)
+        stated = target_level * frames[node.id]
+        if identity.operation == "product":
+            share = abs(stated - reconstructed) / abs(stated)
+        else:
+            # AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated 0 is an ordinary
+            # level. Scaled absolute check: |o - sum| <= tau x max(|o|, sum|parts|); both
+            # sides 0 is consistent exactly (R3-2: a tally of £0 today).
+            scale = max(abs(stated), math.fsum(abs(part) for part in parts))
+            share = 0.0 if scale == 0.0 else abs(stated - reconstructed) / scale
+        plans[node.id] = plan(
+            IDENTITY_INCONSISTENT if share > IDENTITY_RECONCILIATION_TOLERANCE else None,
+            reconstructed=reconstructed,
+            stated=stated,
+            mismatch_share=share,
+        )
+    return plans
+
+
+def definitional_edges(graph: GraphV2) -> set:
+    """R3-9: the operand and addend edges of every EVALUATED identity, as ``(from, to)``.
+
+    They are definitions, not beliefs: the evaluator never reads their sampled strengths,
+    and no edge-level output may describe them as uncertain (AIQ ISL #187 5860770241 (3)).
+    A withheld identity's edges stay beliefs (the node is still linear)."""
+    return {
+        (participant, plan.node_id)
+        for plan in resolve_identity_plans(graph).values()
+        if plan.evaluated
+        for participant in plan.participants
+    }
+
+
+def identity_blocking_critiques(
+    request: RobustnessRequestV2, seed: Optional[int] = None
+) -> List[CritiqueV2]:
+    """R3: one blocker per declared identity that is NOT evaluated and on whose value the
+    decision depends (the node is the goal or a limit's target, or an ancestor of one).
+    Empty when every such identity is evaluated. The route turns a non-empty list into the
+    blocked 422; ``analyze`` refuses on it too, so no caller can obtain approximated numbers.
+    """
+    plans = resolve_identity_plans(request.graph)
+    withheld = [plan for plan in plans.values() if not plan.evaluated]
+    if not withheld:
+        return []
+    decision_nodes = {request.goal_node_id} | {
+        constraint.node_id for constraint in (request.goal_constraints or [])
+    }
+    children: Dict[str, List[str]] = defaultdict(list)
+    for edge in request.graph.edges:
+        children[edge.from_].append(edge.to)
+
+    def reaches_a_decision_node(start: str) -> bool:
+        stack, seen = [start], {start}
+        while stack:
+            current = stack.pop()
+            if current in decision_nodes:
+                return True
+            for child in children.get(current, []):
+                if child not in seen:
+                    seen.add(child)
+                    stack.append(child)
+        return False
+
+    critiques: List[CritiqueV2] = []
+    for plan in withheld:
+        if not reaches_a_decision_node(plan.node_id):
+            continue
+        detail = ""
+        if plan.withheld_reason == IDENTITY_INCONSISTENT:
+            assert plan.reconstructed is not None and plan.stated is not None
+            detail = (
+                f": its parts give {plan.reconstructed:,.2f} where the stated level is "
+                f"{plan.stated:,.2f}, {plan.mismatch_share:.1%} apart"
+            )
+        critique = IDENTITY_NOT_EVALUATED_CRITIQUE.build(
+            affected_node_ids=[plan.node_id, *plan.participants],
+            seed=seed,
+            node_id=plan.node_id,
+            operation=plan.operation,
+            participants=", ".join(plan.participants),
+            reason=plan.withheld_reason,
+            detail=detail,
+        )
+        # R&C 5860893532 / DL ISL #187: the same plan, typed, so CEE can state the figures
+        # without parsing the message (non-finite figures become None in the model).
+        assert plan.withheld_reason is not None
+        critiques.append(
+            critique.model_copy(
+                update={
+                    "identity": CritiqueIdentityV2(
+                        node_id=plan.node_id,
+                        operation=plan.operation,
+                        participants=list(plan.participants),
+                        withheld_reason=plan.withheld_reason,
+                        reconstructed=plan.reconstructed,
+                        stated=plan.stated,
+                        mismatch_share=plan.mismatch_share,
+                    )
+                }
+            )
+        )
+    return critiques
+
+
+def identity_evaluations(graph: GraphV2) -> List[IdentityEvaluation]:
+    """R3: the wire disclosure, one entry per DECLARED identity, from the same plans the
+    evaluator uses (never re-derived)."""
+    nodes = {node.id: node for node in graph.nodes}
+    out: List[IdentityEvaluation] = []
+    for plan in resolve_identity_plans(graph).values():
+        identity = nodes[plan.node_id].nonlinear_identity
+        assert identity is not None
+        reconciliation = (
+            IdentityReconciliation(
+                reconstructed=plan.reconstructed,
+                stated=plan.stated,
+                mismatch_share=plan.mismatch_share,
+            )
+            if plan.reconstructed is not None
+            and plan.stated is not None
+            and plan.mismatch_share is not None
+            else None
+        )
+        out.append(
+            IdentityEvaluation(
+                node_id=plan.node_id,
+                operation=identity.operation,
+                factor_ids=list(plan.factor_ids),
+                addends=list(plan.addends),
+                stated_in_brief=identity.stated_in_brief,
+                evaluated=plan.evaluated,
+                withheld_reason=cast(Any, plan.withheld_reason),
+                level_source=(
+                    None
+                    if not plan.evaluated
+                    else "stated_level" if plan.target_level is not None else "identity_inputs"
+                ),
+                reconciliation=reconciliation,
+            )
+        )
+    return out
+
+
+# The content of ``SCMEvaluatorV2._status_quo``'s inputs (edges, base values, factor values),
+# snapshotted as item tuples: the cache key is what the dicts HOLD, never which dicts they are.
+_StatusQuoKey = Tuple[
+    Tuple[Tuple[Tuple[str, str], float], ...],
+    Optional[Tuple[Tuple[str, float], ...]],
+    Optional[Tuple[Tuple[str, float], ...]],
+]
+
+
+class IdentityNotEvaluatedError(ValueError):
+    """A declared identity the decision depends on cannot be computed exactly (R3)."""
+
+
 class SCMEvaluatorV2:
     """
     Evaluates structural causal model outcomes given edge configuration.
@@ -1502,6 +1782,14 @@ class SCMEvaluatorV2:
                 self._todays_levels[node.id] = level
             if self._parents.get(node.id):
                 self._status_quo_levels[node.id] = level
+
+        # R3 slice 1: every declared identity's plan; only an EVALUATED one changes the
+        # structural equation (a withheld one is left linear and withheld downstream).
+        self._status_quo_cache: Optional[Tuple[_StatusQuoKey, Dict[str, float]]] = None
+        self.identity_plans: Dict[str, IdentityPlan] = resolve_identity_plans(graph)
+        self._evaluated_identities: Dict[str, IdentityPlan] = {
+            node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
+        }
 
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
@@ -1568,8 +1856,12 @@ class SCMEvaluatorV2:
             Root factor nodes use observed_state.value as their base value.
             If factor_values is provided, those take precedence (for sampling).
         """
-        framed = self._in_model_frame(edge_strengths, interventions, base_values, factor_values)
-        return self._propagate(edge_strengths, framed, base_values, factor_values).get(goal_node, 0.0)
+        framed, status_quo = self._framed_with_reference(
+            edge_strengths, interventions, base_values, factor_values
+        )
+        return self._propagate(
+            edge_strengths, framed, base_values, factor_values, status_quo=status_quo
+        ).get(goal_node, 0.0)
 
     def evaluate_multi(
         self,
@@ -1595,8 +1887,12 @@ class SCMEvaluatorV2:
         Returns:
             Dict mapping target_node_id -> computed value
         """
-        framed = self._in_model_frame(edge_strengths, interventions, base_values, factor_values)
-        node_values = self._propagate(edge_strengths, framed, base_values, factor_values)
+        framed, status_quo = self._framed_with_reference(
+            edge_strengths, interventions, base_values, factor_values
+        )
+        node_values = self._propagate(
+            edge_strengths, framed, base_values, factor_values, status_quo=status_quo
+        )
 
         # Return only the requested target nodes
         return {node_id: node_values.get(node_id, 0.0) for node_id in target_nodes}
@@ -1609,9 +1905,14 @@ class SCMEvaluatorV2:
         factor_values: Optional[Dict[str, float]],
         *,
         noise: bool = True,
+        status_quo: Optional[Dict[str, float]] = None,
     ) -> Dict[str, float]:
         """The structural equations in topological order: the ONE loop behind
-        ``evaluate`` and ``evaluate_multi`` (it used to be written out in both)."""
+        ``evaluate`` and ``evaluate_multi`` (it used to be written out in both).
+
+        R3: an EVALUATED identity node is computed by ``_identity_value`` instead of the
+        linear sum; ``status_quo`` is this draw's no-intervention reading (None when this
+        call IS that reading)."""
         if base_values is None:
             base_values = {}
         if factor_values is None:
@@ -1623,6 +1924,10 @@ class SCMEvaluatorV2:
             if node_id in interventions:
                 # Interventional value overrides structural equations
                 node_values[node_id] = interventions[node_id]
+            elif node_id in self._evaluated_identities:
+                node_values[node_id] = self._identity_value(
+                    self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
+                )
             else:
                 # Get node object (used for observed_state and intercept)
                 node = self._nodes_by_id.get(node_id)
@@ -1665,6 +1970,111 @@ class SCMEvaluatorV2:
                     node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
 
         return node_values
+
+    def _status_quo(
+        self,
+        edge_strengths: Dict[Tuple[str, str], float],
+        base_values: Optional[Dict[str, float]],
+        factor_values: Optional[Dict[str, float]],
+    ) -> Dict[str, float]:
+        """This draw's no-intervention reading, without epsilon (it draws no random number):
+        the anchor an EVALUATED identity reads (``_framed_with_reference``). Only the identity
+        path calls it; ``_in_model_frame`` computes its own reading exactly as it always did.
+
+        Every option on a draw is evaluated against the SAME edge and factor draws, so the
+        reading is kept for the last draw seen: a one-entry cache keyed on the CONTENT of the
+        three inputs (a snapshot of their items), NEVER on the objects. A caller may mutate a
+        dict in place between calls: ``_flip_mean_under_background`` bisects one edge of a
+        shared background that way, and a cache keyed on the object returned the reading of a
+        DIFFERENT edge strength, moving flip thresholds (DL CHANGES_REQUIRED, ISL #187). A pure
+        function of its inputs, so caching it on their contents moves no number.
+        """
+        key: _StatusQuoKey = (
+            tuple(edge_strengths.items()),
+            None if base_values is None else tuple(base_values.items()),
+            None if factor_values is None else tuple(factor_values.items()),
+        )
+        cached = self._status_quo_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        self._status_quo_cache = (key, status_quo)
+        return status_quo
+
+    def _framed_with_reference(
+        self,
+        edge_strengths: Dict[Tuple[str, str], float],
+        interventions: Dict[str, float],
+        base_values: Optional[Dict[str, float]],
+        factor_values: Optional[Dict[str, float]],
+    ) -> Tuple[Dict[str, float], Optional[Dict[str, float]]]:
+        """The option's settings in the model's frame (``_in_model_frame``) and, when a
+        declared identity is evaluated, this draw's status-quo reading it is anchored to.
+        A graph with no evaluated identity takes exactly the path it always did."""
+        framed = self._in_model_frame(edge_strengths, interventions, base_values, factor_values)
+        if not self._evaluated_identities:
+            return framed, None
+        status_quo = self._status_quo(edge_strengths, base_values, factor_values)
+        return framed, status_quo
+
+    def _identity_value(
+        self,
+        plan: IdentityPlan,
+        edge_strengths: Dict[Tuple[str, str], float],
+        values: Dict[str, float],
+        status_quo: Optional[Dict[str, float]],
+    ) -> float:
+        """R3 / R3-8: an identity node on this draw, in its own normalised frame.
+
+        Each participant is read at its LEVEL (a root's sample is its level; a non-root
+        with a held level ``o_i`` sits at ``o_i + (sample - status-quo sample)``, B1a),
+        converted to user units through its execution frame, combined, and the result is
+        renormalised into the node's frame. Product (AIQ 5860087988, ratio form)::
+
+            T = A + L + (o - A_sq - L_sq) * term / term_sq
+
+        sum: ``T = o + (A - A_sq) + (L - L_sq) + (term - term_sq)``; with no stated ``o``
+        (item 4) ``T = term + A + L``. ``A`` is the declared addends (exact), ``L`` the
+        node's remaining belief-edge parents (still sampled, item 5). At the status quo
+        ``T = o`` on every draw. Operand/addend edges are definitional: their sampled
+        strengths never enter. A zero or non-finite status-quo term gives NaN (the draw
+        is uninformative), never a guessed figure.
+        """
+        node_id = plan.node_id
+        frame = plan.frames[node_id]
+        reference = values if status_quo is None else status_quo
+
+        def level(participant: str, at: Dict[str, float]) -> float:
+            if not self._parents.get(participant):
+                return at[participant]
+            held = plan.levels[participant]
+            return held + (at[participant] - reference[participant])
+
+        def user(participant: str, at: Dict[str, float]) -> float:
+            return level(participant, at) * plan.frames[participant]
+
+        term = _identity_term(plan.operation, [user(i, values) for i in plan.factor_ids])
+        term_sq = _identity_term(plan.operation, [user(i, reference) for i in plan.factor_ids])
+        addend = math.fsum(user(i, values) for i in plan.addends)
+        addend_sq = math.fsum(user(i, reference) for i in plan.addends)
+        believed = [p for p in self._parents[node_id] if p not in plan.participants]
+        linear = frame * math.fsum(
+            edge_strengths.get((p, node_id), 0.0) * values.get(p, 0.0) for p in believed
+        )
+        linear_sq = frame * math.fsum(
+            edge_strengths.get((p, node_id), 0.0) * reference.get(p, 0.0) for p in believed
+        )
+        if plan.target_level is None:
+            result = term + addend + linear
+        elif plan.operation == "product":
+            if term_sq == 0.0 or not math.isfinite(term_sq):
+                return float("nan")
+            stated = plan.target_level * frame
+            result = addend + linear + (stated - addend_sq - linear_sq) * (term / term_sq)
+        else:
+            stated = plan.target_level * frame
+            result = stated + (addend - addend_sq) + (linear - linear_sq) + (term - term_sq)
+        return result / frame
 
     def _in_model_frame(
         self,
@@ -2062,6 +2472,14 @@ class RobustnessAnalyzerV2:
 
         # Generate request_id if not provided
         request_id = request.request_id or f"robustness-{uuid.uuid4().hex[:12]}"
+
+        # R3: a declared identity the decision depends on, and that cannot be computed
+        # exactly, withholds the analysis: never a linear approximation (AIQ 5860087988
+        # item 2). The V2 route returns it as the blocked 422 before reaching here; this
+        # refuses every other caller, so no path obtains the approximated numbers.
+        identity_blockers = identity_blocking_critiques(request)
+        if identity_blockers:
+            raise IdentityNotEvaluatedError(identity_blockers[0].message)
 
         # Safety net: remove non-inference nodes/edges before analysis
         filtered_graph = filter_inference_graph(request.graph)
@@ -3424,6 +3842,43 @@ class RobustnessAnalyzerV2:
         range_fit_disclosures, range_fit_warnings = resolve_range_fits(request.user_stated_ranges)
         inference_warnings.extend(range_fit_warnings)
 
+        # R3-9 (AIQ ISL #187 5860770241 (3)): an evaluated identity's operand/addend edges
+        # are definitions, so no edge-level output lists them (edge sensitivity, e-values,
+        # fragile/robust edges). The evaluator never read them: nothing else moves.
+        definitional = definitional_edges(request.graph)
+        if definitional:
+            definitional_ids = {f"{source}->{target}" for source, target in definitional}
+            sensitivity = [
+                row
+                for row in sensitivity
+                if (row.edge_from, row.edge_to) not in definitional
+            ]
+            if edge_e_values is not None:
+                edge_e_values = [
+                    row
+                    for row in edge_e_values
+                    if (row.get("from_id"), row.get("to_id")) not in definitional
+                ]
+            robustness = robustness.model_copy(
+                update={
+                    "fragile_edges": [
+                        e for e in robustness.fragile_edges if e not in definitional_ids
+                    ],
+                    "fragile_edges_enhanced": (
+                        None
+                        if robustness.fragile_edges_enhanced is None
+                        else [
+                            e
+                            for e in robustness.fragile_edges_enhanced
+                            if (e.from_id, e.to_id) not in definitional
+                        ]
+                    ),
+                    "robust_edges": [
+                        e for e in robustness.robust_edges if e not in definitional_ids
+                    ],
+                }
+            )
+
         response = RobustnessResponseV2(
             request_id=request_id,
             results=results,
@@ -3485,6 +3940,7 @@ class RobustnessAnalyzerV2:
             correlation_model=correlation_model,
             range_fit_disclosures=range_fit_disclosures,
             node_levels=node_level_frames or None,
+            identity_evaluations=identity_evaluations(request.graph) or None,
         )
 
         self.logger.info(

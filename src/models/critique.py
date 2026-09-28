@@ -290,6 +290,22 @@ SEED_INVALID = CritiqueDefinition(
     default_suggestion="Provide a valid integer seed for reproducibility",
 )
 
+# R3 slice 1 (AIQ #70 5860087988 item 2): a declared accounting identity on the path to the
+# goal or a limit that cannot be computed EXACTLY is WITHHELD, never approximated by the
+# linear model. The whole analysis is withheld, so no number that depends on it can leak.
+IDENTITY_NOT_EVALUATED = CritiqueDefinition(
+    code="IDENTITY_NOT_EVALUATED",
+    severity="blocker",
+    source="validation",
+    message_template=(
+        "{node_id} is declared as the {operation} of {participants} but cannot be computed "
+        "exactly ({reason}{detail}); the analysis is withheld rather than approximated"
+    ),
+    default_suggestion=(
+        "Correct or supply the figure named, then run again: the identity is then evaluated"
+    ),
+)
+
 
 # =============================================================================
 # Analysis Critiques (issues discovered during computation)
@@ -526,6 +542,7 @@ CRITIQUES = {
     "GRAPH_CYCLE_DETECTED": GRAPH_CYCLE_DETECTED,
     # Validation - Nodes
     "MISSING_GOAL_NODE": MISSING_GOAL_NODE,
+    "IDENTITY_NOT_EVALUATED": IDENTITY_NOT_EVALUATED,
     "INVALID_NODE_ID": INVALID_NODE_ID,
     "DUPLICATE_NODE_ID": DUPLICATE_NODE_ID,
     # Validation - Edges

@@ -38,6 +38,7 @@ from src.models.response_v2 import (
 
 # Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure, UserStatedRange
+from src.models.identity_evaluation import IdentityEvaluation
 from src.models.node_level import NodeLevelFrame
 
 # Pure-numpy correlation helpers (no circular import — correlation.py imports nothing
@@ -430,6 +431,55 @@ class EdgeV2(BaseModel):
     }
 
 
+class NonlinearIdentityV2(BaseModel):
+    """R3 slice 1: the node is EXACTLY the product or the sum of named parents (an accounting
+    identity such as MRR = price x paying subscribers), not a guessed straight-line effect.
+
+    CEE declares it and is its only minter; PLoT forwards it verbatim. ISL never infers an
+    identity from the graph's shape (AIQ 5859633012). Strict: an unknown operation or key is
+    REFUSED (422), never dropped, because a dropped declaration is silently "declared, not used".
+    """
+
+    operation: Literal["product", "sum"] = Field(..., description="product | sum of factor_ids")
+    factor_ids: List[str] = Field(
+        ..., min_length=1, description="The parents the node is the product/sum of"
+    )
+    stated_in_brief: bool = Field(..., description="True when the brief itself states it")
+    addends: Optional[List[str]] = Field(
+        None,
+        min_length=1,
+        description=(
+            "Parents added EXACTLY to the identity term (AIQ 5860087988 item 5). Only a "
+            "declared addend is definitional; it is never inferred from an edge."
+        ),
+    )
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _distinct_participants(self) -> "NonlinearIdentityV2":
+        if len(set(self.factor_ids)) != len(self.factor_ids):
+            raise ValueError("nonlinear_identity.factor_ids must be distinct")
+        addends = self.addends or []
+        if len(set(addends)) != len(addends):
+            raise ValueError("nonlinear_identity.addends must be distinct")
+        overlap = sorted(set(addends) & set(self.factor_ids))
+        if overlap:
+            raise ValueError(f"nonlinear_identity.addends overlap factor_ids: {overlap}")
+        return self
+
+
+class ExecutionFrameV2(BaseModel):
+    """R3-8: the node's frame as PLoT resolved it (``resolveNodeFrame``: cap -> scale_frame ->
+    the value/raw_value pair). Runtime metadata for an identity's participants: user units are
+    ``normalised x frame``. Never persisted; never inferred by ISL."""
+
+    frame: float = Field(..., gt=0, allow_inf_nan=False)
+    carrier: Literal["cap", "scale_frame", "pair"]
+
+    model_config = {"extra": "forbid"}
+
+
 class NodeV2(BaseModel):
     """Node in the v2 causal graph."""
 
@@ -467,6 +517,15 @@ class NodeV2(BaseModel):
         None,
         description="Factor classification from CEE (e.g., 'market', 'operational'). "
         "Passthrough only — not used by ISL computation.",
+    )
+
+    # R3 slice 1: an accounting identity CEE declares, and each participant's execution
+    # frame PLoT resolved (runtime metadata, R3-8).
+    nonlinear_identity: Optional[NonlinearIdentityV2] = Field(
+        None, description="R3: this node is exactly the product/sum of named parents"
+    )
+    execution_frame: Optional[ExecutionFrameV2] = Field(
+        None, description="R3-8: user units = normalised x frame (PLoT-resolved)"
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -525,6 +584,33 @@ class GraphV2(BaseModel):
                     raise ValueError(f"Edge references non-existent source node: {edge.from_}")
                 if edge.to not in node_ids:
                     raise ValueError(f"Edge references non-existent target node: {edge.to}")
+        return v
+
+    @field_validator("edges")
+    @classmethod
+    def validate_identities_name_parents(cls, v: List[EdgeV2], info: Any) -> List[EdgeV2]:
+        """R3: every participant of a declared identity is a graph node AND a parent of the
+        identity's node (an identity is over named parents). Anything else is malformed: 422."""
+        if "nodes" not in info.data:
+            return v
+        node_ids = {node.id for node in info.data["nodes"]}
+        parents: Dict[str, set] = {}
+        for edge in v:
+            parents.setdefault(edge.to, set()).add(edge.from_)
+        for node in info.data["nodes"]:
+            identity = node.nonlinear_identity
+            if identity is None:
+                continue
+            for participant in [*identity.factor_ids, *(identity.addends or [])]:
+                if participant not in node_ids:
+                    raise ValueError(
+                        f"nonlinear_identity on {node.id} names a non-existent node: {participant}"
+                    )
+                if participant not in parents.get(node.id, set()):
+                    raise ValueError(
+                        f"nonlinear_identity on {node.id} names {participant}, "
+                        "which is not its parent"
+                    )
         return v
 
     @field_validator("edges")
@@ -2287,6 +2373,12 @@ class RobustnessResponseV2(BaseModel):
         description="Per non-root node: anchored at an attested level (with its author, "
         "domain and per-option out-of-domain share) or 'no level'. Absent when the "
         "graph has no non-root node.",
+    )
+    # R3 slice 1: each declared accounting identity and whether the numbers rest on it.
+    identity_evaluations: Optional[List[IdentityEvaluation]] = Field(
+        None,
+        description="Per declared identity: evaluated (with its reconciliation) or the "
+        "reason it was not. Absent when the graph declares none.",
     )
 
     model_config = {
