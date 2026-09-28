@@ -162,6 +162,13 @@ class TestAiqRulingRows:
     def test_independent_null_at_most_one_in_200(self, n):
         assert self._count(lambda th: 9.0 + 0.0 * th, n) <= 1
 
+    @pytest.mark.parametrize("n", [500, 2000])
+    def test_near_tie_null_at_most_two_in_200(self, n):
+        """theta irrelevant, options 0.02 apart: a comparator chosen on the training fold let
+        the learned rule 'beat' a mis-chosen option (5/200 here); the full-sample comparator
+        (EVPPI's own baseline) does not."""
+        assert self._count(lambda th: 9.98 + 0.0 * th, n) <= 2
+
     def test_true_positive_at_least_180_in_200_at_n500(self):
         assert self._count(lambda th: 9.0 + 1.0 * th, 500) >= 180
 

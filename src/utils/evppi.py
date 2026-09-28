@@ -164,11 +164,15 @@ def _decision_gain_passes(
     """Cross-fitted decision-relevance test (module docstring, REGRESSION_EVPPI_CROSSFIT_FOLDS).
 
     For each fold, learn ``argmax_o E[U_o|theta]`` on the other folds and score it on this
-    fold against the option that is best on average in the training folds. The per-draw
-    gains are paired (common random numbers), so their mean has a plain standard error.
+    fold against the best fixed option over ALL draws, i.e. the without-information choice
+    EVPPI's own baseline uses. Choosing the comparator on the training fold instead lets a
+    learned rule "beat" a noisily mis-chosen option in near-tie decisions: that variant
+    rejected 6-9% of tie and near-tie nulls, this one 0-1% (the test is conservative, not
+    calibrated at 5%). The per-draw gains are paired (common random numbers).
     """
     outcomes = np.asarray(outcome_matrix, dtype=float).T  # (n_samples, n_options)
     n = theta.size
+    best_fixed = int(np.argmax(outcomes.mean(axis=0)))
     order = np.random.default_rng((seed, 1)).permutation(n)
     folds = np.array_split(order, REGRESSION_EVPPI_CROSSFIT_FOLDS)
     gain = np.empty(n)
@@ -177,7 +181,6 @@ def _decision_gain_passes(
         if np.unique(theta[train]).size < _MIN_DISTINCT_THETA:
             return False
         deg = _effective_degree(theta[train], degree)
-        best_fixed = int(np.argmax(outcomes[train].mean(axis=0)))
         rule = np.argmax(_fit_predict(theta[train], outcomes[train], theta[test], deg), axis=1)
         gain[test] = outcomes[test, rule] - outcomes[test, best_fixed]
     std = float(gain.std(ddof=1)) if n > 1 else 0.0
