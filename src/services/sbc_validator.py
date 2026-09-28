@@ -184,13 +184,8 @@ def _sample_true_world(
         exists = rng.random() < edge.exists_probability
         true_existence[key] = exists
         if exists:
-            strength = float(
-                np.clip(
-                    rng.normal(edge.strength.mean, edge.strength.std),
-                    -1.0,
-                    1.0,
-                )
-            )
+            # The engine's law since #200: a plain normal draw, no +/-1 bound on draws.
+            strength = float(rng.normal(edge.strength.mean, edge.strength.std))
         else:
             strength = 0.0
         true_strengths[key] = strength

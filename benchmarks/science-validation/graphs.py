@@ -3,8 +3,9 @@
 Three families:
 
 1. Margin family (`margin_cases`) — single decisive edge whose flip probability
-   under the marginal-switch estimator is analytically known (truncated-normal
-   CDF at zero), spanning comfortable-margin -> knife-edge decisions, plus a
+   under the marginal-switch estimator is analytically known (normal CDF at
+   zero; truncated-normal before ISL #200, see STATUS.md), spanning
+   comfortable-margin -> knife-edge decisions, plus a
    structurally impossible flip (TRUE ZERO by construction).
 2. Repo fixtures (`fixture_requests`) — the pinned-seed variant graphs from
    tests/benchmarks/sample_variants.json.
@@ -33,19 +34,13 @@ from src.utils.rng import SeededRNG  # noqa: E402
 
 SAMPLE_VARIANTS = REPO_ROOT / "tests" / "benchmarks" / "sample_variants.json"
 
-EDGE_LO, EDGE_HI = -1.0, 1.0
+def strength_cdf_at(x: float, mean: float, std: float) -> float:
+    """CDF at x of the sampled strength law: Normal(mean, std), UNBOUNDED since ISL #200.
 
-
-def truncnorm_cdf_at(x: float, mean: float, std: float) -> float:
-    """CDF at x of Normal(mean, std) truncated to the schema bounds [-1, 1].
-
-    This is exactly the distribution produced by SeededRNG.truncated_normal
-    (rejection sampling within bounds), up to the negligible clip fallback
-    (probability (1 - mass)^100 of 100 consecutive rejections).
+    (Before #200 the engine drew from Normal(mean, std) truncated to [-1, 1]; results/ were
+    produced under that law — see STATUS.md.)
     """
-    a = (EDGE_LO - mean) / std
-    b = (EDGE_HI - mean) / std
-    return float(stats.truncnorm.cdf(x, a, b, loc=mean, scale=std))
+    return float(stats.norm.cdf(x, loc=mean, scale=std))
 
 
 @dataclass
@@ -66,7 +61,7 @@ def _margin_payload(mean: float, std: float) -> Dict[str, Any]:
     - Edge lever->goal is decisive: goal = lever_value * strength, so with the
       baseline strength mean > 0 the higher intervention wins; the winner flips
       exactly when the sampled strength is negative.
-      P(flip) = P(TruncNormal(mean, std, [-1,1]) < 0) (exists_probability = 1).
+      P(flip) = P(Normal(mean, std) < 0) (exists_probability = 1; unbounded since #200).
       A zero sampled strength ties both options; the deterministic tie-break
       (option id sort) then picks opt_hi, the baseline winner — not a flip.
     - Edge upstream->lever can never flip anything: `lever` is intervened on by
@@ -132,7 +127,7 @@ def margin_cases() -> List[MarginCase]:
     cases: List[MarginCase] = []
     for name, z in z_targets.items():
         mean = round(z * std, 6)
-        p = truncnorm_cdf_at(0.0, mean, std)
+        p = strength_cdf_at(0.0, mean, std)
         if p >= 0.02:
             regime = "knife_edge" if p > 0.1 else "comfortable"
         elif p >= 0.01:
@@ -432,9 +427,9 @@ def analytic_probability(
     """Closed-form P(x * S >= threshold) for the single-edge SCM.
 
     S = B * T where B ~ Bernoulli(exists_p) gates existence and
-    T ~ TruncNormal(mean, std, [-1, 1]). goal = x * S (x > 0).
+    T ~ Normal(mean, std) (unbounded since ISL #200). goal = x * S (x > 0).
     """
-    p_exists = exists_p * (1.0 - truncnorm_cdf_at(threshold / x, mean, std))
+    p_exists = exists_p * (1.0 - strength_cdf_at(threshold / x, mean, std))
     p_absent = (1.0 - exists_p) * (1.0 if 0.0 >= threshold else 0.0)
     return p_exists + p_absent
 

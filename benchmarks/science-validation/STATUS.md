@@ -1,5 +1,11 @@
 # STATUS — science-validation lane
 
+> **2026-09-28 (R3-B, ISL #200 follow-up):** the engine's sampled strengths lost their +/-1 bound
+> in ISL #200 (`da0dfb7`). The analytic oracles here (`graphs.strength_cdf_at`,
+> `exp4_calibration`) now use the unbounded Normal(mean, std) law. **`results/*.json` were produced
+> under the former truncated law and have NOT been re-run:** do not cite them against current ISL
+> until they are re-run (a cloud session; heavy).
+
 Updated: 2026-07-07 (session 1 — review pass + handoff)
 
 ## Branch note for the orchestrator

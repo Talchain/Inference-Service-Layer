@@ -4,8 +4,8 @@ Question: when ISL reports P(goal >= threshold) = 0.72, is the truth 0.72?
 
 Method: single-edge graphs whose goal distribution is known in closed form —
 goal = x * B * T with B ~ Bernoulli(exists_probability) and
-T ~ TruncNormal(mean, std, [-1, 1]) — so P(goal >= threshold) is analytic
-(truncated-normal CDF x existence mixture). ISL's estimate is compared with
+T ~ Normal(mean, std) (unbounded since ISL #200; truncated to [-1, 1] before) — so
+P(goal >= threshold) is analytic (normal CDF x existence mixture). ISL's estimate is compared with
 the truth over a grid of (mean, std, exists_probability, threshold) at
 n_samples = 10000 across replicate seeds:
 
@@ -50,8 +50,8 @@ N_SAMPLES = 10000  # schema maximum
 
 def goal_distribution_moments(mean: float, std: float, exists_p: float, x: float) -> float:
     """Analytic std of goal = x * B * T (see module docstring)."""
-    a, b = (-1.0 - mean) / std, (1.0 - mean) / std
-    mu_t, var_t = stats.truncnorm.stats(a, b, loc=mean, scale=std, moments="mv")
+    # The strength law since ISL #200: Normal(mean, std), unbounded.
+    mu_t, var_t = mean, std**2
     e_s = exists_p * float(mu_t)
     e_s2 = exists_p * (float(var_t) + float(mu_t) ** 2)
     return x * math.sqrt(max(e_s2 - e_s**2, 0.0))
@@ -63,15 +63,13 @@ def noisy_truth(mean: float, std: float, exists_p: float, x: float, threshold: f
     sigma = goal_distribution_moments(mean, std, exists_p, x)
     if sigma <= 1e-12:
         return 1.0 if 0.0 >= threshold else 0.0
-    a, b = (-1.0 - mean) / std, (1.0 - mean) / std
-
     def integrand(s: float) -> float:
         return float(
-            stats.truncnorm.pdf(s, a, b, loc=mean, scale=std)
-            * stats.norm.cdf((x * s - threshold) / sigma)
+            stats.norm.pdf(s, loc=mean, scale=std) * stats.norm.cdf((x * s - threshold) / sigma)
         )
 
-    exists_part, _ = integrate.quad(integrand, -1.0, 1.0, limit=200)
+    lo, hi = mean - 12.0 * std, mean + 12.0 * std  # the unbounded law; mass outside is < 1e-32
+    exists_part, _ = integrate.quad(integrand, lo, hi, limit=200)
     absent_part = float(stats.norm.cdf((0.0 - threshold) / sigma))
     return exists_p * exists_part + (1.0 - exists_p) * absent_part
 

@@ -8,7 +8,7 @@ called with explicit k_samples (harness-level parameterisation; no src change)
 over K in {100, 1000, 10000, 100000}:
 
 - margin family: single-decisive-edge graphs whose flip probability is known
-  in closed form (truncated-normal CDF at zero), spanning knife-edge ->
+  in closed form (normal CDF at zero; truncated-normal before ISL #200), spanning knife-edge ->
   effectively-zero, plus a structural TRUE ZERO edge in every graph;
 - repo fixtures: every edge of the three pinned graphs in
   tests/benchmarks/sample_variants.json;
