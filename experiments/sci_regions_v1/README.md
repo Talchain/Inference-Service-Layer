@@ -14,4 +14,6 @@ The study uses the frozen R3-B NumPy dependency plus Python's standard library. 
 
 Open `output/comparison.html` as a local file to inspect the point, threshold and map views. It embeds its computed data and has no network resources. The underlying `output/results.zip` contains all per-case JSON, `run-manifest.json` and `mutant-evidence.json`.
 
+`MATCHED-COMPARISON.md` freezes the next same-case reasoning-value pilot. Append `?arm=point`, `?arm=threshold` or `?arm=map` to the local HTML URL to show one net-reading view per participant. No human responses or benefit claim have been collected.
+
 The study is tier X and exploratory. Numeric preference on R3-B is a float point estimate with a heuristic roundoff screen. The full six-option comparison is incomplete because three options lack intervention values.
