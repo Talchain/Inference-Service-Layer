@@ -7119,7 +7119,7 @@ class RobustnessAnalyzerV2:
             influence_rank_map = {s["node_id"]: None for s in sensitivities}
 
         # R3-5: publish the every-factor walk — one cohort, one normalisation, exact-or-null.
-        if every_factor:
+        if every_factor and structural_influence_out is not None:
             every_scores, every_truncated = walked_scores, walked_truncated
             if every_truncated:
                 if not influence_truncated and critiques is not None:

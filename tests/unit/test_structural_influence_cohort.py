@@ -104,6 +104,34 @@ class TestEveryFactorNodeUnderAnEvaluatedIdentity:
         assert by_node(p1["factor_sensitivity"], "influence_score") == walk(wire(identity=PRODUCT), five)
 
 
+def unobserved_leads() -> Dict[str, Any]:
+    """P1 with FOUR extra unit paths from the unobserved factor into MRR (through chance nodes): its raw
+    sum 0.59 + 4 = 4.59 then exceeds subscribers' 3.96 (measured), so the six-factor max is NOT the
+    cohort's max. Only here can a six-factor normalisation leaking into factor_sensitivity show."""
+    d = wire(identity=PRODUCT)
+    for i in range(4):
+        d["graph"]["nodes"].append({"id": f"g_path_{i}", "kind": "chance", "label": f"G path {i}"})
+        d["graph"]["edges"].append(
+            {"from": GRANDFATHERED, "to": f"g_path_{i}", "strength": {"mean": 1.0, "std": 0.01}, "exists_probability": 1.0}
+        )
+        d["graph"]["edges"].append(
+            {"from": f"g_path_{i}", "to": MRR, "strength": {"mean": -1.0, "std": 0.01}, "exists_probability": 1.0}
+        )
+    return d
+
+
+class TestWhenTheUnobservedFactorLeads:
+    def test_factor_sensitivity_is_still_exactly_its_own_five_row_walk(self):
+        d = unobserved_leads()
+        body = envelope(d)
+        assert [e["evaluated"] for e in body["identity_evaluations"] if e["node_id"] == MRR] == [True]
+        scores = by_node(body["structural_influence"], "influence_score")
+        assert max(scores, key=scores.get) == GRANDFATHERED
+        five = [PRICE, SUBS, "monthly_churn", "monthly_new_pro_subscribers", OTHER]
+        assert by_node(body["factor_sensitivity"], "influence_score") == walk(d, five)
+        assert by_node(body["factor_sensitivity"], "influence_score")[SUBS] == 1.0
+
+
 class TestAbsentWithoutAnEvaluatedIdentity:
     def test_c0_has_no_structural_influence_key(self, c0):
         assert "structural_influence" not in c0
