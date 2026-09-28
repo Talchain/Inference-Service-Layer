@@ -347,7 +347,7 @@ RECOMPUTED = {
     "factor_evppi",  # R3-6, MEASURED: 0.0, below_resolution (see below)
     "critiques",  # analysis critiques are recomputed on the new samples
     "identity_evaluations",  # the new disclosure itself (absent when nothing is declared)
-    "structural_influence",  # R3-5: every factor node's influence (absent without an evaluated identity)
+    "structural_influence",  # R3-5: every factor node's influence (on every graph; the identity moves it)
     "metadata",  # execution_time_ms differs on ANY two runs; edge_existence_rates move through the
     # tie-break coupling (£59 no longer ties, so the edge stream is consumed differently)
 }

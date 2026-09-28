@@ -2393,7 +2393,7 @@ class RobustnessResponseV2(BaseModel):
     structural_influence: Optional[List[StructuralInfluence]] = Field(
         None,
         description="Every factor node's structural influence, one cohort and one normalisation. "
-        "Present only when an identity was evaluated; absent otherwise.",
+        "Present on every graph where the factor phase runs; absent when it does not.",
     )
 
     model_config = {

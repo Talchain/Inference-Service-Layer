@@ -2103,12 +2103,13 @@ class ISLResponseV2(BaseModel):
     )
 
     # R3-5 (additive optional, DL #72 5872746926): ONE structural-influence authority over
-    # EVERY factor node — factor_sensitivity scores only the factors with an uncertainty.
+    # EVERY factor node — factor_sensitivity scores only the factors with an uncertainty. Emitted on
+    # every graph: the ONE influence algorithm (AIQ #72 5872951506).
     structural_influence: Optional[List[StructuralInfluence]] = Field(
         None,
         description="Every factor node's structural influence on the goal: one cohort, one "
-        "normalisation, an evaluated identity walked at its own partials. Present only when an "
-        "identity was evaluated; absent otherwise.",
+        "normalisation, an evaluated identity walked at its own partials. Present on every graph "
+        "where the factor phase runs; absent when it does not (no parameter uncertainty).",
     )
 
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can
