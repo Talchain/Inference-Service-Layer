@@ -8174,8 +8174,12 @@ class RobustnessAnalyzerV2:
 
         Algorithm:
         1. For each factor, find all paths to goal_node_id
-        2. For each path, compute path_strength = product of edge.strength.mean * exists_probability
-        3. Factor influence = sum of absolute path strengths (multiple paths add)
+        2. For each path, compute path_strength = product of each edge's effective strength:
+           an evaluated identity's partial at the centre where one applies (``identity_partials``),
+           else edge.strength.mean * exists_probability
+        3. Factor influence = |signed sum of path strengths| — the EXPECTED NET effect (AIQ
+           ruling #72 5875853496): offsetting channels cancel and uncertain links count for less.
+           It is not gross reach (Σ|path|).
         4. Normalize to 0-1 scale across all factors
 
         UC-2 (D-23.18, re-fixed per Codex N1/N2, D-23.19): enumeration is bounded
@@ -8184,10 +8188,11 @@ class RobustnessAnalyzerV2:
         work by U (the original F2 class). The pool ceiling is priced 1:1 in
         compute_weighted_cost (`structural_influence` term).
 
-        ⚠ N1 (P0, Codex): a truncated factor's RAW path sum is a lower bound, but
-        the NORMALIZED score is NOT — the data-dependent max-denominator can
-        shrink faster than a numerator, inflating other factors' normalized
-        scores and inverting ranks (their repro: exact 0.1 → bounded 1.0). The
+        ⚠ N1 (P0, Codex): a truncated factor's RAW net sum bounds nothing (a missing
+        path may add to it or cancel it), and the NORMALIZED score is worse — the
+        data-dependent max-denominator can shrink faster than a numerator,
+        inflating other factors' normalized scores and inverting ranks (their
+        repro: exact 0.1 → bounded 1.0). The
         CALLER must therefore treat any non-empty ``truncated_factor_ids`` as
         exact-or-null: withhold ALL influence scores/ranks for the cohort and
         disclose via STRUCTURAL_INFLUENCE_TRUNCATED. Never publish the
@@ -8218,7 +8223,8 @@ class RobustnessAnalyzerV2:
         for edge in graph.edges:
             from_node = edge.from_
             to_node = edge.to
-            # Effective strength = mean * exists_probability
+            # Effective strength = the identity partial where one applies,
+            # else mean * exists_probability
             effective_strength = partials.get(
                 (from_node, to_node), edge.strength.mean * edge.exists_probability
             )
@@ -8238,7 +8244,7 @@ class RobustnessAnalyzerV2:
         ) -> List[float]:
             """
             Find all paths from start to end and return list of path strengths.
-            Each path strength is the product of edge strengths along the path.
+            Each path strength is the product of effective edge strengths along the path (signed).
             Stops (returning what it has) once the walk-call budget is exhausted.
             """
             nonlocal calls_left, budget_hit
