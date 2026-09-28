@@ -1,0 +1,36 @@
+{
+ "graph": {
+  "nodes": [
+   {"id": "ship_the_new_platform_by_q3", "kind": "goal", "label": "ship the new platform by Q3", "provenance": "from_brief", "goal_threshold_unit": "calendar date", "goal_threshold_frame": "level"},
+   {"id": "senior_engineers_hired", "kind": "factor", "label": "Senior engineers hired", "category": "controllable", "provenance": "ai_inferred", "observed_state": {"cap": 20, "unit": "engineers", "value": 0, "raw_value": 0, "declared_scale": "unit_interval"}},
+   {"id": "junior_engineers_hired", "kind": "factor", "label": "Junior engineers hired", "category": "controllable", "provenance": "ai_inferred", "observed_state": {"cap": 30, "unit": "engineers", "value": 0, "raw_value": 0, "declared_scale": "unit_interval"}},
+   {"id": "annual_salary_spend", "kind": "factor", "label": "Annual salary spend", "category": "controllable", "provenance": "ai_inferred", "observed_state": {"cap": 1000000, "unit": "GBP/year", "value": 0, "raw_value": 0, "declared_scale": "unit_interval"}},
+   {"id": "senior_hiring_delay_risk", "kind": "factor", "label": "Senior hiring delay risk", "category": "external", "provenance": "user_set", "display_value": "0.25 probability", "observed_state": {"unit": "probability", "value": 0.25, "source": "user_assumption", "raw_value": 0.25}},
+   {"id": "junior_coaching_load", "kind": "factor", "label": "Junior coaching load", "category": "observable", "provenance": "ai_inferred", "scale_frame": 10, "observed_state": {"unit": "senior-engineer equivalents", "value": 0, "source": "cee_inference", "raw_value": 0, "extractionType": "inferred"}},
+   {"id": "budget_overrun_risk", "kind": "factor", "label": "Budget overrun risk", "category": "external", "provenance": "user_set", "display_value": "0.1 probability", "observed_state": {"unit": "probability", "value": 0.1, "source": "user_assumption", "raw_value": 0.1}},
+   {"id": "platform_delivery_capacity", "kind": "outcome", "label": "Platform delivery capacity", "provenance": "ai_inferred"}
+  ],
+  "edges": [
+   {"to": "platform_delivery_capacity", "from": "senior_engineers_hired", "strength": {"std": 0.125, "mean": 0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis"}, "effect_direction": "positive", "exists_probability": 0.8},
+   {"to": "platform_delivery_capacity", "from": "junior_engineers_hired", "strength": {"std": 0.125, "mean": 0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis"}, "effect_direction": "positive", "exists_probability": 0.8},
+   {"to": "senior_hiring_delay_risk", "from": "senior_engineers_hired", "strength": {"std": 0.25, "mean": 0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis", "magnitude": "olumi_placeholder", "natural_effect": {"amount": 0.05, "amount_unit": "probability", "strength_mean": 0.5, "per_source_change": 2, "strength_mean_frame": "edge_strength", "per_source_change_unit": "engineers"}}, "effect_direction": "positive", "exists_probability": 0.8},
+   {"to": "platform_delivery_capacity", "from": "senior_hiring_delay_risk", "strength": {"std": 0.125, "mean": -0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis"}, "effect_direction": "negative", "exists_probability": 0.8},
+   {"to": "junior_coaching_load", "from": "junior_engineers_hired", "strength": {"std": 0.375, "mean": 0.75}, "defaulted": true, "provenance": {"source": "cee_hypothesis", "magnitude": "olumi_estimate", "natural_effect": {"amount": 0.25, "amount_unit": "senior-engineer equivalents", "strength_mean": 0.75, "per_source_change": 1, "strength_mean_frame": "edge_strength", "per_source_change_unit": "engineers"}}, "effect_direction": "positive", "exists_probability": 0.8},
+   {"to": "platform_delivery_capacity", "from": "junior_coaching_load", "strength": {"std": 0.125, "mean": -0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis"}, "effect_direction": "negative", "exists_probability": 0.8},
+   {"to": "budget_overrun_risk", "from": "annual_salary_spend", "strength": {"std": 0.25, "mean": 0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis", "magnitude": "olumi_placeholder", "natural_effect": {"amount": 0.11, "amount_unit": "probability", "strength_mean": 0.5, "per_source_change": 220000, "strength_mean_frame": "edge_strength", "per_source_change_unit": "GBP/year"}}, "effect_direction": "positive", "exists_probability": 0.8},
+   {"to": "platform_delivery_capacity", "from": "budget_overrun_risk", "strength": {"std": 0.125, "mean": -0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis"}, "effect_direction": "negative", "exists_probability": 0.8},
+   {"to": "ship_the_new_platform_by_q3", "from": "platform_delivery_capacity", "strength": {"std": 0.125, "mean": 0.5}, "defaulted": true, "provenance": {"source": "cee_hypothesis"}, "effect_direction": "positive", "exists_probability": 0.8}
+  ]
+ },
+ "options": [
+  {"id": "two_senior_engineers", "label": "Two senior engineers", "interventions": {"annual_salary_spend": {"value": 0.22, "source": "cee_hypothesis"}, "senior_engineers_hired": {"value": 0.1, "source": "cee_hypothesis"}}},
+  {"id": "four_junior_engineers", "label": "Four junior engineers", "interventions": {"annual_salary_spend": {"value": 0.22, "source": "cee_hypothesis"}, "junior_engineers_hired": {"value": 0.13333333333333333, "source": "cee_hypothesis"}}},
+  {"id": "continue_as_now", "label": "Continue as now", "interventions": {"senior_engineers_hired": {"value": 0, "source": "observed"}, "annual_salary_spend": {"value": 0, "source": "observed"}, "junior_engineers_hired": {"value": 0, "source": "observed"}}}
+ ],
+ "goal_node_id": "ship_the_new_platform_by_q3",
+ "goal_constraints": [
+  {"unit": "GBP/year", "label": "Annual salary spend", "value": 400000, "node_id": "annual_salary_spend", "operator": "<=", "provenance": "explicit", "value_frame": "level", "constraint_id": "agent-lane:annual_salary_spend:<="}
+ ],
+ "seed": "aiq-eh4",
+ "n_samples": 4000
+}

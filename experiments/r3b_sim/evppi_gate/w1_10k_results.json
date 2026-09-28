@@ -1,0 +1,111 @@
+{
+ "n_draws": 10000,
+ "seeds": 1000,
+ "cases": {
+  "dominated_dependent (true 0)": {
+   "true_evppi": 0.0,
+   "resolved_current": 89,
+   "resolved_gated": 0,
+   "ci95_current": [
+    0.073,
+    0.108
+   ],
+   "ci95_gated": [
+    0,
+    0.004
+   ]
+  },
+  "independent_null (true 0)": {
+   "true_evppi": 0.0,
+   "resolved_current": 39,
+   "resolved_gated": 0,
+   "ci95_current": [
+    0.029,
+    0.053
+   ],
+   "ci95_gated": [
+    0,
+    0.004
+   ]
+  },
+  "near_tie_null (true 0)": {
+   "true_evppi": 0.0,
+   "resolved_current": 74,
+   "resolved_gated": 5,
+   "ci95_current": [
+    0.059,
+    0.092
+   ],
+   "ci95_gated": [
+    0.002,
+    0.012
+   ]
+  },
+  "three_option_null (true 0)": {
+   "true_evppi": 0.0,
+   "resolved_current": 67,
+   "resolved_gated": 1,
+   "ci95_current": [
+    0.053,
+    0.084
+   ],
+   "ci95_gated": [
+    0.0,
+    0.006
+   ]
+  },
+  "true_positive (0.0833)": {
+   "true_evppi": 0.0833155,
+   "resolved_current": 1000,
+   "resolved_gated": 1000,
+   "ci95_current": [
+    0.996,
+    1
+   ],
+   "ci95_gated": [
+    0.996,
+    1
+   ]
+  },
+  "moderate (0.0417)": {
+   "true_evppi": 0.0416577,
+   "resolved_current": 1000,
+   "resolved_gated": 1000,
+   "ci95_current": [
+    0.996,
+    1
+   ],
+   "ci95_gated": [
+    0.996,
+    1
+   ]
+  },
+  "weak_tail (0.0042)": {
+   "true_evppi": 0.0042454,
+   "resolved_current": 1000,
+   "resolved_gated": 605,
+   "ci95_current": [
+    0.996,
+    1
+   ],
+   "ci95_gated": [
+    0.574,
+    0.635
+   ]
+  },
+  "nonlinear_U (true > 0)": {
+   "true_evppi": null,
+   "resolved_current": 1000,
+   "resolved_gated": 1000,
+   "ci95_current": [
+    0.996,
+    1
+   ],
+   "ci95_gated": [
+    0.996,
+    1
+   ]
+  }
+ },
+ "seconds": 296.7
+}
