@@ -13,6 +13,7 @@ This enables answering:
 
 import hashlib
 import logging
+import dataclasses
 import math
 import os
 import statistics
@@ -1578,6 +1579,12 @@ IDENTITY_FRAME_MISSING = "identity_frame_missing"
 IDENTITY_OPERAND_MISSING = "identity_operand_missing"
 IDENTITY_ZERO_LEVEL = "identity_zero_level"
 IDENTITY_INCONSISTENT = "identity_inconsistent"
+# AIQ #72 5868227452 (DL ISL #193 non-blocking note): the ONE central scale k that ties the
+# product to its stated level must lie in [0.5, 2]. k <= 0 (the belief parents already
+# account for the whole stated level: L >= o - A) or far from 1 means the product cannot
+# carry the stated level honestly, so it is withheld, never evaluated with an absurd k.
+IDENTITY_SCALE_OUT_OF_RANGE = "identity_scale_out_of_range"
+IDENTITY_SCALE_RANGE = (0.5, 2.0)
 
 
 @dataclass(frozen=True)
@@ -1600,6 +1607,8 @@ class IdentityPlan:
     reconstructed: Optional[float] = None
     stated: Optional[float] = None
     mismatch_share: Optional[float] = None
+    # A product with a stated level: the evaluator's ONE central scale k (else None).
+    scale: Optional[float] = None
 
     @property
     def evaluated(self) -> bool:
@@ -1616,7 +1625,18 @@ def _identity_term(operation: str, values: Sequence[float]) -> float:
     return float(math.fsum(values))
 
 
-def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
+def resolve_identity_plans(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> Dict[str, IdentityPlan]:
+    """Every declared identity's FINAL plan: the structural checks
+    (``_resolve_structural_identity_plans``) and then, for a product with a stated level,
+    the scale check the evaluator makes once it has ``k`` (``identity_scale_out_of_range``).
+    Every reader (the 422, the disclosure, R3-9's filter) reads this one decision, at the
+    same sampler centres the evaluator uses."""
+    return SCMEvaluatorV2(graph, factor_centres=factor_centres).identity_plans
+
+
+def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
     """One plan per node that DECLARES an identity (ISL never infers one from the graph).
 
     Checked in this order, and the first failure withholds it:
@@ -1630,6 +1650,8 @@ def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
        product ``|o - (term + addends)| / |o| <= 5%``; sum (no ratio, so 0 is an ordinary
        level) ``|o - (term + addends)| <= 5% x max(|o|, sum|parts|)``.
     A node with no stated level is evaluated from its inputs (AIQ 5860087988 item 4).
+    5. (``SCMEvaluatorV2``, once ``k`` is known) a product's ``k`` in [0.5, 2], else
+       ``identity_scale_out_of_range``.
     """
     nodes = {node.id: node for node in graph.nodes}
     plans: Dict[str, IdentityPlan] = {}
@@ -1761,7 +1783,9 @@ def definitional_strengths(graph: GraphV2) -> Dict[Tuple[str, str], float]:
     }
 
 
-def definitional_edges(graph: GraphV2) -> set:
+def definitional_edges(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> set:
     """R3-9: the operand and addend edges of every EVALUATED identity, as ``(from, to)``.
 
     They are definitions, not beliefs: the evaluator never reads their sampled strengths,
@@ -1769,7 +1793,7 @@ def definitional_edges(graph: GraphV2) -> set:
     A withheld identity's edges stay beliefs (the node is still linear)."""
     return {
         (participant, plan.node_id)
-        for plan in resolve_identity_plans(graph).values()
+        for plan in resolve_identity_plans(graph, factor_centres).values()
         if plan.evaluated
         for participant in plan.participants
     }
@@ -1783,7 +1807,7 @@ def identity_blocking_critiques(
     Empty when every such identity is evaluated. The route turns a non-empty list into the
     blocked 422; ``analyze`` refuses on it too, so no caller can obtain approximated numbers.
     """
-    plans = resolve_identity_plans(request.graph)
+    plans = resolve_identity_plans(request.graph, factor_centres(request))
     withheld = [plan for plan in plans.values() if not plan.evaluated]
     if not withheld:
         return []
@@ -1811,7 +1835,14 @@ def identity_blocking_critiques(
         if not reaches_a_decision_node(plan.node_id):
             continue
         detail = ""
-        if plan.withheld_reason == IDENTITY_INCONSISTENT:
+        if plan.withheld_reason == IDENTITY_SCALE_OUT_OF_RANGE:
+            assert plan.scale is not None
+            low, high = IDENTITY_SCALE_RANGE
+            detail = (
+                f": the scale that ties its parts to the stated level is {plan.scale:.3f}, "
+                f"outside [{low:g}, {high:g}]"
+            )
+        elif plan.withheld_reason == IDENTITY_INCONSISTENT:
             assert plan.reconstructed is not None and plan.stated is not None
             detail = (
                 f": its parts give {plan.reconstructed:,.2f} where the stated level is "
@@ -1850,12 +1881,14 @@ def identity_blocking_critiques(
     return critiques
 
 
-def identity_evaluations(graph: GraphV2) -> List[IdentityEvaluation]:
+def identity_evaluations(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> List[IdentityEvaluation]:
     """R3: the wire disclosure, one entry per DECLARED identity, from the same plans the
     evaluator uses (never re-derived)."""
     nodes = {node.id: node for node in graph.nodes}
     out: List[IdentityEvaluation] = []
-    for plan in resolve_identity_plans(graph).values():
+    for plan in resolve_identity_plans(graph, factor_centres).values():
         identity = nodes[plan.node_id].nonlinear_identity
         assert identity is not None
         reconciliation = (
@@ -1972,12 +2005,27 @@ class SCMEvaluatorV2:
         # R3 slice 1: every declared identity's plan; only an EVALUATED one changes the
         # structural equation (a withheld one is left linear and withheld downstream).
         self._status_quo_cache: Optional[Tuple[_StatusQuoKey, Dict[str, float]]] = None
-        self.identity_plans: Dict[str, IdentityPlan] = resolve_identity_plans(graph)
+        self.identity_plans: Dict[str, IdentityPlan] = _resolve_structural_identity_plans(graph)
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
         self._identity_scales: Dict[str, float] = {}
         self._identity_scales = self._central_identity_scales(dict(factor_centres or {}))
+        # AIQ 5868227452: a product whose k leaves [0.5, 2] is withheld (step 5).
+        low, high = IDENTITY_SCALE_RANGE
+        for node_id, k in list(self._identity_scales.items()):
+            in_range = low <= k <= high
+            plan = dataclasses.replace(
+                self.identity_plans[node_id],
+                scale=k,
+                withheld_reason=None if in_range else IDENTITY_SCALE_OUT_OF_RANGE,
+            )
+            self.identity_plans[node_id] = plan
+            if in_range:
+                self._evaluated_identities[node_id] = plan
+            else:
+                del self._evaluated_identities[node_id]
+                del self._identity_scales[node_id]
 
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
@@ -4079,7 +4127,7 @@ class RobustnessAnalyzerV2:
         # R3-9 (AIQ ISL #187 5860770241 (3)): an evaluated identity's operand/addend edges
         # are definitions, so no edge-level output lists them (edge sensitivity, e-values,
         # fragile/robust edges). The evaluator never read them: nothing else moves.
-        definitional = definitional_edges(request.graph)
+        definitional = definitional_edges(request.graph, factor_centres(request))
         if definitional:
             definitional_ids = {f"{source}->{target}" for source, target in definitional}
             sensitivity = [
@@ -4174,7 +4222,8 @@ class RobustnessAnalyzerV2:
             correlation_model=correlation_model,
             range_fit_disclosures=range_fit_disclosures,
             node_levels=node_level_frames or None,
-            identity_evaluations=identity_evaluations(request.graph) or None,
+            identity_evaluations=identity_evaluations(request.graph, factor_centres(request))
+            or None,
         )
 
         self.logger.info(
