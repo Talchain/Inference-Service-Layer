@@ -227,3 +227,67 @@ class TestSamePopulationAsTheProbability:
             constraint_id=LIMIT, node_id="c", operator="<=", value=0.10, value_frame="level", level_domain=UNIT
         )
         assert RobustnessAnalyzerV2._level_out_of_domain_fraction([float("nan"), -0.5], constraint, [False, False]) is None
+
+
+# =============================================================================
+# DL 28 Sep 2026 (#72 5862819400, served journey C `pj-20260928T032434Z` C02, ISL 742c2c4): a Run with one limit
+# REFUSED (B5: scored per limit) and another on an ANCHORED node with a domain (B1a's level clamp) raised
+# `KeyError: 1`, HTTP 500 on every retry. The clamp iterated `enumerate(constraints)` while its series are keyed by
+# position in `scored`. The witness: this file's graph with churn ANCHORED (an attested source and a cap, so its
+# domain is [0, 1] and the clamp is live) plus a limit on the root lever `a`, which has no level (refused).
+# =============================================================================
+
+ROOT_LIMIT = "lim-root"
+
+
+def analyse_anchored(order: str = "refused_first", with_refused: bool = True, root_domain: Optional[LevelDomain] = None):
+    refused = GoalConstraint(
+        constraint_id=ROOT_LIMIT, node_id="a", operator="<=", value=0.5, value_frame="level", level_domain=root_domain
+    )
+    scored = GoalConstraint(constraint_id=LIMIT, node_id="c", operator="<=", value=0.10, value_frame="level", level_domain=UNIT)
+    limits = [scored] if not with_refused else ([refused, scored] if order == "refused_first" else [scored, refused])
+    return RobustnessAnalyzerV2().analyze(
+        RobustnessRequestV2(
+            request_id="level-domain-partial",
+            graph=GraphV2(
+                nodes=[
+                    NodeV2(id="a", kind="factor", label="AI availability"),
+                    NodeV2(
+                        id="c", kind="factor", label="Churn",
+                        observed_state=ObservedState(value=0.04, baseline=0.04, source="brief_extraction", cap=100.0),
+                    ),
+                    NodeV2(id="g", kind="outcome", label="Goal"),
+                ],
+                edges=[edge("a", "c", -0.5), edge("c", "g", -0.5)],
+            ),
+            options=[InterventionOption(id=oid, label=oid, interventions=iv) for oid, iv in {"hold": {}, "ai": {"a": 1.0}}.items()],
+            goal_node_id="g",
+            n_samples=500,
+            seed=11,
+            goal_constraints=limits,
+        )
+    )
+
+
+class TestAPartlyScoredBlockKeepsItsClamp:
+    def test_the_witness_is_anchored_so_the_clamp_is_live(self):
+        # PRECONDITION: without an anchored churn node there is no clamp, and nothing below can go red.
+        frames = [f for f in (analyse_anchored(with_refused=False).node_levels or []) if f.node_id == "c"]
+        assert frames and frames[0].frame == "anchored_level"
+
+    @pytest.mark.parametrize("order", ["refused_first", "scored_first"])
+    def test_one_limit_refused_and_one_clamped_is_scored_not_a_crash(self, order):
+        response = analyse_anchored(order)
+        for option_id in ("hold", "ai"):
+            result = [r for r in response.results if r.option_id == option_id][0]
+            ids = [c.constraint_id for c in result.constraint_analysis.constraints]
+            assert ids == [LIMIT], f"{option_id}: only the resolved limit is scored; the refused one has no row"
+
+    @pytest.mark.parametrize("order", ["refused_first", "scored_first"])
+    def test_the_scored_limit_reads_exactly_what_it_reads_alone(self, order):
+        alone, partial = analyse_anchored(with_refused=False), analyse_anchored(order)
+        for option_id in ("hold", "ai"):
+            a, p = row(alone, option_id), row(partial, option_id)
+            assert p.prob_satisfied == a.prob_satisfied
+            assert p.level_out_of_domain_fraction == a.level_out_of_domain_fraction
+            assert p.failure_margin_median == a.failure_margin_median
