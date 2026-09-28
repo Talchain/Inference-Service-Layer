@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 82
+    "superset_count": 83
   },
   "omissions": [
     {
@@ -691,6 +691,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "stability_thresholds",
       "reason": "ISL superset — ISLResponseV2.stability_thresholds is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "structural_influence",
+      "reason": "ISL superset — ISLResponseV2.structural_influence is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #72 5872746926 (Delivery Lead R3-5 ruling (A): when an identity is evaluated, ISL emits structural influence over EVERY factor node, one cohort and one normalisation; PLoT adopts it only when it covers every row, Talchain/plot-lite-service#400) and 5874354700 (re-baseline with exactly this one entry); meaning AI Quality 5872728325 / 5872951506. Additive and optional (absent without an evaluated identity). Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "ISLResponseV2",
