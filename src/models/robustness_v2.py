@@ -270,6 +270,12 @@ class ParameterUncertainty(BaseModel):
     # For uniform distribution
     range_min: Optional[float] = Field(None, description="Minimum value for uniform distribution")
     range_max: Optional[float] = Field(None, description="Maximum value for uniform distribution")
+    spread_source: Optional[Literal["user", "template"]] = Field(
+        None,
+        description="Who set this spread: 'user' (the user's own figure or range) or 'template' "
+        "(Olumi's default spread). Echoed on factor_evppi so advice can say whose range it is "
+        "(AIQ #72 5867782904). Absent = the caller did not say; ISL never infers it.",
+    )
 
     @model_validator(mode="after")
     def validate_distribution_params(self) -> "ParameterUncertainty":
