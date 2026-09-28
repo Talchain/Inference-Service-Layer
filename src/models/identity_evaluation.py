@@ -22,6 +22,7 @@ IdentityWithheldReason = Literal[
     "identity_operand_missing",
     "identity_zero_level",
     "identity_inconsistent",
+    "identity_scale_out_of_range",
 ]
 
 
