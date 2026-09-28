@@ -54,6 +54,7 @@ from src.models.robustness_v2 import (
     GraphV2,
     InferenceWarning,
     InterventionOption,
+    LevelDomain,
     NodeV2,
     ObjectiveRanking,
     OptionResult,
@@ -153,9 +154,23 @@ MAX_DECOMPOSITION_PATHS = 20000
 # `structural_influence` term whenever the phase can run. Worst wall ≈ 0.3-0.5s.
 MAX_INFLUENCE_WALK_CALLS_TOTAL = 400_000
 
-# Edge strength bounds from schema v2.6
+# Edge strength bounds from schema v2.6. They bound the edge MEAN (parse-time clamp) and the
+# flip-threshold search ranges over that mean. They do NOT bound sampled strengths: a normalised
+# strength's magnitude depends on the node's frame (cap), so a +/-1 cut on draws removed real
+# user-unit effect frame-dependently (-30% of journey A's GBP59 effect under a x2 frame; a
+# 0.85 +/- 0.2 edge lost 23% of its mass). AIQ ruling #72 5868664986: the magnitude bound on draws
+# goes; the sign behaviour (draws may cross zero) is unchanged. See _sample_edge_strength.
 EDGE_STRENGTH_MIN = -1.0
 EDGE_STRENGTH_MAX = 1.0
+
+
+def _sample_edge_strength(rng: SeededRNG, mean: float, std: float) -> float:
+    """One sampled edge strength: Normal(mean, std), with no magnitude bound (AIQ #72 5868664986).
+
+    It consumes exactly one normal draw, the same draw the former truncated sampler accepted
+    first, so a graph whose draws never reach +/-1 is byte-identical to before.
+    """
+    return rng.normal(mean, std)
 
 # B3-S1: sqrt(2) for the Gaussian-copula uniform coupling Phi(y) = 0.5*erfc(-y/√2).
 _SQRT2 = math.sqrt(2.0)
@@ -994,16 +1009,9 @@ class DualUncertaintySampler:
 
             # Structural uncertainty: does edge exist?
             if self.rng.bernoulli(edge.exists_probability):
-                # Parametric uncertainty: what's the effect size?
-                # Truncated normal via rejection sampling — avoids three-mode
-                # artefacts (probability mass spikes at boundaries) that np.clip
-                # would introduce.  Falls back to clamped mean after 100 attempts.
-                strength = self.rng.truncated_normal(
-                    edge.strength.mean,
-                    edge.strength.std,
-                    EDGE_STRENGTH_MIN,
-                    EDGE_STRENGTH_MAX,
-                )
+                # Parametric uncertainty: what's the effect size? Unbounded normal
+                # (AIQ #72 5868664986): a frame-unit bound has no user meaning.
+                strength = _sample_edge_strength(self.rng, edge.strength.mean, edge.strength.std)
                 config[edge_key] = strength
                 self._existence_counts[edge_key] += 1
             else:
@@ -1156,18 +1164,108 @@ def todays_level_is_attested(node: NodeV2) -> bool:
     return source is not None and source in LEVEL_ANCHOR_SOURCE_BY_OBSERVED_SOURCE
 
 
-def anchored_level_domain(node: NodeV2, level: float) -> Tuple[Optional[float], Optional[float]]:
+def anchored_level_domain(
+    level: float, unit_domain: Optional[LevelDomain] = None
+) -> Tuple[Optional[float], Optional[float]]:
     """The levels an anchored quantity can take, in its own frame (AIQ 5855046894 (2)).
 
-    ``>= 0``, unless the held level is itself negative (then the quantity is evidently
-    signed and has no floor here); ``<= 1`` when the node carries a ``cap`` (its level
-    is a share of that cap), unless the held level already exceeds 1. The cap is read
-    for its PRESENCE only.
+    The bounds come from the UNIT's meaning, not from the frame (AIQ #72 5866289608).
+    ``observed_state.cap`` is NOT read: it is a normalisation frame (MRR's £125,000).
+    CEE's factor enricher mints one only for non-'%' quantities above 1 (money, counts),
+    so reading its presence as a ceiling clamped money at its frame. ISL does not parse unit strings (the caller owns
+    units); the unit meaning it receives is ``unit_domain``: the ``level_domain`` PLoT
+    mints for a '%' LEVEL limit on this node (``levelDomainFor``: percent/share ->
+    [0, 1]), in the node's level frame.
+
+    * ceiling: the unit's, when it states one; otherwise none (money, counts).
+    * floor: the unit's, when it states one; otherwise ``>= 0`` unless the held level is
+      itself negative (then the quantity is evidently signed and has no floor here).
+
+    A stated bound the held level already breaks is not applied (a 110% net revenue
+    retention held above a [0, 1] domain keeps no ceiling), so the status quo always
+    reproduces its own level.
+
+    ``unit_domain`` reaches here only for a node on a 100-point frame
+    (``unit_level_domains``, DL ISL #196 5869037504): PLoT sends {0, 1} for every '%'
+    level limit, and off a 100-point frame [0, 1] means [0, frame], the FRAME (e.g.
+    20%), not the unit's [0%, 100%].
     """
-    observed = node.observed_state
-    lower = 0.0 if level >= 0.0 else None
-    upper = 1.0 if observed is not None and observed.cap is not None and level <= 1.0 else None
+    lower: Optional[float] = 0.0 if level >= 0.0 else None
+    upper: Optional[float] = None
+    if unit_domain is not None:
+        if unit_domain.min is not None and level >= unit_domain.min:
+            lower = unit_domain.min
+        if unit_domain.max is not None and level <= unit_domain.max:
+            upper = unit_domain.max
     return lower, upper
+
+
+# The frame on which PLoT's '%' {0, 1} IS the unit's [0%, 100%] (PLoT ``LEGACY_FRAME``).
+PERCENT_POINTS_FRAME = 100.0
+# CEE's ``PAIR_COHERENCE_RELATIVE_EPSILON`` (PLoT ``recoverPairFrame``), by value: a
+# {value, raw_value} pair within it of frame 100 IS frame 100 (7 / 0.07 == 99.99999999999999).
+PAIR_COHERENCE_RELATIVE_EPSILON = 1e-9
+
+
+def node_level_frame(node: Optional[NodeV2]) -> Optional[float]:
+    """The node's frame (user units = level x frame), as far as ISL can see it.
+
+    PLoT's node-frame reader (``resolveNodeFrame``: cap -> scale_frame -> the {value,
+    raw_value} pair), rung for rung, except that ISL never receives ``scale_frame``:
+    PLoT's resolved frame arrives as ``execution_frame`` on an identity's participants
+    only (R3-8), and is read first. Otherwise the cap, otherwise the pair on exactly the
+    domain PLoT's ``recoverPairFrame`` accepts (both finite, value > 0, raw_value >
+    value, quotient finite and > 1), a pair coherent with 100 under CEE's tolerance
+    being 100. None when nothing resolves: ISL does not infer a frame.
+    """
+    if node is None:
+        return None
+    if node.execution_frame is not None:
+        return node.execution_frame.frame
+    observed = node.observed_state
+    if observed is None:
+        return None
+    cap = observed.cap
+    if cap is not None and math.isfinite(cap) and cap > 0:
+        return cap
+    value, raw = observed.value, observed.raw_value
+    if raw is None or not math.isfinite(value) or not math.isfinite(raw):
+        return None
+    if not value > 0 or not raw > value:
+        return None
+    frame = raw / value
+    if not math.isfinite(frame) or frame <= 1:
+        return None
+    at_percent_points = raw / PERCENT_POINTS_FRAME
+    magnitude = max(abs(at_percent_points), abs(value))
+    if abs(value - at_percent_points) / magnitude <= PAIR_COHERENCE_RELATIVE_EPSILON:
+        return PERCENT_POINTS_FRAME
+    return frame
+
+
+def unit_level_domains(request: RobustnessRequestV2) -> Dict[str, LevelDomain]:
+    """Per node, the unit meaning the caller sent for it: the ``level_domain`` of the first
+    'level' limit on that node that carries one (PLoT mints only ``{0, 1}``, for a '%'
+    limit). A 'delta' limit's domain is ignored, as everywhere else: a change has none.
+
+    ONLY for a node on a 100-point frame (DL ISL #196 5869037504). PLoT's
+    ``levelDomainFor`` sends {0, 1} for EVERY '%' level limit, the deferred '%' rung
+    included, where the target's own frame is not 100 points: there [0, 1] means
+    [0, frame], the FRAME (a 20-point frame: [0%, 20%]), not the unit's [0%, 100%], and
+    as a ceiling it certified "churn <= 21%" on every draw. So a node whose frame is not
+    100 points, or not resolvable here (``node_level_frame``), gets no unit meaning: no
+    ceiling, and the floor from the sign rule, as before this change. The limit's own
+    ``level_out_of_domain_fraction`` is untouched (report-only).
+    """
+    nodes = {node.id: node for node in request.graph.nodes}
+    domains: Dict[str, LevelDomain] = {}
+    for constraint in request.goal_constraints or []:
+        if constraint.value_frame != "level" or constraint.level_domain is None:
+            continue
+        if node_level_frame(nodes.get(constraint.node_id)) != PERCENT_POINTS_FRAME:
+            continue
+        domains.setdefault(constraint.node_id, constraint.level_domain)
+    return domains
 
 
 def resolve_factor_central_value(
@@ -4551,6 +4649,7 @@ class RobustnessAnalyzerV2:
         no level at all.
         """
         noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
+        unit_domains = unit_level_domains(request)
         frames: List[NodeLevelFrame] = []
         for node in request.graph.nodes:
             if not parent_map.get(node.id):
@@ -4569,7 +4668,7 @@ class RobustnessAnalyzerV2:
                 reason = None
             if reason is None:
                 assert level is not None and author is not None
-                low, high = anchored_level_domain(node, level)
+                low, high = anchored_level_domain(level, unit_domains.get(node.id))
                 frames.append(
                     NodeLevelFrame(
                         node_id=node.id,
@@ -6730,11 +6829,8 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # Force this edge's existence
                 if exists:
-                    config[edge_key] = rng.truncated_normal(
-                        edge.strength.mean,
-                        edge.strength.std,
-                        EDGE_STRENGTH_MIN,
-                        EDGE_STRENGTH_MAX,
+                    config[edge_key] = _sample_edge_strength(
+                        rng, edge.strength.mean, edge.strength.std
                     )
                 else:
                     config[edge_key] = 0.0
@@ -6743,11 +6839,8 @@ class RobustnessAnalyzerV2:
             else:
                 # Sample normally
                 if rng.bernoulli(edge.exists_probability):
-                    config[edge_key] = rng.truncated_normal(
-                        edge.strength.mean,
-                        edge.strength.std,
-                        EDGE_STRENGTH_MIN,
-                        EDGE_STRENGTH_MAX,
+                    config[edge_key] = _sample_edge_strength(
+                        rng, edge.strength.mean, edge.strength.std
                     )
                 else:
                     config[edge_key] = 0.0
@@ -6777,22 +6870,16 @@ class RobustnessAnalyzerV2:
             if edge.from_ == target_edge.from_ and edge.to == target_edge.to:
                 # TARGET EDGE: Force to exist and apply shifted mean
                 # This isolates magnitude sensitivity from existence sensitivity
-                config[edge_key] = rng.truncated_normal(
-                    edge.strength.mean + shift,
-                    edge.strength.std,
-                    EDGE_STRENGTH_MIN,
-                    EDGE_STRENGTH_MAX,
+                config[edge_key] = _sample_edge_strength(
+                    rng, edge.strength.mean + shift, edge.strength.std
                 )
             elif fixed and edge_key in fixed:
                 config[edge_key] = fixed[edge_key]  # R3-9: a definition draws nothing
             else:
                 # OTHER EDGES: Sample normally (both existence and strength)
                 if rng.bernoulli(edge.exists_probability):
-                    config[edge_key] = rng.truncated_normal(
-                        edge.strength.mean,
-                        edge.strength.std,
-                        EDGE_STRENGTH_MIN,
-                        EDGE_STRENGTH_MAX,
+                    config[edge_key] = _sample_edge_strength(
+                        rng, edge.strength.mean, edge.strength.std
                     )
                 else:
                     config[edge_key] = 0.0
@@ -10152,13 +10239,8 @@ class RobustnessAnalyzerV2:
                 # Edge doesn't exist in this sample → effective strength is 0
                 sampled_strength = 0.0
             else:
-                # Truncated normal — rejection sampling within schema bounds
-                sampled_strength = rng.truncated_normal(
-                    edge.strength.mean,
-                    edge.strength.std,
-                    EDGE_STRENGTH_MIN,
-                    EDGE_STRENGTH_MAX,
-                )
+                # Same sampling law as the main sampler (_sample_edge_strength)
+                sampled_strength = _sample_edge_strength(rng, edge.strength.mean, edge.strength.std)
 
             # Build counterfactual config: this edge sampled, others at baseline
             counterfactual_config = baseline_config.copy()
