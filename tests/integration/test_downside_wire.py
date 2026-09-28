@@ -126,9 +126,10 @@ class TestDownsideOnWire:
         Mutation-proven: percentile 5→4 REDs this pin; determinism of the
         seeded request is covered by the existing determinism tests.
         """
+        # Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
         expected_p05 = {
-            "low": -0.23213546863616197,
-            "high": -0.48139036523706824,
+            "low": -0.23881573806594153,
+            "high": -0.49901717249658567,
         }
         body = post_v2(client, base_request())
         for opt in body["options"]:
@@ -236,9 +237,10 @@ class TestDownsideOnWire:
         this test is RED on the pre-fix code and GREEN after. cvar_10/p05 stay on
         the noised samples and are UNCHANGED by this fix (test_p05_wire_value_pin).
         """
+        # Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
         expected_regret = {
-            "low": 0.04396019818411503,
-            "high": 0.05405519879844565,
+            "low": 0.04928340949887792,
+            "high": 0.05148761223707885,
         }
         pre_fix_noised_bug = {  # what the pre-fix (post-noise) code emitted
             "low": 0.11147263695963129,
@@ -262,9 +264,10 @@ class TestDownsideOnWire:
         PRE-noise values and asserts the emitted regret is NOT in the noised
         band. RED on the pre-fix code (emits ~0.09), GREEN after.
         """
+        # Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
         expected_regret = {
-            "low": 0.0010990049546028757,
-            "high": 0.0013513799699611433,
+            "low": 0.001232085237471949,
+            "high": 0.001287190305926973,
         }
         pre_fix_noised_bug = {"low": 0.0965537399, "high": 0.0899453578}
         body = post_v2(client, near_equivalent_request())
@@ -336,7 +339,8 @@ class TestDownsideOffloadSurvival:
         resp = RobustnessResponseV2.model_validate_json(out_json)
         by_id = {r.option_id: r.pre_noise_expected_regret for r in resp.results}
         # PRE-noise targets (seed 42); the noised/pre-fix values were ~0.111/0.107.
-        assert by_id["low"] == pytest.approx(0.0439601982, rel=1e-9), by_id
-        assert by_id["high"] == pytest.approx(0.0540551988, rel=1e-9), by_id
+        # Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
+        assert by_id["low"] == pytest.approx(0.04928340949887792, rel=1e-9), by_id
+        assert by_id["high"] == pytest.approx(0.05148761223707885, rel=1e-9), by_id
         for v in by_id.values():
             assert v is not None

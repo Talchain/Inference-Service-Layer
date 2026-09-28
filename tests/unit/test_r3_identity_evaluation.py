@@ -709,9 +709,10 @@ class TestFlipThresholdsReadAFreshStatusQuo:
         }
         assert set_level_nodes == {"monthly_new_pro_subscribers", "monthly_churn"}
 
-    def test_no_identity_thresholds_are_base_d1cef9a(self, monkeypatch):
+    def test_no_identity_thresholds_are_base_d1cef9a(self, monkeypatch, former_truncated_edge_sampler):
         """(a) The no-identity path is base: identical to d1cef9a's measured thresholds, and to a run in
-        which no status quo is ever cached."""
+        which no status quo is ever cached. d1cef9a sampled strengths under the former +/-1 bound, so
+        this row does too (AIQ #72 5868664986)."""
         d = wire(identity=None)
         served = flip_means(d)
         expected = {key: BASE_D1CEF9A_FLIP_MEANS.get(key) for key in served}

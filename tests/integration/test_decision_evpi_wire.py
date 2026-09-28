@@ -5,9 +5,10 @@ MINIMUM per-option ``downside.expected_regret`` (= E[max]−max E in outcome uni
 is seed-deterministic, and is additive-only (existing fields unchanged).
 
 Seed-42 pins are hand-derived from the regret values already pinned in
-test_downside_wire.py (low=0.04396019818411503, high=0.05405519879844565;
-near-equivalent low=0.0010990049546028757, high=0.0013513799699611433). Since
+test_downside_wire.py (low=0.04928340949887792, high=0.05148761223707885;
+near-equivalent low=0.001232085237471949, high=0.001287190305926973). Since
 decision_evpi = min_o expected_regret[o], the wire value MUST be the 'low' regret.
+Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
 """
 
 import pytest
@@ -92,23 +93,23 @@ class TestDecisionEvpiOnWire:
         assert body["decision_evpi"] == pytest.approx(min(regrets), rel=1e-12)
 
     def test_decision_evpi_seed42_value_pin(self, client):
-        """Wire-exact pin (hand-derived: min(low=0.04396019818411503,
-        high=0.05405519879844565) = the 'low' regret). A min->max mutation would
-        emit 0.05405519879844565 and RED this pin; a wrong-field mutation moves it."""
+        """Wire-exact pin (hand-derived: min(low=0.04928340949887792,
+        high=0.05148761223707885) = the 'low' regret). A min->max mutation would
+        emit 0.05148761223707885 and RED this pin; a wrong-field mutation moves it."""
         body = post_v2(client, base_request())
-        assert body["decision_evpi"] == pytest.approx(0.04396019818411503, rel=1e-12)
+        assert body["decision_evpi"] == pytest.approx(0.04928340949887792, rel=1e-12)
 
     def test_decision_evpi_positive_control_not_the_max(self, client):
         """Positive control (trap #13): the emitted value is MATERIALLY different
-        from the max regret (0.0540552) — the pin can SEE a min->max mutation, it is
+        from the max regret (0.0514876) — the pin can SEE a min->max mutation, it is
         not vacuously green."""
         body = post_v2(client, base_request())
-        assert abs(body["decision_evpi"] - 0.05405519879844565) > 1e-3
+        assert abs(body["decision_evpi"] - 0.05148761223707885) > 1e-3
 
     def test_decision_evpi_near_equivalent_pin(self, client):
-        """Near-equivalent options -> tiny decision EVPI (~0.0011): min(low, high)."""
+        """Near-equivalent options -> tiny decision EVPI (~0.0012): min(low, high)."""
         body = post_v2(client, near_equivalent_request())
-        assert body["decision_evpi"] == pytest.approx(0.0010990049546028757, rel=1e-12)
+        assert body["decision_evpi"] == pytest.approx(0.001232085237471949, rel=1e-12)
         assert body["decision_evpi"] < 0.01
 
     def test_decision_evpi_seed_deterministic(self, client):
@@ -123,8 +124,8 @@ class TestDecisionEvpiOnWire:
         body = post_v2(client, base_request())
         by_id = {o["id"]: o for o in body["options"]}
         assert by_id["low"]["downside"]["expected_regret"] == pytest.approx(
-            0.04396019818411503, rel=1e-12
+            0.04928340949887792, rel=1e-12
         )
         assert by_id["high"]["downside"]["expected_regret"] == pytest.approx(
-            0.05405519879844565, rel=1e-12
+            0.05148761223707885, rel=1e-12
         )
