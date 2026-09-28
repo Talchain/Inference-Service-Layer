@@ -159,7 +159,9 @@ MAX_INFLUENCE_WALK_CALLS_TOTAL = 400_000
 # strength's magnitude depends on the node's frame (cap), so a +/-1 cut on draws removed real
 # user-unit effect frame-dependently (-30% of journey A's GBP59 effect under a x2 frame; a
 # 0.85 +/- 0.2 edge lost 23% of its mass). AIQ ruling #72 5868664986: the magnitude bound on draws
-# goes; the sign behaviour (draws may cross zero) is unchanged. See _sample_edge_strength.
+# goes. There is still no sign constraint (draws may cross zero), but P(sign flip) now follows the
+# stated normal: 0.159 for 0.5 +/- 0.5, where the +/-1 truncation gave 0.187 (DL #72 5871402629).
+# See _sample_edge_strength.
 EDGE_STRENGTH_MIN = -1.0
 EDGE_STRENGTH_MAX = 1.0
 
@@ -8507,8 +8509,8 @@ class RobustnessAnalyzerV2:
         seed — same request+seed therefore yields byte-identical bands, and
         the derivation never consumes any existing RNG stream. Each child
         seed samples ONE full edge configuration from the joint uncertainty
-        (existence Bernoulli x truncated-normal strength — identical
-        semantics to the main MC's DualUncertaintySampler). Each edge's flip
+        (existence Bernoulli x normal strength, no +/-1 bound on draws since
+        #200 — identical semantics to the main MC's DualUncertaintySampler). Each edge's flip
         point is then re-searched with the other edges held at that sampled
         background. Backgrounds are shared across edges within a seed
         (common random numbers), so bands are comparable across edges.

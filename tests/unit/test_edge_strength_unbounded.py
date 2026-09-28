@@ -4,7 +4,10 @@ A normalised strength's magnitude depends on the node's frame (cap): doubling a 
 halves its normalised values and doubles the strengths out of it, and the user-unit answer must
 not move. The former +/-1 cut on DRAWS broke that: journey A's GBP59 effect fell 30% under a x2
 frame on the served tuple, and a 0.85 +/- 0.2 edge lost 23% of its mass. The mean's parse-time
-clamp and the flip-threshold search ranges are unchanged; so is the sign behaviour.
+clamp and the flip-threshold search ranges are unchanged. There is still no sign constraint, but
+P(sign flip) now follows the stated normal: 0.159 for 0.5 +/- 0.5, where truncation gave 0.187.
+The frame transform is EXACT under the unbounded law (normal(2m, 2s) consumes the same z as
+normal(m, s)), so the frame rows assert equality: a +/-2 bound passed a 3-SE window (DL 5871402629).
 """
 
 from __future__ import annotations
@@ -52,9 +55,17 @@ class TestSampledStrengthLaw:
         s = _strengths(0.85, 0.2)
         assert (s > 1.0).mean() > 0.2  # P(N(0.85, 0.2) > 1) = 0.227
 
-    def test_sign_behaviour_unchanged_draws_may_cross_zero(self):
+    def test_no_sign_constraint_draws_may_cross_zero(self):
         s = _strengths(0.1, 0.3)
         assert 0.3 < (s < 0).mean() < 0.4  # P(N(0.1, 0.3) < 0) = 0.369, as before
+
+    def test_sign_flip_probability_follows_the_normal_not_the_truncation(self):
+        """0.5 +/- 0.5: Phi(-1) = 0.1587 under the normal; the +/-1 truncation gave 0.1873."""
+        s = _strengths(0.5, 0.5)
+        p = float((s < 0).mean())
+        se = float(np.sqrt(0.1587 * (1 - 0.1587) / s.size))
+        assert abs(p - 0.1587) < 4 * se, p
+        assert abs(p - 0.1873) > 8 * se, p
 
     def test_draws_are_finite(self):
         assert np.isfinite(_strengths(0.9, 5.0)).all()
@@ -111,7 +122,7 @@ class TestFrameInvariance:
     def test_x2_frame_gives_the_same_effect(self):
         base, se_b = _effect(_two_level_request(0.45, 0.3, scale=1.0))
         doubled, se_d = _effect(_two_level_request(0.45, 0.3, scale=2.0))
-        assert abs(doubled - base) < 3 * np.hypot(se_b, se_d), (base, doubled)
+        assert doubled == pytest.approx(base, rel=1e-12, abs=1e-12), (base, doubled)
 
 
 class TestByteIdenticalWhenNoDrawReachesTheOldBound:
@@ -200,9 +211,9 @@ def _f_effects(analyse_fn=analyse):
 
 
 class TestContractFOnPaulsBody:
-    def test_price_frame_x2_leaves_the_59_effect_within_3_se(self):
+    def test_price_frame_x2_leaves_the_59_effect_exactly_unchanged(self):
         base, se_b, doubled, se_d = _f_effects()
-        assert abs(doubled - base) <= 3 * np.hypot(se_b, se_d), (base, doubled)
+        assert doubled == pytest.approx(base, rel=1e-12, abs=1e-9), (base, doubled)
 
     def test_mutant_truncated_sampler_is_frame_dependent(self):
         """The discriminating control: AIQ's measured -30% under the served sampler."""
