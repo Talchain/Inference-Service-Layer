@@ -80,7 +80,8 @@ class TestRowA_EveryOperandTheUsers:
         assert warning.severity == "warning"  # PLoT hides 'info'
         assert warning.field == f"nodes[{MRR}].nonlinear_identity"
         detail = warning.detail
-        assert detail["goal_node_id"] == MRR
+        assert detail["goal_node_id"] == detail["node_id"] == MRR
+        assert detail["node_label"] == "MRR"
         assert detail["level_source"] == "identity_inputs"
         assert detail["level_author"] == "user"
         assert detail["frame_verdict"] == "scored"
@@ -88,7 +89,11 @@ class TestRowA_EveryOperandTheUsers:
         assert detail["today_level"] == pytest.approx(TODAY_GBP, abs=1e-6)
         assert detail["frame"] == FRAMES[MRR]["frame"]
         assert detail["goal_baseline"] == pytest.approx(TODAY, abs=1e-12)
-        assert "the user's base" in detail["message"]
+        assert detail["message"] == (
+            "MRR has no level stated for today, so the chance of reaching the goal is measured "
+            "from the level its inputs give today: 74,500.00 in its own units; every input's "
+            "level today is the user's, so this is the user's base."
+        )
 
     def test_the_disclosure_agrees_with_the_identity_disclosure(self):
         response = analysed(unstated(users=(SUBS, OTHER)))
@@ -124,12 +129,17 @@ class TestRowB_TheWeakestOperandDecides:
         assert warning.detail["level_author"] == "olumi"
         assert warning.detail["frame_verdict"] == "estimate_only"
         assert warning.detail["estimated_operand_ids"] == [SUBS, OTHER]
-        assert "Olumi's estimate of today's level, not the user's" in warning.detail["message"]
+        assert warning.detail["message"].endswith(
+            "are Olumi's estimates, so this is Olumi's estimate of today's MRR, not the user's."
+        )
 
     def test_one_estimated_operand_is_enough(self):
         (warning,) = coded(analysed(unstated(users=(OTHER,))), CODE)
         assert warning.detail["frame_verdict"] == "estimate_only"
         assert warning.detail["estimated_operand_ids"] == [SUBS]
+        assert "is Olumi's estimate, so this is Olumi's estimate of today's MRR" in (
+            warning.detail["message"]
+        )
 
     def test_the_v2_wire_carries_it(self):
         body = v2_body(unstated())

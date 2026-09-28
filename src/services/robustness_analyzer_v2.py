@@ -5708,17 +5708,25 @@ class RobustnessAnalyzerV2:
         # is, in user units. Rides as 'warning' because PLoT hides 'info', and an Olumi
         # estimate presented as the user's base is the one reading this must prevent.
         estimated = list(anchor.estimated_operands)
+        # PLoT forwards the message, node_id and node_label (never the other detail keys), so the
+        # message names nodes by their labels: it is the copy the user reads.
+        labels = {node.id: node.label for node in request.graph.nodes}
+        goal_label = labels.get(goal_id, goal_id)
         whose = (
-            "every operand's level today is the user's, so this is the user's base"
+            "every input's level today is the user's, so this is the user's base"
             if anchor.author == "user"
-            else f"{', '.join(estimated)} are Olumi's estimates, so this is Olumi's estimate "
-            f"of today's level, not the user's"
+            else f"{', '.join(labels[i] for i in estimated)} "
+            f"{'is' if len(estimated) == 1 else 'are'} Olumi's "
+            f"{'estimate' if len(estimated) == 1 else 'estimates'}, so this is Olumi's estimate "
+            f"of today's {goal_label}, not the user's"
         )
         return plan, InferenceWarning(
             code="GOAL_LEVEL_FROM_IDENTITY_INPUTS",
             field=f"nodes[{goal_id}].nonlinear_identity",
             detail={
                 "goal_node_id": goal_id,
+                "node_id": goal_id,
+                "node_label": goal_label,
                 "level_source": "identity_inputs",
                 "level_author": anchor.author,
                 "frame_verdict": plan.frame_verdict,
@@ -5727,9 +5735,9 @@ class RobustnessAnalyzerV2:
                 "goal_baseline": plan.goal_baseline,
                 "estimated_operand_ids": estimated,
                 "message": (
-                    f"Goal node '{goal_id}' states no level today, so probability_of_goal is "
-                    f"measured from the level its identity gives at its inputs' levels "
-                    f"today: {anchor.level:,.2f} in the goal's own units; {whose}."
+                    f"{goal_label} has no level stated for today, so the chance of reaching the "
+                    f"goal is measured from the level its inputs give today: "
+                    f"{anchor.level:,.2f} in its own units; {whose}."
                 ),
             },
             severity="warning",
