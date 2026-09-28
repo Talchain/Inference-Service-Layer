@@ -98,10 +98,10 @@ class TestEveryFactorNodeUnderAnEvaluatedIdentity:
         assert scores[PRICE] != 1.0
         assert scores[PRICE] < scores[SUBS]
 
-    def test_factor_sensitivity_keeps_its_own_five_row_cohort_unchanged(self, p1):
+    def test_factor_sensitivity_is_byte_identical_to_walking_its_five_row_cohort_alone(self, p1):
+        """The cohort is walked first in the same order and re-normalised over itself: EXACT, not approx."""
         five = [PRICE, SUBS, "monthly_churn", "monthly_new_pro_subscribers", OTHER]
-        expected = walk(wire(identity=PRODUCT), five)
-        assert by_node(p1["factor_sensitivity"], "influence_score") == pytest.approx(expected, abs=1e-12)
+        assert by_node(p1["factor_sensitivity"], "influence_score") == walk(wire(identity=PRODUCT), five)
 
 
 class TestAbsentWithoutAnEvaluatedIdentity:
@@ -114,12 +114,22 @@ class TestAbsentWithoutAnEvaluatedIdentity:
         assert "structural_influence" not in body
 
 
-class TestPricingAndTruncation:
-    def test_the_second_walk_is_priced_only_when_an_identity_is_declared(self):
+class TestOnePoolAndTruncation:
+    def test_no_new_cost_term_the_every_factor_walk_rides_the_priced_pool(self):
         with_identity = rav2.compute_weighted_cost(RobustnessRequestV2.model_validate(wire(identity=PRODUCT)))
         without = rav2.compute_weighted_cost(RobustnessRequestV2.model_validate(wire(identity=None)))
-        assert with_identity.terms["structural_influence_identity"] == rav2.MAX_INFLUENCE_WALK_CALLS_TOTAL
-        assert "structural_influence_identity" not in without.terms
+        assert with_identity.terms == without.terms
+        assert with_identity.terms["structural_influence"] == rav2.MAX_INFLUENCE_WALK_CALLS_TOTAL
+
+    def test_one_pool_the_cohort_first_a_pool_that_fits_five_but_not_six(self, monkeypatch):
+        """Measured on this wire: the five-row cohort needs 19 walk calls, all six need 24. At 19 the
+        cohort is exact and published; the every-factor list is withheld (exact-or-null), not partial."""
+        monkeypatch.setattr(rav2, "MAX_INFLUENCE_WALK_CALLS_TOTAL", 19)
+        body = envelope(wire(identity=PRODUCT))
+        assert all(r.get("influence_score") is not None for r in body["factor_sensitivity"])
+        rows = body["structural_influence"]
+        assert sorted(r["node_id"] for r in rows) == sorted(ALL_FACTORS)
+        assert all(r.get("influence_score") is None and r.get("influence_rank") is None for r in rows)
 
     def test_a_truncated_cohort_withholds_every_score_and_rank(self, monkeypatch):
         monkeypatch.setattr(rav2, "MAX_INFLUENCE_WALK_CALLS_TOTAL", 3)
