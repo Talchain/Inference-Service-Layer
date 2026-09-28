@@ -9104,7 +9104,15 @@ class RobustnessAnalyzerV2:
             # even tinier floor, and the reply called that factor "most sensitive". A row that emits evppi <= its
             # emitted floor is below resolution.
             noise_floor_emitted = round(est.noise_floor, 6)
-            below_resolution = evppi_emitted <= noise_floor_emitted
+            # Decision-relevance gate (utils/evppi.py): clearing the association floor is not
+            # enough; the rule learned from this factor must beat the best fixed option on
+            # held-out draws. The floor reason takes precedence (AIQ #72 5867782904).
+            status_reason: Optional[str] = None
+            if evppi_emitted <= noise_floor_emitted:
+                status_reason = "at_or_below_noise_floor"
+            elif not est.decision_gain_passes:
+                status_reason = "decision_gain_not_significant"
+            below_resolution = status_reason is not None
 
             results.append(
                 {
@@ -9132,6 +9140,10 @@ class RobustnessAnalyzerV2:
                     # copula draws, so this conditional-expectation EVPPI is honest
                     # (it never assumes independence). True iff correlation active.
                     "correlation_active": correlation_active,
+                    # Why below_resolution (None when resolved).
+                    "status_reason": status_reason,
+                    # Whose spread this is, echoed from the request (None = not stated).
+                    "spread_source": uncertainty.spread_source,
                 }
             )
             safe_ids.append(fid)
