@@ -92,6 +92,50 @@ class TestDecisionRelevantFactorStaysResolved:
         assert est.degenerate and not est.decision_gain_passes
 
 
+
+class TestGateFoldsAreSeeded:
+    """The fold split is part of the verdict, so it must come from the per-factor seed, on a
+    stream separate from the floor's (``default_rng((seed, 1))``). DL verdict on ISL #198
+    (5869397004): the old determinism row did not discriminate, because an always-passing case
+    stays green under an unseeded fold. These rows use a BORDERLINE case (true EVPPI 0.0042, n=2000,
+    data seed 8) whose verdict does depend on the fold seed."""
+
+    SEEDS = range(16)
+    PINNED = "0011101111100110"  # decision_gain_passes for fold seeds 0..15 (numpy PCG64)
+
+    @staticmethod
+    def _verdicts():
+        theta, oo = _two_option(lambda th: 9.0 + 0.5 * th, 2000, 8)
+        return "".join(
+            "1" if factor_evppi_estimate(theta, oo, seed=s).decision_gain_passes else "0"
+            for s in TestGateFoldsAreSeeded.SEEDS
+        )
+
+    def test_the_fold_seed_matters_on_the_borderline_case(self):
+        """Non-vacuity: some fold seeds pass and some fail, so determinism is not automatic."""
+        assert set(self._verdicts()) == {"0", "1"}
+
+    def test_same_seed_same_verdict_and_pinned(self):
+        first = self._verdicts()
+        assert self._verdicts() == first
+        assert first == self.PINNED
+
+    def test_folds_come_from_their_own_seeded_stream(self, monkeypatch):
+        calls = []
+        real = np.random.default_rng
+
+        def spy(*args, **kwargs):
+            calls.append(args)
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(np.random, "default_rng", spy)
+        theta, oo = _two_option(lambda th: 9.0 + 1.0 * th, 500, 3)
+        calls.clear()
+        factor_evppi_estimate(theta, oo, seed=5)
+        assert ((5, 1),) in calls, calls
+        assert (5,) in calls, calls  # the floor's stream, distinct from the folds'
+        assert () not in calls, "an unseeded generator makes the verdict irreproducible"
+
 class TestAnalyzerStatusUsesTheGate:
     """The wire status reads the gate: a row above its floor whose learned rule does not
     beat the best fixed option on held-out draws is below_resolution."""
