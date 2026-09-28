@@ -19,6 +19,8 @@ import numpy as np
 import pytest
 
 import src.services.robustness_analyzer_v2 as analyzer_mod
+from pydantic import ValidationError
+from src.models.robustness_v2 import ParameterUncertainty
 from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
 from src.utils.evppi import FactorEvppiEstimate, factor_evppi_estimate
 
@@ -117,15 +119,77 @@ class TestAnalyzerStatusUsesTheGate:
         self._patched(monkeypatch, raw=0.5, floor=0.0, gate=False)
         row = self._theta_row()
         assert row["evppi"] > row["noise_floor"]
-        assert row["status"] == "below_resolution"
+        assert (row["status"], row["status_reason"]) == (
+            "below_resolution",
+            "decision_gain_not_significant",
+        )
 
     def test_control_above_floor_and_gate_passes_is_resolved(self, monkeypatch):
         self._patched(monkeypatch, raw=0.5, floor=0.01, gate=True)
-        assert self._theta_row()["status"] == "resolved"
+        row = self._theta_row()
+        assert (row["status"], row["status_reason"]) == ("resolved", None)
 
     def test_gate_never_rescues_a_row_at_or_below_its_floor(self, monkeypatch):
         self._patched(monkeypatch, raw=0.01, floor=0.02, gate=True)
-        assert self._theta_row()["status"] == "below_resolution"
+        row = self._theta_row()
+        assert (row["status"], row["status_reason"]) == (
+            "below_resolution",
+            "at_or_below_noise_floor",
+        )
+
+    def test_floor_reason_takes_precedence_when_both_fail(self, monkeypatch):
+        self._patched(monkeypatch, raw=0.01, floor=0.02, gate=False)
+        assert self._theta_row()["status_reason"] == "at_or_below_noise_floor"
+
+
+class TestAiqRulingRows:
+    """AIQ #72 5867782904, rows as ruled (200 seeds each): dominated <= 1/200, independent
+    nulls <= 1/200, true EVPPI 0.083 resolved in >= 180/200 at n=500."""
+
+    SEEDS = 200
+
+    def _count(self, mean_b, n):
+        return sum(
+            _resolved(factor_evppi_estimate(*_two_option(mean_b, n, ds), seed=1000 + ds))
+            for ds in range(self.SEEDS)
+        )
+
+    @pytest.mark.parametrize("n", [500, 2000])
+    def test_dominated_at_most_one_in_200(self, n):
+        assert self._count(lambda th: 9.0 + 0.8 * np.tanh(th), n) <= 1
+
+    @pytest.mark.parametrize("n", [500, 2000])
+    def test_independent_null_at_most_one_in_200(self, n):
+        assert self._count(lambda th: 9.0 + 0.0 * th, n) <= 1
+
+    def test_true_positive_at_least_180_in_200_at_n500(self):
+        assert self._count(lambda th: 9.0 + 1.0 * th, 500) >= 180
+
+
+class TestSpreadSourceEcho:
+    """AIQ #72 5867782904: each factor_evppi row says whose spread it is, echoed from the
+    request's ParameterUncertainty.spread_source; absent means the caller did not say (None)."""
+
+    def _row(self, spread_source):
+        req = _mediator_request(n_samples=800)
+        pu = req.parameter_uncertainties[0]
+        fields = pu.model_dump(exclude_none=True)
+        if spread_source is not None:
+            fields["spread_source"] = spread_source
+        req = req.model_copy(update={"parameter_uncertainties": [ParameterUncertainty(**fields)]})
+        r = RobustnessAnalyzerV2().analyze(req)
+        return {e["factor_id"]: e for e in r.factor_evppi}["theta"]
+
+    @pytest.mark.parametrize("source", ["user", "template"])
+    def test_stated_source_is_echoed(self, source):
+        assert self._row(source)["spread_source"] == source
+
+    def test_absent_source_is_none_never_inferred(self):
+        assert self._row(None)["spread_source"] is None
+
+    def test_unknown_source_is_refused(self):
+        with pytest.raises(ValidationError):
+            ParameterUncertainty(node_id="theta", std=1.0, spread_source="olumi")
 
 
 class TestMediatorAnalyticCaseStaysResolvedEndToEnd:

@@ -1632,6 +1632,15 @@ class FactorEvppiEntryV2(BaseModel):
     noise_floor: float
     status: str
     correlation_active: bool
+    status_reason: Optional[
+        Literal["at_or_below_noise_floor", "decision_gain_not_significant"]
+    ] = None
+    """Why a row is below_resolution (None when resolved): its evppi does not clear the
+    permutation floor, or the rule learned from the factor does not beat the best fixed option
+    on held-out draws (AIQ #72 5867782904)."""
+    spread_source: Optional[Literal["user", "template"]] = None
+    """Echo of the request's ParameterUncertainty.spread_source; None when the caller did not
+    state it (never inferred)."""
 
 
 class FactorEvpcEntryV2(BaseModel):
