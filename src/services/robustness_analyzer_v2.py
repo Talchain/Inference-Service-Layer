@@ -1801,15 +1801,22 @@ def identity_level_anchor(
     a stated level (condition 1: this run's evaluation only; condition 3: a stated level is
     anchored by the caller, never re-derived here)."""
     plan = resolve_identity_plans(request.graph, factor_centres(request)).get(target_id)
-    if plan is None or not plan.evaluated or plan.target_level is not None:
+    return None if plan is None else _anchor_of(plan, request.graph)
+
+
+def _anchor_of(plan: IdentityPlan, graph: GraphV2) -> Optional[IdentityLevelAnchor]:
+    """ONE computation of the anchor, read by the resolver (``identity_level_anchor``) and by the
+    wire disclosure (``identity_evaluations``), so the level a goal is scored from and the one
+    the UI shows beside it cannot drift apart."""
+    if not plan.evaluated or plan.target_level is not None:
         return None
-    nodes = {node.id: node for node in request.graph.nodes}
+    nodes = {node.id: node for node in graph.nodes}
     level = _identity_term(
         plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
     ) + math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
     return IdentityLevelAnchor(
         level=level,
-        frame=plan.frames[target_id],
+        frame=plan.frames[plan.node_id],
         estimated_operands=tuple(
             i for i in plan.participants if baseline_owner(nodes[i].observed_state) != "user"
         ),
@@ -1989,6 +1996,7 @@ def identity_evaluations(
     for plan in resolve_identity_plans(graph, factor_centres).values():
         identity = nodes[plan.node_id].nonlinear_identity
         assert identity is not None
+        anchor = _anchor_of(plan, graph)
         reconciliation = (
             IdentityReconciliation(
                 reconstructed=plan.reconstructed,
@@ -2015,6 +2023,11 @@ def identity_evaluations(
                     else "stated_level" if plan.target_level is not None else "identity_inputs"
                 ),
                 reconciliation=reconciliation,
+                level_author=None if anchor is None else anchor.author,
+                # Non-finite only on an overflowing product, which the resolver refuses by name.
+                today_level=(
+                    anchor.level if anchor is not None and math.isfinite(anchor.level) else None
+                ),
             )
         )
     return out

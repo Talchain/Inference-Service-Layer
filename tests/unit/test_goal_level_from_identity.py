@@ -224,3 +224,53 @@ class TestTheLimitChannelSharesTheRule:
             (result,) = keep.constraint_analysis.constraints
             assert result.prob_satisfied == expected
             assert result.frame_verdict == verdict
+
+
+class TestTheCarrierReachesTheWire:
+    """Panel 5876811906: the UI must not parse prose, so WHOSE today's level it is rides typed on
+    the goal's identity_evaluations entry, which PLoT forwards verbatim (v2-envelope.ts
+    getIslIdentityEvaluations). The same anchor the resolver scores from."""
+
+    @staticmethod
+    def entry(body: Dict[str, Any]) -> Dict[str, Any]:
+        (found,) = [e for e in body["identity_evaluations"] if e["node_id"] == MRR]
+        return found
+
+    @pytest.mark.parametrize("users, author", [((), "olumi"), ((SUBS, OTHER), "user")])
+    def test_the_goals_entry_says_whose_level_it_is(self, users, author):
+        body = v2_body(unstated(users=users))
+        entry = self.entry(body)
+        assert entry["level_source"] == "identity_inputs"
+        assert entry["level_author"] == author
+        assert entry["today_level"] == pytest.approx(TODAY_GBP, abs=1e-6)
+        (warning,) = [w for w in body["inference_warnings"] if w["code"] == CODE]
+        assert warning["detail"]["level_author"] == entry["level_author"]
+        assert warning["detail"]["today_level"] == entry["today_level"]
+
+    def test_a_stated_level_carries_neither(self):
+        d = wire()
+        d["n_samples"] = N_SAMPLES
+        entry = self.entry(v2_body(d))
+        assert entry["level_source"] == "stated_level"
+        assert entry.get("level_author") is None and entry.get("today_level") is None
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"level_source": "stated_level", "level_author": "user"},
+            {"level_source": "stated_level", "today_level": 1.0},
+            {"level_source": "identity_inputs"},
+        ],
+    )
+    def test_the_model_refuses_a_carrier_off_its_source(self, fields):
+        from src.models.identity_evaluation import IdentityEvaluation
+
+        with pytest.raises(ValueError):
+            IdentityEvaluation(
+                node_id=MRR,
+                operation="product",
+                factor_ids=["a", "b"],
+                stated_in_brief=True,
+                evaluated=True,
+                **fields,
+            )
