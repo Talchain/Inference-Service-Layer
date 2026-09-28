@@ -21,6 +21,7 @@ from typing import Any, Dict, NamedTuple, Optional, Tuple, Union
 import numpy as np
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -640,12 +641,26 @@ async def analyze_robustness_v2(
     )
 
 
+def _non_finite_to_null(value: Any) -> Any:
+    """MG ISL #187 5861838085 (4): the V1 body carries the analyzer's raw draws, and a NaN draw
+    leaves NaN in ``outcome_distribution`` (mean/std/median/CI, samples). Starlette renders with
+    ``allow_nan=False``, so that run was a 500. A non-finite float is null; all else is untouched.
+    """
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _non_finite_to_null(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_non_finite_to_null(item) for item in value]
+    return value
+
+
 async def _analyze_robustness_v2_legacy(
     request: RobustnessRequestV2,
     request_id: str,
     app: Any,
     api_key: Optional[str],
-) -> Union[RobustnessResponseV2, JSONResponse]:
+) -> JSONResponse:
     """Legacy V1 response handler (backward compatible)."""
     try:
         # Compute-admission guard (Codex F8 weighted cost) — reject oversized
@@ -716,7 +731,9 @@ async def _analyze_robustness_v2_legacy(
             },
         )
 
-        return response
+        # What FastAPI rendered from the returned model (response_model=None), with non-finite
+        # floats as null: byte-identical whenever every float is finite.
+        return JSONResponse(content=_non_finite_to_null(jsonable_encoder(response)))
 
     except ValidationError as e:
         logger.warning(

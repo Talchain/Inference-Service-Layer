@@ -111,9 +111,10 @@ class TestR3_1TheProductAtUnchangedSubscribers:
 
     def test_without_the_addend_the_whole_75k_scales(self):
         """Undeclared, other MRR growth stays a sampled belief edge (AIQ item 5): the product term is
-        anchored at o - L_sq, the edge's own contribution, measured rather than asserted."""
+        anchored at o - L, the edge's EXPECTED contribution (AIQ #72 5866317942: one central k)."""
         d = wire(identity=PRODUCT)
-        belief = 0.4 * 0.02 * FRAMES[MRR]["frame"]  # other_mrr_growth -> mrr at its mean, £
+        # other_mrr_growth -> mrr at its effective strength, mean 0.4 x exists_probability 0.8, £800
+        belief = 0.8 * 0.4 * 0.02 * FRAMES[MRR]["frame"]
         expected = (75_000.0 - belief) * (59.0 / 49.0 - 1.0)
         assert abs(query_gbp(d, AT_59_SUBS_HELD) - expected) <= 1e-6
 
@@ -833,20 +834,63 @@ class TestTheTypedIdentityOnTheCritique:
         assert identity.stated == 75_000.0
         json.dumps(identity.model_dump(), allow_nan=False)  # strict JSON: raises on NaN/Infinity
 
+    def test_a_numpy_float32_figure_is_screened_too(self):
+        """MG ISL #187 5861838085 (5): np.float32 is not a Python float, so a float32 NaN passed the
+        isinstance check and reached the model as NaN."""
+        import numpy as np
+
+        from src.models.response_v2 import CritiqueIdentityV2
+
+        identity = CritiqueIdentityV2(
+            node_id=MRR,
+            operation="product",
+            participants=[PRICE, SUBS],
+            withheld_reason="identity_inconsistent",
+            reconstructed=np.float32("nan"),
+            stated=np.float32(1.5),
+            mismatch_share=np.float64("inf"),
+        )
+        assert identity.reconstructed is None
+        assert identity.stated == 1.5 and isinstance(identity.stated, float)
+        assert identity.mismatch_share is None
+        json.dumps(identity.model_dump(), allow_nan=False)
+
+    def test_the_message_names_an_addend_as_an_addend(self):
+        """MG ISL #187 5861838085 (6): MRR = price x subscribers + other MRR growth. The message listed
+        the addend inside the product; the typed ``participants`` (CEE reads it) is unchanged."""
+        critique = identity_critique(blocked_422(inconsistent_wire()))
+        assert critique["message"].startswith(
+            f"{MRR} is declared as the product of {PRICE}, {SUBS} plus {OTHER} but cannot be "
+            "computed exactly (identity_inconsistent"
+        )
+        assert f"{SUBS}, {OTHER}" not in critique["message"]
+        assert critique["identity"]["participants"] == [PRICE, SUBS, OTHER]
+
+    def test_without_addends_the_message_is_unchanged(self):
+        d = wire(identity=PRODUCT)
+        (subs,) = [n for n in d["graph"]["nodes"] if n["id"] == SUBS]
+        subs["observed_state"].update(value=0.1, raw_value=1_000)
+        critique = identity_critique(blocked_422(d))
+        assert critique["message"] == (
+            f"{MRR} is declared as the product of {PRICE}, {SUBS} but cannot be computed exactly "
+            "(identity_inconsistent: its parts give 49,000.00 where the stated level is 75,000.00, "
+            "34.7% apart); the analysis is withheld rather than approximated"
+        )
+        assert critique["identity"]["participants"] == [PRICE, SUBS]
+
 
 # ---------------------------------------------------------------------------------------------------------
-# DL ISL #187 (not blocking): a draw whose status-quo product term is 0 is NaN ("uninformative") in
-# ``_identity_value``. The aggregator DROPS it: the wire's mean is the finite draws' mean, n_valid_samples
-# counts only them, and no option wins that draw. It is never averaged in.
+# DL ISL #187 (not blocking): a NaN draw is DROPPED by the aggregator: the wire's mean is the finite draws'
+# mean, n_valid_samples counts only them, and no option wins that draw. It is never averaged in. (A zero
+# status-quo product term no longer produces one: AIQ #72 5866317942, below. A non-finite factor draw does.)
 # ---------------------------------------------------------------------------------------------------------
 
 
 class TestANaNIdentityDrawIsDroppedNotAveraged:
     N_SAMPLES, EVERY = 200, 10
 
-    def _zero_price_every_tenth_draw(self, monkeypatch):
-        """Today's price reads 0 on every tenth factor draw: the status-quo term is 0 on that draw and
-        ``_identity_value`` returns NaN for every option (the REAL term_sq == 0 path)."""
+    def _price_every_tenth_draw(self, monkeypatch, value: float):
+        """Today's price reads ``value`` on every tenth factor draw (the same draw for every option)."""
         original = rav2.FactorSampler.sample_factor_values
         calls = {"n": 0}
 
@@ -854,18 +898,18 @@ class TestANaNIdentityDrawIsDroppedNotAveraged:
             values = original(sampler)
             calls["n"] += 1
             if calls["n"] % self.EVERY == 0:
-                values[PRICE] = 0.0
+                values[PRICE] = value
             return values
 
         monkeypatch.setattr(rav2.FactorSampler, "sample_factor_values", sample)
         return calls
 
-    def test_a_zero_status_quo_term_draw_is_dropped_not_averaged(self, monkeypatch):
+    def test_a_non_finite_draw_is_dropped_not_averaged(self, monkeypatch):
         import numpy as np
 
         d = wire()
         d["n_samples"] = self.N_SAMPLES
-        calls = self._zero_price_every_tenth_draw(monkeypatch)
+        calls = self._price_every_tenth_draw(monkeypatch, float("nan"))
         v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
         calls["n"] = 0
         v2 = v2_body(d)
@@ -890,3 +934,154 @@ class TestANaNIdentityDrawIsDroppedNotAveraged:
         assert sum(o["win_probability"] for o in v2["options"]) == pytest.approx(
             (self.N_SAMPLES - n_nan) / self.N_SAMPLES
         )
+
+    def test_a_zero_status_quo_term_draw_is_finite(self, monkeypatch):
+        """AIQ #72 5866317942: no draw divides by its own status-quo term, so a draw on which today's
+        price reads 0 is an ordinary (finite) draw, not an uninformative one. It was NaN under the
+        ratio form."""
+        import numpy as np
+
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        self._price_every_tenth_draw(monkeypatch, 0.0)
+        v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+        for result in v1.results:
+            assert np.isfinite(np.array(result.outcome_distribution.samples)).all()
+
+    # MG ISL #187 5861838085 (4): the legacy V1 body carries those NaN draws raw (outcome_distribution
+    # mean/std/median/CI and samples); starlette renders with allow_nan=False, so the run was a 500.
+
+    @staticmethod
+    def _v1(d: Dict[str, Any]) -> Any:
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        return TestClient(app, raise_server_exceptions=False).post(
+            "/api/v1/robustness/analyze/v2", json=d, headers={"X-ISL-Response-Version": "1"}
+        )
+
+    def test_the_v1_body_renders_a_nan_draw_as_null_not_a_500(self, monkeypatch):
+        def refuse(token: str) -> Any:
+            raise ValueError(f"not strict JSON: {token}")
+
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        self._price_every_tenth_draw(monkeypatch, float("nan"))
+        response = self._v1(d)
+        assert response.status_code == 200, response.text[:300]
+        body = json.loads(response.text, parse_constant=refuse)
+
+        n_nan = self.N_SAMPLES // self.EVERY
+        for result in body["results"]:
+            samples = result["outcome_distribution"]["samples"]
+            assert sum(s is None for s in samples) == n_nan
+            assert all(math.isfinite(s) for s in samples if s is not None)
+            assert result["outcome_distribution"]["mean"] is None  # NaN in, null out
+
+    def test_without_nan_draws_the_v1_body_is_byte_identical(self, monkeypatch):
+        """The same request with no NaN draw renders exactly what FastAPI rendered from the returned
+        model before the fix (response_model=None: jsonable_encoder, then JSONResponse)."""
+        from fastapi.encoders import jsonable_encoder
+        from fastapi.responses import JSONResponse
+
+        import src.api.robustness as route
+
+        returned: Dict[str, Any] = {}
+        run_offloaded = route.run_offloaded
+
+        async def capture(*args: Any, **kwargs: Any) -> Any:
+            returned["response"] = await run_offloaded(*args, **kwargs)
+            return returned["response"]
+
+        monkeypatch.setattr(route, "run_offloaded", capture)
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        response = self._v1(d)
+        assert response.status_code == 200, response.text[:300]
+        assert response.content == JSONResponse(content=jsonable_encoder(returned["response"])).body
+
+
+# ---------------------------------------------------------------------------------------------------------
+# AIQ #72 5866317942 (MG ISL #187 5861838085 follow-up 2): the product is scaled by ONE central constant
+# k = (o - A - L) / term, never by a sampled status-quo draw's own term. The ratio form divided by that
+# draw's term; a draw near 0 contradicts the stated o and the division amplified it (MG: std 11.3 at price
+# std 0.2; measured here at base 14f1a3a, 10,000 draws: std 230.9, mean -2.44).
+# ---------------------------------------------------------------------------------------------------------
+
+
+def with_price_std(d: Dict[str, Any], std: float) -> Dict[str, Any]:
+    (price,) = [u for u in d["parameter_uncertainties"] if u["node_id"] == PRICE]
+    price["std"] = std
+    return d
+
+
+def option_samples(d: Dict[str, Any]) -> Dict[str, Any]:
+    import numpy as np
+
+    response = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+    return {r.option_id: np.array(r.outcome_distribution.samples) for r in response.results}
+
+
+class TestTheCentralScale:
+    SERVED_59_GBP, SERVED_59_SE = 14_381.96, 13.31  # base 14f1a3a, served wire (R3-1-MC)
+
+    @pytest.fixture(scope="class")
+    def served(self):
+        return option_samples(wire(identity=PRODUCT))
+
+    @pytest.fixture(scope="class")
+    def wide(self):
+        return option_samples(with_price_std(wire(identity=PRODUCT), 0.2))
+
+    def test_k_is_the_reconciliation_factor(self):
+        """With the addend declared, k = (75,000 - 1,000) / 73,500 (Paul's figures), one number."""
+        evaluator = SCMEvaluatorV2(graph_of(wire()))
+        assert evaluator._identity_scales == {MRR: pytest.approx(74_000.0 / 73_500.0, rel=1e-12)}
+
+    def test_a_sum_and_an_ungraphed_identity_have_no_scale(self):
+        assert SCMEvaluatorV2(graph_of(tally_request(0.0)))._identity_scales == {}
+        assert SCMEvaluatorV2(graph_of(wire(identity=None)))._identity_scales == {}
+
+    def test_a_wide_price_keeps_the_tails_finite_and_the_mean(self, served, wide):
+        """MG's table, at price std 0.2 (£40 on £49): the £59 option's spread is the difference form's
+        (subscribers x the price spread, about 0.48 of the frame), NOT 11.3; its mean does not move.
+        Mutant: the sampled denominator -> std 230.9 -> RED."""
+        import numpy as np
+
+        at_59 = wide["increase_price_to_59"]
+        assert np.isfinite(at_59).all()
+        difference_form = (74_000.0 / 73_500.0) * 1_500.0 * (0.2 * 200.0) / FRAMES[MRR]["frame"]
+        assert 0.5 * difference_form < float(at_59.std()) < 1.5 * difference_form
+        assert float(at_59.mean()) == pytest.approx(float(served["increase_price_to_59"].mean()), abs=0.005)
+
+    def test_a_sampled_non_root_parent_is_read_at_its_centre_in_k(self):
+        """DL ISL #193 CHANGES_REQUIRED: churn is non-root, uncertain and not an operand. With a
+        churn -> MRR edge, k was computed with churn at base 0 while every draw reads it at its centre
+        (3%): the £59 effect fell to +£14,389.35 (16 SE). Base 14f1a3a gives +£14,673.50 (SE £17.31).
+        Mutant: k computed with no factor centres -> RED."""
+        d = wire(identity=PRODUCT)
+        d["graph"]["edges"].append(
+            {
+                "from": "monthly_churn",
+                "to": MRR,
+                "strength": {"mean": -0.5, "std": 0.1},
+                "exists_probability": 0.8,
+            }
+        )
+        samples = option_samples(d)
+        diff = (samples["increase_price_to_59"] - samples["keep_current_49_price"]) * FRAMES[MRR]["frame"]
+        assert abs(float(diff.mean()) - 14_673.50) < 3 * 17.31
+
+    def test_k_reads_the_sampler_centres(self):
+        request = RobustnessRequestV2.model_validate(wire(identity=PRODUCT))
+        centres = rav2.factor_centres(request)
+        assert centres[SUBS] == 0.15 and centres[PRICE] == 0.245
+        assert "monthly_churn" in centres
+
+    def test_the_served_59_effect_stays_within_3_se(self, served):
+        """Paul's served wire (price std 1e-4): the £59 effect is +£14,381.96 at base; one central k keeps
+        it within 3 SE. Mutant: k with each belief edge at its bare mean (not x exists_probability) moves
+        it by £50, 3.8 SE -> RED."""
+        diff = (served["increase_price_to_59"] - served["keep_current_49_price"]) * FRAMES[MRR]["frame"]
+        assert abs(float(diff.mean()) - self.SERVED_59_GBP) < 3 * self.SERVED_59_SE

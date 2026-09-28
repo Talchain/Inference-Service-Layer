@@ -1593,6 +1593,19 @@ def resolve_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan]:
     return plans
 
 
+def factor_centres(request: RobustnessRequestV2) -> Dict[str, float]:
+    """Each sampled factor's central value, from THE resolver the sampler agrees with
+    (``resolve_factor_central_value``): what a draw reads it at, on average. The identity
+    scale ``k`` is computed at these (DL ISL #193 CHANGES_REQUIRED): a non-root, uncertain,
+    non-operand parent read at base 0 instead put ``k`` 4.7% off on a churn -> MRR shape."""
+    nodes = {node.id: node for node in request.graph.nodes}
+    return {
+        u.node_id: resolve_factor_central_value(nodes[u.node_id], u).value
+        for u in request.parameter_uncertainties or []
+        if u.node_id in nodes
+    }
+
+
 def definitional_edges(graph: GraphV2) -> set:
     """R3-9: the operand and addend edges of every EVALUATED identity, as ``(from, to)``.
 
@@ -1654,7 +1667,10 @@ def identity_blocking_critiques(
             seed=seed,
             node_id=plan.node_id,
             operation=plan.operation,
-            participants=", ".join(plan.participants),
+            # MG ISL #187 5861838085 (6): the addends are named apart from the operands; the
+            # typed ``identity.participants`` below is unchanged (CEE reads it).
+            operands=", ".join(plan.factor_ids),
+            addends=f" plus {', '.join(plan.addends)}" if plan.addends else "",
             reason=plan.withheld_reason,
             detail=detail,
         )
@@ -1749,7 +1765,12 @@ class SCMEvaluatorV2:
     - Providing value-aware robustness analysis
     """
 
-    def __init__(self, graph: GraphV2, epsilon_rng: Optional[SeededRNG] = None):
+    def __init__(
+        self,
+        graph: GraphV2,
+        epsilon_rng: Optional[SeededRNG] = None,
+        factor_centres: Optional[Mapping[str, float]] = None,
+    ):
         """
         Initialize evaluator.
 
@@ -1759,6 +1780,9 @@ class SCMEvaluatorV2:
                 noise.  When provided and a node has epsilon_std > 0, adds
                 N(0, epsilon_std) after computing the structural equation.
                 Node values are clamped to [0, 1] after epsilon noise.
+            factor_centres: each sampled factor's central value (``factor_centres``),
+                read by an evaluated product's ONE scale ``k``. Without it a sampled
+                non-root parent is read at base 0 while every draw reads its centre.
         """
         self.graph = graph
         self._epsilon_rng = epsilon_rng
@@ -1797,6 +1821,8 @@ class SCMEvaluatorV2:
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
+        self._identity_scales: Dict[str, float] = {}
+        self._identity_scales = self._central_identity_scales(dict(factor_centres or {}))
 
     def _compute_topological_order(self) -> List[str]:
         """Compute topological order of nodes for evaluation."""
@@ -2024,6 +2050,44 @@ class SCMEvaluatorV2:
         status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         return framed, status_quo
 
+    def _central_identity_scales(self, factor_centres: Dict[str, float]) -> Dict[str, float]:
+        """AIQ #72 5866317942: ONE constant per evaluated product with a stated level,
+        ``k = (o - A - L) / term``, every figure at TODAY's levels in user units and each
+        remaining belief edge at its EFFECTIVE strength ``mean x exists_probability`` (the
+        central strength this module uses everywhere: structural influence, flip means). That
+        is the expected ``L`` the ratio form's per-draw numerator averaged, so the served mean
+        is kept. With the addend declared (R3-1) ``k = (75,000 - 1,000) / 73,500`` exactly.
+        Computed once per graph, so no draw divides by its own sampled status-quo term. A
+        graph with no evaluated product never propagates here."""
+        products = {
+            node_id: plan
+            for node_id, plan in self._evaluated_identities.items()
+            if plan.operation == "product" and plan.target_level is not None
+        }
+        if not products:
+            return {}
+        means = {
+            (edge.from_, edge.to): edge.strength.mean * edge.exists_probability
+            for edge in self.graph.edges
+        }
+        # Today at the centre: every sampled factor at the centre its draws read
+        # (``factor_centres``). An identity node reads itself as the reference here, so its
+        # own scale never enters (term == term_sq): no scale is needed to compute the scales.
+        today = self._propagate(means, {}, None, factor_centres, noise=False)
+        scales: Dict[str, float] = {}
+        for node_id, plan in products.items():
+            assert plan.target_level is not None  # filtered above
+            frame = plan.frames[node_id]
+            believed = [p for p in self._parents[node_id] if p not in plan.participants]
+            linear = frame * math.fsum(means.get((p, node_id), 0.0) * today[p] for p in believed)
+            addends = math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
+            # Non-zero: every operand level is non-zero (identity_zero_level withholds otherwise).
+            term = _identity_term(
+                plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
+            )
+            scales[node_id] = (plan.target_level * frame - addends - linear) / term
+        return scales
+
     def _identity_value(
         self,
         plan: IdentityPlan,
@@ -2036,16 +2100,19 @@ class SCMEvaluatorV2:
         Each participant is read at its LEVEL (a root's sample is its level; a non-root
         with a held level ``o_i`` sits at ``o_i + (sample - status-quo sample)``, B1a),
         converted to user units through its execution frame, combined, and the result is
-        renormalised into the node's frame. Product (AIQ 5860087988, ratio form)::
+        renormalised into the node's frame. Product (AIQ #72 5866317942)::
 
-            T = A + L + (o - A_sq - L_sq) * term / term_sq
+            T = o + k * (term - term_sq) + (A - A_sq) + (L - L_sq)
 
-        sum: ``T = o + (A - A_sq) + (L - L_sq) + (term - term_sq)``; with no stated ``o``
-        (item 4) ``T = term + A + L``. ``A`` is the declared addends (exact), ``L`` the
-        node's remaining belief-edge parents (still sampled, item 5). At the status quo
-        ``T = o`` on every draw. Operand/addend edges are definitional: their sampled
-        strengths never enter. A zero or non-finite status-quo term gives NaN (the draw
-        is uninformative), never a guessed figure.
+        with ONE constant ``k = (o - A - L) / term`` at the centre
+        (``_central_identity_scales``). At the centre this is the ratio form of AIQ 5860087988
+        exactly; per draw it never divides by the SAMPLED status-quo term, whose near-zero
+        draws contradict the stated ``o`` and exploded the tails (MG ISL #187 5861838085:
+        std 11.3 at price std 0.2). sum: ``T = o + (A - A_sq) + (L - L_sq) + (term - term_sq)``;
+        with no stated ``o`` (item 4) ``T = term + A + L``. ``A`` is the declared addends
+        (exact), ``L`` the node's remaining belief-edge parents (still sampled, item 5). At
+        the status quo ``T = o`` on every draw. Operand/addend edges are definitional: their
+        sampled strengths never enter.
         """
         node_id = plan.node_id
         frame = plan.frames[node_id]
@@ -2072,15 +2139,11 @@ class SCMEvaluatorV2:
             edge_strengths.get((p, node_id), 0.0) * reference.get(p, 0.0) for p in believed
         )
         if plan.target_level is None:
-            result = term + addend + linear
-        elif plan.operation == "product":
-            if term_sq == 0.0 or not math.isfinite(term_sq):
-                return float("nan")
-            stated = plan.target_level * frame
-            result = addend + linear + (stated - addend_sq - linear_sq) * (term / term_sq)
-        else:
-            stated = plan.target_level * frame
-            result = stated + (addend - addend_sq) + (linear - linear_sq) + (term - term_sq)
+            return (term + addend + linear) / frame
+        stated = plan.target_level * frame
+        # A sum is unscaled. While the scales are computed, term == term_sq (see above).
+        scale = self._identity_scales.get(node_id, 1.0)
+        result = stated + scale * (term - term_sq) + (addend - addend_sq) + (linear - linear_sq)
         return result / frame
 
     def _in_model_frame(
@@ -2555,7 +2618,9 @@ class RobustnessAnalyzerV2:
         # so existing graphs with default epsilon_std=0.0 are unaffected.
         has_epsilon = any(n.epsilon_std > 0 for n in request.graph.nodes)
         rng_epsilon = SeededRNG(seed + 3) if has_epsilon else None
-        evaluator = SCMEvaluatorV2(request.graph, epsilon_rng=rng_epsilon)
+        evaluator = SCMEvaluatorV2(
+            request.graph, epsilon_rng=rng_epsilon, factor_centres=factor_centres(request)
+        )
 
         self.logger.info(
             "robustness_v2_analysis_started",
@@ -3129,7 +3194,12 @@ class RobustnessAnalyzerV2:
             # an anchored band is exactly a point wherever the option changes nothing (the
             # status quo reproduces its held level on every draw), which is not degenerate.
             # float(np.std(...)) over the same list is what the band's std was until B1a.
-            if float(np.std(option_outcomes[result.option_id])) < ZERO_VARIANCE_TOLERANCE:
+            # MG ISL #187 5861838085 (3): over the FINITE draws only. One NaN draw made the
+            # std NaN, the comparison False, and the critique silently vanished.
+            draws = np.asarray(option_outcomes[result.option_id], dtype=float)
+            finite_draws = draws[np.isfinite(draws)]
+            # No finite draw: there is no spread to read, so no degeneracy is claimed.
+            if finite_draws.size and float(np.std(finite_draws)) < ZERO_VARIANCE_TOLERANCE:
                 critiques.append(
                     DEGENERATE_OPTION_ZERO_VARIANCE.build(
                         option_label=option_labels.get(result.option_id, result.option_id),
@@ -4143,7 +4213,11 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Dict[str, List[float]] = {
             node_id: [] for node_id in (status_quo_reference_nodes or [])
         }
-        sq_evaluator = SCMEvaluatorV2(request.graph) if status_quo_reference_nodes else None
+        sq_evaluator = (
+            SCMEvaluatorV2(request.graph, factor_centres=factor_centres(request))
+            if status_quo_reference_nodes
+            else None
+        )
 
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
@@ -9462,7 +9536,11 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Dict[str, List[float]] = {
             node_id: [] for node_id in sq_reference_nodes
         }
-        sq_evaluator = SCMEvaluatorV2(request.graph) if sq_reference_nodes else None
+        sq_evaluator = (
+            SCMEvaluatorV2(request.graph, factor_centres=factor_centres(request))
+            if sq_reference_nodes
+            else None
+        )
 
         for i in range(n_samples):
             # F7: periodic wall-clock deadline re-check (mirrors the E-value
