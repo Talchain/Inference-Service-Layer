@@ -63,6 +63,13 @@ SEED = 42
 ENDPOINT = "/api/v1/robustness/analyze/v2?response_version=2"
 
 
+@pytest.fixture(autouse=True)
+def _fixture_arithmetic_assumes_bounded_strengths(former_truncated_edge_sampler):
+    """HUGE_FINITE * strength must stay finite for ONE contribution, which these graphs were built
+    to guarantee under the former +/-1 bound on sampled strengths. The finiteness gates under test
+    do not depend on the sampler, so this file keeps that bound (AIQ #72 5868664986)."""
+
+
 @pytest.fixture
 def client():
     """Bare client — no lifespan, so run_offloaded takes its in-process branch."""

@@ -72,6 +72,28 @@ def pytest_collection_modifyitems(config, items):
 
 
 # ---------------------------------------------------------------------------
+# Former edge-strength sampler (AIQ #72 5868664986)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def former_truncated_edge_sampler(monkeypatch):
+    """Sample edge strengths as ISL did before AIQ #72 5868664986: Normal truncated to +/-1.
+
+    For tests whose FIXTURE ARITHMETIC was designed under that bound (e.g. HUGE * strength staying
+    finite) or whose constants were measured under it, and whose subject does not depend on the
+    sampler. The served, unbounded law is pinned in tests/unit/test_edge_strength_unbounded.py.
+    """
+    from src.services import robustness_analyzer_v2 as rav2
+
+    monkeypatch.setattr(
+        rav2,
+        "_sample_edge_strength",
+        lambda rng, mean, std: rng.truncated_normal(mean, std, -1.0, 1.0),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Auto-scaled noise opt-in (arch step 1, 2026-07-26)
 # ---------------------------------------------------------------------------
 

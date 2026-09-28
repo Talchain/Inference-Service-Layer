@@ -127,6 +127,8 @@ class TestWhenTheUnobservedFactorLeads:
         assert [e["evaluated"] for e in body["identity_evaluations"] if e["node_id"] == MRR] == [True]
         scores = by_node(body["structural_influence"], "influence_score")
         assert max(scores, key=scores.get) == GRANDFATHERED
+        # DL nit (5873894527): the list BY VALUE, so a mixed-normalisation mutant is RED on value, not tie order.
+        assert scores == pytest.approx(walk(d, ALL_FACTORS), abs=1e-12)
         five = [PRICE, SUBS, "monthly_churn", "monthly_new_pro_subscribers", OTHER]
         assert by_node(body["factor_sensitivity"], "influence_score") == walk(d, five)
         assert by_node(body["factor_sensitivity"], "influence_score")[SUBS] == 1.0

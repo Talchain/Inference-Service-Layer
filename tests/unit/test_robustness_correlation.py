@@ -276,10 +276,11 @@ class TestCorrelationActivation:
         # Exact seeded pin (numpy 1.26.x / PCG64, seed=42, n=2000, this fixture).
         # Stable across 3 runs; reverting the copula draw moves this value (mutation
         # check M2 in NOTES.md).
+        # Re-captured when sampled strengths lost the +/-1 bound (AIQ #72 5868664986).
         correlated = _outcome(
             analyzer.analyze(_request([FactorCorrelation(factor_a="fa", factor_b="fb", rho=0.9)]))
         )
-        assert correlated.std == pytest.approx(1.3234972880067288, abs=1e-9)
+        assert correlated.std == pytest.approx(1.381394017522505, abs=1e-9)
 
     def test_rho_zero_all_normal_is_bit_identical_to_absent(self, analyzer):
         # rho=0 over an all-normal correlated set spanning the full uncertainty
