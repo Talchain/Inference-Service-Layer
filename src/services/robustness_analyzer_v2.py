@@ -9952,11 +9952,20 @@ class RobustnessAnalyzerV2:
 
         Returns:
             True if value satisfies constraint, False otherwise
+
+        S-3 (AIQ #72 5866734772, root 2): a value AT the limit meets it, in either
+        direction. "At" is the ONE relative tolerance (``NO_CHANGE_RELATIVE_TOLERANCE``,
+        B1a-5's "equal"): a tally set to exactly the limit lands an ulp either side of it
+        from draw to draw, and a bare comparison read about half those draws as a breach.
+        A real excess is still a breach, and a limit of exactly 0 is met only by 0 or less.
         """
+        at_limit = math.isclose(
+            value, constraint.threshold, rel_tol=NO_CHANGE_RELATIVE_TOLERANCE, abs_tol=0.0
+        )
         if constraint.operator == ">=":
-            return value >= constraint.threshold
+            return value >= constraint.threshold or at_limit
         elif constraint.operator == "<=":
-            return value <= constraint.threshold
+            return value <= constraint.threshold or at_limit
         else:
             # This should never happen due to Pydantic validation
             raise ValueError(f"Unknown operator: {constraint.operator}")
