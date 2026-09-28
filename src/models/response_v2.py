@@ -33,6 +33,7 @@ from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 # Range→distribution disclosure model (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure
 from src.models.identity_evaluation import IdentityEvaluation
+from src.models.structural_influence import StructuralInfluence
 from src.models.node_level import NodeLevelFrame
 
 
@@ -2108,6 +2109,15 @@ class ISLResponseV2(BaseModel):
         description="Per declared identity: evaluated (with level_source and the "
         "reconciliation of its stated level against its inputs) or withheld_reason. Absent "
         "when the graph declares none.",
+    )
+
+    # R3-5 (additive optional, DL #72 5872746926): ONE structural-influence authority over
+    # EVERY factor node — factor_sensitivity scores only the factors with an uncertainty.
+    structural_influence: Optional[List[StructuralInfluence]] = Field(
+        None,
+        description="Every factor node's structural influence on the goal: one cohort, one "
+        "normalisation, an evaluated identity walked at its own partials. Present only when an "
+        "identity was evaluated; absent otherwise.",
     )
 
     # Auto-noise disclosure — mirrors V1 _metadata.auto_noise_applied so PLoT B3 can

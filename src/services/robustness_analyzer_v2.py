@@ -41,6 +41,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from src.models.identity_evaluation import IdentityEvaluation, IdentityReconciliation
 from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReason
+from src.models.structural_influence import StructuralInfluence
 from src.models.robustness_v2 import (
     CHANGE_FRAMES,
     BucketResult,
@@ -1771,6 +1772,17 @@ def factor_centres(request: RobustnessRequestV2) -> Dict[str, float]:
         for u in request.parameter_uncertainties or []
         if u.node_id in nodes
     }
+def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[str, float]:
+    """R3-5: ``_compute_structural_influence``'s own normalisation, over ``node_ids`` only.
+
+    The same arithmetic, so a sub-cohort re-normalised from a longer walk's raw sums is byte-identical to
+    walking that sub-cohort alone (the sub-cohort is walked first, so its raw sums are the same)."""
+    max_influence = max((raw[node_id] for node_id in node_ids), default=0.0)
+    if max_influence < 1e-10:
+        return {node_id: 0.0 for node_id in node_ids}
+    return {node_id: raw[node_id] / max_influence for node_id in node_ids}
+
+
 def identity_partials(
     graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
 ) -> Dict[Tuple[str, str], float]:
@@ -3532,6 +3544,7 @@ class RobustnessAnalyzerV2:
         # correlated factors. Omitted (absent, not fabricated) with the
         # correlation_model disclosure marker naming the reason.
         factor_sensitivity: List[FactorSensitivityResult] = []
+        structural_influence: List[StructuralInfluence] = []  # R3-5: evaluated identity only
         if factor_sampler.has_uncertainties() and "sensitivity" in request.analysis_types:
             if correlation_active:
                 suppressed_attributions.append(SUPPRESSED_ATTR_FACTOR_SENSITIVITY)
@@ -3544,7 +3557,12 @@ class RobustnessAnalyzerV2:
                 suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
                 factor_sensitivity = self._compute_factor_sensitivity(
-                    request, option_outcomes, rng_factor, evaluator, critiques=critiques
+                    request,
+                    option_outcomes,
+                    rng_factor,
+                    evaluator,
+                    critiques=critiques,
+                    structural_influence_out=structural_influence,
                 )
 
         # Compute conditional winners (factor-partitioned win probabilities).
@@ -4289,6 +4307,7 @@ class RobustnessAnalyzerV2:
             node_levels=node_level_frames or None,
             identity_evaluations=identity_evaluations(request.graph, factor_centres(request))
             or None,
+            structural_influence=structural_influence or None,
         )
 
         self.logger.info(
@@ -7280,6 +7299,7 @@ class RobustnessAnalyzerV2:
         rng: SeededRNG,
         evaluator: SCMEvaluatorV2,
         critiques: Optional[List[CritiqueV2]] = None,
+        structural_influence_out: Optional[List[StructuralInfluence]] = None,
     ) -> List[FactorSensitivityResult]:
         """
         Compute sensitivity to factor node values.
@@ -7509,12 +7529,30 @@ class RobustnessAnalyzerV2:
 
         # Compute structural influence for all factors
         factor_node_ids: List[str] = [s["node_id"] for s in sensitivities]
-        influence_scores, influence_truncated = self._compute_structural_influence(
+        # R3-5 (DL #72 5872746926, AIQ 5872728325): when an identity is EVALUATED the SAME walk (one
+        # pool, priced as `structural_influence`) continues past the uncertainty cohort to every other
+        # factor node, so a factor with no observed value gets a score too. The cohort is walked first
+        # and in the same order, so its raw sums and truncation are exactly today's; it is re-normalised
+        # over itself below, so factor_sensitivity is byte-identical.
+        every_factor: List[str] = []
+        if structural_influence_out is not None and evaluator._evaluated_identities:
+            in_cohort = set(factor_node_ids)
+            every_factor = factor_node_ids + [
+                str(n.id) for n in request.graph.nodes if n.kind == "factor" and str(n.id) not in in_cohort
+            ]
+        raw_influence: Dict[str, float] = {}
+        walked_scores, walked_truncated = self._compute_structural_influence(
             request.graph,
-            factor_node_ids,
+            every_factor or factor_node_ids,
             request.goal_node_id,
             factor_centres=factor_centres(request),
+            raw_out=raw_influence,
         )
+        if every_factor:
+            influence_scores = normalised_influence(raw_influence, factor_node_ids)
+            influence_truncated = [t for t in walked_truncated if t in set(factor_node_ids)]
+        else:
+            influence_scores, influence_truncated = walked_scores, walked_truncated
         # N1 (Codex re-confirm, D-23.19): EXACT-OR-NULL. Normalized scores of a
         # truncated cohort are NOT lower bounds (the data-dependent max
         # denominator can shrink faster than a numerator — their repro inflated
@@ -7553,6 +7591,34 @@ class RobustnessAnalyzerV2:
             }
         else:
             influence_rank_map = {s["node_id"]: None for s in sensitivities}
+
+        # R3-5: publish the every-factor walk — one cohort, one normalisation, exact-or-null.
+        if every_factor and structural_influence_out is not None:
+            every_scores, every_truncated = walked_scores, walked_truncated
+            if every_truncated:
+                if not influence_truncated and critiques is not None:
+                    critiques.append(
+                        STRUCTURAL_INFLUENCE_TRUNCATED.build(
+                            factor_ids=", ".join(sorted(every_truncated)),
+                            budget=MAX_INFLUENCE_WALK_CALLS_TOTAL,
+                            affected_node_ids=sorted(every_truncated),
+                            seed=rng.seed,
+                        )
+                    )
+                structural_influence_out.extend(
+                    StructuralInfluence(node_id=node_id) for node_id in every_factor
+                )
+            else:
+                ranked = sorted(every_factor, key=lambda node_id: every_scores[node_id], reverse=True)
+                rank_of = {node_id: i + 1 for i, node_id in enumerate(ranked)}
+                structural_influence_out.extend(
+                    StructuralInfluence(
+                        node_id=node_id,
+                        influence_score=every_scores[node_id],
+                        influence_rank=rank_of[node_id],
+                    )
+                    for node_id in every_factor
+                )
 
         # --- Bootstrap stability analysis (3C) ---
         # Measures stability of attribution under model and sampling uncertainty:
@@ -8100,6 +8166,7 @@ class RobustnessAnalyzerV2:
         goal_node_id: str,
         max_walk_calls_total: Optional[int] = None,
         factor_centres: Optional[Mapping[str, float]] = None,
+        raw_out: Optional[Dict[str, float]] = None,
     ) -> Tuple[Dict[str, float], List[str]]:
         """
         Compute structural influence score for each factor based on causal path strengths.
@@ -8212,6 +8279,10 @@ class RobustnessAnalyzerV2:
             # so factors that start after exhaustion are truncated too.
             if budget_hit:
                 truncated_factors.append(str(node_id))
+
+        # R3-5: a caller that re-normalises a sub-cohort reads the raw sums (``normalised_influence``).
+        if raw_out is not None:
+            raw_out.update(raw_influences)
 
         # Normalize to 0-1 scale
         max_influence = max(raw_influences.values()) if raw_influences else 0.0

@@ -39,6 +39,7 @@ from src.models.response_v2 import (
 # Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
 from src.models.range_fit import RangeFitDisclosure, UserStatedRange
 from src.models.identity_evaluation import IdentityEvaluation
+from src.models.structural_influence import StructuralInfluence
 from src.models.node_level import NodeLevelFrame
 
 # Pure-numpy correlation helpers (no circular import — correlation.py imports nothing
@@ -2427,6 +2428,12 @@ class RobustnessResponseV2(BaseModel):
         None,
         description="Per declared identity: evaluated (with its reconciliation) or the "
         "reason it was not. Absent when the graph declares none.",
+    )
+    # R3-5 (DL #72 5872746926): structural influence over EVERY factor node.
+    structural_influence: Optional[List[StructuralInfluence]] = Field(
+        None,
+        description="Every factor node's structural influence, one cohort and one normalisation. "
+        "Present only when an identity was evaluated; absent otherwise.",
     )
 
     model_config = {

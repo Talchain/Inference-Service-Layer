@@ -1566,6 +1566,7 @@ async def _analyze_robustness_v2_enhanced(
         # author of every anchored level and its per-option out-of-domain share.
         builder.set_node_levels(v1_response.node_levels)
         builder.set_identity_evaluations(v1_response.identity_evaluations)
+        builder.set_structural_influence(v1_response.structural_influence)
 
         # T1-6: Path decomposition passthrough (additive; request-gated by
         # include_path_decomposition so it only appears when asked for).

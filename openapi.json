@@ -4241,6 +4241,21 @@
             "description": "Reason for non-computed status",
             "title": "Status Reason"
           },
+          "structural_influence": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StructuralInfluence"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every factor node's structural influence on the goal: one cohort, one normalisation, an evaluated identity walked at its own partials. Present only when an identity was evaluated; absent otherwise.",
+            "title": "Structural Influence"
+          },
           "timestamp": {
             "description": "Response timestamp in ISO 8601 format",
             "title": "Timestamp",
@@ -7126,6 +7141,21 @@
               }
             ],
             "description": "Thresholds used for attribution_stability classification. Provisional \u2014 pending scientific review. NOT included in response_hash."
+          },
+          "structural_influence": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StructuralInfluence"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Every factor node's structural influence, one cohort and one normalisation. Present only when an identity was evaluated; absent otherwise.",
+            "title": "Structural Influence"
           }
         },
         "required": [
@@ -8404,6 +8434,48 @@
           "std"
         ],
         "title": "StrengthDistribution",
+        "type": "object"
+      },
+      "StructuralInfluence": {
+        "description": "One factor node's structural influence on the goal, normalised over EVERY factor node.",
+        "properties": {
+          "influence_rank": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rank by influence_score, 1 = highest, over every factor node. None when the walk truncated.",
+            "title": "Influence Rank"
+          },
+          "influence_score": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sum of |path strengths| to the goal, normalised to 0-1 across EVERY factor node (an evaluated identity's operand and addend edges carry its partial at the centre). None for every row when the walk truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED).",
+            "title": "Influence Score"
+          },
+          "node_id": {
+            "description": "Factor node ID",
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id"
+        ],
+        "title": "StructuralInfluence",
         "type": "object"
       },
       "StructuralModel": {
