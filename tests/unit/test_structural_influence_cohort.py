@@ -139,9 +139,10 @@ class TestTheServedIdentityShapeWithItsAddend:
     def test_the_addend_moves_exactly_other_and_grandfathered(self):
         served = by_node(envelope(wire(identity=WITH_ADDEND))["structural_influence"], "influence_score")
         free = by_node(envelope(wire(identity=PRODUCT))["structural_influence"], "influence_score")
+        # NET and discounted (AIQ 5875853496). Under gross reach price was 0.638133, grandfathered 0.149351.
         assert {k: round(v, 6) for k, v in served.items()} == {
-            SUBS: 1.0, PRICE: 0.638133, "monthly_churn": 0.12, "monthly_new_pro_subscribers": 0.08,
-            OTHER: 0.101351, GRANDFATHERED: 0.149351,
+            SUBS: 1.0, PRICE: 0.586357, "monthly_churn": 0.12, "monthly_new_pro_subscribers": 0.08,
+            OTHER: 0.101351, GRANDFATHERED: 0.053351,
         }
         moved = sorted(k for k in served if round(served[k], 6) != round(free[k], 6))
         assert moved == sorted([OTHER, GRANDFATHERED])
@@ -178,10 +179,14 @@ class TestEveryGraphCarriesTheOneAlgorithm:
             walk(d, ALL_FACTORS), abs=1e-12
         )
 
-    def test_c0_the_unobserved_factor_leads_so_a_normalisation_leak_would_show(self, c0):
-        scores = by_node(c0["structural_influence"], "influence_score")
-        assert max(scores, key=scores.get) == GRANDFATHERED
-        assert scores[GRANDFATHERED] == 1.0
+    def test_c0_price_leads_and_the_unobserved_factor_is_a_close_second(self, c0):
+        """Net and discounted (AIQ 5875853496): C0's top two are price (1.0) and the unobserved factor
+        (0.9933). Under gross reach the unobserved factor led. The normalisation-leak mutant is caught by
+        ``TestWhenTheUnobservedFactorLeads`` (where it leads by construction), not here."""
+        rows = sorted(c0["structural_influence"], key=lambda r: r["influence_rank"])
+        assert [r["node_id"] for r in rows[:2]] == [PRICE, GRANDFATHERED]
+        assert rows[0]["influence_score"] == 1.0
+        assert rows[1]["influence_score"] == pytest.approx(0.993314, abs=1e-6)
 
     def test_c0_factor_sensitivity_is_byte_identical_to_its_own_cohort_walk(self, c0):
         d = wire(identity=None)
@@ -197,7 +202,7 @@ class TestEveryGraphCarriesTheOneAlgorithm:
 
     def test_p1_and_c0_differ_at_the_top_the_identity_partials_still_move_it(self, p1, c0):
         top = lambda b: max(by_node(b["structural_influence"], "influence_score").items(), key=lambda kv: kv[1])[0]
-        assert top(p1) == SUBS and top(c0) == GRANDFATHERED
+        assert top(p1) == SUBS and top(c0) == PRICE
 
     def test_a_withheld_identity_carries_it_too_over_every_factor_node(self):
         d = declared_but_unused()

@@ -8274,8 +8274,11 @@ class RobustnessAnalyzerV2:
         for node_id in factor_node_ids:
             budget_hit = False
             path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
-            # Sum of absolute path strengths (multiple paths add)
-            raw_influences[node_id] = sum(abs(s) for s in path_strengths)
+            # EXPECTED NET effect (AIQ ruling #72 5875853496): signed path products — each already
+            # ∏(mean × exists_probability) — summed, THEN the magnitude, so offsetting channels
+            # cancel. Gross reach (Σ|path|) would call a factor a major driver when moving it barely
+            # moves the goal at its central estimates.
+            raw_influences[node_id] = abs(math.fsum(path_strengths))
             # An exhausted pool trips budget_hit on the factor's first walk call,
             # so factors that start after exhaustion are truncated too.
             if budget_hit:
