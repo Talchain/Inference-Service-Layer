@@ -1156,6 +1156,78 @@
         "title": "CounterfactualResponse",
         "type": "object"
       },
+      "CritiqueIdentityV2": {
+        "description": "R3: the declared identity an ``IDENTITY_NOT_EVALUATED`` critique is about, typed so a\nconsumer never parses the message (PLoT carries this shape; CEE turns it into a typed ask\nnaming the identity and the figures in conflict, AIQ ISL #187 5860770241 item 2).\n\nBuilt from the SAME plan the evaluator withheld (``IdentityPlan``), never re-derived.\n``reconstructed`` / ``stated`` / ``mismatch_share`` are in USER units and non-null only\nwhen the reconciliation was computed (``identity_inconsistent``); a non-finite figure\nis None, never NaN or Infinity (the 422 is rendered as strict JSON).",
+        "properties": {
+          "mismatch_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The reconciliation gap as a share (tau = 5%)",
+            "title": "Mismatch Share"
+          },
+          "node_id": {
+            "description": "The node declared as the identity",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "description": "'product' | 'sum'",
+            "title": "Operation",
+            "type": "string"
+          },
+          "participants": {
+            "description": "factor_ids then addends, in declaration order",
+            "items": {
+              "type": "string"
+            },
+            "title": "Participants",
+            "type": "array"
+          },
+          "reconstructed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the identity's inputs give today, user units",
+            "title": "Reconstructed"
+          },
+          "stated": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node's stated level today, user units",
+            "title": "Stated"
+          },
+          "withheld_reason": {
+            "description": "identity_frame_missing | identity_operand_missing | identity_zero_level | identity_inconsistent",
+            "title": "Withheld Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "operation",
+          "participants",
+          "withheld_reason"
+        ],
+        "title": "CritiqueIdentityV2",
+        "type": "object"
+      },
       "CritiqueV2": {
         "description": "Structured critique for UI display.",
         "properties": {
@@ -1198,6 +1270,17 @@
             "description": "Unique identifier for this critique",
             "title": "Id",
             "type": "string"
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CritiqueIdentityV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "IDENTITY_NOT_EVALUATED only: the withheld identity, its reason and (identity_inconsistent) both figures. Absent on every other critique."
           },
           "message": {
             "description": "Human-readable message (sanitised)",

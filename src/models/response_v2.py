@@ -16,7 +16,15 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    computed_field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
 from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
@@ -121,6 +129,47 @@ class RequestEchoV2(BaseModel):
 # =============================================================================
 
 
+class CritiqueIdentityV2(BaseModel):
+    """R3: the declared identity an ``IDENTITY_NOT_EVALUATED`` critique is about, typed so a
+    consumer never parses the message (PLoT carries this shape; CEE turns it into a typed ask
+    naming the identity and the figures in conflict, AIQ ISL #187 5860770241 item 2).
+
+    Built from the SAME plan the evaluator withheld (``IdentityPlan``), never re-derived.
+    ``reconstructed`` / ``stated`` / ``mismatch_share`` are in USER units and non-null only
+    when the reconciliation was computed (``identity_inconsistent``); a non-finite figure
+    is None, never NaN or Infinity (the 422 is rendered as strict JSON).
+    """
+
+    node_id: str = Field(..., description="The node declared as the identity")
+    operation: str = Field(..., description="'product' | 'sum'")
+    participants: List[str] = Field(
+        ..., description="factor_ids then addends, in declaration order"
+    )
+    withheld_reason: str = Field(
+        ...,
+        description="identity_frame_missing | identity_operand_missing | "
+        "identity_zero_level | identity_inconsistent",
+    )
+    reconstructed: Optional[float] = Field(
+        None, description="What the identity's inputs give today, user units"
+    )
+    stated: Optional[float] = Field(None, description="The node's stated level today, user units")
+    mismatch_share: Optional[float] = Field(
+        None, description="The reconciliation gap as a share (tau = 5%)"
+    )
+
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
+    @field_validator("reconstructed", "stated", "mismatch_share", mode="before")
+    @classmethod
+    def _finite_or_none(cls, value: Any) -> Any:
+        """A figure that is not a finite number is not known: None, never NaN/Infinity."""
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value if math.isfinite(value) else None
+        return value
+
+
 class CritiqueV2(BaseModel):
     """Structured critique for UI display."""
 
@@ -142,9 +191,26 @@ class CritiqueV2(BaseModel):
     suggestion: Optional[str] = Field(
         None, description="Actionable suggestion to resolve the issue"
     )
+    # R3: IDENTITY_NOT_EVALUATED only. ABSENT (not null) on every other code, on every
+    # wire, including the 422 (which dumps without exclude_none): see ``_omit_absent_identity``.
+    identity: Optional[CritiqueIdentityV2] = Field(
+        None,
+        description="IDENTITY_NOT_EVALUATED only: the withheld identity, its reason and "
+        "(identity_inconsistent) both figures. Absent on every other critique.",
+    )
 
     # CIL 0.2: consistent extra='ignore' across all response models
     model_config = {"extra": "ignore"}
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_identity(self, handler: SerializerFunctionWrapHandler):  # type: ignore[no-untyped-def]
+        """Drop ``identity`` when it is None, so the new key never appears as a null on a
+        critique it does not describe (the blocked 422 dumps WITHOUT exclude_none). No return
+        annotation on purpose: the JSON schema then stays the field schema above."""
+        data = handler(self)
+        if self.identity is None and isinstance(data, dict):
+            data.pop("identity", None)
+        return data
 
 
 # =============================================================================

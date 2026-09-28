@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.38.0",
     "omission_count": 50,
-    "superset_count": 81
+    "superset_count": 82
   },
   "omissions": [
     {
@@ -411,6 +411,11 @@
       "isl_model": "ConstraintResultV2",
       "prop": "threshold",
       "reason": "ISL superset — ConstraintResultV2.threshold is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "CritiqueV2",
+      "prop": "identity",
+      "reason": "ISL superset — CritiqueV2.identity is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: Inference-Service-Layer #187 DL CHANGES_REQUIRED @45a36d60 and R&C 5860893532 (the IDENTITY_NOT_EVALUATED critique carries the withheld identity typed, so CEE #2165 states the figures without parsing the message; PLoT carries the same shape). Additive and optional: present on IDENTITY_NOT_EVALUATED only, absent on every other critique. Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "DownsideV2",

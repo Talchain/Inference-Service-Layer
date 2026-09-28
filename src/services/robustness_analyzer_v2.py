@@ -103,7 +103,7 @@ from src.models.critique import (
     MARGINAL_SWITCH_TRUNCATED,
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
-from src.models.response_v2 import CritiqueV2
+from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
 from src.services.range_fit import resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
@@ -1642,15 +1642,31 @@ def identity_blocking_critiques(
                 f": its parts give {plan.reconstructed:,.2f} where the stated level is "
                 f"{plan.stated:,.2f}, {plan.mismatch_share:.1%} apart"
             )
+        critique = IDENTITY_NOT_EVALUATED_CRITIQUE.build(
+            affected_node_ids=[plan.node_id, *plan.participants],
+            seed=seed,
+            node_id=plan.node_id,
+            operation=plan.operation,
+            participants=", ".join(plan.participants),
+            reason=plan.withheld_reason,
+            detail=detail,
+        )
+        # R&C 5860893532 / DL ISL #187: the same plan, typed, so CEE can state the figures
+        # without parsing the message (non-finite figures become None in the model).
+        assert plan.withheld_reason is not None
         critiques.append(
-            IDENTITY_NOT_EVALUATED_CRITIQUE.build(
-                affected_node_ids=[plan.node_id, *plan.participants],
-                seed=seed,
-                node_id=plan.node_id,
-                operation=plan.operation,
-                participants=", ".join(plan.participants),
-                reason=plan.withheld_reason,
-                detail=detail,
+            critique.model_copy(
+                update={
+                    "identity": CritiqueIdentityV2(
+                        node_id=plan.node_id,
+                        operation=plan.operation,
+                        participants=list(plan.participants),
+                        withheld_reason=plan.withheld_reason,
+                        reconstructed=plan.reconstructed,
+                        stated=plan.stated,
+                        mismatch_share=plan.mismatch_share,
+                    )
+                }
             )
         )
     return critiques
@@ -1693,6 +1709,15 @@ def identity_evaluations(graph: GraphV2) -> List[IdentityEvaluation]:
             )
         )
     return out
+
+
+# The content of ``SCMEvaluatorV2._status_quo``'s inputs (edges, base values, factor values),
+# snapshotted as item tuples: the cache key is what the dicts HOLD, never which dicts they are.
+_StatusQuoKey = Tuple[
+    Tuple[Tuple[Tuple[str, str], float], ...],
+    Optional[Tuple[Tuple[str, float], ...]],
+    Optional[Tuple[Tuple[str, float], ...]],
+]
 
 
 class IdentityNotEvaluatedError(ValueError):
@@ -1760,14 +1785,7 @@ class SCMEvaluatorV2:
 
         # R3 slice 1: every declared identity's plan; only an EVALUATED one changes the
         # structural equation (a withheld one is left linear and withheld downstream).
-        self._status_quo_cache: Optional[
-            Tuple[
-                Dict[Tuple[str, str], float],
-                Optional[Dict[str, float]],
-                Optional[Dict[str, float]],
-                Dict[str, float],
-            ]
-        ] = None
+        self._status_quo_cache: Optional[Tuple[_StatusQuoKey, Dict[str, float]]] = None
         self.identity_plans: Dict[str, IdentityPlan] = resolve_identity_plans(graph)
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
@@ -1959,23 +1977,28 @@ class SCMEvaluatorV2:
         base_values: Optional[Dict[str, float]],
         factor_values: Optional[Dict[str, float]],
     ) -> Dict[str, float]:
-        """This draw's no-intervention reading, without epsilon (it draws no random number).
+        """This draw's no-intervention reading, without epsilon (it draws no random number):
+        the anchor an EVALUATED identity reads (``_framed_with_reference``). Only the identity
+        path calls it; ``_in_model_frame`` computes its own reading exactly as it always did.
 
         Every option on a draw is evaluated against the SAME edge and factor draws, so the
-        reading is computed once per draw: a one-entry cache keyed on the very objects
-        passed (held, so an id can never be reused), never on their contents. A pure
-        function of its inputs, so caching it moves no number.
+        reading is kept for the last draw seen: a one-entry cache keyed on the CONTENT of the
+        three inputs (a snapshot of their items), NEVER on the objects. A caller may mutate a
+        dict in place between calls: ``_flip_mean_under_background`` bisects one edge of a
+        shared background that way, and a cache keyed on the object returned the reading of a
+        DIFFERENT edge strength, moving flip thresholds (DL CHANGES_REQUIRED, ISL #187). A pure
+        function of its inputs, so caching it on their contents moves no number.
         """
+        key: _StatusQuoKey = (
+            tuple(edge_strengths.items()),
+            None if base_values is None else tuple(base_values.items()),
+            None if factor_values is None else tuple(factor_values.items()),
+        )
         cached = self._status_quo_cache
-        if (
-            cached is not None
-            and cached[0] is edge_strengths
-            and cached[1] is base_values
-            and cached[2] is factor_values
-        ):
-            return cached[3]
+        if cached is not None and cached[0] == key:
+            return cached[1]
         status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
-        self._status_quo_cache = (edge_strengths, base_values, factor_values, status_quo)
+        self._status_quo_cache = (key, status_quo)
         return status_quo
 
     def _framed_with_reference(
@@ -2100,7 +2123,7 @@ class SCMEvaluatorV2:
         ]
         if not unchanged and not set_levels:
             return interventions
-        status_quo = self._status_quo(edge_strengths, base_values, factor_values)
+        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
         framed = dict(interventions)
         for node_id in unchanged:
             framed[node_id] = status_quo[node_id]

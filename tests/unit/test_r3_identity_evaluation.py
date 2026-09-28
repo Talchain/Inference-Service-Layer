@@ -627,3 +627,265 @@ class TestR3_9DefinitionalEdgesAreNotBeliefs:
         listed = edge_pairs_listed(v1, v2)
         assert (OTHER, MRR) in listed  # undeclared addend: still a sampled belief edge
         assert (PRICE, "monthly_new_pro_subscribers") in listed
+
+
+# ---------------------------------------------------------------------------------------------------------
+# DL CHANGES_REQUIRED on ISL #187 @45a36d60 (BLOCKING): flip thresholds read a FRESH status quo.
+# ``_flip_mean_under_background.winner_at`` bisects one edge of a SHARED background dict IN PLACE and calls
+# ``evaluate`` on it. A status-quo cache keyed on the dict OBJECT returned the reading of a different edge
+# strength on every step after the first, so any option with a today's-level (``unchanged``) or
+# ``set_levels`` setting moved its threshold with no identity declared (measured at 45a36d60 on this wire:
+# pro_plan_price -> monthly_new_pro_subscribers, background 1, -0.3491... against base 0.3750...).
+# ---------------------------------------------------------------------------------------------------------
+
+# Base d1cef9a (staging), measured on the no-identity served wire below: every (edge, background) whose
+# background admits a flip. Every other pair is None (no flip). Backgrounds: 0 = the expected-value
+# background (mean x exists_probability), 1-3 = ``_sample_flip_backgrounds(request, seed, 3, ...)``.
+BASE_D1CEF9A_FLIP_MEANS = {
+    (PRICE, MRR, 0): 0.007482051849365234,
+    (PRICE, MRR, 1): 0.006546497344970703,
+    (PRICE, MRR, 2): 0.02470541000366211,
+    (PRICE, MRR, 3): 0.002655506134033203,
+    (PRICE, "monthly_new_pro_subscribers", 1): 0.37500038146972653,
+    ("monthly_churn", SUBS, 1): -0.6806744575500487,
+    ("monthly_new_pro_subscribers", SUBS, 1): 0.07612380981445313,
+    ("monthly_new_pro_subscribers", SUBS, 2): 0.6398595809936525,
+    (SUBS, MRR, 1): -2.3841857911061326e-07,
+}
+
+
+def _no_cache_status_quo(self, edge_strengths, base_values, factor_values):
+    return self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+
+
+def _object_keyed_status_quo(self, edge_strengths, base_values, factor_values):
+    """45a36d60's cache, reinstated as an in-test CONTROL: keyed on the objects passed."""
+    cached = getattr(self, "_object_cache", None)
+    if (
+        cached is not None
+        and cached[0] is edge_strengths
+        and cached[1] is base_values
+        and cached[2] is factor_values
+    ):
+        return cached[3]
+    status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+    self._object_cache = (edge_strengths, base_values, factor_values, status_quo)
+    return status_quo
+
+
+def flip_means(d: Dict[str, Any]) -> Dict[Tuple[str, str, int], Optional[float]]:
+    """``_flip_mean_under_background`` for every edge on four backgrounds, as the sweep calls it."""
+    request = RobustnessRequestV2.model_validate(d)
+    analyzer = rav2.RobustnessAnalyzerV2()
+    evaluator = SCMEvaluatorV2(request.graph)  # no epsilon: the post-MC structural state
+    expected = {
+        (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
+    }
+    backgrounds = [expected] + analyzer._sample_flip_backgrounds(
+        request, request.seed, 3, "flip_stability"
+    )
+    return {
+        (edge.from_, edge.to, i): analyzer._flip_mean_under_background(
+            request, evaluator, edge, background
+        )
+        for edge in request.graph.edges
+        for i, background in enumerate(backgrounds)
+    }
+
+
+class TestFlipThresholdsReadAFreshStatusQuo:
+    def test_the_wire_exercises_both_framings(self):
+        """Non-vacuity: the reference option holds price at TODAY's level (B1a-5 ``unchanged``) and
+        two set a non-root level (``set_levels``), whose status-quo sample moves with the edges."""
+        d = wire(identity=None)
+        evaluator = SCMEvaluatorV2(graph_of(d))
+        (keep,) = [o for o in d["options"] if o["id"] == "keep_current_49_price"]
+        assert rav2.is_todays_level(keep["interventions"][PRICE], evaluator._todays_levels[PRICE])
+        set_level_nodes = {
+            node_id
+            for o in d["options"]
+            for node_id in o["interventions"]
+            if node_id in evaluator._status_quo_levels
+        }
+        assert set_level_nodes == {"monthly_new_pro_subscribers", "monthly_churn"}
+
+    def test_no_identity_thresholds_are_base_d1cef9a(self, monkeypatch):
+        """(a) The no-identity path is base: identical to d1cef9a's measured thresholds, and to a run in
+        which no status quo is ever cached."""
+        d = wire(identity=None)
+        served = flip_means(d)
+        expected = {key: BASE_D1CEF9A_FLIP_MEANS.get(key) for key in served}
+        assert len(served) == 40 and sum(v is not None for v in expected.values()) == 9
+        assert served == expected
+        monkeypatch.setattr(SCMEvaluatorV2, "_status_quo", _no_cache_status_quo)
+        assert flip_means(d) == served
+
+    def test_evaluated_identity_thresholds_equal_a_no_cache_computation(self, monkeypatch):
+        """(b) With the identity EVALUATED, the cached anchor gives exactly the thresholds a run that
+        recomputes the status quo on every call gives."""
+        d = wire()
+        (plan,) = resolve_identity_plans(graph_of(d)).values()
+        assert plan.evaluated
+        served = flip_means(d)
+        monkeypatch.setattr(SCMEvaluatorV2, "_status_quo", _no_cache_status_quo)
+        assert flip_means(d) == served
+
+    def test_control_an_object_keyed_cache_moves_them(self, monkeypatch):
+        """Discriminating control for (b): 45a36d60's object-keyed cache on the same graph gives
+        DIFFERENT thresholds, so (b) can see the defect."""
+        d = wire()
+        monkeypatch.setattr(SCMEvaluatorV2, "_status_quo", _no_cache_status_quo)
+        fresh = flip_means(d)
+        monkeypatch.setattr(SCMEvaluatorV2, "_status_quo", _object_keyed_status_quo)
+        assert flip_means(d) != fresh
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The typed ``identity`` on the IDENTITY_NOT_EVALUATED critique (R&C 5860893532; DL ISL #187). PLoT carries
+# this shape and CEE states it as a typed ask, so nobody parses the message.
+# ---------------------------------------------------------------------------------------------------------
+
+
+def blocked_422(d: Dict[str, Any]) -> Dict[str, Any]:
+    from fastapi.testclient import TestClient
+
+    from src.api.main import app
+
+    response = TestClient(app).post(
+        "/api/v1/robustness/analyze/v2", json=d, headers={"X-ISL-Response-Version": "2"}
+    )
+    assert response.status_code == 422, response.text
+    return response.json()
+
+
+def identity_critique(body: Dict[str, Any]) -> Dict[str, Any]:
+    (critique,) = [c for c in body["critiques"] if c["code"] == "IDENTITY_NOT_EVALUATED"]
+    return critique
+
+
+class TestTheTypedIdentityOnTheCritique:
+    def test_identity_inconsistent_carries_both_figures(self):
+        """49 x 1,000 + 1,000 = £50,000 against a stated £75,000: a third apart."""
+        identity = identity_critique(blocked_422(inconsistent_wire()))["identity"]
+        assert set(identity) == {
+            "node_id",
+            "operation",
+            "participants",
+            "withheld_reason",
+            "reconstructed",
+            "stated",
+            "mismatch_share",
+        }
+        assert identity["node_id"] == MRR
+        assert identity["operation"] == "product"
+        assert identity["participants"] == [PRICE, SUBS, OTHER]
+        assert identity["withheld_reason"] == "identity_inconsistent"
+        assert identity["reconstructed"] == pytest.approx(50_000.0)
+        assert identity["stated"] == pytest.approx(75_000.0)
+        assert identity["mismatch_share"] == pytest.approx(25_000.0 / 75_000.0)
+
+    @pytest.mark.parametrize(
+        "reason, edit",
+        [
+            ("identity_operand_missing", lambda subs, price: subs.update(observed_state=None)),
+            ("identity_zero_level", lambda subs, price: price["observed_state"].update(value=0.0)),
+        ],
+    )
+    def test_a_reason_with_no_reconciliation_carries_no_figures(self, reason, edit):
+        d = wire()
+        nodes = {n["id"]: n for n in d["graph"]["nodes"]}
+        edit(nodes[SUBS], nodes[PRICE])
+        identity = identity_critique(blocked_422(d))["identity"]
+        assert identity["withheld_reason"] == reason
+        assert identity["node_id"] == MRR and identity["participants"] == [PRICE, SUBS, OTHER]
+        assert identity["reconstructed"] is None
+        assert identity["stated"] is None
+        assert identity["mismatch_share"] is None
+
+    def test_every_other_critique_has_no_identity_key(self):
+        """On the 422 (dumped WITHOUT exclude_none) beside another blocker, and on a computed 200."""
+        d = inconsistent_wire()
+        d["options"] = d["options"] + [
+            {"id": "keep_copy", "label": "Keep (copy)", "interventions": {PRICE: 0.245}}
+        ]
+        body = blocked_422(d)
+        others = [c for c in body["critiques"] if c["code"] != "IDENTITY_NOT_EVALUATED"]
+        assert "IDENTICAL_OPTIONS" in {c["code"] for c in others}
+        assert all("identity" not in c for c in others)
+        assert "identity" in identity_critique(body)
+        computed = v2_body(wire())["critiques"]
+        assert computed and all("identity" not in c for c in computed)
+
+    def test_a_non_finite_figure_is_none_never_nan(self):
+        from src.models.response_v2 import CritiqueIdentityV2
+
+        identity = CritiqueIdentityV2(
+            node_id=MRR,
+            operation="product",
+            participants=[PRICE, SUBS],
+            withheld_reason="identity_inconsistent",
+            reconstructed=float("inf"),
+            stated=75_000.0,
+            mismatch_share=float("nan"),
+        )
+        assert identity.reconstructed is None and identity.mismatch_share is None
+        assert identity.stated == 75_000.0
+        json.dumps(identity.model_dump(), allow_nan=False)  # strict JSON: raises on NaN/Infinity
+
+
+# ---------------------------------------------------------------------------------------------------------
+# DL ISL #187 (not blocking): a draw whose status-quo product term is 0 is NaN ("uninformative") in
+# ``_identity_value``. The aggregator DROPS it: the wire's mean is the finite draws' mean, n_valid_samples
+# counts only them, and no option wins that draw. It is never averaged in.
+# ---------------------------------------------------------------------------------------------------------
+
+
+class TestANaNIdentityDrawIsDroppedNotAveraged:
+    N_SAMPLES, EVERY = 200, 10
+
+    def _zero_price_every_tenth_draw(self, monkeypatch):
+        """Today's price reads 0 on every tenth factor draw: the status-quo term is 0 on that draw and
+        ``_identity_value`` returns NaN for every option (the REAL term_sq == 0 path)."""
+        original = rav2.FactorSampler.sample_factor_values
+        calls = {"n": 0}
+
+        def sample(sampler):
+            values = original(sampler)
+            calls["n"] += 1
+            if calls["n"] % self.EVERY == 0:
+                values[PRICE] = 0.0
+            return values
+
+        monkeypatch.setattr(rav2.FactorSampler, "sample_factor_values", sample)
+        return calls
+
+    def test_a_zero_status_quo_term_draw_is_dropped_not_averaged(self, monkeypatch):
+        import numpy as np
+
+        d = wire()
+        d["n_samples"] = self.N_SAMPLES
+        calls = self._zero_price_every_tenth_draw(monkeypatch)
+        v1 = rav2.RobustnessAnalyzerV2().analyze(RobustnessRequestV2.model_validate(d))
+        calls["n"] = 0
+        v2 = v2_body(d)
+
+        n_nan = self.N_SAMPLES // self.EVERY
+        finite_means = {}
+        nan_masks = []
+        for result in v1.results:
+            samples = np.array(result.outcome_distribution.samples)
+            nan_masks.append(~np.isfinite(samples))
+            finite_means[result.option_id] = float(np.mean(samples[np.isfinite(samples)]))
+        assert all(int(mask.sum()) == n_nan for mask in nan_masks)
+        assert all(np.array_equal(mask, nan_masks[0]) for mask in nan_masks)  # whole draws
+
+        for option in v2["options"]:
+            outcome = option["outcome"]
+            assert outcome["n_samples"] == self.N_SAMPLES
+            assert outcome["n_valid_samples"] == self.N_SAMPLES - n_nan
+            assert math.isfinite(outcome["mean"])
+            assert outcome["mean"] == pytest.approx(finite_means[option["id"]], rel=1e-12)
+        # A NaN draw is won by no option: the shares sum to the informative fraction.
+        assert sum(o["win_probability"] for o in v2["options"]) == pytest.approx(
+            (self.N_SAMPLES - n_nan) / self.N_SAMPLES
+        )
