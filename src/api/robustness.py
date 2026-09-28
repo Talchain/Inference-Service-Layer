@@ -1016,8 +1016,15 @@ async def _analyze_robustness_v2_enhanced(
             p10_val: Optional[float]
             p50_val: Optional[float]
             p90_val: Optional[float]
+            # The draws every displayed summary is read from: the finite draws, clamped to the goal's level
+            # domain when the band is (below). None when there are no finite draws.
+            # Typed as `finite_samples` is (untyped numpy): `cvar_from_samples` takes it as a Sequence[float].
+            display_samples: Any = None
+            # True only when the clamp MOVED a draw; an option whose draws never left the domain keeps its bytes.
+            display_clamped = False
             if finite_samples is not None:
                 finite_cleaned = finite_samples
+                display_samples = finite_cleaned
                 if len(finite_cleaned) > 0:
                     # Task 4: single np.percentile call for efficiency. B2 adds
                     # p05, extending the p10/p50/p90 family downward with the SAME
@@ -1048,8 +1055,17 @@ async def _analyze_robustness_v2_enhanced(
                         percentiles_source = "unavailable"
                     elif goal_level_domain is not None:
                         low, high = goal_level_domain
-                        p10_val, p50_val, p90_val = (
-                            min(max(v, low), high) for v in (p10_val, p50_val, p90_val)
+                        # ⛔ ONE SET OF DRAWS FOR THE DISPLAYED SUMMARY (DL ruling #72 5865702681; MG 5865668959).
+                        # Clamping only p10/p50/p90 left the mean, std, p05 and cvar_10 on the unclamped draws, so
+                        # an option could read "mean £126,363, 90th percentile £125,000" (served journey A, the
+                        # £59 option: draws to 4.17 on a 0–1 level domain). The band IS the clamped draws'
+                        # percentiles (np.percentile is monotone), and every displayed summary is now taken from
+                        # those same draws. DISPLAY-ONLY: win shares, differences, regret, EVPPI and the leader are
+                        # computed by the analyzer on the unclamped draws and are untouched here.
+                        display_samples = np.clip(finite_cleaned, low, high)
+                        display_clamped = bool(np.any(display_samples != finite_cleaned))
+                        p05_val, p10_val, p50_val, p90_val = (
+                            float(v) for v in np.percentile(display_samples, [5, 10, 50, 90])
                         )
                     # PRE-noise CRN-aligned joint regret (B2 CRN-fix F1), threaded
                     # from the analyzer. Present for every option with samples; if
@@ -1072,7 +1088,7 @@ async def _analyze_robustness_v2_enhanced(
                         and pre_noise_regret is not None
                         and math.isfinite(pre_noise_regret)
                     ):
-                        cvar_val = cvar_from_samples(finite_cleaned)
+                        cvar_val = cvar_from_samples(display_samples)
                         if math.isfinite(cvar_val) and math.isfinite(p05_val):
                             downside = DownsideV2(
                                 cvar_10=cvar_val,
@@ -1125,7 +1141,10 @@ async def _analyze_robustness_v2_enhanced(
             # unchanged.
             outcome_mean: Optional[float]
             outcome_std: Optional[float]
-            if math.isfinite(dist.mean) and math.isfinite(dist.std):
+            if display_clamped and percentiles_source == "samples" and display_samples is not None:
+                # The clamp moved a draw: the mean and std are read from the SAME clamped draws (see above).
+                outcome_mean, outcome_std = overflow_safe_mean_std(display_samples)
+            elif math.isfinite(dist.mean) and math.isfinite(dist.std):
                 outcome_mean, outcome_std = dist.mean, dist.std
             elif finite_samples is not None and finite_samples.size > 0:
                 outcome_mean, outcome_std = overflow_safe_mean_std(finite_samples)
