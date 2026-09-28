@@ -15,6 +15,7 @@
 | `results.json` | Machine-readable results (deterministic); `runtime.json` holds the timings |
 | `breakeven.json` | Mode X price → churn break-even for MVP B (A-180910Z, deterministic), from `sim/breakeven.py` |
 | `RESEARCH-BRIEF.md` | Brief for an independent research agent: scientific due diligence on representation, time, elicitation, information value and superseding approaches |
+| `evppi_gate/` | Study: ISL's EVPPI `resolved` status on factors with known true EVPPI (ISL's own estimator), and a cross-fitted decision-relevance gate. `results.json` is deterministic |
 | `corpus/` | The 12 served graphs, copied verbatim from `olumi-programme-docs@58ca52c`, with sha256 values |
 | `sim/` | Engine: `static.py` (tiers and taint), `dynamic.py` (monthly stock-flow), `metrics.py` (deadline metrics and EVPPI), `run.py`, `report.py`, `mapping_report.py`, `breakeven.py` |
 | `tests/` | Correctness tests: closed forms, held levels, time coherence, withholding mutants, direction, EVPPI validation, convergence |

@@ -1,0 +1,87 @@
+{
+ "cases": {
+  "dominated_dependent": {
+   "by_n": {
+    "2000": {
+     "floor_zero": 26,
+     "resolved_current": 28,
+     "resolved_with_gate": 0
+    },
+    "500": {
+     "floor_zero": 4,
+     "resolved_current": 52,
+     "resolved_with_gate": 1
+    }
+   },
+   "note": "theta moves B only; B never beats A (sup E[B|theta] = 9.8 < 10)",
+   "true_evppi": 0.0
+  },
+  "independent_null": {
+   "by_n": {
+    "2000": {
+     "floor_zero": 32,
+     "resolved_current": 10,
+     "resolved_with_gate": 0
+    },
+    "500": {
+     "floor_zero": 5,
+     "resolved_current": 8,
+     "resolved_with_gate": 0
+    }
+   },
+   "note": "theta unrelated to either option",
+   "true_evppi": 0.0
+  },
+  "moderate_positive": {
+   "by_n": {
+    "2000": {
+     "floor_zero": 0,
+     "resolved_current": 200,
+     "resolved_with_gate": 187
+    },
+    "500": {
+     "floor_zero": 0,
+     "resolved_current": 193,
+     "resolved_with_gate": 78
+    }
+   },
+   "note": "B wins for theta > 1: EVPPI = 0.5 E[(theta - 1)+]",
+   "true_evppi": 0.0416577
+  },
+  "true_positive": {
+   "by_n": {
+    "2000": {
+     "floor_zero": 5,
+     "resolved_current": 200,
+     "resolved_with_gate": 200
+    },
+    "500": {
+     "floor_zero": 1,
+     "resolved_current": 200,
+     "resolved_with_gate": 182
+    }
+   },
+   "note": "B wins for theta > 1: EVPPI = E[(theta - 1)+]",
+   "true_evppi": 0.0833155
+  },
+  "weak_tail_positive": {
+   "by_n": {
+    "2000": {
+     "floor_zero": 27,
+     "resolved_current": 179,
+     "resolved_with_gate": 24
+    },
+    "500": {
+     "floor_zero": 4,
+     "resolved_current": 120,
+     "resolved_with_gate": 8
+    }
+   },
+   "note": "B wins only for theta > 2: EVPPI = 0.5 E[(theta - 2)+]",
+   "true_evppi": 0.0042454
+  }
+ },
+ "estimator": "ISL src/utils/evppi.py factor_evppi_estimate, unmodified",
+ "gate": "2-fold cross-fitted learned-rule gain > 1.645 SE (one-sided)",
+ "seeds": 200
+}
