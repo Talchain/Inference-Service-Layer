@@ -167,3 +167,58 @@ class TestNoGateNoChange:
         body = v2_body({**wire(), "n_samples": 400})
         assert not [c for c in body["critiques"] if c["code"] == "STRUCTURAL_INFLUENCE_GATED"]
         assert all(r["influence_score"] is not None for r in body["structural_influence"])
+
+
+class TestTheCarrierSurvivesTruncationAndNamesOnlyGoalPaths:
+    """PR Review #213 (5882196850): (1) a truncated walk withholds every score, but a gated row keeps its typed
+    ``gated_by`` (and the gated reason sits beside the truncation reason), so PLoT never ranks it by the walk;
+    (2) ``gated_by`` names only zero inputs on a factor-to-goal path, not a dead-end product's."""
+
+    def test_a_truncated_walk_keeps_the_gate(self, monkeypatch):
+        from tests.unit.test_r3_identity_evaluation import v2_body
+
+        monkeypatch.setattr(rav2, "MAX_INFLUENCE_WALK_CALLS_TOTAL", 1)
+        body = v2_body({**zero_price(stated=False), "n_samples": 200})
+        rows = {r["node_id"]: r for r in body["structural_influence"]}
+        assert all(r.get("influence_score") is None for r in rows.values())
+        for node_id in GATED:
+            assert rows[node_id]["gated_by"] == [PRICE], node_id
+        for node_id in (PRICE, OTHER, GRANDFATHERED):
+            assert "gated_by" not in rows[node_id], node_id
+        codes = {c["code"] for c in body["critiques"]}
+        assert {"STRUCTURAL_INFLUENCE_TRUNCATED", "STRUCTURAL_INFLUENCE_GATED"} <= codes
+
+    def test_a_dead_end_products_zero_input_is_not_named(self):
+        """Subscribers also feed a dead-end product (side = subscribers x z1, z1 0 today) that never reaches MRR.
+        Subscribers is gated by price on its only goal path; z1 gates nothing that reaches the goal.
+        """
+        from tests.unit.test_r3_identity_evaluation import v2_body
+
+        d = zero_price(stated=False)
+        d["graph"]["nodes"] += [
+            {
+                "id": "z1",
+                "kind": "factor",
+                "label": "Z1",
+                "observed_state": {"value": 0.0},
+                "execution_frame": {"frame": 100.0, "carrier": "cap"},
+            },
+            {
+                "id": "side",
+                "kind": "factor",
+                "label": "Side product",
+                "execution_frame": {"frame": 1_000_000.0, "carrier": "cap"},
+                "nonlinear_identity": {
+                    "operation": "product",
+                    "factor_ids": [SUBS, "z1"],
+                    "stated_in_brief": False,
+                },
+            },
+        ]
+        d["graph"]["edges"] += [
+            {"from": SUBS, "to": "side", "strength": {"mean": 1.0, "std": 0.01}},
+            {"from": "z1", "to": "side", "strength": {"mean": 1.0, "std": 0.01}},
+        ]
+        body = v2_body({**d, "n_samples": 200})
+        rows = {r["node_id"]: r for r in body["structural_influence"]}
+        assert rows[SUBS]["gated_by"] == [PRICE]  # not [PRICE, "z1"]

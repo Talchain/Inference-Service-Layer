@@ -1848,8 +1848,9 @@ def zero_gated_factor_ids(
         gated[f] = sorted(
             {
                 z
-                for (i, _), zeros in gated_edges.items()
-                if i == f or reaches_node(f, i)
+                for (i, product), zeros in gated_edges.items()
+                # only a gated edge on a factor-to-goal path gates it (PR Review #213 5882196850)
+                if (i == f or reaches_node(f, i)) and reaches(product, every)
                 for z in zeros
             }
         )
@@ -7660,7 +7661,7 @@ class RobustnessAnalyzerV2:
                 centres=factor_centres(request),
         )
         gated = set(gated_by)
-        if gated and critiques is not None and not walked_truncated:
+        if gated and critiques is not None:
             critiques.append(
                 STRUCTURAL_INFLUENCE_GATED.build(
                     factor_ids=", ".join(sorted(gated)),
@@ -7713,7 +7714,8 @@ class RobustnessAnalyzerV2:
                         )
                     )
                 structural_influence_out.extend(
-                    StructuralInfluence(node_id=node_id) for node_id in every_factor
+                    StructuralInfluence(node_id=node_id, gated_by=gated_by.get(node_id))
+                    for node_id in every_factor
                 )
             else:
                 ranked = sorted(
