@@ -157,6 +157,24 @@ MAX_DECOMPOSITION_PATHS = 20000
 # `structural_influence` term whenever the phase can run. Worst wall ≈ 0.3-0.5s.
 MAX_INFLUENCE_WALK_CALLS_TOTAL = 400_000
 
+# AIQ tie band (#72 5880886200): a goal draw within GOAL_TIE_BAND_REL * max(1, |threshold|) of
+# the threshold is ON it: not met for a strict goal ("above"), met for "at least". A held
+# option's level and the threshold come by different arithmetic, so an exact compare let one
+# ulp decide 0% vs 100%.
+GOAL_TIE_BAND_REL = 1e-9
+
+
+def meets_goal_threshold(
+    values: np.ndarray, threshold: float, *, strict: bool, minimise: bool
+) -> np.ndarray:
+    """Per draw: has the goal been met? Past the threshold ("above", or "below" when
+    minimising), with a draw inside the tie band ON it: not met when ``strict``, met when
+    not ("at least" / "at most"). NaN is never met.
+    """
+    on = np.abs(values - threshold) <= GOAL_TIE_BAND_REL * max(1.0, abs(threshold))
+    past = values < threshold if minimise else values > threshold
+    return past & ~on if strict else past | on
+
 # Edge strength bounds from schema v2.6. They bound the edge MEAN (parse-time clamp) and the
 # flip-threshold search ranges over that mean. They do NOT bound sampled strengths: a normalised
 # strength's magnitude depends on the node's frame (cap), so a +/-1 cut on draws removed real
@@ -6722,9 +6740,8 @@ class RobustnessAnalyzerV2:
                 minimise = request.goal_direction == "minimise"
 
                 def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
-                    if minimise:
-                        return values < threshold if strict else values <= threshold
-                    return values > threshold if strict else values >= threshold
+                    # With AIQ's tie band (#72 5880886200): one ulp cannot decide 0% vs 100%.
+                    return meets_goal_threshold(values, threshold, strict=strict, minimise=minimise)
 
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
