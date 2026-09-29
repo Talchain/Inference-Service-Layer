@@ -382,6 +382,23 @@ STRUCTURAL_INFLUENCE_TRUNCATED = CritiqueDefinition(
     ),
 )
 
+FACTOR_STABILITY_ANCHORED = CritiqueDefinition(
+    code="FACTOR_STABILITY_ANCHORED",
+    severity="info",
+    source="analysis",
+    # AIQ #72 5882847470: an identity with a stated level is anchored to each draw's status quo, so the
+    # one-at-a-time probe reads only the reference option's change through it (keep-current: T = o).
+    # A factor seen only through such a node gets no stability claim from that probe.
+    message_template=(
+        "Sensitivity stability is withheld for {factor_ids}: every path from them to the goal runs "
+        "through {anchors}, which is anchored to its stated level, so the one-at-a-time check cannot "
+        "see them"
+    ),
+    default_suggestion=(
+        "Read the structural influence and the options' outcomes for these factors instead"
+    ),
+)
+
 STRUCTURAL_INFLUENCE_GATED = CritiqueDefinition(
     code="STRUCTURAL_INFLUENCE_GATED",
     severity="info",
