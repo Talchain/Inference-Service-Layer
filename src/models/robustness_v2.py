@@ -1152,6 +1152,16 @@ class RobustnessRequestV2(BaseModel):
         "absent, the maximiser runs UNATTESTED and the response says so — ISL never "
         "infers the user's aim from a node label.",
     )
+    # S4 (B) (#72 5879133964): "MRR ABOVE £85k" is a STRICT goal. Absent or False keeps the historical
+    # comparison (">=", "<=" when minimising), byte-identical. On a continuous outcome the two agree; they
+    # differ only on a draw sitting EXACTLY on the threshold, e.g. a status quo that holds the goal at it,
+    # which ">=" counts as met and "above" does not.
+    goal_threshold_strict: Optional[bool] = Field(
+        None,
+        description="True when the goal must be strictly PAST goal_threshold ('above', 'over', 'more than'; "
+        "'below', 'under', 'less than' when minimising): probability_of_goal then counts a draw exactly on the "
+        "threshold as NOT met. Absent or false: 'at least' / 'at most', as before. Requires goal_threshold.",
+    )
 
     # Enhancement flags
     include_e_values: bool = Field(
@@ -1296,6 +1306,12 @@ class RobustnessRequestV2(BaseModel):
                     "is stated in, or state goal_direction='maximise'/'minimise' "
                     "instead — ISL will not substitute a maximiser for a target."
                 )
+        # S4 (B): a strict comparator is a property OF a threshold; without one it states nothing.
+        if self.goal_threshold_strict is True and self.goal_threshold is None:
+            raise ValueError(
+                "goal_threshold_strict=true says the goal must be strictly past goal_threshold, "
+                "so it requires goal_threshold."
+            )
         return self
 
     @field_validator("goal_node_id")

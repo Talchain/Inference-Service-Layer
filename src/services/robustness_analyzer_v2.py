@@ -6715,14 +6715,21 @@ class RobustnessAnalyzerV2:
             # untruth in one direction and the "100% chance" untruth in the other.
             probability_of_goal = None
             if goal_threshold_plan is not None:
+                # S4 (B) (#72 5879133964): a STRICT goal ("above £85k") is met only strictly past the
+                # threshold, so a draw exactly on it (a status quo holding the goal there) is not met.
+                # Absent / False: ">=" ("<=" when minimising), byte-identical to before.
+                strict = request.goal_threshold_strict is True
+                minimise = request.goal_direction == "minimise"
+
+                def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
+                    if minimise:
+                        return values < threshold if strict else values <= threshold
+                    return values > threshold if strict else values >= threshold
+
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
                     compared = samples_array
-                    meets = (
-                        compared <= goal_threshold_plan.delta_threshold
-                        if request.goal_direction == "minimise"
-                        else compared >= goal_threshold_plan.delta_threshold
-                    )
+                    meets = meets_threshold(compared, goal_threshold_plan.delta_threshold)
                 else:
                     # Level frame: recover the goal's LEVEL per draw by adding the
                     # option's causal effect to the level the goal is actually at.
@@ -6735,11 +6742,9 @@ class RobustnessAnalyzerV2:
                     if goal_domain is not None and not goal_threshold_plan.change_frame:
                         # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
-                    meets = (
-                        compared <= goal_threshold_plan.level_threshold
-                        if request.goal_direction == "minimise"
-                        else compared >= goal_threshold_plan.level_threshold
-                    )
+                    # A plan with no delta threshold is a level plan: both are set at one site.
+                    assert goal_threshold_plan.level_threshold is not None
+                    meets = meets_threshold(compared, goal_threshold_plan.level_threshold)
 
                 # 2.477(j) — FINITENESS GATE. This comparison used to run over the
                 # RAW array, and `+inf >= anything` is True. So the one shape that
