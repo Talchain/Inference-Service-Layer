@@ -106,6 +106,7 @@ from src.models.critique import (
     HIGH_TIE_RATE,
     IDENTITY_NOT_EVALUATED as IDENTITY_NOT_EVALUATED_CRITIQUE,
     MARGINAL_SWITCH_TRUNCATED,
+    STRUCTURAL_INFLUENCE_GATED,
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
@@ -1686,8 +1687,10 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
        ``identity_frame_missing``: a frame is never inferred from "compatible" operands;
     2. every participant has a level today (``status_quo_level``), else
        ``identity_operand_missing``;
-    3. a product has no zero operand and no zero stated target, else
-       ``identity_zero_level`` (its ratio and relative check are undefined there);
+    3. a product WITH a stated target has no zero operand and no zero target, else
+       ``identity_zero_level`` (its ratio ``k`` and relative check are undefined there). With
+       no stated target there is no ratio (``T = term + A + L`` per draw), so a zero operand
+       is an ordinary level (AIQ #72 5881596876: the cloud share 0 today);
     4. with a stated target ``o``, in user units, else ``identity_inconsistent``:
        product ``|o - (term + addends)| / |o| <= 5%``; sum (no ratio, so 0 is an ordinary
        level) ``|o - (term + addends)| <= 5% x max(|o|, sum|parts|)``.
@@ -1735,8 +1738,10 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
         if len(levels) != len(participants):
             plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
             continue
-        if identity.operation == "product" and (
-            any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0
+        if (
+            identity.operation == "product"
+            and target_level is not None
+            and (any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0)
         ):
             plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
             continue
@@ -1785,6 +1790,54 @@ def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[
     if max_influence < 1e-10:
         return {node_id: 0.0 for node_id in node_ids}
     return {node_id: raw[node_id] / max_influence for node_id in node_ids}
+
+
+def zero_gated_factor_ids(
+    graph: GraphV2,
+    factor_ids: List[str],
+    goal_node_id: str,
+    centres: Optional[Mapping[str, float]] = None,
+) -> List[str]:
+    """AIQ #72 5881683705 (1b): the factors whose EVERY path to the goal runs through a product
+    with ANOTHER operand at 0 today. Their influence at today's centre is exactly 0 by that gate
+    (``identity_partials``: the others' product), not by cancellation, so it is withheld.
+
+    An operand edge ``(i, product)`` is gated when some other operand's level today is 0 (only an
+    evaluated product with no stated level can have one: rule 3). A factor is gated when it reaches
+    the goal, but not once every gated edge is removed."""
+    if not any(node.nonlinear_identity is not None for node in graph.nodes):
+        return []
+    gated_edges = {
+        (i, node_id)
+        for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items()
+        if plan.evaluated and plan.operation == "product"
+        for i in plan.factor_ids
+        if any(plan.levels[j] == 0.0 for j in plan.factor_ids if j != i)
+    }
+    if not gated_edges:
+        return []
+    every: Dict[str, List[str]] = {}
+    ungated: Dict[str, List[str]] = {}
+    for edge in graph.edges:
+        every.setdefault(str(edge.from_), []).append(str(edge.to))
+        if (str(edge.from_), str(edge.to)) not in gated_edges:
+            ungated.setdefault(str(edge.from_), []).append(str(edge.to))
+
+    def reaches(start: str, adjacency: Dict[str, List[str]]) -> bool:
+        seen, stack = {start}, [start]
+        while stack:
+            node_id = stack.pop()
+            if node_id == goal_node_id:
+                return True
+            for nxt in adjacency.get(node_id, ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return False
+
+    return [
+        f for f in factor_ids if f != goal_node_id and reaches(f, every) and not reaches(f, ungated)
+    ]
 
 
 def identity_partials(
@@ -7582,11 +7635,32 @@ class RobustnessAnalyzerV2:
                 )
             )
 
+        # AIQ #72 5881683705 (1b): a factor whose every path runs through a product with another
+        # operand at 0 today is WITHHELD (a gate, not "no influence"), never 0 and never ranked.
+        gated = set(
+            zero_gated_factor_ids(
+                request.graph,
+                every_factor or factor_node_ids,
+                str(request.goal_node_id),
+                centres=factor_centres(request),
+            )
+        )
+        if gated and critiques is not None and not walked_truncated:
+            critiques.append(
+                STRUCTURAL_INFLUENCE_GATED.build(
+                    factor_ids=", ".join(sorted(gated)),
+                    affected_node_ids=sorted(gated),
+                    seed=rng.seed,
+                )
+            )
+
         # Add influence scores to sensitivities (None when the cohort truncated —
-        # a normalized score is only ever published when it is exact).
+        # a normalized score is only ever published when it is exact — or the factor is gated).
         for s in sensitivities:
             s["influence_score"] = (
-                influence_scores.get(str(s["node_id"]), 0.0) if influence_exact else None
+                influence_scores.get(str(s["node_id"]), 0.0)
+                if influence_exact and str(s["node_id"]) not in gated
+                else None
             )
 
         # Sort by absolute elasticity for importance_rank
@@ -7597,11 +7671,16 @@ class RobustnessAnalyzerV2:
         # re-publish the unsound ordering).
         if influence_exact:
             sorted_by_influence = sorted(
-                sensitivities, key=lambda x: float(x["influence_score"]), reverse=True
+                (s for s in sensitivities if s["influence_score"] is not None),
+                key=lambda x: float(x["influence_score"]),
+                reverse=True,
             )
             influence_rank_map: Dict[str, Optional[int]] = {
-                s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
+                s["node_id"]: None for s in sensitivities
             }
+            influence_rank_map.update(
+                {s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)}
+            )
         else:
             influence_rank_map = {s["node_id"]: None for s in sensitivities}
 
@@ -7622,10 +7701,16 @@ class RobustnessAnalyzerV2:
                     StructuralInfluence(node_id=node_id) for node_id in every_factor
                 )
             else:
-                ranked = sorted(every_factor, key=lambda node_id: every_scores[node_id], reverse=True)
+                ranked = sorted(
+                    (node_id for node_id in every_factor if node_id not in gated),
+                    key=lambda node_id: every_scores[node_id],
+                    reverse=True,
+                )
                 rank_of = {node_id: i + 1 for i, node_id in enumerate(ranked)}
                 structural_influence_out.extend(
-                    StructuralInfluence(
+                    StructuralInfluence(node_id=node_id)
+                    if node_id in gated
+                    else StructuralInfluence(
                         node_id=node_id,
                         influence_score=every_scores[node_id],
                         influence_rank=rank_of[node_id],
@@ -7684,6 +7769,7 @@ class RobustnessAnalyzerV2:
             zero_reason = s.get("zero_reason")  # type: ignore[assignment]
             if (
                 influence_exact
+                and s["influence_score"] is not None  # gated (1b): has a path, not disconnected
                 and abs(float(s["elasticity"])) < 1e-10
                 and float(s["influence_score"]) < 1e-10
             ):

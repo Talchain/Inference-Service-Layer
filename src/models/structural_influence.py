@@ -30,13 +30,15 @@ class StructuralInfluence(BaseModel):
         None,
         ge=0.0,
         le=1.0,
-        description="Sum of |path strengths| to the goal, normalised to 0-1 across EVERY factor node "
-        "(an evaluated identity's operand and addend edges carry its partial at the centre). "
-        "None for every row when the walk truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED).",
+        description="Expected NET effect on the goal: |sum of signed path strengths|, each edge at "
+        "mean x exists_probability, normalised to 0-1 across EVERY factor node (an evaluated identity's "
+        "operand and addend edges carry its partial at the centre). None for every row when the walk "
+        "truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED), and for a factor whose every path runs "
+        "through a product with another input at 0 today (STRUCTURAL_INFLUENCE_GATED).",
     )
     influence_rank: Optional[int] = Field(
         None,
         ge=1,
-        description="Rank by influence_score, 1 = highest, over every factor node. None when the "
-        "walk truncated.",
+        description="Rank by influence_score, 1 = highest, over every factor node with a score. None "
+        "when the walk truncated or the factor is gated.",
     )
