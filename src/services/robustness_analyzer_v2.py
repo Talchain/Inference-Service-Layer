@@ -32,6 +32,7 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
+    Set,
     Tuple,
     cast,
 )
@@ -106,6 +107,7 @@ from src.models.critique import (
     HIGH_TIE_RATE,
     IDENTITY_NOT_EVALUATED as IDENTITY_NOT_EVALUATED_CRITIQUE,
     MARGINAL_SWITCH_TRUNCATED,
+    FACTOR_STABILITY_ANCHORED,
     STRUCTURAL_INFLUENCE_GATED,
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
@@ -1855,6 +1857,53 @@ def zero_gated_factor_ids(
             }
         )
     return gated
+
+
+def anchored_blind_factor_ids(
+    graph: GraphV2,
+    factor_ids: List[str],
+    goal_node_id: str,
+    centres: Optional[Mapping[str, float]] = None,
+) -> Dict[str, List[str]]:
+    """AIQ #72 5882847470: the factors the one-at-a-time probe cannot see, each mapped to the
+    anchored identities that blind it.
+
+    An evaluated identity with a STATED level is anchored to this draw's status quo
+    (``_identity_value``: ``T = o + k * (term - term_sq) + ...``). A perturbed factor moves the
+    draw and its status quo together, so through that node the probe reads only the reference
+    option's own change: under keep-current, ``T = o`` whatever the factor does. A factor whose
+    EVERY path to the goal passes through such a node gives a reading about the probe, not about
+    the factor, so no stability claim is made from it."""
+    anchored = {
+        node_id
+        for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items()
+        if plan.evaluated and plan.target_level is not None
+    }
+    if not anchored:
+        return {}
+    children: Dict[str, List[str]] = {}
+    for edge in graph.edges:
+        children.setdefault(str(edge.from_), []).append(str(edge.to))
+
+    def reached(start: str, *, avoid: Set[str]) -> Set[str]:
+        seen, stack = {start}, [start]
+        while stack:
+            node_id = stack.pop()
+            for nxt in children.get(node_id, ()):
+                if nxt not in seen and nxt not in avoid:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    blind: Dict[str, List[str]] = {}
+    for f in factor_ids:
+        every = reached(f, avoid=set())
+        if f == goal_node_id or goal_node_id not in every:
+            continue  # the goal itself, or disconnected: not this question
+        if f in anchored or goal_node_id not in reached(f, avoid=anchored):
+            # name only the anchors on a path to the goal (PR Review #213's provenance rule)
+            blind[f] = sorted(a for a in anchored & every if goal_node_id in reached(a, avoid=set()))
+    return blind
 
 
 def identity_partials(
@@ -7764,6 +7813,24 @@ class RobustnessAnalyzerV2:
             n_bootstrap_override=self._n_bootstrap_override,
         )
 
+        # AIQ #72 5882847470: no stability claim from a blind probe. The rows keep their shape (every
+        # other consumer sees the same fields); only the bootstrap stability read off the probe is withheld.
+        blind = anchored_blind_factor_ids(
+            request.graph,
+            [str(s["node_id"]) for s in sensitivities],
+            str(request.goal_node_id),
+            centres=factor_centres(request),
+        )
+        if blind and critiques is not None:
+            critiques.append(
+                FACTOR_STABILITY_ANCHORED.build(
+                    factor_ids=", ".join(sorted(blind)),
+                    anchors=", ".join(sorted({a for anchors in blind.values() for a in anchors})),
+                    affected_node_ids=sorted(blind),
+                    seed=rng.seed,
+                )
+            )
+
         # Convert to results with ranks
         results = []
         rank = 0
@@ -7801,7 +7868,7 @@ class RobustnessAnalyzerV2:
                 zero_reason = ZeroSensitivityReason.DISCONNECTED
 
             node_id = str(s["node_id"])
-            bs = bootstrap_stability.get(node_id, {})
+            bs = {} if node_id in blind else bootstrap_stability.get(node_id, {})
 
             results.append(
                 FactorSensitivityResult(
