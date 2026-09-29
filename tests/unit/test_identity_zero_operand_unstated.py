@@ -222,3 +222,33 @@ class TestTheCarrierSurvivesTruncationAndNamesOnlyGoalPaths:
         body = v2_body({**d, "n_samples": 200})
         rows = {r["node_id"]: r for r in body["structural_influence"]}
         assert rows[SUBS]["gated_by"] == [PRICE]  # not [PRICE, "z1"]
+
+
+class TestTheOatRowDoesNotSayNoEffectForAGatedFactor:
+    """AIQ #72 5882619314 (2): the one-at-a-time sensitivity reads at today's centre, where price 0 multiplies a
+    gated factor's effect to exactly 0 and the row said ``zero_outcome_diff`` ("no effect") for a factor that
+    matters once the option moves. ``elasticity`` and ``importance_rank`` are REQUIRED numbers on the wire, so there
+    is no field to null: the row is omitted (the 2.514(a) precedent), exactly as a factor ISL never analysed. The
+    typed gate rides ``structural_influence[].gated_by`` and the ``STRUCTURAL_INFLUENCE_GATED`` critique."""
+
+    def test_the_gated_factors_were_perturbed(self):
+        # Precondition, so the omission below is not vacuous: every gated factor is in the OAT cohort.
+        cohort = {u["node_id"] for u in zero_price(stated=False).get("parameter_uncertainties") or []}
+        assert GATED <= cohort, GATED - cohort
+
+    def test_no_gated_factor_has_an_oat_row(self, body):
+        rows = {r["node_id"]: r for r in body.get("factor_sensitivity") or []}
+        assert not GATED & set(rows), sorted(GATED & set(rows))
+
+    def test_the_other_rows_stay_and_rank_contiguously(self, body):
+        rows = body.get("factor_sensitivity") or []
+        assert {PRICE, OTHER} <= {r["node_id"] for r in rows}  # the ungated half of the cohort
+        assert sorted(r["importance_rank"] for r in rows) == list(range(1, len(rows) + 1))
+
+    def test_without_a_gate_the_same_factors_keep_their_rows(self):
+        from tests.unit.test_r3_identity_evaluation import v2_body
+
+        rows = {r["node_id"] for r in v2_body({**wire(), "n_samples": 400}).get("factor_sensitivity") or []}
+        cohort = {u["node_id"] for u in wire().get("parameter_uncertainties") or []}
+        assert GATED & cohort <= rows
+        assert GATED & cohort, "control needs a gated factor in the cohort"
