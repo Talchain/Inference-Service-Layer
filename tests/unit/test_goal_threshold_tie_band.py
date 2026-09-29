@@ -92,6 +92,25 @@ class TestJustOutsideTheBandIsNotATie:
         assert p_goal(request) == 0.0
 
 
+class TestMinimiseIsWiredThrough:
+    """Outside the band, the direction decides (R3 SCIENCE 5881297285): the one-ulp rows alone let an analyser that
+    ignored ``goal_direction`` survive, because on the tie the band alone decides."""
+
+    @pytest.mark.parametrize("strict", [True, False])
+    def test_below_the_threshold_meets_a_minimise_goal(self, strict):
+        assert (
+            p_goal(held_at(T - 1e-6), goal_direction="minimise", goal_threshold_strict=strict)
+            == 1.0
+        )
+
+    @pytest.mark.parametrize("strict", [True, False])
+    def test_above_the_threshold_does_not(self, strict):
+        assert (
+            p_goal(held_at(T + 1e-6), goal_direction="minimise", goal_threshold_strict=strict)
+            == 0.0
+        )
+
+
 class TestTheComparatorItself:
     """The analyser's one comparator, direct. At |t| > 1 the band is RELATIVE (1e-9 * |t|): an absolute 1e-9 band
     would call 1e-7 away from 1000 "past"; the ruled band calls it ON. NaN is never met; +/-inf is never ON.
