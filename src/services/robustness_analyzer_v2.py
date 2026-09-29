@@ -6731,7 +6731,7 @@ class RobustnessAnalyzerV2:
                 def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
                     on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
                     past = values < threshold if minimise else values > threshold
-                    return past & ~on if strict else past | on
+                    return np.asarray(past & ~on if strict else past | on, dtype=bool)
 
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
