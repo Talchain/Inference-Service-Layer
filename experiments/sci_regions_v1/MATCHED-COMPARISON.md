@@ -1,6 +1,6 @@
 # SCI-REGIONS v1: matched reasoning-value check
 
-**Status: INSTRUMENT FROZEN; BROWSER PREFLIGHT AND HUMAN COMPREHENSION NOT RUN.** This is the bounded next test requested by [Science's checkpoint review](https://github.com/Talchain/olumi-programme-docs/issues/72#issuecomment-5878761605). It asks whether additional views help a person understand when the frozen model's implication changes. It does not test a recommendation, probability, area of plausibility, the deployed product, or Olumi's wider proposition.
+**Status: THREE-ARM LOCALHOST BROWSER PREFLIGHT PASSED; DIRECT-FILE OFFLINE OPEN AND HUMAN COMPREHENSION NOT RUN.** This is the bounded next test requested by [Science's checkpoint review](https://github.com/Talchain/olumi-programme-docs/issues/72#issuecomment-5878761605). It asks whether additional views help a person understand when the frozen model's implication changes. It does not test a recommendation, probability, area of plausibility, the deployed product, or Olumi's wider proposition.
 
 ## Frozen case and access
 
@@ -16,7 +16,7 @@ Open the local HTML file with one of these query suffixes. The suffix fixes the 
 | B | `?arm=threshold` | Same point detail plus evaluated churn-response sweep at £0/month and transition brackets |
 | C | `?arm=map` | Same point detail plus the two-axis evaluated-point map, layer toggle and coordinate table |
 
-The HTML is self-contained and uses no network resources. Browser rendering remains unwitnessed by the executor; check the three arm URLs in a real offline browser before recruiting anyone. Record browser/version and whether each arm shows the expected material. Do not silently substitute a screenshot or a different model reading.
+The HTML is self-contained and uses no external network resources. On 29 September, the executor opened all three arm URLs in the Codex in-app browser through a local loopback server serving the unchanged HTML file. The point arm showed £117,090, the feasible £59 option and incomplete six-option comparison; the threshold arm showed the exact evaluated bracket [1.4875, 1.59375] with the feasibility/preference change; the map arm showed the exact 0.53125 and −£18,750/−£17,968.75 coordinates, their different named preferences, and the same incomplete comparison. This preflight found and repaired a four-decimal display rounding defect; the computed JSON did not change. The browser's security policy blocked `file:` navigation, so direct-file offline opening remains unverified. Check that mode before recruiting anyone. Do not silently substitute a screenshot or a different model reading.
 
 ## Participant tasks
 
