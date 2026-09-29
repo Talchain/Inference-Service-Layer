@@ -18,6 +18,8 @@ Open the local HTML file with one of these query suffixes. The suffix fixes the 
 
 The HTML is self-contained and uses no external network resources. On 29 September, the executor opened all three arm URLs in the Codex in-app browser through a local loopback server serving the unchanged HTML file. The point arm showed £117,090, the feasible £59 option and incomplete six-option comparison; the threshold arm showed the exact evaluated bracket [1.4875, 1.59375] with the feasibility/preference change; the map arm showed the exact 0.53125 and −£18,750/−£17,968.75 coordinates, their different named preferences, and the same incomplete comparison. This preflight found and repaired a four-decimal display rounding defect; the computed JSON did not change. The browser's security policy blocked `file:` navigation, so direct-file offline opening remains unverified. Check that mode before recruiting anyone. Do not silently substitute a screenshot or a different model reading.
 
+An independent read-only check of the final HTML (`SHA-256 f167ba436d4b8fb53a40b8fed467d737fef66f70c1d55d06651e499bc132fc230`) found that its two embedded 1,682-point result objects are semantically identical to the net and gross 41×41 JSON members of `results.zip`. It found no external resource attributes or network API calls; the page declares `default-src 'none'`. This verifies embedded-data fidelity and static self-containment, not direct-file browser execution.
+
 ## Participant tasks
 
 Ask for a short answer and the evidence they used. Record response time per question, whether the participant says the view is insufficient, and a one-question cognitive-load rating after all tasks. Do not show the answer key until all answers are locked.
