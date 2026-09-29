@@ -8451,6 +8451,21 @@
       "StructuralInfluence": {
         "description": "One factor node's structural influence on the goal, normalised over EVERY factor node.",
         "properties": {
+          "gated_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set only when the score is withheld because EVERY path from this factor to the goal runs through a product with another input at 0 today: those zero inputs. The influence depends on the option chosen (STRUCTURAL_INFLUENCE_GATED); a consumer shows that, never 0 and never a rank.",
+            "title": "Gated By"
+          },
           "influence_rank": {
             "anyOf": [
               {

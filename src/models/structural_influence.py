@@ -17,7 +17,7 @@ its own module because ``response_v2`` cannot import ``robustness_v2`` (circular
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,12 @@ class StructuralInfluence(BaseModel):
         "operand and addend edges carry its partial at the centre). None for every row when the walk "
         "truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED), and for a factor whose every path runs "
         "through a product with another input at 0 today (STRUCTURAL_INFLUENCE_GATED).",
+    )
+    gated_by: Optional[List[str]] = Field(
+        None,
+        description="Set only when the score is withheld because EVERY path from this factor to the goal "
+        "runs through a product with another input at 0 today: those zero inputs. The influence depends on "
+        "the option chosen (STRUCTURAL_INFLUENCE_GATED); a consumer shows that, never 0 and never a rank.",
     )
     influence_rank: Optional[int] = Field(
         None,

@@ -140,6 +140,15 @@ class TestAGatedFactorIsWithheldNotZero:
         assert [r["influence_rank"] for r in ranked] == [1, 2, 3]
         assert ranked[0]["influence_score"] == 1.0
 
+    def test_the_row_carries_what_gates_it(self, body):
+        """The typed carrier (AIQ 5881953818 / R3 SCIENCE 5881691323): PLoT and the UI read ``gated_by``, never a
+        critique code. Only a withheld row has it."""
+        rows = {r["node_id"]: r for r in body["structural_influence"]}
+        for node_id in GATED:
+            assert rows[node_id]["gated_by"] == [PRICE], node_id
+        for node_id in (PRICE, OTHER, GRANDFATHERED):
+            assert "gated_by" not in rows[node_id], node_id
+
     def test_the_withhold_says_why(self, body):
         (critique,) = [c for c in body["critiques"] if c["code"] == "STRUCTURAL_INFLUENCE_GATED"]
         assert "depends on the option chosen" in critique["message"]

@@ -1797,25 +1797,27 @@ def zero_gated_factor_ids(
     factor_ids: List[str],
     goal_node_id: str,
     centres: Optional[Mapping[str, float]] = None,
-) -> List[str]:
+) -> Dict[str, List[str]]:
     """AIQ #72 5881683705 (1b): the factors whose EVERY path to the goal runs through a product
     with ANOTHER operand at 0 today. Their influence at today's centre is exactly 0 by that gate
     (``identity_partials``: the others' product), not by cancellation, so it is withheld.
 
     An operand edge ``(i, product)`` is gated when some other operand's level today is 0 (only an
     evaluated product with no stated level can have one: rule 3). A factor is gated when it reaches
-    the goal, but not once every gated edge is removed."""
+    the goal, but not once every gated edge is removed. Each gated factor maps to the zero operands
+    that gate it (``gated_by``, the typed carrier PLoT and the UI read)."""
     if not any(node.nonlinear_identity is not None for node in graph.nodes):
-        return []
-    gated_edges = {
-        (i, node_id)
-        for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items()
-        if plan.evaluated and plan.operation == "product"
-        for i in plan.factor_ids
-        if any(plan.levels[j] == 0.0 for j in plan.factor_ids if j != i)
-    }
+        return {}
+    gated_edges: Dict[Tuple[str, str], List[str]] = {}
+    for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items():
+        if not (plan.evaluated and plan.operation == "product"):
+            continue
+        for i in plan.factor_ids:
+            zeros = [j for j in plan.factor_ids if j != i and plan.levels[j] == 0.0]
+            if zeros:
+                gated_edges[(i, node_id)] = zeros
     if not gated_edges:
-        return []
+        return {}
     every: Dict[str, List[str]] = {}
     ungated: Dict[str, List[str]] = {}
     for edge in graph.edges:
@@ -1823,11 +1825,12 @@ def zero_gated_factor_ids(
         if (str(edge.from_), str(edge.to)) not in gated_edges:
             ungated.setdefault(str(edge.from_), []).append(str(edge.to))
 
-    def reaches(start: str, adjacency: Dict[str, List[str]]) -> bool:
+    def reaches(start: str, adjacency: Dict[str, List[str]], target: Optional[str] = None) -> bool:
+        goal = goal_node_id if target is None else target
         seen, stack = {start}, [start]
         while stack:
             node_id = stack.pop()
-            if node_id == goal_node_id:
+            if node_id == goal:
                 return True
             for nxt in adjacency.get(node_id, ()):
                 if nxt not in seen:
@@ -1835,9 +1838,17 @@ def zero_gated_factor_ids(
                     stack.append(nxt)
         return False
 
-    return [
-        f for f in factor_ids if f != goal_node_id and reaches(f, every) and not reaches(f, ungated)
-    ]
+    def reaches_node(start: str, target: str) -> bool:
+        return reaches(start, every, target)
+
+    gated: Dict[str, List[str]] = {}
+    for f in factor_ids:
+        if f == goal_node_id or not reaches(f, every) or reaches(f, ungated):
+            continue
+        gated[f] = sorted(
+            {z for (i, _), zeros in gated_edges.items() if i == f or reaches_node(f, i) for z in zeros}
+        )
+    return gated
 
 
 def identity_partials(
@@ -7637,14 +7648,13 @@ class RobustnessAnalyzerV2:
 
         # AIQ #72 5881683705 (1b): a factor whose every path runs through a product with another
         # operand at 0 today is WITHHELD (a gate, not "no influence"), never 0 and never ranked.
-        gated = set(
-            zero_gated_factor_ids(
+        gated_by = zero_gated_factor_ids(
                 request.graph,
                 every_factor or factor_node_ids,
                 str(request.goal_node_id),
                 centres=factor_centres(request),
-            )
         )
+        gated = set(gated_by)
         if gated and critiques is not None and not walked_truncated:
             critiques.append(
                 STRUCTURAL_INFLUENCE_GATED.build(
@@ -7708,7 +7718,7 @@ class RobustnessAnalyzerV2:
                 )
                 rank_of = {node_id: i + 1 for i, node_id in enumerate(ranked)}
                 structural_influence_out.extend(
-                    StructuralInfluence(node_id=node_id)
+                    StructuralInfluence(node_id=node_id, gated_by=gated_by[node_id])
                     if node_id in gated
                     else StructuralInfluence(
                         node_id=node_id,
