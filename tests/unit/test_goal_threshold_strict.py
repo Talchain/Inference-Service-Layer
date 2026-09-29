@@ -80,6 +80,9 @@ class TestATieAtTheThresholdIsOnIt:
         above, below = self.held_at(0.8 + 1e-6), self.held_at(0.8 - 1e-6)
         assert p_goal(above) == p_goal(above, goal_threshold_strict=True) == 1.0
         assert p_goal(below) == p_goal(below, goal_threshold_strict=True) == 0.0
+        # Minimising, the same gaps read the other way round: below the ceiling is met, above it is not.
+        assert p_goal(below, goal_direction="minimise") == p_goal(below, goal_direction="minimise", goal_threshold_strict=True) == 1.0
+        assert p_goal(above, goal_direction="minimise") == p_goal(above, goal_direction="minimise", goal_threshold_strict=True) == 0.0
 
 
 class TestItChangesNothingElse:
