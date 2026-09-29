@@ -173,7 +173,8 @@ def meets_goal_threshold(
     """
     on = np.abs(values - threshold) <= GOAL_TIE_BAND_REL * max(1.0, abs(threshold))
     past = values < threshold if minimise else values > threshold
-    return past & ~on if strict else past | on
+    met: np.ndarray = past & ~on if strict else past | on
+    return met
 
 # Edge strength bounds from schema v2.6. They bound the edge MEAN (parse-time clamp) and the
 # flip-threshold search ranges over that mean. They do NOT bound sampled strengths: a normalised
