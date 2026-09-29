@@ -1,0 +1,161 @@
+[
+  {
+    "case_id": "r3b-A-180910Z-net-churn-limit",
+    "crossing_rule": "GREATER_THAN",
+    "current_unit": "percentage points per +£10",
+    "current_value": 0.5,
+    "current_value_source": "PINNED_RESEARCH_REFERENCE",
+    "fixed_assumptions": [
+      {
+        "id": "X_feature_competitive_mrr",
+        "source": "frozen one-axis slice",
+        "value": 0
+      },
+      {
+        "id": "X_price_churn_via_sensitivity",
+        "source": "frozen break-even reading",
+        "value": 0
+      },
+      {
+        "id": "X_reading_net_additions_are_net",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "X_sum_mrr",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "level_persistence",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "no_lag",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "onset_month_0",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "rate_persistence",
+        "source": "frozen model X_net_reading",
+        "value": true
+      }
+    ],
+    "flip_kind": "HARD_CONSTRAINT_FEASIBILITY",
+    "flip_meaning": "For £59 with feature release, monthly churn meets the 4% hard limit at the boundary and breaches it above the boundary. Goal attainment and month-12 MRR preference are separate; all six options cannot be compared.",
+    "flip_threshold": 1.5,
+    "flip_thresholds_status": "computed",
+    "provenance": {
+      "assumption_qualifier": "Exploratory interpolation between frozen X sweep and break-even bracket; not evidence-backed plausibility; no joint probability interpretation",
+      "evaluator_sha256": "7082e94860d80ef4409aa7e4db7ebe9b9dd7ae3660d92db3faef200ff800cd13",
+      "graph_id": "pj-20260927T180910Z-A",
+      "graph_sha256": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+      "mapping_sha256": "235ef1db77ae8cdb816a203d49f06501c1f490d525c6219799c0a0211c96fc21",
+      "model_id": "X_net_reading",
+      "source_commit": "fdb51e84a673993de7cddb85d5b963741941b80a",
+      "source_kind": "PINNED_R3B_RESEARCH",
+      "tier": "X"
+    },
+    "reason": null,
+    "subject": {
+      "id": "X_price_churn_direct",
+      "kind": "EVIDENCE_VARIABLE",
+      "label": "Direct churn response to a £10 Pro price rise",
+      "option_id": "59_with_feature_release",
+      "related_factor_ids": [
+        "monthly_churn"
+      ]
+    },
+    "threshold_unit": "percentage points per +£10"
+  },
+  {
+    "case_id": "r3b-A-180910Z-new-pro-grandfathering-unavailable",
+    "crossing_rule": null,
+    "current_unit": null,
+    "current_value": null,
+    "current_value_source": "NOT_QUANTIFIED",
+    "fixed_assumptions": [
+      {
+        "id": "X_feature_competitive_mrr",
+        "source": "frozen one-axis slice",
+        "value": 0
+      },
+      {
+        "id": "X_price_churn_direct",
+        "source": "pinned research reference",
+        "value": 0.5
+      },
+      {
+        "id": "X_price_churn_via_sensitivity",
+        "source": "frozen break-even reading",
+        "value": 0
+      },
+      {
+        "id": "X_reading_net_additions_are_net",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "X_sum_mrr",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "level_persistence",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "no_lag",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "onset_month_0",
+        "source": "frozen model X_net_reading",
+        "value": true
+      },
+      {
+        "id": "rate_persistence",
+        "source": "frozen model X_net_reading",
+        "value": true
+      }
+    ],
+    "flip_kind": null,
+    "flip_meaning": null,
+    "flip_threshold": null,
+    "flip_thresholds_status": "unavailable",
+    "provenance": {
+      "assumption_qualifier": "Exploratory interpolation between frozen X sweep and break-even bracket; not evidence-backed plausibility; no joint probability interpretation",
+      "evaluator_sha256": "7082e94860d80ef4409aa7e4db7ebe9b9dd7ae3660d92db3faef200ff800cd13",
+      "graph_id": "pj-20260927T180910Z-A",
+      "graph_sha256": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+      "mapping_sha256": "235ef1db77ae8cdb816a203d49f06501c1f490d525c6219799c0a0211c96fc21",
+      "model_id": "X_net_reading",
+      "source_commit": "fdb51e84a673993de7cddb85d5b963741941b80a",
+      "source_kind": "PINNED_R3B_RESEARCH",
+      "tier": "X"
+    },
+    "reason": {
+      "code": "OPTION_LEVELS_MISSING",
+      "detail": "The option names new-customer pricing and grandfathering, but neither controlled factor has a quantified intervention. A missing effect is not zero effect."
+    },
+    "subject": {
+      "id": "40bb45e7",
+      "kind": "OPTION_CONTROLLED_LEVERS",
+      "label": "£59 for new Pro customers; grandfather existing customers",
+      "option_id": "40bb45e7",
+      "related_factor_ids": [
+        "fac_new_pro_customer_price",
+        "fac_grandfathering_existing_customers"
+      ]
+    },
+    "threshold_unit": null
+  }
+]

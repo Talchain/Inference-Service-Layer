@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any
 
-SUPPORTED = {"$schema", "$id", "title", "type", "additionalProperties", "required", "properties", "definitions", "$ref", "const", "enum", "minItems", "maxItems", "uniqueItems", "items", "minLength", "pattern", "minimum", "exclusiveMinimum", "oneOf"}
+SUPPORTED = {"$schema", "$id", "title", "type", "additionalProperties", "additionalItems", "required", "properties", "definitions", "$ref", "const", "enum", "minItems", "maxItems", "uniqueItems", "items", "minLength", "pattern", "minimum", "exclusiveMinimum", "oneOf", "allOf"}
 
 
 class SchemaError(ValueError):
@@ -54,6 +54,8 @@ def validate(value: Any, schema: dict, *, root: dict | None = None, path: str = 
                 pass
         if passed != 1:
             raise SchemaError(f"{path}: expected exactly one variant, got {passed}")
+    for option in schema.get("allOf", []):
+        validate(value, option, root=root, path=path, depth=depth + 1)
     kinds = schema.get("type")
     if kinds is not None:
         kinds = kinds if isinstance(kinds, list) else [kinds]
@@ -80,8 +82,16 @@ def validate(value: Any, schema: dict, *, root: dict | None = None, path: str = 
         if schema.get("uniqueItems") and len({json.dumps(x, sort_keys=True) for x in value}) != len(value):
             raise SchemaError(f"{path}: duplicate array element")
         if "items" in schema:
-            for i, item in enumerate(value):
-                validate(item, schema["items"], root=root, path=f"{path}[{i}]", depth=depth + 1)
+            items = schema["items"]
+            if isinstance(items, list):
+                for i, item in enumerate(value):
+                    if i < len(items):
+                        validate(item, items[i], root=root, path=f"{path}[{i}]", depth=depth + 1)
+                    elif schema.get("additionalItems") is False:
+                        raise SchemaError(f"{path}[{i}]: extra array item")
+            else:
+                for i, item in enumerate(value):
+                    validate(item, items, root=root, path=f"{path}[{i}]", depth=depth + 1)
     if isinstance(value, str):
         if len(value) < schema.get("minLength", 0):
             raise SchemaError(f"{path}: too short")

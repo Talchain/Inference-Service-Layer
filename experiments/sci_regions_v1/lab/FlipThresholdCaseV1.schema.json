@@ -1,0 +1,328 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://olumi.example/research/FlipThresholdCaseV1.schema.json",
+  "title": "Two frozen SCI-REGIONS cases for the existing AI Experience Lab",
+  "type": "array",
+  "minItems": 2,
+  "maxItems": 2,
+  "items": [
+    {
+      "allOf": [
+        {
+          "$ref": "#/definitions/case"
+        },
+        {
+          "properties": {
+            "flip_thresholds_status": {
+              "const": "computed"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "$ref": "#/definitions/case"
+        },
+        {
+          "properties": {
+            "flip_thresholds_status": {
+              "const": "unavailable"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "additionalItems": false,
+  "definitions": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "flip_thresholds_status",
+        "subject",
+        "current_value",
+        "current_value_source",
+        "current_unit",
+        "flip_threshold",
+        "threshold_unit",
+        "crossing_rule",
+        "flip_kind",
+        "flip_meaning",
+        "fixed_assumptions",
+        "provenance",
+        "reason"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "flip_thresholds_status": {
+          "enum": [
+            "computed",
+            "unavailable"
+          ]
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "kind",
+            "label",
+            "option_id",
+            "related_factor_ids"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "kind": {
+              "enum": [
+                "EVIDENCE_VARIABLE",
+                "OPTION_CONTROLLED_LEVERS"
+              ]
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1
+            },
+            "option_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "related_factor_ids": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "current_value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "current_value_source": {
+          "enum": [
+            "PINNED_RESEARCH_REFERENCE",
+            "NOT_QUANTIFIED"
+          ]
+        },
+        "current_unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flip_threshold": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "threshold_unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "crossing_rule": {
+          "enum": [
+            "GREATER_THAN",
+            null
+          ]
+        },
+        "flip_kind": {
+          "enum": [
+            "HARD_CONSTRAINT_FEASIBILITY",
+            null
+          ]
+        },
+        "flip_meaning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fixed_assumptions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "value",
+              "source"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": [
+                  "number",
+                  "boolean"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_commit",
+            "graph_id",
+            "graph_sha256",
+            "mapping_sha256",
+            "model_id",
+            "tier",
+            "evaluator_sha256",
+            "source_kind",
+            "assumption_qualifier"
+          ],
+          "properties": {
+            "source_commit": {
+              "const": "fdb51e84a673993de7cddb85d5b963741941b80a"
+            },
+            "graph_id": {
+              "const": "pj-20260927T180910Z-A"
+            },
+            "graph_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "mapping_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "model_id": {
+              "const": "X_net_reading"
+            },
+            "tier": {
+              "const": "X"
+            },
+            "evaluator_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "source_kind": {
+              "const": "PINNED_R3B_RESEARCH"
+            },
+            "assumption_qualifier": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "reason": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "detail"
+          ],
+          "properties": {
+            "code": {
+              "const": "OPTION_LEVELS_MISSING"
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "flip_thresholds_status": {
+              "const": "computed"
+            },
+            "current_value": {
+              "type": "number"
+            },
+            "current_value_source": {
+              "const": "PINNED_RESEARCH_REFERENCE"
+            },
+            "current_unit": {
+              "type": "string"
+            },
+            "flip_threshold": {
+              "type": "number"
+            },
+            "threshold_unit": {
+              "type": "string"
+            },
+            "crossing_rule": {
+              "const": "GREATER_THAN"
+            },
+            "flip_kind": {
+              "const": "HARD_CONSTRAINT_FEASIBILITY"
+            },
+            "flip_meaning": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "flip_thresholds_status": {
+              "const": "unavailable"
+            },
+            "current_value": {
+              "type": "null"
+            },
+            "current_value_source": {
+              "const": "NOT_QUANTIFIED"
+            },
+            "current_unit": {
+              "type": "null"
+            },
+            "flip_threshold": {
+              "type": "null"
+            },
+            "threshold_unit": {
+              "type": "null"
+            },
+            "crossing_rule": {
+              "type": "null"
+            },
+            "flip_kind": {
+              "type": "null"
+            },
+            "flip_meaning": {
+              "type": "null"
+            },
+            "reason": {
+              "type": "object"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
