@@ -1846,7 +1846,12 @@ def zero_gated_factor_ids(
         if f == goal_node_id or not reaches(f, every) or reaches(f, ungated):
             continue
         gated[f] = sorted(
-            {z for (i, _), zeros in gated_edges.items() if i == f or reaches_node(f, i) for z in zeros}
+            {
+                z
+                for (i, _), zeros in gated_edges.items()
+                if i == f or reaches_node(f, i)
+                for z in zeros
+            }
         )
     return gated
 
