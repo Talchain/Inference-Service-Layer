@@ -7670,6 +7670,12 @@ class RobustnessAnalyzerV2:
                 )
             )
 
+        # AIQ #72 5882619314 (2): the one-at-a-time row reads at today's centre, where the zero operand makes a
+        # gated factor's outcome diff exactly 0 — a false "no effect" for a factor that matters once the option
+        # moves. `elasticity` and `importance_rank` are required, so there is no field to null: omit the row
+        # (the 2.514(a) precedent below), as for a factor ISL never analysed. The gate rides `gated_by`.
+        sensitivities = [s for s in sensitivities if str(s["node_id"]) not in gated]
+
         # Add influence scores to sensitivities (None when the cohort truncated —
         # a normalized score is only ever published when it is exact — or the factor is gated).
         for s in sensitivities:
