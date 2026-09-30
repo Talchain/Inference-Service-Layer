@@ -2624,6 +2624,43 @@ class PhaseDeadline:
 
 # R1 S2: refusals a consumer keys on BY NAME (R&C's CEE ask, #72 5871316082). Every other refusal keeps
 # its channel's generic code (GOAL_THRESHOLD_NOT_CONVERTIBLE / CONSTRAINT_NOT_CONVERTIBLE).
+# TEMPORAL step 1, R3 #75 5911436566 (1): a point counts as the range's middle when it lies
+# between the fitted P40 and P60. z at 0.60 of the standard normal.
+INTERVENTION_RANGE_MIDDLE_Z = 0.2533471031357997
+
+
+def _lognormal_limit_probability(median: float, sigma: float, operator: str, limit: float) -> float:
+    """Closed-form P(X op limit) for X lognormal with this median and log-scale sigma."""
+    if limit <= 0.0:
+        below = 0.0
+    else:
+        below = 0.5 * (1.0 + math.erf(math.log(limit / median) / (sigma * math.sqrt(2.0))))
+    return below if operator == "<=" else 1.0 - below
+
+
+def _clamped_limit_probability(
+    untruncated: float,
+    operator: str,
+    limit: float,
+    low: Optional[float],
+    high: Optional[float],
+) -> float:
+    """P(clamp(X) op limit): what a truncating reader would report. Clamping moves only the
+    mass beyond a bound onto that bound, so the answer changes only when the limit itself
+    lies beyond a bound."""
+    if operator == "<=":
+        if high is not None and limit >= high:
+            return 1.0
+        if low is not None and limit < low:
+            return 0.0
+    else:
+        if low is not None and limit <= low:
+            return 1.0
+        if high is not None and limit > high:
+            return 0.0
+    return untruncated
+
+
 R1_NAMED_REFUSAL_CODES: Dict[str, str] = {
     "goal_base_missing": "GOAL_BASE_MISSING",
     "change_of_a_change": "CHANGE_OF_A_CHANGE",
@@ -6794,8 +6831,8 @@ class RobustnessAnalyzerV2:
                 if sampled is not None:
                     # TEMPORAL step 1: the option sets the target to a stated RANGE, so its
                     # level is that draw of the range, not one number on every draw. The
-                    # plan-time refusal admits only a 'level' limit on a root whose point is
-                    # the range's median, so ``set_level`` is that point and the series is
+                    # plan-time refusal admits only a 'level' limit on a root whose point lies
+                    # in the range's P40–P60 without moving the verdict, and the series is
                     # already in the limit's frame.
                     assert not plan.change_frame, "a ranged pin is scored only for a level limit"
                     pairs_draw_for_draw = len(sampled) == len(samples)
@@ -7541,12 +7578,21 @@ class RobustnessAnalyzerV2:
         3. the limit must be a 'level' (``intervention_range_frame_unsupported``);
         4. the target must be a root, so no reported-level clamp can truncate the draws
            silently (``intervention_range_non_root_target``);
-        5. the option's point must be the range's implied median, or ISL would analyse around
-           a centre the user did not give (``intervention_range_point_conflict``);
-        6. the limit's ``level_domain`` must not be crossed by the lognormal's support
-           (``intervention_range_crosses_level_domain``): truncate vs refuse is R3's call;
-        7. the quartiles must be in the normalised domain, like any level operand
+        5. R3 #75 5911436566 (1): the option's point must lie between the fitted P40 and P60,
+           else the user gave two different middles (``intervention_range_point_conflict``);
+        6. and the verdict's side (more likely than not, or not) must be the same with the
+           median at the range's middle and moved to the point, else no chance is shown and
+           the user is asked (``intervention_range_point_flips_verdict``);
+        7. R3 (3): the range is NEVER truncated. A limit's ``level_domain`` does not clamp it
+           (the row names the tail as ``level_out_of_domain_fraction``), but if clamping would
+           move the verdict to the other side, no chance is shown
+           (``intervention_range_truncation_flips_verdict``);
+        8. the quartiles must be in the normalised domain, like any level operand
            (``constraint_values_outside_normalised_domain``).
+
+        Rules 6 and 7 use the closed-form lognormal CDF, so the check is exact and draws
+        nothing. (A coverage-0.5-vs-0.8 flip cannot happen for one duration: both readings
+        share the median, so the side is the sign of ln(limit / median) under either.)
         """
         target = constraint.node_id
         ranged = [
@@ -7606,35 +7652,66 @@ class RobustnessAnalyzerV2:
                     "clamped, which would truncate the range's draws silently. It is omitted.",
                     ident,
                 )
-            point = option.interventions[node_id]
-            median_raw = math.sqrt(stated.low * stated.high)
-            median = stated.to_frame(median_raw)
-            if not math.isclose(point, median, rel_tol=1e-6, abs_tol=1e-9):
+            mu, sigma = fit_lognormal_range(stated.low, stated.high)
+            median_raw = math.exp(mu)
+            point_raw = stated.from_frame(option.interventions[node_id])
+            middle_lo = math.exp(mu - INTERVENTION_RANGE_MIDDLE_Z * sigma)
+            middle_hi = math.exp(mu + INTERVENTION_RANGE_MIDDLE_Z * sigma)
+            point_detail = {
+                **ident,
+                "point": point_raw,
+                "implied_median": median_raw,
+                "middle_band": [middle_lo, middle_hi],
+                "low": stated.low,
+                "high": stated.high,
+            }
+            if not (point_raw > 0.0 and middle_lo <= point_raw <= middle_hi):
                 return (
                     "intervention_range_point_conflict",
-                    f"Option '{option.id}' sets '{node_id}' to {stated.from_frame(point):g}, "
-                    f"but its stated range {stated.low:g}–{stated.high:g} has median "
-                    f"{median_raw:g}. Ask which is meant; the limit is omitted until then.",
-                    {
-                        **ident,
-                        "point": stated.from_frame(point),
-                        "implied_median": median_raw,
-                        "low": stated.low,
-                        "high": stated.high,
-                    },
+                    f"Option '{option.id}' gives '{node_id}' as {point_raw:g} and also as "
+                    f"{stated.low:g}–{stated.high:g}, whose middle is {median_raw:g}. Ask which "
+                    "Olumi should treat as the middle; the limit is omitted until then.",
+                    point_detail,
+                )
+            limit_raw = stated.from_frame(constraint.value)
+
+            def more_likely_than_not(median: float) -> bool:
+                return (
+                    _lognormal_limit_probability(median, sigma, constraint.operator, limit_raw)
+                    >= 0.5
+                )
+
+            if more_likely_than_not(median_raw) != more_likely_than_not(point_raw):
+                return (
+                    "intervention_range_point_flips_verdict",
+                    f"Whether this limit is more likely met than not depends on taking "
+                    f"{median_raw:g} or {point_raw:g} as the middle of '{node_id}'. No chance "
+                    "is shown; ask which the user means.",
+                    point_detail,
                 )
             domain = constraint.level_domain
             if domain is not None:
-                support_floor = stated.to_frame(0.0)
-                if domain.max is not None or (
-                    domain.min is not None and domain.min > support_floor
-                ):
+                lo_raw = None if domain.min is None else stated.from_frame(domain.min)
+                hi_raw = None if domain.max is None else stated.from_frame(domain.max)
+                untruncated = _lognormal_limit_probability(
+                    median_raw, sigma, constraint.operator, limit_raw
+                )
+                truncated = _clamped_limit_probability(
+                    untruncated, constraint.operator, limit_raw, lo_raw, hi_raw
+                )
+                if (untruncated >= 0.5) != (truncated >= 0.5):
                     return (
-                        "intervention_range_crosses_level_domain",
-                        "The limit states a level domain the range's lognormal crosses (it has "
-                        "no upper end). Whether to truncate or refuse is pending Science; the "
-                        "limit is omitted.",
-                        {**ident, "level_domain_min": domain.min, "level_domain_max": domain.max},
+                        "intervention_range_truncation_flips_verdict",
+                        "Cutting the range at the limit's stated bounds would move this limit "
+                        "to the other side of more-likely-than-not. The range is never "
+                        "truncated, so no chance is shown; ask how sure the user is.",
+                        {
+                            **ident,
+                            "untruncated": untruncated,
+                            "truncated": truncated,
+                            "level_domain_min": domain.min,
+                            "level_domain_max": domain.max,
+                        },
                     )
             limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
             operands = {

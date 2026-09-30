@@ -4528,7 +4528,7 @@
                 "type": "null"
               }
             ],
-            "description": "node_id -> the option's stated range for the value it sets there. Each key must also be in `interventions` (the point, which must be the range's median).",
+            "description": "node_id -> the option's stated range for the value it sets there. Each key must also be in `interventions` (the point, within the range's P40-P60).",
             "title": "Intervention Ranges"
           },
           "interventions": {
@@ -4555,7 +4555,7 @@
         "type": "object"
       },
       "InterventionRange": {
-        "description": "TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).\n\nThe caller states the range and what it MEANS, never a distribution family: ISL chooses\nthe science-owned family for the meaning and echoes what it used\n(``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);\n``normalisation`` maps them onto the node's frame (absent = the frame is raw units).\nThe option's point in ``interventions`` stays, and must be the range's implied median,\nor the limit is refused (TEMPORAL ask 1).",
+        "description": "TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).\n\nThe caller states the range and what it MEANS, never a distribution family: ISL chooses\nthe science-owned family for the meaning and echoes what it used\n(``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);\n``normalisation`` maps them onto the node's frame (absent = the frame is raw units).\nThe option's point in ``interventions`` stays. It must lie between the range's fitted\nP40 and P60 without moving the verdict's side, or the limit is refused and the user\nasked (R3 #75 5911436566 (1)). The range is scored with its own median.",
         "properties": {
           "high": {
             "description": "The stated bad case, raw units (> low)",

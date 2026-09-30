@@ -754,8 +754,8 @@ class InterventionRangeNormalisation(BaseModel):
 
 # The range meanings ISL samples. R3 #75 5909972020: a user's "likely range" is read as the
 # QUARTILES (RATIFIED_COVERAGE 0.5) of a lognormal. Any other stated meaning ("5–20 at most/at
-# least", hard bounds) is a different claim, so the limit is refused by name, never sampled
-# under a reading the user did not give. The vocabulary is pending R3/AIQ (TEMPORAL ask 2).
+# least", min–max, hard bounds) is a different claim, so the limit is refused by name, never
+# sampled under a reading the user did not give (R3 #75 5911436566 (2), AIQ 5911370944).
 INTERVENTION_RANGE_SAMPLED_MEANINGS = frozenset({"likely_range"})
 
 
@@ -766,8 +766,9 @@ class InterventionRange(BaseModel):
     the science-owned family for the meaning and echoes what it used
     (``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);
     ``normalisation`` maps them onto the node's frame (absent = the frame is raw units).
-    The option's point in ``interventions`` stays, and must be the range's implied median,
-    or the limit is refused (TEMPORAL ask 1).
+    The option's point in ``interventions`` stays. It must lie between the range's fitted
+    P40 and P60 without moving the verdict's side, or the limit is refused and the user
+    asked (R3 #75 5911436566 (1)). The range is scored with its own median.
     """
 
     low: float = Field(..., gt=0, description="The stated good case, raw units (> 0)")
@@ -826,7 +827,7 @@ class InterventionOption(BaseModel):
         None,
         description=(
             "node_id -> the option's stated range for the value it sets there. Each key must "
-            "also be in `interventions` (the point, which must be the range's median)."
+            "also be in `interventions` (the point, within the range's P40-P60)."
         ),
     )
 

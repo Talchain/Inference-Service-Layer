@@ -441,17 +441,41 @@ class TestT7FailClosed:
             response, "intervention_range_meaning_unsupported", option_id="plan", meaning="min_max"
         )
 
-    def test_a_point_that_is_not_the_ranges_median_is_refused(self) -> None:
-        # "likely 9 days" against a stated 5–20 (median 10): ask, don't analyse around a different centre.
+    def test_a_point_outside_the_ranges_p40_to_p60_is_refused(self) -> None:
+        # R3 5911436566 (1): for 5–20 d the middle band is 7.7–13.0 d. "About 6 days" and
+        # "5–20 days" are two different middles: ask, don't analyse around either.
         response = run(
             build(
-                ranges=RANGED, points={"plan": {"d": days(9)}, "late": {"d": days(21)}, "hold": {}}
+                ranges=RANGED, points={"plan": {"d": days(6)}, "late": {"d": days(21)}, "hold": {}}
             )
         )
         self._assert_refused(response, "intervention_range_point_conflict", option_id="plan")
         detail = refusals(response, "intervention_range_point_conflict")[0].detail
         assert detail["implied_median"] == pytest.approx(10.0)
-        assert detail["point"] == pytest.approx(9.0)
+        assert detail["point"] == pytest.approx(6.0)
+        assert detail["middle_band"] == pytest.approx([7.70, 12.98], abs=0.01)
+
+    def test_a_point_inside_the_middle_band_is_scored_from_the_range(self) -> None:
+        # "Likely 9" with 5–20: same side either way (0.666 vs 0.628), so the range is scored.
+        response = run(
+            build(
+                ranges=RANGED, points={"plan": {"d": days(9)}, "late": {"d": days(21)}, "hold": {}}
+            )
+        )
+        assert row(response, "plan").prob_satisfied == pytest.approx(
+            p_leq(5.0, 20.0, 14.0), abs=TOL
+        )
+
+    def test_a_point_that_moves_the_verdict_to_the_other_side_is_refused(self) -> None:
+        # Limit 11 d: median 10 → 0.537 (more likely than not); point 12 d → 0.466 (not).
+        response = run(
+            build(
+                ranges=RANGED,
+                points={"plan": {"d": days(12)}, "late": {"d": days(21)}, "hold": {}},
+                constraints=[dt_limit(value=days(11))],
+            )
+        )
+        self._assert_refused(response, "intervention_range_point_flips_verdict", option_id="plan")
 
     def test_a_non_level_limit_on_a_ranged_node_is_refused(self) -> None:
         response = run(
@@ -459,10 +483,23 @@ class TestT7FailClosed:
         )
         self._assert_refused(response, "intervention_range_frame_unsupported", option_id="plan")
 
-    def test_a_limit_whose_level_domain_the_range_crosses_is_refused(self) -> None:
+    def test_a_level_domain_never_truncates_the_range_and_the_tail_is_named(self) -> None:
+        # R3 5911436566 (3): never truncate. Scored on the untruncated fit; the row names the
+        # share of draws beyond the stated bound ("about 1 in 11 runs take more than 40 days").
         capped = dt_limit(level_domain=LevelDomain(min=0.0, max=1.0))
+        plan = row(run(build(ranges=RANGED, constraints=[capped])), "plan")
+        assert plan.prob_satisfied == pytest.approx(0.628323, abs=TOL)
+        tail = 1.0 - phi(math.log(40.0 / 10.0) / (math.log(4.0) / (2.0 * Z75)))
+        assert tail == pytest.approx(0.0887, abs=1e-4)
+        assert plan.level_out_of_domain_fraction == pytest.approx(tail, abs=TOL)
+
+    def test_truncation_that_would_flip_the_verdict_is_refused(self) -> None:
+        # Bound at 8 d, limit ≤ 9 d: clamped → 1.0, untruncated → 0.459. Sides differ: ask.
+        capped = dt_limit(value=days(9), level_domain=LevelDomain(min=0.0, max=days(8)))
         response = run(build(ranges=RANGED, constraints=[capped]))
-        self._assert_refused(response, "intervention_range_crosses_level_domain", option_id="plan")
+        self._assert_refused(
+            response, "intervention_range_truncation_flips_verdict", option_id="plan"
+        )
 
     def test_a_floor_at_zero_days_is_not_crossed(self) -> None:
         floored = dt_limit(level_domain=LevelDomain(min=0.0))
