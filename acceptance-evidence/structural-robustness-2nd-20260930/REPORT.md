@@ -17,7 +17,7 @@
 | Brief (verbatim; four-cases `paul-mrr`) | "Should we raise our Pro plan price from £49 to £59 a month? We have 1,500 paying subscribers and £75k MRR. Monthly churn must stay below 5%, and we want MRR above £85k within a year." |
 | Source draft | R3's served **m2** of that brief (`r3/science-notes` @ `fb3a396c`, `row-b-2339-ef042ce/drafts/m2.json`). Served CEE `ef042ce`, scenario `3eb2e670…`. Copied as `models/m2-served-draft.json` (sha256 `ad0379c4…623f`). |
 | Model A | m2, then Olumi's **own** card: `proposeProductIdentity(m2)` returned "Is "MRR" your "Pro plan price" × "Paying subscribers"? £49 × 1,500 = £73,500, close to your £75,000…" Then `applyIdentityConfirmEdit` returned `mutated` (`models/A-card-and-edit.json`). The only change is `stated_in_brief: false → true` (`models/DIFF.json`). No hand edit. |
-| Graph hashes (`computeAnalysisAffectingGraphHash`) | m2 `4e611c845a165aab` · A `f136e81e033ca4cd` · A2 `ca913d9bc17348e6` · B `a2596e82a669253a` |
+| Graph hashes (`computeAnalysisAffectingGraphHash`) | m2 `4e611c845a165aab` · A `f136e81e033ca4cd` · A2 `ca913d9bc17348e6` · B `a2596e82a669253a` · C `046301bfc30a8c4e` |
 | Heads | CEE `950177e9` (served) · PLoT `af4cd569` (served; same pin as the first run) · ISL `f7f19e31` (served; this branch's base) |
 | Chain | CEE's real `run_analysis` handler builds the PLoT `/v2/run` payload (`models/*-plot-payload.json`). PLoT's real `/v2/run` runs in-process against a local ISL (`plot-responses/`, `isl-requests/`). ISL's own V2 route then runs in-process, seeds `1254899477` (the served seed), `1` and `20260930`, n = 10,000 (`runs-direct/`). |
 
@@ -107,7 +107,7 @@
 - B builds it up over the year: L ≈ 180 when the chain holds, giving about £83.4k on average.
 - £59 stops paying for itself when L > 254. m2's own reply said this: "a loss of at most 254".
 
-## 6. Classification of headline conclusions (across A and B only)
+## 6. Classification of headline conclusions (across A, B and C only)
 
 | # | Headline (as the served post-Yes model says it) | A vs B (time scope) | A vs C (sign of price → churn) |
 |---|---|---|---|
