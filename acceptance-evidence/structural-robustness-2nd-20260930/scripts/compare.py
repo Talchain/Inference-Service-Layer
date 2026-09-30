@@ -13,7 +13,8 @@ ROOT = os.path.dirname(HERE)
 GOAL_FRAME = "106250"  # MRR's execution frame (cap): £85,000 = 0.8
 SEEDS = ["1254899477", "1", "20260930"]
 MODELS = {"A": "today's subscribers (m2 + card Yes)", "A2": "frame control of A (subscriber cap 20,000)",
-          "B": "subscribers at month 12 (Olumi's monthly effects accumulated over the brief's 12 months)"}
+          "B": "subscribers at month 12 (Olumi's monthly effects accumulated over the brief's 12 months)",
+          "C": "A with Olumi's price -> churn sign reversed (SCIENCE 5912253182 / R3 5912313721)"}
 OPTSETS = {"cur": "today's CEE submission (Raise to £59, Status quo)", "served3": "+ Olumi's 'Raise to £54'"}
 
 

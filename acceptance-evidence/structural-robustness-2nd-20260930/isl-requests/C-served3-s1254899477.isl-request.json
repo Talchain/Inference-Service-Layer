@@ -1,0 +1,220 @@
+{
+  "request_id": "req-ssr2-C",
+  "graph": {
+    "nodes": [
+      {
+        "id": "mrr",
+        "kind": "goal",
+        "label": "MRR",
+        "observed_state": {
+          "value": 0.7058823529411765,
+          "baseline": 0.7058823529411765,
+          "unit": "\u00a3/month",
+          "source": "brief_extraction",
+          "raw_value": 75000,
+          "cap": 106250
+        },
+        "intercept": 0,
+        "epsilon_std": 0,
+        "nonlinear_identity": {
+          "operation": "product",
+          "factor_ids": [
+            "pro_plan_price",
+            "paying_subscribers"
+          ],
+          "stated_in_brief": true
+        },
+        "execution_frame": {
+          "frame": 106250,
+          "carrier": "cap"
+        }
+      },
+      {
+        "id": "pro_plan_price",
+        "kind": "factor",
+        "label": "Pro plan price",
+        "observed_state": {
+          "value": 0.245,
+          "unit": "\u00a3 per subscriber per month",
+          "source": "brief_extraction",
+          "std": 0.0001,
+          "raw_value": 49,
+          "cap": 200
+        },
+        "intercept": 0,
+        "epsilon_std": 0,
+        "execution_frame": {
+          "frame": 200,
+          "carrier": "cap"
+        }
+      },
+      {
+        "id": "paying_subscribers",
+        "kind": "factor",
+        "label": "Paying subscribers",
+        "observed_state": {
+          "value": 0.3,
+          "unit": "subscribers",
+          "source": "brief_extraction",
+          "std": 0.0001,
+          "raw_value": 1500,
+          "cap": 5000
+        },
+        "intercept": 0,
+        "epsilon_std": 0,
+        "execution_frame": {
+          "frame": 5000,
+          "carrier": "cap"
+        }
+      },
+      {
+        "id": "monthly_churn",
+        "kind": "factor",
+        "label": "Monthly churn",
+        "observed_state": {
+          "value": 0.035,
+          "baseline": 0.035,
+          "unit": "%",
+          "source": "cee_inference",
+          "raw_value": 3.5,
+          "extractionType": "inferred"
+        },
+        "intercept": 0,
+        "epsilon_std": 0
+      },
+      {
+        "id": "new_paying_subscribers_per_month",
+        "kind": "factor",
+        "label": "New paying subscribers per month",
+        "observed_state": {
+          "value": 0.09,
+          "unit": "subscribers/month",
+          "source": "cee_inference",
+          "raw_value": 90,
+          "extractionType": "inferred"
+        },
+        "intercept": 0,
+        "epsilon_std": 0
+      }
+    ],
+    "edges": [
+      {
+        "from": "pro_plan_price",
+        "to": "monthly_churn",
+        "exists_probability": 0.8,
+        "strength": {
+          "mean": -0.2,
+          "std": 0.1
+        }
+      },
+      {
+        "from": "monthly_churn",
+        "to": "paying_subscribers",
+        "exists_probability": 0.8,
+        "strength": {
+          "mean": -0.3,
+          "std": 0.15
+        }
+      },
+      {
+        "from": "new_paying_subscribers_per_month",
+        "to": "paying_subscribers",
+        "exists_probability": 0.8,
+        "strength": {
+          "mean": 0.2,
+          "std": 0.1
+        }
+      },
+      {
+        "from": "pro_plan_price",
+        "to": "mrr",
+        "exists_probability": 0.8,
+        "strength": {
+          "mean": 0.5,
+          "std": 0.125
+        }
+      },
+      {
+        "from": "paying_subscribers",
+        "to": "mrr",
+        "exists_probability": 0.8,
+        "strength": {
+          "mean": 0.5,
+          "std": 0.125
+        }
+      }
+    ]
+  },
+  "options": [
+    {
+      "id": "raise_pro_price_to_59",
+      "label": "Raise Pro price to \u00a359",
+      "interventions": {
+        "pro_plan_price": 0.295
+      }
+    },
+    {
+      "id": "status_quo",
+      "label": "Status quo",
+      "interventions": {
+        "pro_plan_price": 0.245
+      }
+    },
+    {
+      "id": "raise_pro_price_to_54",
+      "label": "Raise Pro price to \u00a354",
+      "interventions": {
+        "pro_plan_price": 0.27
+      }
+    }
+  ],
+  "goal_node_id": "mrr",
+  "n_samples": 10000,
+  "analysis_types": [
+    "comparison",
+    "sensitivity",
+    "robustness"
+  ],
+  "parameter_uncertainties": [
+    {
+      "node_id": "pro_plan_price",
+      "distribution": "point_mass"
+    },
+    {
+      "node_id": "paying_subscribers",
+      "distribution": "normal",
+      "std": 0.0001
+    },
+    {
+      "node_id": "monthly_churn",
+      "distribution": "normal",
+      "std": 0.1
+    },
+    {
+      "node_id": "new_paying_subscribers_per_month",
+      "distribution": "normal",
+      "std": 0.1
+    }
+  ],
+  "include_e_values": true,
+  "include_voi": true,
+  "include_factor_flips": true,
+  "goal_threshold": 0.8,
+  "goal_threshold_frame": "level",
+  "goal_constraints": [
+    {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "node_id": "monthly_churn",
+      "operator": "<=",
+      "value": 0.05,
+      "label": "Monthly churn",
+      "value_frame": "level",
+      "level_domain": {
+        "min": 0,
+        "max": 1
+      }
+    }
+  ],
+  "goal_threshold_strict": true,
+  "seed": "1254899477"
+}

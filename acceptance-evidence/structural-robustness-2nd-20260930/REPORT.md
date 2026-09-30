@@ -6,7 +6,8 @@
 
 - **Brief:** Talchain/olumi-programme-docs#75 comment 5907927672.
 - **ACK:** #75 comment 5911632589.
-- **Scope:** SCIENCE's ruling 5911688274 allows this run one new time-scope ambiguity and then says STOP. This run adds no other ambiguity.
+- **Scope:** SCIENCE's ruling 5911688274 allows this run one new time-scope ambiguity (B) and then says STOP broadening.
+- **Model C:** SCIENCE 5912253182 (13:26Z) then asked this lane to test one Olumi-signed direction the brief doesn't establish, and R3 5912313721 named the acceptance row: flip price → churn on Paul's MRR brief. That is Model C, the brief's second and last allowed alternative. Nothing further is added.
 - **Claim boundary:** SCIENCE approved only "structurally robust / structure-sensitive across these explicitly tested plausible representations". The run makes no probability over structures and no "correct model" claim.
 
 ## 1. Frozen inputs
@@ -31,7 +32,7 @@
 |---|---|---|---|
 | 1 | MRR = price × subscribers (product) vs additive | Card; `stated_in_brief:false` (AIQ 5908212412) | Tested by the first run (H2 flips 0 ↔ 1) |
 | 2 | Total vs Pro-only MRR | £49 × 1,500 = £73,500 ≠ £75k; four-cases "preserve both and ask about scope" | Tested by the first run |
-| 3 | price → churn in or out | Not user-authored (AIQ 5908212412, 5909030106) | **Not selected.** ISL already samples its absence (`exists_probability` 0.8) and reports it in `fragile_edges` and the e-values, so a structural toggle adds nothing parametric analysis can't show. |
+| 3 | price → churn: in or out, and its **sign** | Not user-authored (AIQ 5908212412, 5909030106). The brief states only a churn LIMIT. | *In or out:* not selected, because ISL already samples the edge's absence (`exists_probability` 0.8). *Sign:* tested as **Model C**, at SCIENCE's request (5912253182) with R3's acceptance row (5912313721). |
 | 4 | **Time scope of "paying subscribers" in MRR = price × subscribers** | The brief states today's 1,500 but targets "within a year". Olumi's own 10 served drafts of the unchanged brief split: **m1 and m8** read subscribers at month 12; **m2–m7 and m9** read today's subscribers (`drafts.log`). m2's own reply says: "Does "MRR" get there within 12 months? The model holds the deadline; no result answers that yet." The goal carries `goal_horizon_months: 12` into the PLoT payload, but it never reaches ISL: the ISL request has no horizon. | **Selected** |
 | 5 | price → new subscribers | Needs a magnitude the brief lacks (m4, m6 and m7 guess one; m2 has none) | Not constructible without adding a value |
 
@@ -62,6 +63,14 @@
 - It is first order. ISL's engine (linear, plus product/sum identities) cannot express monthly compounding. A compounding structure is NOT COMPARABLE here, and it was not built.
 - m1's literal drafted shape (unsized default edges into a month-12 outcome with no level) is not analysable. R3's `m1-yes-run-de6c642` run is blocked on the missing unit, and AIQ 5900908629 withholds unsized paths. It was not run.
 
+## 3b. Model C: exact structural delta (see `models/DIFF.json`, `A_to_C`)
+
+**Hypothesis C:** raising the Pro price *lowers* monthly churn rather than raising it. Olumi's link is `cee_hypothesis` / `olumi_estimate`; the user's words only set a churn limit.
+
+- C = A with `pro_plan_price → monthly_churn` reversed: +0.1pp per £1 becomes −0.1pp per £1 (normalised strength +0.2 → −0.2), and `effect_direction` goes from positive to negative.
+- The magnitude, spread, existence and everything else stay identical to A.
+- The reversed sign is not a claim that it is true. It tests whether any headline depends on Olumi's direction.
+
 ## 4. Controls
 
 1. **First run reproduced.** Its committed A and B ISL requests (ISL `6f7f9b43`) replay on `f7f19e3` **identically on every science field**, with volatile fields masked (`control-first-run/`).
@@ -78,20 +87,20 @@
 
 ## 5. Like-for-like results (£59 unless stated; [min, max] over 3 seeds; "cur" option set)
 
-| | A: today's subscribers | B: subscribers at month 12 |
-|---|---|---|
-| Leader | Raise to £59 | Raise to £59 |
-| Win probability | 1.00 | 0.835–0.842 (0.809–0.814 with £54) |
-| **P(MRR > £85k)** | **1.00** (0.9999–1.00) | **0.53** (0.529–0.533) |
-| MRR mean | £89.7k | £83.3k–£83.4k |
-| MRR p10 | £88.7k | £71.2k–£71.6k |
-| P(£59 ends below today's £75k) | 0.00 | 0.16 (0.158–0.165) |
-| P(churn < 5%) | 0.87–0.88 | 0.87–0.88 |
-| price → churn e-value (flips the leader?) | unflippable | flips at ≈0.22pp per £1, i.e. 2.2× Olumi's 0.1pp estimate (all 3 seeds; 7–9 of 10 stability seeds) |
-| churn → subscribers | not fragile | fragile at 2 of 3 seeds, switch probability 0.43 |
-| Robustness label | high (stability 1.00) | high (0.81–0.84) |
-| Identity | evaluated | evaluated |
-| £54 (served-era set): wins / P(>£85k) | 0 / 0 | 0.05 / ≤0.004 |
+| | A: today's subscribers | B: subscribers at month 12 | C: A with price → churn reversed |
+|---|---|---|---|
+| Leader | Raise to £59 | Raise to £59 | Raise to £59 |
+| Win probability | 1.00 | 0.835–0.842 (0.809–0.814 with £54) | 1.00 |
+| **P(MRR > £85k)** | **1.00** (0.9999–1.00) | **0.53** (0.529–0.533) | 1.00 |
+| MRR mean | £89.7k | £83.3k–£83.4k | £90.9k |
+| MRR p10 | £88.7k | £71.2k–£71.6k | £90.3k |
+| P(£59 ends below today's £75k) | 0.00 | 0.16 (0.158–0.165) | 0.00 |
+| P(churn < 5%) | 0.87–0.88 | 0.87–0.88 | 1.00 |
+| price → churn e-value (flips the leader?) | unflippable | flips at ≈0.22pp per £1, i.e. 2.2× Olumi's 0.1pp estimate (all 3 seeds; 7–9 of 10 stability seeds) | unflippable |
+| churn → subscribers | not fragile | fragile at 2 of 3 seeds, switch probability 0.43 | not fragile |
+| Robustness label | high (stability 1.00) | high (0.81–0.84) | high (1.00) |
+| Identity | evaluated | evaluated | evaluated |
+| £54 (served-era set): wins / P(>£85k) | 0 / 0 | 0.05 / ≤0.004 | 0 / 0 |
 
 **Mechanism.** ISL anchors MRR to the stated £75k, so MRR(£59) ≈ £75,000 + 1.02 × [£59 × (1,500 − L) − £73,500], where L is the extra subscribers lost.
 - A reads Olumi's churn effect once: L ≈ 15, giving about £89.7k.
@@ -100,20 +109,24 @@
 
 ## 6. Classification of headline conclusions (across A and B only)
 
-| # | Headline (as the served post-Yes model says it) | Class |
-|---|---|---|
-| H1 | Raise to £59 comes out ahead | **STRUCTURALLY ROBUST** (margin narrows: 1.00 → ≈0.84) |
-| H2 | £59 gets MRR above £85k within a year (≈100%) | **STRUCTURE-SENSITIVE** (1.00 → 0.53) |
-| H3 | £59 cannot leave MRR below today's £75k | **STRUCTURE-SENSITIVE** (0.00 → 0.16; p10 £88.7k → £71.4k) |
-| H4 | No plausible churn response flips the leader | **STRUCTURE-SENSITIVE** (unflippable → flips at 2.2× Olumi's price → churn estimate) |
-| H5 | £59 keeps monthly churn under 5% (0.87) | ROBUST, but **invariant by construction** (the time scope doesn't touch churn's level); not informative here |
-| H6 | £54 is never best | **STRUCTURALLY ROBUST** |
-| H7 | Robustness "high" | ROBUST label; the stability number moves (1.00 → 0.81–0.84) |
-| — | Driver / structural-influence scores | **NOT COMPARABLE** between A and B (they depend on frame; see F1) |
+| # | Headline (as the served post-Yes model says it) | A vs B (time scope) | A vs C (sign of price → churn) |
+|---|---|---|---|
+| H1 | Raise to £59 comes out ahead | **STRUCTURALLY ROBUST** (margin narrows: 1.00 → ≈0.84) | ROBUST (1.00) |
+| H2 | £59 gets MRR above £85k within a year (≈100%) | **STRUCTURE-SENSITIVE** (1.00 → 0.53) | ROBUST (1.00) |
+| H3 | £59 cannot leave MRR below today's £75k | **STRUCTURE-SENSITIVE** (0.00 → 0.16; p10 £88.7k → £71.4k) | ROBUST (0.00) |
+| H4 | No plausible churn response flips the leader | **STRUCTURE-SENSITIVE** (unflippable → flips at 2.2× Olumi's price → churn estimate) | ROBUST (unflippable) |
+| H5 | £59 keeps monthly churn under 5% (0.87) | ROBUST, but **invariant by construction** (the time scope doesn't touch churn's level) | Same side; the figure moves (0.87 → 1.00) |
+| H6 | £54 is never best | **STRUCTURALLY ROBUST** | ROBUST |
+| H7 | Robustness "high" | ROBUST label; the stability number moves (1.00 → 0.81–0.84) | ROBUST |
+| — | Driver / structural-influence scores | **NOT COMPARABLE** between A and B (they depend on frame; see F1) | not compared |
+
+**R3's acceptance row (5912313721) on the served post-Yes model (A → C):** flipping Olumi's price → churn sign changes neither the leader nor the goal side. So under rule (3), the reply must **not** say "this depends on price raising churn". Only the churn-limit figure moves (0.87 → 1.00), and it stays on the same side.
+- The direction explains why. Price → churn is £59's only harm path, so reversing it can only help £59.
+- The conclusions that *do* rest on churn's response rest on its **accumulation over the year** (B), not on its sign.
 
 **What this adds to the first run:**
 - The first run's line "If MRR is your Pro price × paying subscribers … £59 reaches about £89.8k and clears £85k in every scenario" is reproduced by A: £89.7k, 1.00.
-- **That line is itself structure-sensitive to the time scope.** Confirming the product card does not settle the £85k question. The leader survives all five tested structures (three in the first run, two here).
+- **That line is itself structure-sensitive to the time scope.** Confirming the product card does not settle the £85k question. The leader survives every structure tested across the two runs: the first run's three, and A, B and C here.
 
 ## 7. User-facing explanation
 
@@ -126,6 +139,7 @@
 - It comes with a concrete user action: estimate the 12-month loss at £59; the break-even is about 254 subscribers.
 - The leader is classified robust.
 - The alternative is not arbitrary. It is the reading 2 of Olumi's own 10 served drafts chose, it uses only Olumi's own estimates, and its horizon is the brief's.
+- C shows the method can also say **"no change"**: reversing Olumi's price → churn sign leaves every headline on its side. It separates what depends on churn's accumulation (B) from what depends on churn's direction (nothing here), instead of collapsing into a generic caveat.
 
 **Smallest insertion point (for SCIENCE to decide; nothing is integrated):**
 - AIQ's proposed route (5911189156 (e)) computes each Run under both readings and names the leader only when they agree.
@@ -146,14 +160,14 @@
 
 ## 10. Limitations
 
-- n = 1: one brief, one served draft, one alternative.
+- n = 1: one brief, one served draft, two alternatives (B, C).
 - B is first order. Compounding cannot be expressed in ISL, and B is not "the true model".
-- Olumi's estimates are held fixed. H1's robustness holds only against this choice and the first run's two.
+- Olumi's estimates are held fixed. H1's robustness holds only against B, C and the first run's two alternatives.
 - Local and in-process only. Fixed seeds; optional-phase budgets are raised as in the first run (they gate whether a phase completes, never its numbers).
 
 ## Layout
 
-`models/` (m2, A, A2 and B graphs, CEE→PLoT payloads, card/edit, hashes, DIFF) · `isl-requests/` (what PLoT sent to ISL) · `plot-responses/` · `runs-direct/` (18 ISL runs) · `control-first-run/` · `results/comparison.json` · `scripts/`
+`models/` (m2, A, A2, B and C graphs, CEE→PLoT payloads, card/edit, hashes, DIFF) · `isl-requests/` (what PLoT sent to ISL) · `plot-responses/` · `runs-direct/` (24 ISL runs) · `control-first-run/` · `results/comparison.json` · `scripts/`
 
 **Reproduce:**
 1. `zz-ssr2-capture.test.ts`, run as an untracked CEE test with `SSR2_OUT` and `SSR2_M2`.

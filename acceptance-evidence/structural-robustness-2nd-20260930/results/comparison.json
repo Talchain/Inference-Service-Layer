@@ -9,7 +9,8 @@
   "models": {
     "A": "today's subscribers (m2 + card Yes)",
     "A2": "frame control of A (subscriber cap 20,000)",
-    "B": "subscribers at month 12 (Olumi's monthly effects accumulated over the brief's 12 months)"
+    "B": "subscribers at month 12 (Olumi's monthly effects accumulated over the brief's 12 months)",
+    "C": "A with Olumi's price -> churn sign reversed (SCIENCE 5912253182 / R3 5912313721)"
   },
   "option_sets": {
     "cur": "today's CEE submission (Raise to £59, Status quo)",
@@ -137,6 +138,43 @@
             0
           ]
         },
+        "identity_evaluated": [
+          "True"
+        ]
+      },
+      "C": {
+        "leader": [
+          "raise_pro_price_to_59"
+        ],
+        "win_probability_59": [
+          1.0,
+          1.0
+        ],
+        "p_mrr_above_85k_59": [
+          1.0,
+          1.0
+        ],
+        "mrr_mean_59_gbp": [
+          90874.2,
+          90901.6
+        ],
+        "mrr_p10_59_gbp": [
+          90306.1,
+          90306.1
+        ],
+        "p_below_today_59": [
+          0.0,
+          0.0
+        ],
+        "p_churn_below_5pct_59": [
+          1.0,
+          1.0
+        ],
+        "robustness_level": [
+          "high"
+        ],
+        "fragile_edges": [],
+        "fragile_switch_probability": {},
         "identity_evaluated": [
           "True"
         ]
@@ -288,6 +326,51 @@
         "p_mrr_above_85k_54": [
           0.0018,
           0.0039
+        ]
+      },
+      "C": {
+        "leader": [
+          "raise_pro_price_to_59"
+        ],
+        "win_probability_59": [
+          1.0,
+          1.0
+        ],
+        "p_mrr_above_85k_59": [
+          1.0,
+          1.0
+        ],
+        "mrr_mean_59_gbp": [
+          90874.2,
+          90901.6
+        ],
+        "mrr_p10_59_gbp": [
+          90306.1,
+          90306.1
+        ],
+        "p_below_today_59": [
+          0.0,
+          0.0
+        ],
+        "p_churn_below_5pct_59": [
+          1.0,
+          1.0
+        ],
+        "robustness_level": [
+          "high"
+        ],
+        "fragile_edges": [],
+        "fragile_switch_probability": {},
+        "identity_evaluated": [
+          "True"
+        ],
+        "win_probability_54": [
+          0.0,
+          0.0
+        ],
+        "p_mrr_above_85k_54": [
+          0.0,
+          0.0001
         ]
       }
     }
@@ -706,6 +789,141 @@
           0
         ]
       ],
+      "identity_evaluations": [
+        {
+          "node_id": "mrr",
+          "evaluated": true,
+          "withheld_reason": null
+        }
+      ],
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "critique_codes": [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "FACTOR_STABILITY_ANCHORED"
+      ]
+    },
+    "C|cur|1254899477": {
+      "analysis_status": "computed",
+      "leader": "raise_pro_price_to_59",
+      "options": {
+        "raise_pro_price_to_59": {
+          "win_probability": 1.0,
+          "probability_of_goal": 1.0,
+          "mrr_mean_gbp": 90901.6,
+          "mrr_p10_gbp": 90306.1,
+          "mrr_p50_gbp": 90683.4,
+          "mrr_p90_gbp": 91909.6,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "status_quo": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 75000.0,
+          "mrr_p10_gbp": 75000.0,
+          "mrr_p50_gbp": 75000.0,
+          "mrr_p90_gbp": 75000.0,
+          "churn_below_limit": [
+            1.0
+          ]
+        }
+      },
+      "robustness_level": "high",
+      "recommendation_stability": 1.0,
+      "fragile_edges": [],
+      "identity_evaluations": [
+        {
+          "node_id": "mrr",
+          "evaluated": true,
+          "withheld_reason": null
+        }
+      ],
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "critique_codes": [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "FACTOR_STABILITY_ANCHORED"
+      ]
+    },
+    "C|cur|1": {
+      "analysis_status": "computed",
+      "leader": "raise_pro_price_to_59",
+      "options": {
+        "raise_pro_price_to_59": {
+          "win_probability": 1.0,
+          "probability_of_goal": 1.0,
+          "mrr_mean_gbp": 90884.3,
+          "mrr_p10_gbp": 90306.1,
+          "mrr_p50_gbp": 90662.3,
+          "mrr_p90_gbp": 91863.3,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "status_quo": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 75000.0,
+          "mrr_p10_gbp": 75000.0,
+          "mrr_p50_gbp": 75000.0,
+          "mrr_p90_gbp": 75000.0,
+          "churn_below_limit": [
+            1.0
+          ]
+        }
+      },
+      "robustness_level": "high",
+      "recommendation_stability": 1.0,
+      "fragile_edges": [],
+      "identity_evaluations": [
+        {
+          "node_id": "mrr",
+          "evaluated": true,
+          "withheld_reason": null
+        }
+      ],
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "critique_codes": [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "FACTOR_STABILITY_ANCHORED"
+      ]
+    },
+    "C|cur|20260930": {
+      "analysis_status": "computed",
+      "leader": "raise_pro_price_to_59",
+      "options": {
+        "raise_pro_price_to_59": {
+          "win_probability": 1.0,
+          "probability_of_goal": 1.0,
+          "mrr_mean_gbp": 90874.2,
+          "mrr_p10_gbp": 90306.1,
+          "mrr_p50_gbp": 90657.0,
+          "mrr_p90_gbp": 91844.1,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "status_quo": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 75000.0,
+          "mrr_p10_gbp": 75000.0,
+          "mrr_p50_gbp": 75000.0,
+          "mrr_p90_gbp": 75000.0,
+          "churn_below_limit": [
+            1.0
+          ]
+        }
+      },
+      "robustness_level": "high",
+      "recommendation_stability": 1.0,
+      "fragile_edges": [],
       "identity_evaluations": [
         {
           "node_id": "mrr",
@@ -1233,6 +1451,174 @@
           0
         ]
       ],
+      "identity_evaluations": [
+        {
+          "node_id": "mrr",
+          "evaluated": true,
+          "withheld_reason": null
+        }
+      ],
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "critique_codes": [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "FACTOR_STABILITY_ANCHORED"
+      ]
+    },
+    "C|served3|1254899477": {
+      "analysis_status": "computed",
+      "leader": "raise_pro_price_to_59",
+      "options": {
+        "raise_pro_price_to_59": {
+          "win_probability": 1.0,
+          "probability_of_goal": 1.0,
+          "mrr_mean_gbp": 90901.6,
+          "mrr_p10_gbp": 90306.1,
+          "mrr_p50_gbp": 90683.4,
+          "mrr_p90_gbp": 91909.6,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "status_quo": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 75000.0,
+          "mrr_p10_gbp": 75000.0,
+          "mrr_p50_gbp": 75000.0,
+          "mrr_p90_gbp": 75000.0,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "raise_pro_price_to_54": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0001,
+          "mrr_mean_gbp": 82925.6,
+          "mrr_p10_gbp": 82653.1,
+          "mrr_p50_gbp": 82825.7,
+          "mrr_p90_gbp": 83386.8,
+          "churn_below_limit": [
+            1.0
+          ]
+        }
+      },
+      "robustness_level": "high",
+      "recommendation_stability": 1.0,
+      "fragile_edges": [],
+      "identity_evaluations": [
+        {
+          "node_id": "mrr",
+          "evaluated": true,
+          "withheld_reason": null
+        }
+      ],
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "critique_codes": [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "FACTOR_STABILITY_ANCHORED"
+      ]
+    },
+    "C|served3|1": {
+      "analysis_status": "computed",
+      "leader": "raise_pro_price_to_59",
+      "options": {
+        "raise_pro_price_to_59": {
+          "win_probability": 1.0,
+          "probability_of_goal": 1.0,
+          "mrr_mean_gbp": 90884.3,
+          "mrr_p10_gbp": 90306.1,
+          "mrr_p50_gbp": 90662.3,
+          "mrr_p90_gbp": 91863.3,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "status_quo": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 75000.0,
+          "mrr_p10_gbp": 75000.0,
+          "mrr_p50_gbp": 75000.0,
+          "mrr_p90_gbp": 75000.0,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "raise_pro_price_to_54": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 82917.6,
+          "mrr_p10_gbp": 82653.1,
+          "mrr_p50_gbp": 82816.1,
+          "mrr_p90_gbp": 83365.7,
+          "churn_below_limit": [
+            1.0
+          ]
+        }
+      },
+      "robustness_level": "high",
+      "recommendation_stability": 1.0,
+      "fragile_edges": [],
+      "identity_evaluations": [
+        {
+          "node_id": "mrr",
+          "evaluated": true,
+          "withheld_reason": null
+        }
+      ],
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ],
+      "critique_codes": [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "FACTOR_STABILITY_ANCHORED"
+      ]
+    },
+    "C|served3|20260930": {
+      "analysis_status": "computed",
+      "leader": "raise_pro_price_to_59",
+      "options": {
+        "raise_pro_price_to_59": {
+          "win_probability": 1.0,
+          "probability_of_goal": 1.0,
+          "mrr_mean_gbp": 90874.2,
+          "mrr_p10_gbp": 90306.1,
+          "mrr_p50_gbp": 90657.0,
+          "mrr_p90_gbp": 91844.1,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "status_quo": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0,
+          "mrr_mean_gbp": 75000.0,
+          "mrr_p10_gbp": 75000.0,
+          "mrr_p50_gbp": 75000.0,
+          "mrr_p90_gbp": 75000.0,
+          "churn_below_limit": [
+            1.0
+          ]
+        },
+        "raise_pro_price_to_54": {
+          "win_probability": 0.0,
+          "probability_of_goal": 0.0001,
+          "mrr_mean_gbp": 82913.0,
+          "mrr_p10_gbp": 82653.1,
+          "mrr_p50_gbp": 82813.6,
+          "mrr_p90_gbp": 83356.9,
+          "churn_below_limit": [
+            1.0
+          ]
+        }
+      },
+      "robustness_level": "high",
+      "recommendation_stability": 1.0,
+      "fragile_edges": [],
       "identity_evaluations": [
         {
           "node_id": "mrr",

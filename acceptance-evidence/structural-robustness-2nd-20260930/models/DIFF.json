@@ -318,5 +318,53 @@
         "std": 0.30000000000000004
       }
     }
+  ],
+  "A_to_C (sign of price->churn reversed)": [
+    {
+      "edge": "pro_plan_price->monthly_churn",
+      "field": "effect_direction",
+      "from": "positive",
+      "to": "negative"
+    },
+    {
+      "edge": "pro_plan_price->monthly_churn",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 0.1,
+          "amount_unit": "percentage points",
+          "strength_mean": 0.2,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "£ per subscriber per month"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -0.1,
+          "amount_unit": "percentage points",
+          "strength_mean": -0.2,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "£ per subscriber per month"
+        }
+      }
+    },
+    {
+      "edge": "pro_plan_price->monthly_churn",
+      "field": "strength",
+      "from": {
+        "std": 0.1,
+        "mean": 0.2
+      },
+      "to": {
+        "mean": -0.2,
+        "std": 0.1
+      }
+    }
   ]
 }

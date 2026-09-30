@@ -15,6 +15,9 @@
  *        it (-15 subscribers per +1pp monthly churn; +1 per new subscriber/month) accumulated over the brief's 12
  *        months, first order (non-compounding): -180 and +12. Same frame as A2, so B differs from A2 ONLY in those two
  *        edges' sizes and the operand's label. No level, option, node, uncertainty or other edge changes.
+ *   C  = A with Olumi's price -> churn SIGN reversed (SCIENCE #75 5912253182; R3 5912313721 acceptance row): the link is
+ *        Olumi's hypothesis (`cee_hypothesis`, `olumi_estimate`), not the user's; the brief states only a churn LIMIT.
+ *        Same magnitude and spread; only the direction flips. Nothing else changes.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -86,8 +89,8 @@ function reframeSubs(g: Json, scaleNatural: number): void {
   }
 }
 
-describe('SSR2: build A / A2 / B from served m2 and capture CEE -> PLoT payloads', () => {
-  it('A (card Yes via the canonical writer), A2 (frame control), B (month-12 subscriber operand)', () => {
+describe('SSR2: build A / A2 / B / C from served m2 and capture CEE -> PLoT payloads', () => {
+  it('A (card Yes via the canonical writer), A2 (frame control), B (month-12 subscriber operand), C (price -> churn sign reversed)', () => {
     mkdirSync(OUT, { recursive: true });
     const M2 = (JSON.parse(readFileSync(M2_PATH, 'utf8')) as Json).graph as Json;
 
@@ -114,8 +117,19 @@ describe('SSR2: build A / A2 / B from served m2 and capture CEE -> PLoT payloads
     const subsB = B.nodes.find((n: Json) => n.id === SUBS);
     subsB.label = 'Paying subscribers at 12 months';
 
+    const C = clone(A);
+    const pc = C.edges.find((e: Json) => e.from === 'pro_plan_price' && e.to === 'monthly_churn');
+    expect(pc?.provenance?.source, 'price -> churn is Olumi\'s hypothesis').toBe('cee_hypothesis');
+    pc.strength = { mean: -pc.strength.mean, std: pc.strength.std };
+    pc.effect_direction = 'negative';
+    pc.provenance.natural_effect = {
+      ...pc.provenance.natural_effect,
+      amount: -pc.provenance.natural_effect.amount,
+      strength_mean: pc.strength.mean,
+    };
+
     const hashes: Record<string, string> = { m2: computeAnalysisAffectingGraphHash(M2 as never) };
-    for (const [tag, g] of [['A', A], ['A2', A2], ['B', B]] as const) {
+    for (const [tag, g] of [['A', A], ['A2', A2], ['B', B], ['C', C]] as const) {
       hashes[tag] = computeAnalysisAffectingGraphHash(g as never);
       writeFileSync(`${OUT}/${tag}-graph.json`, JSON.stringify(g, null, 2));
     }
@@ -123,7 +137,7 @@ describe('SSR2: build A / A2 / B from served m2 and capture CEE -> PLoT payloads
   });
 
   it('captures the PLoT payload CEE run_analysis sends for each', async () => {
-    for (const tag of ['A', 'A2', 'B'] as const) {
+    for (const tag of ['A', 'A2', 'B', 'C'] as const) {
       const g = JSON.parse(readFileSync(`${OUT}/${tag}-graph.json`, 'utf8')) as Json;
       const p = await capture(g, tag);
       writeFileSync(`${OUT}/${tag}-plot-payload.json`, JSON.stringify(p, null, 2));
