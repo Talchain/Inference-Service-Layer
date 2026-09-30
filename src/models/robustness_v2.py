@@ -730,6 +730,85 @@ class GraphV2(BaseModel):
     }
 
 
+class InterventionRangeNormalisation(BaseModel):
+    """How the caller's normaliser maps this node's RAW units onto its [0, 1] frame.
+
+    A COMPUTATIONAL map only (PLoT's affine intervention normaliser), never a bound on
+    what the quantity can take: a draw beyond ``raw_at_one`` is valid arithmetic. A
+    semantic bound is the limit's own ``level_domain``, which a range must not cross
+    (TEMPORAL step 1 refuses it; R3 rules truncate vs refuse)."""
+
+    raw_at_zero: float = Field(..., description="The raw value the normaliser maps to 0")
+    raw_at_one: float = Field(..., description="The raw value the normaliser maps to 1")
+
+    @model_validator(mode="after")
+    def _finite_and_increasing(self) -> "InterventionRangeNormalisation":
+        if not (math.isfinite(self.raw_at_zero) and math.isfinite(self.raw_at_one)):
+            raise ValueError("normalisation values must be finite")
+        if not self.raw_at_one > self.raw_at_zero:
+            raise ValueError("normalisation.raw_at_one must exceed raw_at_zero")
+        return self
+
+    model_config = {"extra": "ignore"}
+
+
+# The range meanings ISL samples. R3 #75 5909972020: a user's "likely range" is read as the
+# QUARTILES (RATIFIED_COVERAGE 0.5) of a lognormal. Any other stated meaning ("5–20 at most/at
+# least", hard bounds) is a different claim, so the limit is refused by name, never sampled
+# under a reading the user did not give. The vocabulary is pending R3/AIQ (TEMPORAL ask 2).
+INTERVENTION_RANGE_SAMPLED_MEANINGS = frozenset({"likely_range"})
+
+
+class InterventionRange(BaseModel):
+    """TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).
+
+    The caller states the range and what it MEANS, never a distribution family: ISL chooses
+    the science-owned family for the meaning and echoes what it used
+    (``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);
+    ``normalisation`` maps them onto the node's frame (absent = the frame is raw units).
+    The option's point in ``interventions`` stays, and must be the range's implied median,
+    or the limit is refused (TEMPORAL ask 1).
+    """
+
+    low: float = Field(..., gt=0, description="The stated good case, raw units (> 0)")
+    high: float = Field(..., gt=0, description="The stated bad case, raw units (> low)")
+    meaning: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        description=(
+            "What the user's words say the range is. Sampled only for 'likely_range' "
+            "(read as the quartiles, lognormal); any other meaning refuses the limit by name."
+        ),
+    )
+    normalisation: Optional[InterventionRangeNormalisation] = Field(
+        None, description="Raw → node-frame map (computational only, never a bound)"
+    )
+
+    @model_validator(mode="after")
+    def _finite_and_ordered(self) -> "InterventionRange":
+        if not (math.isfinite(self.low) and math.isfinite(self.high)):
+            raise ValueError("intervention range bounds must be finite")
+        if not self.high > self.low:
+            raise ValueError("intervention range high must exceed low")
+        return self
+
+    def to_frame(self, raw: float) -> float:
+        """Map a raw value onto the node's frame with the caller's own affine map."""
+        if self.normalisation is None:
+            return raw
+        span = self.normalisation.raw_at_one - self.normalisation.raw_at_zero
+        return (raw - self.normalisation.raw_at_zero) / span
+
+    def from_frame(self, value: float) -> float:
+        if self.normalisation is None:
+            return value
+        span = self.normalisation.raw_at_one - self.normalisation.raw_at_zero
+        return self.normalisation.raw_at_zero + value * span
+
+    model_config = {"extra": "ignore"}
+
+
 class InterventionOption(BaseModel):
     """A decision option with its interventions."""
 
@@ -737,6 +816,18 @@ class InterventionOption(BaseModel):
     label: str = Field(..., description="Human-readable option name", max_length=500)
     interventions: Dict[str, float] = Field(
         ..., description="node_id -> intervention value mapping"
+    )
+    # TEMPORAL step 1 (brief dl-claude-27fbe09b/briefs/TEMPORAL.md; R3 #75 5909972020).
+    # Reader-first and INERT WHEN ABSENT: a request without it is byte-identical (T0 in
+    # tests/unit/test_intervention_ranges.py). It moves ONLY this option's own probability of
+    # a 'level' limit on the ranged node; the Monte Carlo, win share, EVPI and every other
+    # option are untouched. PLoT keys its fail-closed forward on the echo.
+    intervention_ranges: Optional[Dict[str, InterventionRange]] = Field(
+        None,
+        description=(
+            "node_id -> the option's stated range for the value it sets there. Each key must "
+            "also be in `interventions` (the point, which must be the range's median)."
+        ),
     )
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
@@ -1334,6 +1425,12 @@ class RobustnessRequestV2(BaseModel):
                     raise ValueError(
                         f"Option '{option.id}' references non-existent node: {node_id}"
                     )
+            for node_id in (option.intervention_ranges or {}).keys():
+                if node_id not in option.interventions:
+                    raise ValueError(
+                        f"Option '{option.id}' intervention_ranges['{node_id}'] is not a node "
+                        "the option sets (it must also be in interventions)"
+                    )
         return self
 
     @model_validator(mode="after")
@@ -1777,12 +1874,32 @@ class ConstraintAnalysis(BaseModel):
             "requested constraint is unscored (B5): each refused constraint is "
             "named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED "
             "warning and has no row in `constraints`; the scored ones keep theirs. "
-            "Never computed over the scored subset."
+            "Never computed over the scored subset. Also ABSENT (with the "
+            "conditionals) for an option whose rows mix a limit scored from a "
+            "stated range with other limits (TEMPORAL step 1), named by "
+            "CONSTRAINT_JOINT_WITHHELD."
         ),
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
         None, description="Pairwise conditional probabilities: P(C_j | C_i)"
     )
+
+
+class SampledInterventionRange(BaseModel):
+    """TEMPORAL step 1 echo: a stated range ISL SAMPLED to score this option's limit(s).
+
+    Present only when at least one of the option's constraint rows was scored from the
+    range; PLoT's fail-closed forward keys on it. Says how the range was read, so every
+    surface can name the reading (AIQ #75 5909998288)."""
+
+    node_id: str = Field(..., description="The node whose range was sampled")
+    meaning: str = Field(..., description="The stated meaning ISL read (e.g. 'likely_range')")
+    family: Literal["lognormal"] = Field(..., description="The family ISL chose for that meaning")
+    coverage: float = Field(
+        ..., description="Central share of mass the stated bounds hold (0.5 = quartiles)"
+    )
+    low: float = Field(..., description="Stated good case, raw units")
+    high: float = Field(..., description="Stated bad case, raw units")
 
 
 class OptionResult(BaseModel):
@@ -1800,6 +1917,12 @@ class OptionResult(BaseModel):
     constraint_analysis: Optional[ConstraintAnalysis] = Field(
         None,
         description="Multi-constraint analysis results. Only present when goal_constraints is provided.",
+    )
+    # TEMPORAL step 1 echo. A REGULAR field (not a PrivateAttr) for the same offload
+    # boundary reason as pre_noise_expected_regret below.
+    sampled_intervention_ranges: Optional[List[SampledInterventionRange]] = Field(
+        None,
+        description="The stated ranges ISL sampled to score this option's limits. Absent when none.",
     )
 
     # B2 CRN-fix (CODE-REVIEW-ISL F1): the JOINT expected_regret, computed in the

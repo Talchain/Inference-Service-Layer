@@ -56,6 +56,7 @@ from src.models.response_v2 import (
     ISLV2Error422,
     ObjectiveRankingV2,
     OptionResultV2,
+    SampledInterventionRangeV2,
     OutcomeDistributionV2,
     PathContributionV2,
     PathDecompositionV2,
@@ -1191,6 +1192,15 @@ async def _analyze_robustness_v2_enhanced(
                     ),
                     probability_of_goal=result.probability_of_goal,
                     constraint_analysis=constraint_analysis_v2,
+                    # TEMPORAL step 1 echo, V1 → V2 field for field. None → omitted.
+                    sampled_intervention_ranges=(
+                        [
+                            SampledInterventionRangeV2(**sampled.model_dump())
+                            for sampled in result.sampled_intervention_ranges
+                        ]
+                        if result.sampled_intervention_ranges
+                        else None
+                    ),
                     status=status,
                     status_reason=(
                         "Numerical issues in sampling" if status != "computed" else None

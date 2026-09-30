@@ -164,6 +164,13 @@ def detect_identical_options(options: List[Dict[str, Any]]) -> Optional[Tuple[st
             continue  # Empty interventions handled separately
 
         canonical = canonicalise_interventions(interventions)
+        # TEMPORAL step 1: two options with the same point but different stated ranges are
+        # different options (their limit chances differ). The ranges were validated finite
+        # at parse, so a sorted JSON dump is canonical. Absent ranges leave `canonical`
+        # byte-identical to before.
+        ranges = option.get("intervention_ranges")
+        if ranges:
+            canonical += "|ranges=" + json.dumps(ranges, sort_keys=True)
 
         if canonical in seen:
             prev_id, prev_label = seen[canonical]

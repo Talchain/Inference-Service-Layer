@@ -56,6 +56,7 @@ from src.models.robustness_v2 import (
     GoalConstraint,
     GraphV2,
     InferenceWarning,
+    INTERVENTION_RANGE_SAMPLED_MEANINGS,
     InterventionOption,
     LevelDomain,
     NodeV2,
@@ -67,6 +68,7 @@ from src.models.robustness_v2 import (
     PathContribution,
     PathDecomposition,
     ResponseMetadataV2,
+    SampledInterventionRange,
     RobustnessRequestV2,
     RobustnessResponseV2,
     RobustnessResult,
@@ -112,7 +114,7 @@ from src.models.critique import (
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
-from src.services.range_fit import resolve_range_fits
+from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
 from src.utils.evppi import (
@@ -3302,6 +3304,19 @@ class RobustnessAnalyzerV2:
         )
         inference_warnings.extend(constraint_frame_warnings)
         constraint_plans = self._complete_constraint_plans(request, scored_constraint_plans)
+        # TEMPORAL step 1: each option's stated range on a SCORED limit's target, drawn on its
+        # own tagged stream. {} (and nothing drawn) when no option states a range.
+        intervention_range_series = (
+            self._intervention_range_series(
+                request,
+                seed,
+                {request.goal_constraints[i].node_id for i in scored_constraint_plans}
+                if request.goal_constraints
+                else set(),
+            )
+            if any(option.intervention_ranges for option in request.options)
+            else {}
+        )
 
         # ROADMAP 2.1192: WHAT "wins" MEANS for this request. Resolved here,
         # beside the threshold plan it reuses and BEFORE the Monte Carlo, for
@@ -3573,7 +3588,37 @@ class RobustnessAnalyzerV2:
             status_quo_node_values,
             level_domains=level_domains,
             goal_level_anchor=anchored_levels.get(request.goal_node_id),
+            range_series=intervention_range_series or None,
         )
+        # TEMPORAL step 1: name each option whose joint was held back because a limit row was
+        # scored from its stated range beside other limits (B5: an absence always has a name).
+        for result in results:
+            analysis = result.constraint_analysis
+            if (
+                result.sampled_intervention_ranges
+                and analysis is not None
+                and len(analysis.constraints) > 1
+            ):
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="CONSTRAINT_JOINT_WITHHELD",
+                        field=f"results[{result.option_id}].constraint_analysis.joint_probability",
+                        detail={
+                            "option_id": result.option_id,
+                            "reason": "intervention_range_joint_deferred",
+                            "sampled_node_ids": [
+                                r.node_id for r in result.sampled_intervention_ranges
+                            ],
+                            "message": (
+                                "This option's limits include one scored from a stated range. "
+                                "Their joint chance and conditionals are held back until the "
+                                "dependence between the range and the model is defined; each "
+                                "limit's own chance is shown."
+                            ),
+                        },
+                        severity="warning",
+                    )
+                )
         # B1a: per anchored node whose level is reported (the goal band, a limit's
         # target), the share of each option's reported levels that left the node's
         # domain. Report-only: it reads the unclamped reported levels and moves nothing.
@@ -3945,6 +3990,21 @@ class RobustnessAnalyzerV2:
                     "its metric is P(joint_goal) and at least one goal constraint "
                     "could not be resolved into its target's sample frame. Base "
                     "analysis is unaffected.",
+                )
+            )
+        elif request.include_voi and any(r.sampled_intervention_ranges for r in results):
+            # TEMPORAL step 1: this phase's metric re-evaluates the limits at each option's
+            # POINT, so for a range-scored limit it would read a different model from the row
+            # beside it. Held back (Paul, 30 Sep) and disclosed, never computed.
+            inference_warnings.append(
+                self._optional_phase_unavailable_warning(
+                    "EVPI_UNAVAILABLE",
+                    "p_win_sensitivity",
+                    "intervention_ranges_deferred",
+                    _elapsed_ms(),
+                    "Win-probability sensitivity (p_win_sensitivity) was skipped: a goal "
+                    "constraint was scored from a stated range, which this phase does not yet "
+                    "sample. Base analysis is unaffected.",
                 )
             )
         elif request.include_voi and factor_sampler.has_uncertainties():
@@ -6625,6 +6685,17 @@ class RobustnessAnalyzerV2:
                     severity="warning",
                 )
 
+            # TEMPORAL step 1: a limit a stated range bears on is refused by NAME on any
+            # doubt about the range, BEFORE a plan exists, so it is never scored at the point
+            # (the false 100% / 0% the range exists to replace). All options, like every
+            # other plan-time refusal; the joint follows B5.
+            range_refusal = RobustnessAnalyzerV2._intervention_range_refusal(request, constraint)
+            if range_refusal is not None:
+                reason, message, extra = range_refusal
+                _, range_warning = refuse(reason, f"goal_constraints[{index}]", message, **extra)
+                warnings.append(range_warning)
+                continue
+
             plan, warning = RobustnessAnalyzerV2._resolve_threshold_in_sample_frame(
                 request,
                 target_id=constraint.node_id,
@@ -6686,6 +6757,7 @@ class RobustnessAnalyzerV2:
         constraint_plans: Dict[int, "GoalThresholdPlan"],
         status_quo_node_values: Dict[str, List[float]],
         option_id: str,
+        range_series: Optional[Dict[str, List[float]]] = None,
     ) -> Dict[int, List[float]]:
         """Put every constraint's samples into the frame ITS threshold is stated in.
 
@@ -6718,6 +6790,18 @@ class RobustnessAnalyzerV2:
             # (on a non-root target its samples are that level in the model's frame).
             set_level = dict(plan.pinned_levels).get(option_id)
             if set_level is not None:
+                sampled = (range_series or {}).get(constraint.node_id)
+                if sampled is not None:
+                    # TEMPORAL step 1: the option sets the target to a stated RANGE, so its
+                    # level is that draw of the range, not one number on every draw. The
+                    # plan-time refusal admits only a 'level' limit on a root whose point is
+                    # the range's median, so ``set_level`` is that point and the series is
+                    # already in the limit's frame.
+                    assert not plan.change_frame, "a ranged pin is scored only for a level limit"
+                    pairs_draw_for_draw = len(sampled) == len(samples)
+                    assert pairs_draw_for_draw, "the range series must pair with the Monte Carlo"
+                    resolved[index] = list(sampled)
+                    continue
                 resolved[index] = [set_level] * len(samples)
                 continue
             if plan.level_threshold is None:
@@ -6761,6 +6845,7 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
         level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
         goal_level_anchor: Optional[float] = None,
+        range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -7025,6 +7110,7 @@ class RobustnessAnalyzerV2:
 
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
+            sampled_ranges: Optional[List[SampledInterventionRange]] = None
             if request.goal_constraints and constraint_node_values:
                 analysis_dict = self._compute_constraint_analysis(
                     constraint_node_values,
@@ -7033,6 +7119,7 @@ class RobustnessAnalyzerV2:
                     constraint_plans,
                     status_quo_node_values,
                     level_domains=level_domains,
+                    range_series=(range_series or {}).get(option.id),
                 )
                 if analysis_dict:
                     # Convert dict to ConstraintAnalysis model
@@ -7062,6 +7149,18 @@ class RobustnessAnalyzerV2:
                         joint_probability=analysis_dict["joint_probability"],
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
+                    sampled_ranges = [
+                        SampledInterventionRange(
+                            node_id=node_id,
+                            meaning=option.intervention_ranges[node_id].meaning,
+                            family="lognormal",
+                            coverage=RATIFIED_COVERAGE,
+                            low=option.intervention_ranges[node_id].low,
+                            high=option.intervention_ranges[node_id].high,
+                        )
+                        for node_id in analysis_dict["sampled_range_node_ids"]
+                        if option.intervention_ranges
+                    ] or None
 
             option_result = OptionResult(
                 option_id=option.id,
@@ -7079,6 +7178,7 @@ class RobustnessAnalyzerV2:
                 win_probability=wins[option.id] / request.n_samples,
                 probability_of_goal=probability_of_goal,
                 constraint_analysis=constraint_analysis_result,
+                sampled_intervention_ranges=sampled_ranges,
             )
             # B2 CRN-fix (F1): attach the PRE-noise joint regret so the V2
             # emission layer emits the CRN-aligned value instead of recomputing it
@@ -7422,6 +7522,164 @@ class RobustnessAnalyzerV2:
         estimators never share permutation/redraw randomness (drift-tolerant by
         design — the tag is the only per-site variation)."""
         return int(hashlib.sha256(f"{seed}:{phase}:{node_id}".encode()).hexdigest()[:8], 16)
+
+    # --- TEMPORAL step 1: per-option stated ranges (R3 #75 5909972020) ---------------------
+    # A range moves ONLY its own option's probability of a 'level' limit on the node it sets.
+    # These helpers never call evaluate(), so they are not priced phases (no _compute_/_run_).
+
+    @staticmethod
+    def _intervention_range_refusal(
+        request: RobustnessRequestV2, constraint: GoalConstraint
+    ) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+        """``(reason, message, detail)`` when a stated range bears on this limit and cannot be
+        honestly sampled for it, else None. First failing rule wins; FAIL CLOSED throughout.
+
+        1. A range upstream of the target is not propagated in step 1, so the limit would be
+           scored at the point: refused (``intervention_range_not_propagated``).
+        For each option that states a range ON the target:
+        2. its meaning must be one ISL samples (``intervention_range_meaning_unsupported``);
+        3. the limit must be a 'level' (``intervention_range_frame_unsupported``);
+        4. the target must be a root, so no reported-level clamp can truncate the draws
+           silently (``intervention_range_non_root_target``);
+        5. the option's point must be the range's implied median, or ISL would analyse around
+           a centre the user did not give (``intervention_range_point_conflict``);
+        6. the limit's ``level_domain`` must not be crossed by the lognormal's support
+           (``intervention_range_crosses_level_domain``): truncate vs refuse is R3's call;
+        7. the quartiles must be in the normalised domain, like any level operand
+           (``constraint_values_outside_normalised_domain``).
+        """
+        target = constraint.node_id
+        ranged = [
+            (option, node_id, stated)
+            for option in request.options
+            for node_id, stated in sorted((option.intervention_ranges or {}).items())
+        ]
+        if not ranged:
+            return None
+
+        children: Dict[str, List[str]] = {}
+        for edge in request.graph.edges:
+            children.setdefault(edge.from_, []).append(edge.to)
+        for option, node_id, _ in ranged:
+            if node_id == target:
+                continue
+            frontier, seen = list(children.get(node_id, [])), set()
+            while frontier:
+                current = frontier.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                frontier.extend(children.get(current, []))
+            if target in seen:
+                return (
+                    "intervention_range_not_propagated",
+                    f"Option '{option.id}' states a range for '{node_id}', upstream of this "
+                    "limit's target. Step 1 samples a range only for a limit on the node the "
+                    "option sets, so this limit would be scored at the point. It is omitted.",
+                    {"option_id": option.id, "ranged_node_id": node_id},
+                )
+
+        parents = {edge.to for edge in request.graph.edges}
+        for option, node_id, stated in ranged:
+            if node_id != target:
+                continue
+            ident = {"option_id": option.id, "ranged_node_id": node_id}
+            if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
+                return (
+                    "intervention_range_meaning_unsupported",
+                    f"Option '{option.id}' states its range as '{stated.meaning}'. ISL samples "
+                    "only a likely range (read as the quartiles); another meaning is a "
+                    "different claim, so this limit is omitted rather than misread.",
+                    {**ident, "meaning": stated.meaning},
+                )
+            if constraint.value_frame != "level":
+                return (
+                    "intervention_range_frame_unsupported",
+                    "A stated range is sampled only for a 'level' limit in step 1; this limit "
+                    f"is '{constraint.value_frame}'. It is omitted.",
+                    ident,
+                )
+            if node_id in parents:
+                return (
+                    "intervention_range_non_root_target",
+                    f"'{node_id}' has causes in the graph, so its reported level may be "
+                    "clamped, which would truncate the range's draws silently. It is omitted.",
+                    ident,
+                )
+            point = option.interventions[node_id]
+            median_raw = math.sqrt(stated.low * stated.high)
+            median = stated.to_frame(median_raw)
+            if not math.isclose(point, median, rel_tol=1e-6, abs_tol=1e-9):
+                return (
+                    "intervention_range_point_conflict",
+                    f"Option '{option.id}' sets '{node_id}' to {stated.from_frame(point):g}, "
+                    f"but its stated range {stated.low:g}–{stated.high:g} has median "
+                    f"{median_raw:g}. Ask which is meant; the limit is omitted until then.",
+                    {
+                        **ident,
+                        "point": stated.from_frame(point),
+                        "implied_median": median_raw,
+                        "low": stated.low,
+                        "high": stated.high,
+                    },
+                )
+            domain = constraint.level_domain
+            if domain is not None:
+                support_floor = stated.to_frame(0.0)
+                if domain.max is not None or (
+                    domain.min is not None and domain.min > support_floor
+                ):
+                    return (
+                        "intervention_range_crosses_level_domain",
+                        "The limit states a level domain the range's lognormal crosses (it has "
+                        "no upper end). Whether to truncate or refuse is pending Science; the "
+                        "limit is omitted.",
+                        {**ident, "level_domain_min": domain.min, "level_domain_max": domain.max},
+                    )
+            limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
+            operands = {
+                f"pinned_range_low[{option.id}]": stated.to_frame(stated.low),
+                f"pinned_range_high[{option.id}]": stated.to_frame(stated.high),
+            }
+            out_of_domain = {k: v for k, v in operands.items() if abs(v) > limit}
+            if out_of_domain:
+                return (
+                    "constraint_values_outside_normalised_domain",
+                    f"Range operands {sorted(out_of_domain)} exceed |{limit}|, so they are not "
+                    "in the normalised domain; raw units were probably sent unnormalised.",
+                    {**ident, "out_of_domain": out_of_domain, "domain_limit": limit},
+                )
+        return None
+
+    @staticmethod
+    def _intervention_range_series(
+        request: RobustnessRequestV2,
+        seed: int,
+        scored_target_ids: Optional[Set[str]] = None,
+    ) -> Dict[str, Dict[str, List[float]]]:
+        """``{option_id: {node_id: per-draw level in the node's frame}}`` for each sampled range.
+
+        Only ranges whose meaning ISL samples, and (when given) only on a scored limit's
+        target. Each (option, node) draws from ITS OWN tagged stream, created only when it is
+        needed, so no existing stream moves and one option's range never moves another's
+        draws. ``{}`` when nothing is ranged: the request is then byte-identical.
+        """
+        series: Dict[str, Dict[str, List[float]]] = {}
+        for option in request.options:
+            for node_id, stated in sorted((option.intervention_ranges or {}).items()):
+                if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
+                    continue
+                if scored_target_ids is not None and node_id not in scored_target_ids:
+                    continue
+                mu, sigma = fit_lognormal_range(stated.low, stated.high)
+                rng = SeededRNG(
+                    RobustnessAnalyzerV2._per_factor_seed(
+                        seed, "intervention_range", f"{option.id}:{node_id}"
+                    )
+                )
+                raw = np.exp(mu + sigma * rng.normal_array(0.0, 1.0, request.n_samples))
+                series.setdefault(option.id, {})[node_id] = [stated.to_frame(float(x)) for x in raw]
+        return series
 
     def _compute_factor_sensitivity(
         self,
@@ -11257,6 +11515,7 @@ class RobustnessAnalyzerV2:
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
         level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
+        range_series: Optional[Dict[str, List[float]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -11308,6 +11567,21 @@ class RobustnessAnalyzerV2:
         scored_plans = {
             position: constraint_plans[index] for position, index in enumerate(scored_indices)
         }
+        # TEMPORAL step 1: the rows this option scores from a stated range. The JOINT across a
+        # range-scored row and any other row is held back (with its conditionals): the range is
+        # sampled independently of the model, and that dependence is not yet defined (Paul, 30
+        # Sep). A single limit keeps its joint, which is that row.
+        sampled_range_node_ids = sorted(
+            {
+                constraint.node_id
+                for position, constraint in enumerate(scored)
+                if constraint.node_id in (range_series or {})
+                and option_id in dict(scored_plans[position].pinned_levels)
+            }
+        )
+        range_joint_deferred = bool(sampled_range_node_ids) and len(scored) > 1
+        if range_joint_deferred:
+            joint_emitted = False
 
         # Put every scored constraint's samples into the frame ITS threshold is
         # stated in, once, before any comparison sees them.
@@ -11317,6 +11591,7 @@ class RobustnessAnalyzerV2:
             scored_plans,
             status_quo_node_values or {},
             option_id,
+            range_series=range_series,
         )
         # B1a (AIQ 5855046894 (2)): a 'level' limit on an ANCHORED node reads its level
         # CLAMPED to the node's domain, so every figure in the block (probability, joint,
@@ -11442,5 +11717,9 @@ class RobustnessAnalyzerV2:
             "constraints": constraint_results,
             # B5: ABSENT while any constraint is unscored — never the subset joint.
             "joint_probability": joint_probability if joint_emitted else None,
-            "conditional_probabilities": conditional_probs if conditional_probs else None,
+            "conditional_probabilities": (
+                conditional_probs if conditional_probs and not range_joint_deferred else None
+            ),
+            "sampled_range_node_ids": sampled_range_node_ids,
+            "range_joint_deferred": range_joint_deferred,
         }

@@ -438,6 +438,22 @@ class DownsideV2(BaseModel):
 # =============================================================================
 
 
+class SampledInterventionRangeV2(BaseModel):
+    """TEMPORAL step 1: a stated range ISL sampled to score this option's limit(s)."""
+
+    node_id: str = Field(..., description="The node whose range was sampled")
+    meaning: str = Field(..., description="The stated meaning ISL read (e.g. 'likely_range')")
+    family: Literal["lognormal"] = Field(..., description="The family ISL chose for that meaning")
+    coverage: float = Field(
+        ..., description="Central share of mass the stated bounds hold (0.5 = the quartiles)"
+    )
+    low: float = Field(..., description="Stated good case, raw units")
+    high: float = Field(..., description="Stated bad case, raw units")
+
+    # CIL 0.2: consistent extra='ignore' across all response models
+    model_config = {"extra": "ignore"}
+
+
 class OptionResultV2(BaseModel):
     """Analysis result for a single option."""
 
@@ -473,6 +489,15 @@ class OptionResultV2(BaseModel):
     constraint_analysis: Optional["ConstraintAnalysisV2"] = Field(
         None,
         description="Multi-constraint analysis results. Only present when goal_constraints is provided in request.",
+    )
+    sampled_intervention_ranges: Optional[List[SampledInterventionRangeV2]] = Field(
+        None,
+        description=(
+            "TEMPORAL step 1: the stated ranges ISL sampled to score this option's own "
+            "limits (each read as the quartiles of a lognormal). Present iff a limit row "
+            "of this option was scored from a range; a consumer that sent a range and "
+            "finds no entry here must not show that limit's probability."
+        ),
     )
     status: Literal["computed", "partial", "failed"] = Field(
         ..., description="Option-specific status"
@@ -631,7 +656,10 @@ class ConstraintAnalysisV2(BaseModel):
             "requested constraint is unscored (B5): each refused constraint is "
             "named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED "
             "warning and has no row in `constraints`; the scored ones keep theirs. "
-            "Never computed over the scored subset."
+            "Never computed over the scored subset. Also ABSENT (with the "
+            "conditionals) for an option whose rows mix a limit scored from a "
+            "stated range with other limits (TEMPORAL step 1), named by "
+            "CONSTRAINT_JOINT_WITHHELD."
         ),
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
