@@ -1,0 +1,322 @@
+{
+  "m2_to_A (card Yes, canonical writer)": [
+    {
+      "node": "mrr",
+      "field": "nonlinear_identity",
+      "from": {
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "paying_subscribers"
+        ],
+        "stated_in_brief": false
+      },
+      "to": {
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "paying_subscribers"
+        ],
+        "stated_in_brief": true
+      }
+    }
+  ],
+  "A_to_A2 (frame control)": [
+    {
+      "node": "paying_subscribers",
+      "field": "observed_state",
+      "from": {
+        "cap": 5000,
+        "unit": "subscribers",
+        "value": 0.3,
+        "source": "brief_extraction",
+        "raw_value": 1500,
+        "declared_scale": "unit_interval"
+      },
+      "to": {
+        "cap": 20000,
+        "unit": "subscribers",
+        "value": 0.075,
+        "source": "brief_extraction",
+        "raw_value": 1500,
+        "declared_scale": "unit_interval"
+      }
+    },
+    {
+      "edge": "monthly_churn->paying_subscribers",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -15,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.3,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "%"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -15,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.075,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "%"
+        }
+      }
+    },
+    {
+      "edge": "monthly_churn->paying_subscribers",
+      "field": "strength",
+      "from": {
+        "std": 0.15,
+        "mean": -0.3
+      },
+      "to": {
+        "mean": -0.075,
+        "std": 0.0375
+      }
+    },
+    {
+      "edge": "new_paying_subscribers_per_month->paying_subscribers",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.2,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers/month"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.05,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers/month"
+        }
+      }
+    },
+    {
+      "edge": "new_paying_subscribers_per_month->paying_subscribers",
+      "field": "strength",
+      "from": {
+        "std": 0.1,
+        "mean": 0.2
+      },
+      "to": {
+        "mean": 0.05,
+        "std": 0.025
+      }
+    }
+  ],
+  "A2_to_B (structural delta)": [
+    {
+      "node": "paying_subscribers",
+      "field": "label",
+      "from": "Paying subscribers",
+      "to": "Paying subscribers at 12 months"
+    },
+    {
+      "edge": "monthly_churn->paying_subscribers",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -15,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.075,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "%"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -180,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.8999999999999999,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "%"
+        }
+      }
+    },
+    {
+      "edge": "monthly_churn->paying_subscribers",
+      "field": "strength",
+      "from": {
+        "mean": -0.075,
+        "std": 0.0375
+      },
+      "to": {
+        "mean": -0.8999999999999999,
+        "std": 0.44999999999999996
+      }
+    },
+    {
+      "edge": "new_paying_subscribers_per_month->paying_subscribers",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.05,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers/month"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 12,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.6000000000000001,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers/month"
+        }
+      }
+    },
+    {
+      "edge": "new_paying_subscribers_per_month->paying_subscribers",
+      "field": "strength",
+      "from": {
+        "mean": 0.05,
+        "std": 0.025
+      },
+      "to": {
+        "mean": 0.6000000000000001,
+        "std": 0.30000000000000004
+      }
+    }
+  ],
+  "A_to_B (net)": [
+    {
+      "node": "paying_subscribers",
+      "field": "label",
+      "from": "Paying subscribers",
+      "to": "Paying subscribers at 12 months"
+    },
+    {
+      "node": "paying_subscribers",
+      "field": "observed_state",
+      "from": {
+        "cap": 5000,
+        "unit": "subscribers",
+        "value": 0.3,
+        "source": "brief_extraction",
+        "raw_value": 1500,
+        "declared_scale": "unit_interval"
+      },
+      "to": {
+        "cap": 20000,
+        "unit": "subscribers",
+        "value": 0.075,
+        "source": "brief_extraction",
+        "raw_value": 1500,
+        "declared_scale": "unit_interval"
+      }
+    },
+    {
+      "edge": "monthly_churn->paying_subscribers",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -15,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.3,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "%"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": -180,
+          "amount_unit": "subscribers",
+          "strength_mean": -0.8999999999999999,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "%"
+        }
+      }
+    },
+    {
+      "edge": "monthly_churn->paying_subscribers",
+      "field": "strength",
+      "from": {
+        "std": 0.15,
+        "mean": -0.3
+      },
+      "to": {
+        "mean": -0.8999999999999999,
+        "std": 0.44999999999999996
+      }
+    },
+    {
+      "edge": "new_paying_subscribers_per_month->paying_subscribers",
+      "field": "provenance",
+      "from": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 1,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.2,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers/month"
+        }
+      },
+      "to": {
+        "source": "cee_hypothesis",
+        "magnitude": "olumi_estimate",
+        "natural_effect": {
+          "amount": 12,
+          "amount_unit": "subscribers",
+          "strength_mean": 0.6000000000000001,
+          "per_source_change": 1,
+          "strength_mean_frame": "edge_strength",
+          "per_source_change_unit": "subscribers/month"
+        }
+      }
+    },
+    {
+      "edge": "new_paying_subscribers_per_month->paying_subscribers",
+      "field": "strength",
+      "from": {
+        "std": 0.1,
+        "mean": 0.2
+      },
+      "to": {
+        "mean": 0.6000000000000001,
+        "std": 0.30000000000000004
+      }
+    }
+  ]
+}

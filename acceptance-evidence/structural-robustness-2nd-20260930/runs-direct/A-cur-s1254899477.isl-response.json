@@ -1,0 +1,878 @@
+{
+  "status": 200,
+  "ms": 1583,
+  "request": {
+    "request_id": "ssr2-A-cur-s1254899477-s1254899477",
+    "graph": {
+      "nodes": [
+        {
+          "id": "mrr",
+          "kind": "goal",
+          "label": "MRR",
+          "observed_state": {
+            "value": 0.7058823529411765,
+            "baseline": 0.7058823529411765,
+            "unit": "\u00a3/month",
+            "source": "brief_extraction",
+            "raw_value": 75000,
+            "cap": 106250
+          },
+          "intercept": 0,
+          "epsilon_std": 0,
+          "nonlinear_identity": {
+            "operation": "product",
+            "factor_ids": [
+              "pro_plan_price",
+              "paying_subscribers"
+            ],
+            "stated_in_brief": true
+          },
+          "execution_frame": {
+            "frame": 106250,
+            "carrier": "cap"
+          }
+        },
+        {
+          "id": "pro_plan_price",
+          "kind": "factor",
+          "label": "Pro plan price",
+          "observed_state": {
+            "value": 0.245,
+            "unit": "\u00a3 per subscriber per month",
+            "source": "brief_extraction",
+            "std": 0.0001,
+            "raw_value": 49,
+            "cap": 200
+          },
+          "intercept": 0,
+          "epsilon_std": 0,
+          "execution_frame": {
+            "frame": 200,
+            "carrier": "cap"
+          }
+        },
+        {
+          "id": "paying_subscribers",
+          "kind": "factor",
+          "label": "Paying subscribers",
+          "observed_state": {
+            "value": 0.3,
+            "unit": "subscribers",
+            "source": "brief_extraction",
+            "std": 0.0001,
+            "raw_value": 1500,
+            "cap": 5000
+          },
+          "intercept": 0,
+          "epsilon_std": 0,
+          "execution_frame": {
+            "frame": 5000,
+            "carrier": "cap"
+          }
+        },
+        {
+          "id": "monthly_churn",
+          "kind": "factor",
+          "label": "Monthly churn",
+          "observed_state": {
+            "value": 0.035,
+            "baseline": 0.035,
+            "unit": "%",
+            "source": "cee_inference",
+            "raw_value": 3.5,
+            "extractionType": "inferred"
+          },
+          "intercept": 0,
+          "epsilon_std": 0
+        },
+        {
+          "id": "new_paying_subscribers_per_month",
+          "kind": "factor",
+          "label": "New paying subscribers per month",
+          "observed_state": {
+            "value": 0.09,
+            "unit": "subscribers/month",
+            "source": "cee_inference",
+            "raw_value": 90,
+            "extractionType": "inferred"
+          },
+          "intercept": 0,
+          "epsilon_std": 0
+        }
+      ],
+      "edges": [
+        {
+          "from": "pro_plan_price",
+          "to": "monthly_churn",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 0.2,
+            "std": 0.1
+          }
+        },
+        {
+          "from": "monthly_churn",
+          "to": "paying_subscribers",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": -0.3,
+            "std": 0.15
+          }
+        },
+        {
+          "from": "new_paying_subscribers_per_month",
+          "to": "paying_subscribers",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 0.2,
+            "std": 0.1
+          }
+        },
+        {
+          "from": "pro_plan_price",
+          "to": "mrr",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          }
+        },
+        {
+          "from": "paying_subscribers",
+          "to": "mrr",
+          "exists_probability": 0.8,
+          "strength": {
+            "mean": 0.5,
+            "std": 0.125
+          }
+        }
+      ]
+    },
+    "options": [
+      {
+        "id": "raise_pro_price_to_59",
+        "label": "Raise Pro price to \u00a359",
+        "interventions": {
+          "pro_plan_price": 0.295
+        }
+      },
+      {
+        "id": "status_quo",
+        "label": "Status quo",
+        "interventions": {
+          "pro_plan_price": 0.245
+        }
+      }
+    ],
+    "goal_node_id": "mrr",
+    "n_samples": 10000,
+    "analysis_types": [
+      "comparison",
+      "sensitivity",
+      "robustness"
+    ],
+    "parameter_uncertainties": [
+      {
+        "node_id": "pro_plan_price",
+        "distribution": "point_mass"
+      },
+      {
+        "node_id": "paying_subscribers",
+        "distribution": "normal",
+        "std": 0.0001
+      },
+      {
+        "node_id": "monthly_churn",
+        "distribution": "normal",
+        "std": 0.1
+      },
+      {
+        "node_id": "new_paying_subscribers_per_month",
+        "distribution": "normal",
+        "std": 0.1
+      }
+    ],
+    "include_e_values": true,
+    "include_voi": true,
+    "include_factor_flips": true,
+    "goal_threshold": 0.8,
+    "goal_threshold_frame": "level",
+    "goal_constraints": [
+      {
+        "constraint_id": "agent-lane:monthly_churn:<=",
+        "node_id": "monthly_churn",
+        "operator": "<=",
+        "value": 0.05,
+        "label": "Monthly churn",
+        "value_frame": "level",
+        "level_domain": {
+          "min": 0,
+          "max": 1
+        }
+      }
+    ],
+    "goal_threshold_strict": true,
+    "seed": "1254899477"
+  },
+  "response": {
+    "version": "2.0",
+    "endpoint_version": "analyze/v2",
+    "engine_version": "1.0.0",
+    "build": "dev",
+    "timestamp": "2026-09-30T14:59:12.851666Z",
+    "analysis_status": "computed",
+    "robustness_status": "computed",
+    "factor_sensitivity_status": "computed",
+    "critiques": [
+      {
+        "id": "critique_056a3032f83a",
+        "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "severity": "warning",
+        "message": "Option 'Status quo' has zero variance \u2014 intervention may have no causal path to goal",
+        "source": "analysis",
+        "affected_option_ids": [
+          "status_quo"
+        ],
+        "suggestion": "Check that intervention targets are connected to the goal with non-zero edge strengths"
+      },
+      {
+        "id": "critique_b3e7f7cfc53b",
+        "code": "FACTOR_STABILITY_ANCHORED",
+        "severity": "info",
+        "message": "Sensitivity stability is withheld for monthly_churn, new_paying_subscribers_per_month, paying_subscribers, pro_plan_price: every path from them to the goal runs through mrr, which is anchored to its stated level, so the one-at-a-time check cannot see them",
+        "source": "analysis",
+        "affected_node_ids": [
+          "monthly_churn",
+          "new_paying_subscribers_per_month",
+          "paying_subscribers",
+          "pro_plan_price"
+        ],
+        "suggestion": "Read the structural influence and the options' outcomes for these factors instead"
+      }
+    ],
+    "request_echo": {
+      "graph_node_count": 5,
+      "graph_edge_count": 5,
+      "options_count": 2,
+      "goal_node_id_hash": "0030da21b6cb",
+      "n_samples": 10000,
+      "response_version_requested": 2,
+      "include_diagnostics": false
+    },
+    "objective_ranking": {
+      "direction": "maximise",
+      "attested": false,
+      "status": "computed"
+    },
+    "options": [
+      {
+        "id": "raise_pro_price_to_59",
+        "label": "Raise Pro price to \u00a359",
+        "outcome": {
+          "mean": 0.8445499632647337,
+          "std": 0.006455442646353019,
+          "p10": 0.8352650362627997,
+          "p50": 0.8464601870490364,
+          "p90": 0.8499399759903961,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1.0,
+          "percentiles_source": "samples"
+        },
+        "downside": {
+          "cvar_10": 0.8306148690834877,
+          "p05": 0.8319631555129918,
+          "expected_regret": 0.0
+        },
+        "win_probability": 1.0,
+        "probability_of_goal": 1.0,
+        "constraint_analysis": {
+          "constraints": [
+            {
+              "constraint_id": "agent-lane:monthly_churn:<=",
+              "node_id": "monthly_churn",
+              "operator": "<=",
+              "threshold": 0.05,
+              "label": "Monthly churn",
+              "prob_satisfied": 0.8746,
+              "failure_margin_median": 0.0019207645654077538,
+              "near_miss_fraction": 0.8524720893141946,
+              "binding": false,
+              "level_out_of_domain_fraction": 0.0,
+              "frame_verdict": "scored",
+              "value": 0.05
+            }
+          ],
+          "joint_probability": 0.8746
+        },
+        "status": "computed"
+      },
+      {
+        "id": "status_quo",
+        "label": "Status quo",
+        "outcome": {
+          "mean": 0.7058823529411763,
+          "std": 2.220446049250313e-16,
+          "p10": 0.7058823529411765,
+          "p50": 0.7058823529411765,
+          "p90": 0.7058823529411765,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1.0,
+          "percentiles_source": "samples"
+        },
+        "downside": {
+          "cvar_10": 0.7058823529411762,
+          "p05": 0.7058823529411765,
+          "expected_regret": 0.13866761032355726
+        },
+        "win_probability": 0.0,
+        "probability_of_goal": 0.0,
+        "constraint_analysis": {
+          "constraints": [
+            {
+              "constraint_id": "agent-lane:monthly_churn:<=",
+              "node_id": "monthly_churn",
+              "operator": "<=",
+              "threshold": 0.05,
+              "label": "Monthly churn",
+              "prob_satisfied": 1.0,
+              "binding": false,
+              "level_out_of_domain_fraction": 0.0,
+              "frame_verdict": "scored",
+              "value": 0.05
+            }
+          ],
+          "joint_probability": 1.0
+        },
+        "status": "computed"
+      }
+    ],
+    "robustness": {
+      "level": "high",
+      "confidence": 1.0,
+      "confidence_basis": "recommendation_stability_uncalibrated",
+      "is_robust": true,
+      "fragile_edges_v1": [],
+      "robust_edges": [
+        "monthly_churn->paying_subscribers",
+        "new_paying_subscribers_per_month->paying_subscribers",
+        "pro_plan_price->monthly_churn"
+      ],
+      "recommendation_stability": 1.0,
+      "edge_e_values": [
+        {
+          "edge_id": "pro_plan_price->monthly_churn",
+          "from_id": "pro_plan_price",
+          "to_id": "monthly_churn",
+          "is_unflippable": true,
+          "flip_direction": "increase",
+          "current_mean": 0.2,
+          "flip_mean": 0.2,
+          "baseline_winner_id": "raise_pro_price_to_59",
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 0,
+            "seed_flip_means": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        },
+        {
+          "edge_id": "monthly_churn->paying_subscribers",
+          "from_id": "monthly_churn",
+          "to_id": "paying_subscribers",
+          "is_unflippable": true,
+          "flip_direction": "increase",
+          "current_mean": -0.3,
+          "flip_mean": -0.3,
+          "baseline_winner_id": "raise_pro_price_to_59",
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 0,
+            "seed_flip_means": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        },
+        {
+          "edge_id": "new_paying_subscribers_per_month->paying_subscribers",
+          "from_id": "new_paying_subscribers_per_month",
+          "to_id": "paying_subscribers",
+          "is_unflippable": true,
+          "flip_direction": "increase",
+          "current_mean": 0.2,
+          "flip_mean": 0.2,
+          "baseline_winner_id": "raise_pro_price_to_59",
+          "stability": {
+            "n_seeds": 10,
+            "n_seeds_flipped": 0,
+            "seed_flip_means": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          }
+        }
+      ],
+      "edge_sensitivity": [
+        {
+          "edge_id": "pro_plan_price->monthly_churn",
+          "from_id": "pro_plan_price",
+          "to_id": "monthly_churn",
+          "sensitivity_type": "existence",
+          "sensitivity_score": 1.0,
+          "direction": "negative",
+          "elasticity": -0.009133449626119247,
+          "importance_rank": 1,
+          "interpretation": "Decision is robust to whether pro_plan_price->monthly_churn exists"
+        },
+        {
+          "edge_id": "monthly_churn->paying_subscribers",
+          "from_id": "monthly_churn",
+          "to_id": "paying_subscribers",
+          "sensitivity_type": "existence",
+          "sensitivity_score": 0.8918264640353479,
+          "direction": "negative",
+          "elasticity": -0.008145452084506899,
+          "importance_rank": 2,
+          "interpretation": "Decision is robust to whether monthly_churn->paying_subscribers exists"
+        },
+        {
+          "edge_id": "monthly_churn->paying_subscribers",
+          "from_id": "monthly_churn",
+          "to_id": "paying_subscribers",
+          "sensitivity_type": "magnitude",
+          "sensitivity_score": 0.44574335447820457,
+          "direction": "positive",
+          "elasticity": 0.004071174474304096,
+          "importance_rank": 3,
+          "interpretation": "Decision is robust to effect size variation in monthly_churn->paying_subscribers"
+        },
+        {
+          "edge_id": "pro_plan_price->monthly_churn",
+          "from_id": "pro_plan_price",
+          "to_id": "monthly_churn",
+          "sensitivity_type": "magnitude",
+          "sensitivity_score": 0.42883630338301054,
+          "direction": "negative",
+          "elasticity": -0.0039167547747999175,
+          "importance_rank": 4,
+          "interpretation": "Decision is robust to effect size variation in pro_plan_price->monthly_churn"
+        },
+        {
+          "edge_id": "new_paying_subscribers_per_month->paying_subscribers",
+          "from_id": "new_paying_subscribers_per_month",
+          "to_id": "paying_subscribers",
+          "sensitivity_type": "existence",
+          "sensitivity_score": 0.07593799747455447,
+          "direction": "negative",
+          "elasticity": -0.0006935758746422139,
+          "importance_rank": 5,
+          "interpretation": "Decision is robust to whether new_paying_subscribers_per_month->paying_subscribers exists"
+        },
+        {
+          "edge_id": "new_paying_subscribers_per_month->paying_subscribers",
+          "from_id": "new_paying_subscribers_per_month",
+          "to_id": "paying_subscribers",
+          "sensitivity_type": "magnitude",
+          "sensitivity_score": 0.0472069653921687,
+          "direction": "positive",
+          "elasticity": 0.0004311624404113274,
+          "importance_rank": 6,
+          "interpretation": "Decision is robust to effect size variation in new_paying_subscribers_per_month->paying_subscribers"
+        }
+      ]
+    },
+    "factor_sensitivity": [
+      {
+        "node_id": "pro_plan_price",
+        "label": "Pro plan price",
+        "sensitivity_score": 0.0,
+        "importance_score": 1.0,
+        "elasticity": 0.0,
+        "elasticity_display": 0.0,
+        "direction": "negative",
+        "confidence": 0.75,
+        "confidence_source": "graph_structural",
+        "confidence_provenance": {
+          "method_version": "graph-structural-v1",
+          "calibrated": false
+        },
+        "importance_rank": 1,
+        "observed_value": 0.245,
+        "interpretation": "Factor Pro plan price has no uncertainty (point mass)",
+        "value_source": "brief_extraction",
+        "zero_reason": "point_mass",
+        "baseline_near_zero": false,
+        "influence_score": 1.0,
+        "influence_rank": 1
+      },
+      {
+        "node_id": "paying_subscribers",
+        "label": "Paying subscribers",
+        "sensitivity_score": 0.0,
+        "importance_score": 0.6666666666666667,
+        "elasticity": 0.0,
+        "elasticity_display": 0.0,
+        "direction": "negative",
+        "confidence": 0.6716,
+        "confidence_source": "graph_structural",
+        "confidence_provenance": {
+          "method_version": "graph-structural-v1",
+          "calibrated": false
+        },
+        "importance_rank": 2,
+        "observed_value": 0.3,
+        "interpretation": "Decision is robust to Paying subscribers value variation",
+        "value_source": "brief_extraction",
+        "zero_reason": "zero_outcome_diff",
+        "baseline_near_zero": false,
+        "influence_score": 0.8431064860698161,
+        "influence_rank": 2
+      },
+      {
+        "node_id": "monthly_churn",
+        "label": "Monthly churn",
+        "sensitivity_score": 0.0,
+        "importance_score": 0.33333333333333337,
+        "elasticity": 0.0,
+        "elasticity_display": 0.0,
+        "direction": "negative",
+        "confidence": 0.3512,
+        "confidence_source": "graph_structural",
+        "confidence_provenance": {
+          "method_version": "graph-structural-v1",
+          "calibrated": false
+        },
+        "importance_rank": 3,
+        "observed_value": 0.035,
+        "interpretation": "Decision is robust to Monthly churn value variation",
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "zero_reason": "zero_outcome_diff",
+        "baseline_near_zero": false,
+        "influence_score": 0.20234555665675585,
+        "influence_rank": 3
+      },
+      {
+        "node_id": "new_paying_subscribers_per_month",
+        "label": "New paying subscribers per month",
+        "sensitivity_score": 0.0,
+        "importance_score": 0.0,
+        "elasticity": 0.0,
+        "elasticity_display": 0.0,
+        "direction": "negative",
+        "confidence": 0.3174,
+        "confidence_source": "graph_structural",
+        "confidence_provenance": {
+          "method_version": "graph-structural-v1",
+          "calibrated": false
+        },
+        "importance_rank": 4,
+        "observed_value": 0.09,
+        "interpretation": "Decision is robust to New paying subscribers per month value variation",
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "zero_reason": "zero_outcome_diff",
+        "baseline_near_zero": false,
+        "influence_score": 0.13489703777117062,
+        "influence_rank": 4
+      }
+    ],
+    "inference_warnings": [
+      {
+        "code": "GOAL_DIRECTION_UNATTESTED",
+        "field": "goal_direction",
+        "detail": {
+          "goal_node_id": "mrr",
+          "assumed_sense": "maximise",
+          "reason": "goal_direction_absent",
+          "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective."
+        },
+        "severity": "warning"
+      }
+    ],
+    "p_win_sensitivity": [
+      {
+        "factor_id": "monthly_churn",
+        "p_win_delta": 0.012,
+        "p_win_delta_percentage_points": 1.2,
+        "current_metric": 0.868,
+        "perfect_metric": 0.88,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "new_paying_subscribers_per_month",
+        "p_win_delta": 0.0065,
+        "p_win_delta_percentage_points": 0.65,
+        "current_metric": 0.868,
+        "perfect_metric": 0.8745,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "paying_subscribers",
+        "p_win_delta": 0.0025,
+        "p_win_delta_percentage_points": 0.25,
+        "current_metric": 0.868,
+        "perfect_metric": 0.8705,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "pro_plan_price",
+        "p_win_delta": 0.0,
+        "p_win_delta_percentage_points": 0.0,
+        "current_metric": 0.868,
+        "perfect_metric": 0.8605,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": true,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      }
+    ],
+    "decision_evpi": 0.0,
+    "factor_evppi": [
+      {
+        "factor_id": "paying_subscribers",
+        "evppi": 0.0,
+        "evppi_raw": -0.0,
+        "baseline_max_expected_utility": 0.84455,
+        "conditional_max_expected_utility": 0.84455,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": true,
+        "clamped_high": false,
+        "noise_floor": 0.0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      },
+      {
+        "factor_id": "monthly_churn",
+        "evppi": 0.0,
+        "evppi_raw": -0.0,
+        "baseline_max_expected_utility": 0.84455,
+        "conditional_max_expected_utility": 0.84455,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": true,
+        "clamped_high": false,
+        "noise_floor": 0.0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      },
+      {
+        "factor_id": "new_paying_subscribers_per_month",
+        "evppi": 0.0,
+        "evppi_raw": -0.0,
+        "baseline_max_expected_utility": 0.84455,
+        "conditional_max_expected_utility": 0.84455,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": true,
+        "clamped_high": false,
+        "noise_floor": 0.0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      }
+    ],
+    "factor_flip_values": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "direction": "increase",
+        "flip_reason": "found",
+        "alternative_winner_id": "status_quo",
+        "baseline_winner_id": "raise_pro_price_to_59",
+        "stability": {
+          "n_seeds": 10,
+          "n_seeds_flipped": 10,
+          "band_min": 0.295,
+          "band_median": 0.295,
+          "band_max": 0.295,
+          "band_width": 0.0,
+          "seed_flip_values": [
+            0.295,
+            0.295,
+            0.295,
+            0.295,
+            0.295,
+            0.295,
+            0.295,
+            0.295,
+            0.295,
+            0.295
+          ]
+        }
+      },
+      {
+        "factor_id": "new_paying_subscribers_per_month",
+        "current_value": 0.09,
+        "flip_reason": "structurally_invariant",
+        "baseline_winner_id": "raise_pro_price_to_59"
+      }
+    ],
+    "sensitivity_reference_option_id": "raise_pro_price_to_59",
+    "node_levels": [
+      {
+        "node_id": "mrr",
+        "frame": "anchored_level",
+        "level_anchor_source": "user_stated",
+        "observed_source": "brief_extraction",
+        "level": 0.7058823529411765,
+        "level_domain_min": 0.0,
+        "level_out_of_domain_share": {
+          "raise_pro_price_to_59": 0.0,
+          "status_quo": 0.0
+        }
+      },
+      {
+        "node_id": "paying_subscribers",
+        "frame": "anchored_level",
+        "level_anchor_source": "user_stated",
+        "observed_source": "brief_extraction",
+        "level": 0.3,
+        "level_domain_min": 0.0,
+        "parameter_uncertainty_unused": true
+      },
+      {
+        "node_id": "monthly_churn",
+        "frame": "anchored_level",
+        "level_anchor_source": "olumi_estimate",
+        "observed_source": "cee_inference",
+        "level": 0.035,
+        "level_domain_min": 0.0,
+        "level_domain_max": 1.0,
+        "level_out_of_domain_share": {
+          "raise_pro_price_to_59": 0.0,
+          "status_quo": 0.0
+        },
+        "parameter_uncertainty_unused": true
+      }
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "structural_influence": [
+      {
+        "node_id": "pro_plan_price",
+        "influence_score": 1.0,
+        "influence_rank": 1
+      },
+      {
+        "node_id": "paying_subscribers",
+        "influence_score": 0.8431064860698161,
+        "influence_rank": 2
+      },
+      {
+        "node_id": "monthly_churn",
+        "influence_score": 0.20234555665675585,
+        "influence_rank": 3
+      },
+      {
+        "node_id": "new_paying_subscribers_per_month",
+        "influence_score": 0.13489703777117062,
+        "influence_rank": 4
+      }
+    ],
+    "auto_noise_applied": false,
+    "sample_population_provenance": {
+      "auto_scaled_noise_applied": false,
+      "calibration_status": "uncalibrated_poc_heuristic",
+      "metric_populations": {
+        "expected_regret": "model_only",
+        "win_probability": "model_only",
+        "factor_evppi": "model_only",
+        "factor_evpc": "model_only",
+        "decision_evpi": "model_only",
+        "p05": "model_only",
+        "p10": "model_only",
+        "p50": "model_only",
+        "p90": "model_only",
+        "mean": "model_only",
+        "cvar_10": "model_only",
+        "probability_of_goal": "model_only"
+      },
+      "unnoised_constraint_node_ids": []
+    },
+    "request_id": "ssr2-A-cur-s1254899477-s1254899477",
+    "processing_time_ms": 1499,
+    "seed_used": "1254899477",
+    "seed_source": "client_provided"
+  }
+}
