@@ -42,6 +42,37 @@ When an important assumption has only a point estimate, can Olumi ask for the sm
 KEEP only if the elicited range licenses a genuinely new per-option robustness/threshold claim, or reveals a crossing
 inside the range that the point estimate could not support. Otherwise KILL.
 
-## Status
+## Run it
 
-Skeleton only. Runs, results, payload and coaching example follow in later commits on this branch.
+From the ISL repo root, after `poetry install`, with three read-only checkouts at the pinned heads:
+
+```bash
+git worktree add --detach /tmp/isl-regions 68e8c8874eed528422db186852d3a5a1da9a27da   # R3-B + SCI-REGIONS
+git worktree add --detach /tmp/isl-sr 6f7f9b43da3d6e43bfa4d1061e9322aafd607fb6        # A-graph control pins
+git -C <olumi-programme-docs> worktree add --detach /tmp/evidence ef108360           # frozen SCI-EVIDENCE
+poetry run python experiments/sci_evidence_range_v1/run.py \
+  --r3b-root /tmp/isl-regions/experiments \
+  --control-root /tmp/isl-sr/acceptance-evidence/structural-robustness-20260930 \
+  --evidence-root /tmp/evidence/research/sci-evidence-v1
+```
+
+About 15 s. Deterministic: two runs give byte-identical outputs (SHA-256s in `manifest.json`).
+
+## Files
+
+| File | Contents |
+|---|---|
+| `payload.json` | The experimental payload: identity, quantity, before/after capability, findings, control, caveats, verdict |
+| `coaching.md` | The five-step user interaction, generated from the results |
+| `classification.json` | Step 1: every quantity on the R3-B graph with its uncertainty status and why it was or wasn't chosen |
+| `results/r3b.json` | Per-option sweep across the range (both readings), threshold band, goal crossings, controls |
+| `results/control.json` | Production-path control: reproduction of the served response, before/after per option, change sizes |
+| `results/cards.json` | Frozen Evidence adapter lines: the real served card, and the control's before/after bodies |
+| `manifest.json` | Heads, input/code/output SHA-256s, provider runs NOT_RUN |
+| `run.py`, `build_payload.py` | The runner and the payload/coaching builder (figures only from `results/`) |
+
+## Result
+
+**KEEP (for Science review).** See `payload.json` → `verdict` and `newly_available_finding`, and `coaching.md`.
+The production-path control shows today's product cannot yet deliver this for a shared observable
+(`payload.json` → `production_path_control`).
