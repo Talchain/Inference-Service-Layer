@@ -1,0 +1,60 @@
+{
+  "A": {
+    "leading_option_id": null,
+    "goal_figures": {
+      "raise_to_59": {
+        "probability_of_goal": null,
+        "win_probability": null,
+        "mean": null
+      },
+      "keep_49_price": {
+        "probability_of_goal": null,
+        "win_probability": null,
+        "mean": null
+      }
+    },
+    "warning_codes": [
+      "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "GOAL_DIRECTION_UNATTESTED",
+      "GOAL_FIGURES_PRODUCT_NOT_READ"
+    ]
+  },
+  "B": {
+    "leading_option_id": "raise_to_59",
+    "goal_figures": {
+      "raise_to_59": {
+        "probability_of_goal": 1,
+        "win_probability": 1,
+        "mean": 89780.26270413389
+      },
+      "keep_49_price": {
+        "probability_of_goal": 0,
+        "win_probability": 0,
+        "mean": 74999.99999999999
+      }
+    },
+    "warning_codes": [
+      "EDGE_E_VALUE_NON_FINITE_DROPPED",
+      "GOAL_DIRECTION_UNATTESTED"
+    ]
+  },
+  "C": {
+    "leading_option_id": null,
+    "goal_figures": {
+      "raise_to_59": {
+        "probability_of_goal": null,
+        "win_probability": null,
+        "mean": null
+      },
+      "keep_49_price": {
+        "probability_of_goal": null,
+        "win_probability": null,
+        "mean": null
+      }
+    },
+    "warning_codes": [
+      "GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED",
+      "GOAL_DIRECTION_UNATTESTED"
+    ]
+  }
+}

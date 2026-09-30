@@ -1,0 +1,2523 @@
+{
+  "status": 200,
+  "ms": 21946,
+  "body": {
+    "request_schema_version": "v3",
+    "endpoint_version": "v2/run",
+    "preflight_version": "2025-12-26",
+    "request_id": "req-ssr-B",
+    "analysis_status": "computed",
+    "approximate": false,
+    "option_comparison_status": "computed",
+    "robustness_status": "computed",
+    "drivers_status": "computed",
+    "constraints_status": "computed",
+    "constraint_results": [
+      {
+        "constraint_id": "agent-lane:monthly_churn:<=",
+        "node_id": "monthly_churn",
+        "operator": "<=",
+        "value": 5,
+        "probability": 1,
+        "option_id": "raise_to_59",
+        "scale_provenance": {
+          "source": "unit_percent",
+          "range_unified": true,
+          "decision_grade": true
+        },
+        "frame_verdict": "scored"
+      }
+    ],
+    "constraint_diagnostics": [
+      {
+        "constraint_id": "agent-lane:monthly_churn:<=",
+        "binding": false
+      }
+    ],
+    "conditional_probabilities": [],
+    "auto_noise_applied": false,
+    "auto_noise_provenance": {
+      "applied": false,
+      "effect": "widens_outcome_and_risk_uncertainty",
+      "formula_version": "plot_auto_v1",
+      "multiplier": 1,
+      "noise_distribution": "normal_zero_mean_outcome_std",
+      "filter_scope": "outcome_and_risk_nodes",
+      "is_provisional": true,
+      "calibration_status": "provisional_pending_pilot_calibration"
+    },
+    "isl_analysis_status": "computed",
+    "critiques": [
+      {
+        "id": "1730dfbc-9e92-4afd-adf1-8df8829d9bf2",
+        "code": "MIXED_RANGE_DERIVATION",
+        "severity": "info",
+        "message": "Factors use 3 different range derivation tiers. Normalisation quality may vary.",
+        "source": "validation",
+        "affected_node_ids": [
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "mrr",
+          "non_pro_mrr",
+          "pro_paying_subscribers",
+          "pro_plan_price"
+        ],
+        "blocks_analysis": false,
+        "user_message": "Factors use different methods to determine their value ranges. Normalisation quality may vary."
+      },
+      {
+        "id": "22486ed2-3561-48bf-9a1e-43a66ba5647c",
+        "code": "CONSTRAINT_MISSING_RANGE",
+        "severity": "info",
+        "message": "Constraint \"agent-lane:monthly_churn:<=\" target node \"monthly_churn\" has no derivable range. Constraint value will be compared as-is by ISL.",
+        "source": "validation",
+        "affected_node_ids": [
+          "monthly_churn"
+        ],
+        "blocks_analysis": false,
+        "user_message": "The constraint on Monthly churn cannot be range-checked. The constraint value will be used as-is."
+      },
+      {
+        "id": "8af63f8f-94b3-47c5-b725-a9b5f825fd85",
+        "code": "NORMALIZATION_WARNING",
+        "severity": "info",
+        "message": "Node 'raise_to_59' has kind='option'. Option nodes are filtered before analysis.",
+        "source": "validation",
+        "blocks_analysis": false,
+        "user_message": "An option was excluded from factor analysis. This is expected."
+      },
+      {
+        "id": "180e6aba-c03b-476d-80c0-c1dc4b6757ec",
+        "code": "NORMALIZATION_WARNING",
+        "severity": "info",
+        "message": "Node 'keep_49_price' has kind='option'. Option nodes are filtered before analysis.",
+        "source": "validation",
+        "blocks_analysis": false,
+        "user_message": "An option was excluded from factor analysis. This is expected."
+      },
+      {
+        "id": "a6f6f7b2-1254-417a-a655-72f293675066",
+        "code": "NORMALIZATION_WARNING",
+        "severity": "info",
+        "message": "Node 'raise_to_54' has kind='option'. Option nodes are filtered before analysis.",
+        "source": "validation",
+        "blocks_analysis": false,
+        "user_message": "An option was excluded from factor analysis. This is expected."
+      },
+      {
+        "id": "critique_98fd350dae5c",
+        "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "severity": "warning",
+        "message": "Option 'Keep £49 price' has zero variance — intervention may have no causal path to goal",
+        "suggestion": "Check that intervention targets are connected to the goal with non-zero edge strengths",
+        "source": "isl",
+        "affected_option_ids": [
+          "keep_49_price"
+        ],
+        "blocks_analysis": false,
+        "user_message": "This option's result has no spread: every figure it depends on is set exactly."
+      },
+      {
+        "id": "critique_e8da6c251253",
+        "code": "FACTOR_STABILITY_ANCHORED",
+        "severity": "info",
+        "message": "Sensitivity stability is withheld for monthly_churn, monthly_new_pro_subscribers, non_pro_mrr, pro_paying_subscribers, pro_plan_price: every path from them to the goal runs through mrr, which is anchored to its stated level, so the one-at-a-time check cannot see them",
+        "suggestion": "Read the structural influence and the options' outcomes for these factors instead",
+        "source": "isl",
+        "affected_node_ids": [
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "non_pro_mrr",
+          "pro_paying_subscribers",
+          "pro_plan_price"
+        ],
+        "blocks_analysis": false,
+        "user_message": "We found something worth checking in your model, but we do not yet have a plain-English explanation for this one. Open the advanced details for the technical note, then re-run the analysis — if it keeps happening, send us that note and we will look into it."
+      }
+    ],
+    "option_comparison": [
+      {
+        "option_id": "raise_to_59",
+        "option_label": "Raise to £59",
+        "id": "raise_to_59",
+        "label": "Raise to £59",
+        "outcome": {
+          "mean": 89780.26270413389,
+          "std": 339.54108135613626,
+          "p10": 89296.44293301941,
+          "p50": 89883.91745104251,
+          "p90": 90061.22448979592,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1,
+          "percentiles_source": "samples"
+        },
+        "status": "computed",
+        "probability_of_goal": 1,
+        "win_probability": 1,
+        "downside": {
+          "cvar_10": 0.8380258493999545,
+          "p05": 0.8386766549722536,
+          "expected_regret": 0
+        },
+        "probability_of_joint_goal": 1,
+        "constraint_probabilities": {
+          "agent-lane:monthly_churn:<=": 1
+        },
+        "constraints_decision_grade": true,
+        "constraint_margins": [
+          {
+            "constraint_id": "agent-lane:monthly_churn:<=",
+            "level_out_of_domain_fraction": 0
+          }
+        ]
+      },
+      {
+        "option_id": "keep_49_price",
+        "option_label": "Keep £49 price",
+        "id": "keep_49_price",
+        "label": "Keep £49 price",
+        "outcome": {
+          "mean": 74999.99999999999,
+          "std": 2.3592239273284576e-11,
+          "p10": 75000,
+          "p50": 75000,
+          "p90": 75000,
+          "n_samples": 10000,
+          "n_valid_samples": 10000,
+          "validity_ratio": 1,
+          "percentiles_source": "samples"
+        },
+        "status": "computed",
+        "probability_of_goal": 0,
+        "win_probability": 0,
+        "downside": {
+          "cvar_10": 0.7058823529411762,
+          "p05": 0.7058823529411765,
+          "expected_regret": 0.13910835486243656
+        },
+        "probability_of_joint_goal": 1,
+        "constraint_probabilities": {
+          "agent-lane:monthly_churn:<=": 1
+        },
+        "constraints_decision_grade": true,
+        "constraint_margins": [
+          {
+            "constraint_id": "agent-lane:monthly_churn:<=",
+            "level_out_of_domain_fraction": 0
+          }
+        ]
+      }
+    ],
+    "edge_sensitivity": [
+      {
+        "edge_id": "monthly_churn::pro_paying_subscribers",
+        "from": "monthly_churn",
+        "to": "pro_paying_subscribers",
+        "from_label": "Monthly churn",
+        "to_label": "Pro paying subscribers",
+        "sensitivity_type": "existence",
+        "elasticity": -413.2114581821085,
+        "importance_rank": 1,
+        "interpretation": "Decision is robust to whether monthly_churn->pro_paying_subscribers exists"
+      },
+      {
+        "edge_id": "pro_plan_price::monthly_churn",
+        "from": "pro_plan_price",
+        "to": "monthly_churn",
+        "from_label": "Pro plan price",
+        "to_label": "Monthly churn",
+        "sensitivity_type": "existence",
+        "elasticity": -393.27038426288317,
+        "importance_rank": 2,
+        "interpretation": "Decision is robust to whether pro_plan_price->monthly_churn exists"
+      },
+      {
+        "edge_id": "pro_plan_price::monthly_churn",
+        "from": "pro_plan_price",
+        "to": "monthly_churn",
+        "from_label": "Pro plan price",
+        "to_label": "Monthly churn",
+        "sensitivity_type": "magnitude",
+        "elasticity": -231.65061089183965,
+        "importance_rank": 3,
+        "interpretation": "Decision is robust to effect size variation in pro_plan_price->monthly_churn"
+      },
+      {
+        "edge_id": "monthly_churn::pro_paying_subscribers",
+        "from": "monthly_churn",
+        "to": "pro_paying_subscribers",
+        "from_label": "Monthly churn",
+        "to_label": "Pro paying subscribers",
+        "sensitivity_type": "magnitude",
+        "elasticity": 172.8052035397226,
+        "importance_rank": 4,
+        "interpretation": "Decision is robust to effect size variation in monthly_churn->pro_paying_subscribers"
+      },
+      {
+        "edge_id": "monthly_new_pro_subscribers::pro_paying_subscribers",
+        "from": "monthly_new_pro_subscribers",
+        "to": "pro_paying_subscribers",
+        "from_label": "Monthly new Pro subscribers",
+        "to_label": "Pro paying subscribers",
+        "sensitivity_type": "existence",
+        "elasticity": -87.89937538827336,
+        "importance_rank": 5,
+        "interpretation": "Decision is robust to whether monthly_new_pro_subscribers->pro_paying_subscribers exists"
+      },
+      {
+        "edge_id": "non_pro_mrr::mrr",
+        "from": "non_pro_mrr",
+        "to": "mrr",
+        "from_label": "Non-Pro MRR",
+        "to_label": "MRR",
+        "sensitivity_type": "existence",
+        "elasticity": -51.32223122434701,
+        "importance_rank": 6,
+        "interpretation": "Decision is robust to whether non_pro_mrr->mrr exists"
+      },
+      {
+        "edge_id": "monthly_new_pro_subscribers::pro_paying_subscribers",
+        "from": "monthly_new_pro_subscribers",
+        "to": "pro_paying_subscribers",
+        "from_label": "Monthly new Pro subscribers",
+        "to_label": "Pro paying subscribers",
+        "sensitivity_type": "magnitude",
+        "elasticity": -32.79104982574274,
+        "importance_rank": 7,
+        "interpretation": "Decision is robust to effect size variation in monthly_new_pro_subscribers->pro_paying_subscribers"
+      },
+      {
+        "edge_id": "non_pro_mrr::mrr",
+        "from": "non_pro_mrr",
+        "to": "mrr",
+        "from_label": "Non-Pro MRR",
+        "to_label": "MRR",
+        "sensitivity_type": "magnitude",
+        "elasticity": 14.195985770031339,
+        "importance_rank": 8,
+        "interpretation": "Decision is robust to effect size variation in non_pro_mrr->mrr"
+      }
+    ],
+    "sensitivity_reference_option_id": "raise_to_59",
+    "decision_evpi": 0,
+    "factor_evppi": [
+      {
+        "factor_id": "pro_paying_subscribers",
+        "evppi": 0,
+        "evppi_raw": 0,
+        "baseline_max_expected_utility": 0.844991,
+        "conditional_max_expected_utility": 0.844991,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": false,
+        "clamped_high": true,
+        "noise_floor": 0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      },
+      {
+        "factor_id": "monthly_churn",
+        "evppi": 0,
+        "evppi_raw": 0,
+        "baseline_max_expected_utility": 0.844991,
+        "conditional_max_expected_utility": 0.844991,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": false,
+        "clamped_high": true,
+        "noise_floor": 0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "evppi": 0,
+        "evppi_raw": 0,
+        "baseline_max_expected_utility": 0.844991,
+        "conditional_max_expected_utility": 0.844991,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": false,
+        "clamped_high": true,
+        "noise_floor": 0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "evppi": 0,
+        "evppi_raw": 0,
+        "baseline_max_expected_utility": 0.844991,
+        "conditional_max_expected_utility": 0.844991,
+        "units": "outcome",
+        "method": "regression_evppi_v1",
+        "regression_degree": 4,
+        "n_samples": 10000,
+        "clamped_low": false,
+        "clamped_high": true,
+        "noise_floor": 0,
+        "status": "below_resolution",
+        "correlation_active": false,
+        "status_reason": "at_or_below_noise_floor"
+      }
+    ],
+    "p_win_sensitivity": [
+      {
+        "factor_id": "pro_plan_price",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 1,
+        "perfect_metric": 1,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "pro_paying_subscribers",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 1,
+        "perfect_metric": 1,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "monthly_churn",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 1,
+        "perfect_metric": 1,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 1,
+        "perfect_metric": 1,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "p_win_delta": 0,
+        "p_win_delta_percentage_points": 0,
+        "current_metric": 1,
+        "perfect_metric": 1,
+        "metric_type": "p_joint_goal",
+        "method": "p_win_delta_at_mean_v1",
+        "n_samples": 2000,
+        "status": "below_resolution",
+        "clamped": false,
+        "noise_floor": 0.03099,
+        "noise_floor_method": "z95_worst_case_bernoulli_diff",
+        "labelling_doctrine": "provisional_doctrine_v0"
+      }
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500,
+          "stated": 75000,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "edge_e_values": [],
+    "conditional_winners": [],
+    "factor_sensitivity": [
+      {
+        "factor_id": "pro_paying_subscribers",
+        "factor_label": "Pro paying subscribers",
+        "influence_score": 0.8296759861291723,
+        "influence_rank": 2,
+        "sensitivity_score": 0.5,
+        "elasticity": 0.5312500000000001,
+        "direction": "positive",
+        "importance_rank": 1,
+        "value_of_information": 0,
+        "confidence": 0.4,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.8,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "value_source": "brief_extraction",
+        "influence_basis": "isl_structural",
+        "importance_basis": "isl_structural",
+        "driver_label": "biggest",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "explicit_cap"
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "factor_label": "Non-Pro MRR",
+        "influence_score": 0.26981332882249504,
+        "influence_rank": 3,
+        "sensitivity_score": 0.9411764705882352,
+        "elasticity": 1,
+        "direction": "positive",
+        "importance_rank": 2,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "influence_basis": "isl_structural",
+        "importance_basis": "isl_structural",
+        "driver_label": "moderate",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "inferred_value"
+      },
+      {
+        "factor_id": "monthly_churn",
+        "factor_label": "Monthly churn",
+        "influence_score": 0.19912223667100135,
+        "influence_rank": 4,
+        "sensitivity_score": -0.15,
+        "elasticity": 0.15937500000000002,
+        "direction": "negative",
+        "importance_rank": 3,
+        "value_of_information": 0,
+        "confidence": 0.4,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "standard"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.8,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "influence_basis": "isl_structural",
+        "importance_basis": "isl_structural",
+        "driver_label": "minor",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "inferred_baseline"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "factor_label": "Monthly new Pro subscribers",
+        "influence_score": 0.0663740788903338,
+        "influence_rank": 5,
+        "sensitivity_score": 0.05,
+        "elasticity": 0.05312500000000001,
+        "direction": "positive",
+        "importance_rank": 4,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "value_source": "cee_inference",
+        "value_extraction_type": "inferred",
+        "influence_basis": "isl_structural",
+        "importance_basis": "isl_structural",
+        "driver_label": "minor",
+        "evpi_percentage_points": 0,
+        "evpi_method": "heuristic",
+        "evidence_hint": false,
+        "range_derivation_source": "inferred_value"
+      },
+      {
+        "factor_id": "pro_plan_price",
+        "factor_label": "Pro plan price",
+        "influence_score": 1,
+        "influence_rank": 1,
+        "sensitivity_score": 0,
+        "elasticity": 0,
+        "direction": "positive",
+        "importance_rank": 5,
+        "value_of_information": 0,
+        "confidence": 0.5,
+        "confidence_source": "plot_unified_from_graph",
+        "confidence_provenance": {
+          "computation_source": "plot_unified_from_graph",
+          "formula_version": "plot_unified_v2",
+          "is_provisional": true,
+          "calibration_status": "provisional_pending_pilot_calibration",
+          "input_quality": "degenerate_fallback"
+        },
+        "confidence_components": {
+          "structural_certainty": 0.5,
+          "sampling_stability": null
+        },
+        "zero_reason": "intervention_override",
+        "source": "graph",
+        "flip_risk_category": "negligible",
+        "value_source": "brief_extraction",
+        "influence_basis": "isl_structural",
+        "importance_basis": "isl_structural",
+        "driver_label": "strong",
+        "range_derivation_source": "explicit_cap"
+      }
+    ],
+    "driver_order": {
+      "version": 1,
+      "basis": "isl_structural",
+      "ranked_factor_ids": [
+        "pro_paying_subscribers",
+        "non_pro_mrr",
+        "monthly_churn",
+        "monthly_new_pro_subscribers",
+        "pro_plan_price"
+      ],
+      "species": "single",
+      "lever_policy": "du_union",
+      "lever_ids": [
+        "pro_plan_price"
+      ],
+      "separability": {
+        "top_pair_separable": true,
+        "method": "relative_gap_0.10_provisional"
+      },
+      "rank_stability": {
+        "max_rank_flip_rate": null,
+        "min_attribution_stability": null
+      }
+    },
+    "factor_stability": [],
+    "inference_warnings": [
+      {
+        "code": "EDGE_E_VALUE_NON_FINITE_DROPPED",
+        "message": "4 edge E-value entries were omitted from edge_e_values: 4 carried no finite E-value from the analysis engine (an unflippable edge, whose current and flip means coincide, has no evidence ratio). edge_e_values is shorter because those entries could not be represented, not because they were computed empty. All other analyses are unaffected.",
+        "severity": "info"
+      },
+      {
+        "code": "GOAL_DIRECTION_UNATTESTED",
+        "message": "No objective sense was stated for the goal node, so options were ranked by largest goal value. That is an assumption, not the team's stated aim: if the goal is a quantity to reduce, or the aim is to land near a target rather than as high as possible, this ranking answers a different question. Send goal_direction to rank against the stated objective.",
+        "severity": "warning",
+        "field": "goal_direction"
+      }
+    ],
+    "m1_coaching": {
+      "story_headlines": {
+        "raise_to_59": "Raise to £59 outperforms by 100 points with high confidence",
+        "keep_49_price": "Runner-up with 0% win probability"
+      },
+      "evidence_gaps": [
+        {
+          "factor_id": "pro_paying_subscribers",
+          "factor_label": "Pro paying subscribers",
+          "voi_score": 0.41483799306458613,
+          "confidence": 0.5,
+          "confidence_defaulted": true,
+          "influence": 0.8296759861291723,
+          "influence_display": "83%",
+          "suggestion": "Confidence in \"Pro paying subscribers\" has not been measured; no measured evidence says learning it would change which option leads.",
+          "notes": [
+            "Confidence not measured by ISL; ordered with a neutral default"
+          ],
+          "value": 0.3,
+          "raw_value": 1500,
+          "unit": "subscribers",
+          "cap": 5000,
+          "evpi_percentage_points": 41.5,
+          "evpi_method": "heuristic"
+        },
+        {
+          "factor_id": "non_pro_mrr",
+          "factor_label": "Non-Pro MRR",
+          "voi_score": 0.13490666441124752,
+          "confidence": 0.5,
+          "confidence_defaulted": true,
+          "influence": 0.26981332882249504,
+          "influence_display": "27%",
+          "suggestion": "Confidence in \"Non-Pro MRR\" has not been measured; no measured evidence says learning it would change which option leads.",
+          "notes": [
+            "Confidence not measured by ISL; ordered with a neutral default"
+          ],
+          "value": 0.015,
+          "raw_value": 1500,
+          "unit": "£/month",
+          "evpi_percentage_points": 13.5,
+          "evpi_method": "heuristic"
+        },
+        {
+          "factor_id": "monthly_churn",
+          "factor_label": "Monthly churn",
+          "voi_score": 0.09956111833550067,
+          "confidence": 0.5,
+          "confidence_defaulted": true,
+          "influence": 0.19912223667100135,
+          "influence_display": "20%",
+          "suggestion": "Confidence in \"Monthly churn\" has not been measured; no measured evidence says learning it would change which option leads.",
+          "notes": [
+            "Confidence not measured by ISL; ordered with a neutral default"
+          ],
+          "value": 0.03,
+          "raw_value": 3,
+          "unit": "%",
+          "evpi_percentage_points": 10,
+          "evpi_method": "heuristic"
+        }
+      ],
+      "model_critiques": [
+        {
+          "type": "INFLUENTIAL_EXTERNALS",
+          "severity": "warn",
+          "challenge_question": "External factors Non-Pro MRR significantly affect your outcome but are inherently uncertain. How might you bound these?",
+          "suggested_action": "Consider converting to observable (if you can estimate baseline) or add proxy factors with explicit 0-1 scales",
+          "targets": [
+            "non_pro_mrr"
+          ]
+        },
+        {
+          "type": "NARROW_FRAMING",
+          "severity": "blocker",
+          "challenge_question": "Only 2 options without a baseline. Are you missing alternatives?",
+          "suggested_action": "Consider adding 'Status Quo' to anchor comparisons",
+          "context": {
+            "count": 2
+          }
+        }
+      ],
+      "next_actions": [
+        {
+          "priority": 1,
+          "action": "Reconsider framing — add alternatives or Status Quo baseline",
+          "rationale": "With only 2 options and no baseline, comparisons may be misleading",
+          "related_critique": "NARROW_FRAMING"
+        }
+      ],
+      "readiness": "needs_framing",
+      "headline_type": "clear_winner",
+      "assumptions_ledger": {
+        "assumptions": [
+          {
+            "dedup_key": "plot_normaliser:removed:global:unknown:goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+            "source_service": "plot_normaliser",
+            "action": "removed",
+            "entity_type": "global",
+            "entity_id": "unknown",
+            "field": "goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+            "from_value": "{\"unit\":\"%\"}",
+            "to_value": "null",
+            "reason": "Non-canonical fields stripped before ISL: unit",
+            "impact": "low",
+            "impact_reason_code": "STRUCTURAL_ONLY",
+            "audience": "internal"
+          },
+          {
+            "dedup_key": "plot_normaliser:normalised:global:unknown:intervention.value.pro_plan_price",
+            "source_service": "plot_normaliser",
+            "action": "normalised",
+            "entity_type": "global",
+            "entity_id": "unknown",
+            "field": "intervention.value.pro_plan_price",
+            "from_value": 59,
+            "to_value": 0.295,
+            "reason": "normalised range=[0,200] source=explicit_cap",
+            "impact": "low",
+            "impact_reason_code": "STRUCTURAL_ONLY",
+            "audience": "internal"
+          },
+          {
+            "dedup_key": "plot_normaliser:normalised:global:unknown:constraint.value.agent-lane:monthly_churn:<=",
+            "source_service": "plot_normaliser",
+            "action": "normalised",
+            "entity_type": "global",
+            "entity_id": "unknown",
+            "field": "constraint.value.agent-lane:monthly_churn:<=",
+            "from_value": 5,
+            "to_value": 0.05,
+            "reason": "normalised range=[0,100] source=unit_percent",
+            "impact": "low",
+            "impact_reason_code": "STRUCTURAL_ONLY",
+            "audience": "internal"
+          }
+        ],
+        "total_count": 3,
+        "high_impact_count": 0,
+        "medium_impact_count": 0,
+        "low_impact_count": 3,
+        "user_count": 0,
+        "user_high_impact_count": 0
+      },
+      "thresholds_used": {
+        "headline_clear_winner_delta": 0.2,
+        "headline_clear_winner_stability": 0.7,
+        "headline_moderate_winner_delta": 0.1,
+        "headline_moderate_winner_stability": 0.5,
+        "headline_close_call_delta": 0.1,
+        "headline_high_uncertainty_voi": 0.3,
+        "headline_high_uncertainty_fragile": 0.25,
+        "headline_fragile_edge_min": 0.15,
+        "evidence_gap_min_voi": 0,
+        "evidence_gap_top_quartile": true,
+        "evidence_gap_floor": 3,
+        "evidence_gap_cap": 3,
+        "critique_dominant_factor_threshold": 0.5,
+        "critique_influential_external_quartile": 0.25,
+        "critique_narrow_framing_max_options": 2,
+        "critique_anchoring_baseline_value": 0.5,
+        "critique_overconfidence_threshold": 0.85,
+        "action_fragile_edge_threshold": 0.2,
+        "action_high_voi_threshold": 0.4,
+        "readiness_high_evidence_gap_count": 2,
+        "readiness_high_voi_threshold": 0.4,
+        "readiness_joint_prob_floor": 0.05,
+        "readiness_joint_prob_close_call": 0.3,
+        "tone_confident_stability_min": 0.75,
+        "tone_low_driver_confidence_max": 0.5
+      },
+      "readiness_signals": {
+        "overall": "needs_framing",
+        "overall_score": 0.25,
+        "computed_score_raw": 0.82,
+        "dimensions": {
+          "evidence_quality": 0.8,
+          "model_robustness": 1,
+          "framing_quality": 0.5
+        },
+        "signals": [
+          {
+            "dimension": "evidence",
+            "signal": "3 evidence gaps",
+            "impact": "negative",
+            "weight": 0.2
+          },
+          {
+            "dimension": "robustness",
+            "signal": "High recommendation stability",
+            "impact": "positive",
+            "weight": 0.2
+          },
+          {
+            "dimension": "robustness",
+            "signal": "Clear 100-point margin",
+            "impact": "positive",
+            "weight": 0.15
+          },
+          {
+            "dimension": "framing",
+            "signal": "Narrow framing detected",
+            "impact": "negative",
+            "weight": 0.5
+          }
+        ]
+      },
+      "key_drivers": [
+        {
+          "factor_id": "pro_paying_subscribers",
+          "factor_label": "Pro paying subscribers",
+          "influence_score": 0.83,
+          "normalised_impact": 0.83,
+          "impact_display": "Very High",
+          "direction": "positive",
+          "rank": 1
+        },
+        {
+          "factor_id": "non_pro_mrr",
+          "factor_label": "Non-Pro MRR",
+          "influence_score": 0.27,
+          "normalised_impact": 0.27,
+          "impact_display": "Medium",
+          "direction": "positive",
+          "rank": 2
+        },
+        {
+          "factor_id": "monthly_churn",
+          "factor_label": "Monthly churn",
+          "influence_score": 0.199,
+          "normalised_impact": 0.2,
+          "impact_display": "Low",
+          "direction": "negative",
+          "rank": 3
+        },
+        {
+          "factor_id": "monthly_new_pro_subscribers",
+          "factor_label": "Monthly new Pro subscribers",
+          "influence_score": 0.066,
+          "normalised_impact": 0.07,
+          "impact_display": "Low",
+          "direction": "positive",
+          "rank": 4
+        },
+        {
+          "factor_id": "pro_plan_price",
+          "factor_label": "Pro plan price",
+          "influence_score": 1,
+          "normalised_impact": 1,
+          "impact_display": "Very High",
+          "direction": "positive",
+          "rank": 5
+        }
+      ],
+      "executive_summary": {
+        "summary": "Raise to £59 currently leads by 100 points on the current model. The decision framing should be reconsidered before proceeding. Reconsider the decision framing and alternatives.",
+        "decision_statement": "Raise to £59 currently leads by 100 points on the current model.",
+        "key_qualifier": "The decision framing should be reconsidered before proceeding.",
+        "action_implication": "Reconsider the decision framing and alternatives."
+      },
+      "readiness_tone": "tempered",
+      "readiness_reasons": [
+        "EVIDENCE_GAPS",
+        "INSUFFICIENT_SIGNALS",
+        "TOP_DRIVER_UNMEASURED"
+      ],
+      "coaching_version": "1.2.0",
+      "computed_at": "2026-09-30T11:17:25.036Z"
+    },
+    "confidence_tier": "needs_work",
+    "flip_thresholds": [
+      {
+        "factor_id": "pro_plan_price",
+        "factor_label": "Pro plan price",
+        "current_value": 49,
+        "flip_value": 59,
+        "direction": "increase",
+        "unit": "£ per subscriber per month",
+        "alternative_winner_id": "keep_49_price",
+        "alternative_winner_label": "Keep £49 price",
+        "flip_reason": "found",
+        "iterations_used": 0,
+        "probes_used": 0,
+        "value_scale": "display",
+        "current_display": "49 £ per subscriber per month",
+        "flip_display": "59 £ per subscriber per month"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "factor_label": "Monthly new Pro subscribers",
+        "current_value": 0.0162,
+        "flip_value": null,
+        "unit": "subscribers/month",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null,
+        "flip_reason": "structurally_invariant",
+        "iterations_used": 0,
+        "probes_used": 0,
+        "no_flip_in_range": true
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "factor_label": "Non-Pro MRR",
+        "current_value": 0.00045,
+        "flip_value": null,
+        "unit": "£/month",
+        "alternative_winner_id": null,
+        "alternative_winner_label": null,
+        "flip_reason": "structurally_invariant",
+        "iterations_used": 0,
+        "probes_used": 0,
+        "no_flip_in_range": true
+      }
+    ],
+    "flip_thresholds_status": "partial_no_effect",
+    "flip_thresholds_margin_status": "unavailable",
+    "flip_thresholds_margin_coverage": {
+      "total": 3,
+      "with_margin": 0,
+      "without_margin": 3
+    },
+    "identifiability": {
+      "status": "identifiable",
+      "method": "backdoor",
+      "pairs_checked": 1,
+      "pairs_identifiable": 1
+    },
+    "m1_review": null,
+    "review_status": "disabled",
+    "robustness": {
+      "fragile_edges": [],
+      "robust_edges": [
+        {
+          "edge_id": "monthly_churn->pro_paying_subscribers",
+          "from_id": "monthly_churn",
+          "to_id": "pro_paying_subscribers",
+          "from_label": "Monthly churn",
+          "to_label": "Pro paying subscribers",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "monthly_new_pro_subscribers->pro_paying_subscribers",
+          "from_id": "monthly_new_pro_subscribers",
+          "to_id": "pro_paying_subscribers",
+          "from_label": "Monthly new Pro subscribers",
+          "to_label": "Pro paying subscribers",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "non_pro_mrr->mrr",
+          "from_id": "non_pro_mrr",
+          "to_id": "mrr",
+          "from_label": "Non-Pro MRR",
+          "to_label": "MRR",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        },
+        {
+          "edge_id": "pro_plan_price->monthly_churn",
+          "from_id": "pro_plan_price",
+          "to_id": "monthly_churn",
+          "from_label": "Pro plan price",
+          "to_label": "Monthly churn",
+          "alternative_winner_id": null,
+          "alternative_winner_label": null
+        }
+      ],
+      "is_robust": true,
+      "level": "high",
+      "confidence": 1,
+      "confidence_basis": "recommendation_stability_uncalibrated",
+      "recommended_option_id": "raise_to_59",
+      "recommended_option_label": "Raise to £59",
+      "recommended_option_compliance": "compliant",
+      "recommended_option_compliance_reason": "this option met every limit you set, in all the scenarios we tested",
+      "near_tie": {
+        "is_tie": false,
+        "top_option_id": "raise_to_59",
+        "second_option_id": "keep_49_price",
+        "tied_option_ids": [
+          "raise_to_59"
+        ],
+        "gap": 1,
+        "threshold": 0.1
+      },
+      "display_verdict": "robust",
+      "display_verdict_reason": "this run held up under the changes we tested"
+    },
+    "robustness_synthesis": null,
+    "cee_status": "skipped",
+    "decision_quality": null,
+    "insights": null,
+    "improvement_guidance": null,
+    "rationale": null,
+    "ceeTrace": {
+      "requestId": "req-ssr-B",
+      "degraded": false,
+      "timestamp": "2026-09-30T11:17:25.032Z",
+      "source": "orchestrator",
+      "reason": "CEE feature disabled"
+    },
+    "processing_time_ms": 21639.610957999997,
+    "response_hash": "054010e8571b24f6",
+    "decision_brief": {
+      "brief_id": "955c17a1-66cd-4daa-877c-41b66eeb8572",
+      "version": "1",
+      "graph_hash": "054010e8571b24f6",
+      "seed": 1254899477,
+      "created_at": "2026-09-30T11:17:25.066Z",
+      "headline": "Raise to £59 currently leads by 100 points on the current model. The decision framing should be reconsidered before proceeding. Reconsider the decision framing and alternatives.",
+      "options": [
+        {
+          "option_id": "raise_to_59",
+          "label": "Raise to £59",
+          "win_probability": 1,
+          "rank": 1
+        },
+        {
+          "option_id": "keep_49_price",
+          "label": "Keep £49 price",
+          "win_probability": 0,
+          "rank": 2
+        }
+      ],
+      "top_drivers": [
+        {
+          "factor_label": "Pro paying subscribers",
+          "sensitivity": 0.5312500000000001,
+          "direction": "positive"
+        },
+        {
+          "factor_label": "Non-Pro MRR",
+          "sensitivity": 1,
+          "direction": "positive"
+        },
+        {
+          "factor_label": "Monthly churn",
+          "sensitivity": 0.15937500000000002,
+          "direction": "negative"
+        },
+        {
+          "factor_label": "Monthly new Pro subscribers",
+          "sensitivity": 0.05312500000000001,
+          "direction": "positive"
+        }
+      ],
+      "key_assumptions": [
+        "Pro paying subscribers",
+        "Non-Pro MRR",
+        "Monthly churn"
+      ],
+      "what_would_change": [],
+      "robustness": "robust",
+      "warnings": [
+        {
+          "code": "NARROW_FRAMING",
+          "message": "Only 2 options without a baseline. Are you missing alternatives?",
+          "severity": "error"
+        },
+        {
+          "code": "DEGENERATE_OPTION_ZERO_VARIANCE",
+          "message": "Option 'Keep £49 price' has zero variance — intervention may have no causal path to goal",
+          "severity": "warning"
+        },
+        {
+          "code": "INFLUENTIAL_EXTERNALS",
+          "message": "External factors Non-Pro MRR significantly affect your outcome but are inherently uncertain. How might you bound these?",
+          "severity": "warning"
+        },
+        {
+          "code": "M2_UNAVAILABLE",
+          "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+          "severity": "warning"
+        }
+      ],
+      "lineage": {
+        "config_version": "00e0edce70a2",
+        "response_hash": "054010e8571b24f6",
+        "n_samples": 10000
+      },
+      "headline_banded": {
+        "text": "Raise to £59 is clearly ahead.",
+        "band": "clearly_ahead",
+        "leader_option_id": "raise_to_59",
+        "leader_label": "Raise to £59",
+        "runner_up_option_id": "keep_49_price",
+        "runner_up_label": "Keep £49 price",
+        "win_probability_gap": 1,
+        "robustness_gated": false,
+        "doctrine": "provisional_doctrine_v0"
+      },
+      "defaulted_assumptions": [],
+      "robustness_caveat": {
+        "text": "This run held up under the changes we tested. That is not a guarantee. Defaulted or uncertain inputs could still change it.",
+        "basis": "is_robust",
+        "flip_evidence": {
+          "status": "partial_no_effect",
+          "text": "Changing at least one tested factor on its own could change which option is most likely to achieve your goal. The other factors we could test could not."
+        },
+        "doctrine": "provisional_doctrine_v0"
+      },
+      "warning_codes": [
+        "GOAL_DIRECTION_UNATTESTED"
+      ]
+    },
+    "review_cards": [],
+    "fact_objects": [],
+    "_meta": {
+      "source_path": "isl",
+      "repairs_applied": [
+        {
+          "field": "goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+          "action": "removed",
+          "from_value": "{\"unit\":\"%\"}",
+          "to_value": "null",
+          "reason": "Non-canonical fields stripped before ISL: unit",
+          "code": "STRIP_RAW_CONSTRAINT_FIELDS",
+          "layer": "plot",
+          "field_path": "goal_constraints[constraint_id=agent-lane:monthly_churn:<=]",
+          "before": {
+            "unit": "%"
+          },
+          "after": null,
+          "severity": "info"
+        },
+        {
+          "field": "intervention.value.pro_plan_price",
+          "action": "normalised",
+          "from_value": 59,
+          "to_value": 0.295,
+          "reason": "normalised range=[0,200] source=explicit_cap",
+          "code": "LEGACY_REPAIR",
+          "layer": "plot",
+          "field_path": "intervention.value.pro_plan_price",
+          "before": 59,
+          "after": 0.295,
+          "severity": "info"
+        },
+        {
+          "field": "constraint.value.agent-lane:monthly_churn:<=",
+          "action": "normalised",
+          "from_value": 5,
+          "to_value": 0.05,
+          "reason": "normalised range=[0,100] source=unit_percent",
+          "code": "LEGACY_REPAIR",
+          "layer": "plot",
+          "field_path": "constraint.value.agent-lane:monthly_churn:<=",
+          "before": 5,
+          "after": 0.05,
+          "severity": "info"
+        }
+      ],
+      "request_id": "req-ssr-B",
+      "plot_build": "af4cd56",
+      "hash_version": 8,
+      "response_hash": "054010e8571b24f6",
+      "request_id_chain": {
+        "ui": "req-ssr-B",
+        "plot": "req-ssr-B",
+        "isl": "req-ssr-B",
+        "isl_echoed": "req-ssr-B",
+        "cee": null,
+        "cee_echoed": null,
+        "all_match": true,
+        "chain_complete": true
+      },
+      "constraint_sources": {},
+      "range_derivation_sources": {
+        "mrr": "explicit_cap",
+        "pro_plan_price": "explicit_cap",
+        "pro_paying_subscribers": "explicit_cap",
+        "monthly_churn": "inferred_baseline",
+        "monthly_new_pro_subscribers": "inferred_value",
+        "non_pro_mrr": "inferred_value"
+      },
+      "evidence": {
+        "plot_build": "af4cd56",
+        "isl_build": "dev",
+        "isl_request_digest": {
+          "sha256": "41786498fb8c7c1e7ddfa0f797ad8cea6ea47f9dc3b4c9cc90af0da351c7c01b",
+          "bytes": 3390,
+          "key_manifest": [
+            "analysis_types",
+            "goal_constraints",
+            "goal_node_id",
+            "goal_threshold",
+            "goal_threshold_frame",
+            "goal_threshold_strict",
+            "graph",
+            "include_e_values",
+            "include_factor_flips",
+            "include_voi",
+            "n_samples",
+            "options",
+            "parameter_uncertainties",
+            "request_id",
+            "seed"
+          ]
+        },
+        "isl_response_digest": {
+          "sha256": "8535283c36f5965815bc1fe7dc3f60c8c80e9ce7360a15aa01c9e0c15d12c0c5",
+          "bytes": 17451,
+          "key_manifest": [
+            "analysis_status",
+            "auto_noise_applied",
+            "build",
+            "critiques",
+            "decision_evpi",
+            "endpoint_version",
+            "engine_version",
+            "factor_evppi",
+            "factor_flip_values",
+            "factor_sensitivity",
+            "factor_sensitivity_status",
+            "identity_evaluations",
+            "inference_warnings",
+            "node_levels",
+            "objective_ranking",
+            "options",
+            "p_win_sensitivity",
+            "processing_time_ms",
+            "request_echo",
+            "request_id",
+            "robustness",
+            "robustness_status",
+            "sample_population_provenance",
+            "seed_source",
+            "seed_used",
+            "sensitivity_reference_option_id",
+            "structural_influence",
+            "timestamp",
+            "version"
+          ]
+        },
+        "isl_wire_generation_ok": true,
+        "enrichment_contract_schema_parsed": true,
+        "enrichment_contract_ok": true,
+        "enrichment_contract_withheld": []
+      },
+      "feature_flags_snapshot": {
+        "SCM_LITE_ENABLE": "0",
+        "PROD_SCM_LITE_PLACEHOLDER": "0",
+        "ADAPTIVE_K_ENABLE": "0",
+        "CONFIDENCE_CALIBRATED": "0",
+        "IDENT_TAG_ENABLE": "0",
+        "PROVENANCE_ENABLE": "0",
+        "ENABLE_DUAL_BELIEFS": "0",
+        "ENABLE_NOISY_OR": "0",
+        "ENABLE_LOGISTIC": "0",
+        "ENABLE_NOISY_AND_NOT": "0",
+        "ENABLE_MIXED_COMBINATION": "0",
+        "ENABLE_TRACE_CACHING": "0",
+        "ENABLE_STRATIFIED_SAMPLING": "0",
+        "ENABLE_IMPORTANCE_SAMPLING": "0",
+        "ENABLE_OPTION_PROBABILITIES": "0",
+        "RATE_LIMIT_ENABLED": "1",
+        "TOKEN_RL_ENABLE": "0",
+        "RL_CB_ENABLE": "0",
+        "PROMETHEUS_METRICS": "0",
+        "PROMETHEUS_ENABLE": "0",
+        "OPS_SNAPSHOT_ENABLE": "0",
+        "METRICS": "0",
+        "AUTH_ENABLED": "0",
+        "AUTH_V2_ENABLED": "0",
+        "TEST_ROUTES": "0",
+        "CORS_DEV": "0",
+        "OPENAPI_DEV": "0",
+        "COMPARE_VIEW_ENABLE": "0",
+        "INSPECTOR_DEBUG_ENABLE": "0",
+        "FEATURE_STREAM": "0",
+        "STREAM_PARITY_ENABLE": "0",
+        "WHATIF_DELTA_ENABLE": "0",
+        "CEE_ORCHESTRATOR_ENABLED": "0",
+        "DECISION_REVIEW_ENABLE": "0",
+        "ENABLE_FACTS_ASSEMBLY": "0",
+        "ENABLE_REVIEW_PASS": "0",
+        "ENABLE_VALIDATE_PATCH": "0",
+        "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+        "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "0"
+      },
+      "decision_brief_assembled": true,
+      "review_cards_count": 0,
+      "evidence_priority_card_present": false,
+      "response_content_hash": "rch_v2:13c01540edfc8c14"
+    },
+    "downstream_calls": {
+      "isl": [
+        {
+          "service": "isl",
+          "endpoint": "/api/v1/robustness/analyze/v2",
+          "status": 200,
+          "elapsed_ms": 21147,
+          "payload_hash": "9b4e0bcd2f97",
+          "response_hash": "3159e5d7e595",
+          "request_id": "req-ssr-B",
+          "request_payload": {
+            "request_id": "sha8:703ba028",
+            "graph": {
+              "nodes": [
+                {
+                  "id": "sha8:a46700b8",
+                  "kind": "sha8:c257381e",
+                  "label": "sha8:be333acf",
+                  "observed_state": {
+                    "value": "sha8:555d4763",
+                    "baseline": "sha8:555d4763",
+                    "unit": "sha8:79f3db3e",
+                    "source": "sha8:41efc1e8",
+                    "raw_value": "sha8:d249f942",
+                    "cap": "sha8:f33951f1"
+                  },
+                  "intercept": "sha8:98ff0732",
+                  "epsilon_std": "sha8:98ff0732",
+                  "nonlinear_identity": {
+                    "operation": "sha8:d1ce5b95",
+                    "factor_ids": [
+                      "sha8:8c881a48",
+                      "sha8:308758da"
+                    ],
+                    "stated_in_brief": true
+                  },
+                  "sha8:ed62bd87": {
+                    "sha8:ef87eb97": "sha8:f33951f1",
+                    "sha8:de837284": "sha8:51ddd254"
+                  }
+                },
+                {
+                  "id": "sha8:8c881a48",
+                  "kind": "sha8:f7239ba2",
+                  "label": "sha8:e79ede92",
+                  "observed_state": {
+                    "value": "sha8:ad50c5d1",
+                    "unit": "sha8:651ab107",
+                    "source": "sha8:41efc1e8",
+                    "std": "sha8:43da8542",
+                    "raw_value": "sha8:d69ae890",
+                    "cap": "sha8:a557f589"
+                  },
+                  "intercept": "sha8:98ff0732",
+                  "epsilon_std": "sha8:98ff0732",
+                  "sha8:ed62bd87": {
+                    "sha8:ef87eb97": "sha8:a557f589",
+                    "sha8:de837284": "sha8:51ddd254"
+                  }
+                },
+                {
+                  "id": "sha8:308758da",
+                  "kind": "sha8:f7239ba2",
+                  "label": "sha8:3b70fce4",
+                  "observed_state": {
+                    "value": "sha8:cd18833f",
+                    "unit": "sha8:757cfb2b",
+                    "source": "sha8:41efc1e8",
+                    "std": "sha8:43da8542",
+                    "raw_value": "sha8:baf6e68c",
+                    "cap": "sha8:7feabfff"
+                  },
+                  "intercept": "sha8:98ff0732",
+                  "epsilon_std": "sha8:98ff0732",
+                  "sha8:ed62bd87": {
+                    "sha8:ef87eb97": "sha8:7feabfff",
+                    "sha8:de837284": "sha8:51ddd254"
+                  }
+                },
+                {
+                  "id": "sha8:0535956e",
+                  "kind": "sha8:f7239ba2",
+                  "label": "sha8:f17286bb",
+                  "observed_state": {
+                    "value": "sha8:23a4e0ba",
+                    "baseline": "sha8:23a4e0ba",
+                    "unit": "sha8:2b06a6a7",
+                    "source": "sha8:76dfceb0",
+                    "raw_value": "sha8:15b3a07c",
+                    "extractionType": "sha8:152b633e"
+                  },
+                  "intercept": "sha8:98ff0732",
+                  "epsilon_std": "sha8:98ff0732"
+                },
+                {
+                  "id": "sha8:6d199f5c",
+                  "kind": "sha8:f7239ba2",
+                  "label": "sha8:faa2a941",
+                  "observed_state": {
+                    "value": "sha8:3cfa1274",
+                    "unit": "sha8:feb718a0",
+                    "source": "sha8:76dfceb0",
+                    "raw_value": "sha8:318a045f",
+                    "extractionType": "sha8:152b633e"
+                  },
+                  "intercept": "sha8:98ff0732",
+                  "epsilon_std": "sha8:98ff0732"
+                },
+                {
+                  "id": "sha8:7acf3529",
+                  "kind": "sha8:f7239ba2",
+                  "label": "sha8:b95b7086",
+                  "observed_state": {
+                    "value": "sha8:d1801c8b",
+                    "unit": "sha8:79f3db3e",
+                    "source": "sha8:76dfceb0",
+                    "raw_value": "sha8:baf6e68c",
+                    "extractionType": "sha8:152b633e"
+                  },
+                  "intercept": "sha8:98ff0732",
+                  "epsilon_std": "sha8:98ff0732"
+                }
+              ],
+              "edges": [
+                {
+                  "from": "sha8:8c881a48",
+                  "to": "sha8:0535956e",
+                  "exists_probability": "sha8:23ec8b26",
+                  "strength": {
+                    "mean": "sha8:0eb70497",
+                    "std": "sha8:e4313468"
+                  }
+                },
+                {
+                  "from": "sha8:0535956e",
+                  "to": "sha8:308758da",
+                  "exists_probability": "sha8:23ec8b26",
+                  "strength": {
+                    "mean": "sha8:cc62434e",
+                    "std": "sha8:fb9db059"
+                  }
+                },
+                {
+                  "from": "sha8:6d199f5c",
+                  "to": "sha8:308758da",
+                  "exists_probability": "sha8:23ec8b26",
+                  "strength": {
+                    "mean": "sha8:0eb70497",
+                    "std": "sha8:e4313468"
+                  }
+                },
+                {
+                  "from": "sha8:8c881a48",
+                  "to": "sha8:a46700b8",
+                  "exists_probability": "sha8:23ec8b26",
+                  "strength": {
+                    "mean": "sha8:833a9b1a",
+                    "std": "sha8:9cc447e1"
+                  }
+                },
+                {
+                  "from": "sha8:308758da",
+                  "to": "sha8:a46700b8",
+                  "exists_probability": "sha8:23ec8b26",
+                  "strength": {
+                    "mean": "sha8:833a9b1a",
+                    "std": "sha8:9cc447e1"
+                  }
+                },
+                {
+                  "from": "sha8:7acf3529",
+                  "to": "sha8:a46700b8",
+                  "exists_probability": "sha8:23ec8b26",
+                  "strength": {
+                    "mean": "sha8:edaa5a9d",
+                    "std": "sha8:8f9f86fb"
+                  }
+                }
+              ]
+            },
+            "options": [
+              {
+                "id": "sha8:ed77b38d",
+                "label": "sha8:43be7021",
+                "interventions": {
+                  "sha8:8c881a48": "sha8:59edf190"
+                }
+              },
+              {
+                "id": "sha8:e86d9f07",
+                "label": "sha8:a84fb613",
+                "interventions": {
+                  "sha8:8c881a48": "sha8:ad50c5d1"
+                }
+              }
+            ],
+            "goal_node_id": "sha8:a46700b8",
+            "n_samples": "sha8:4beff890",
+            "analysis_types": [
+              "sha8:7f105d5d",
+              "sha8:203dd8df",
+              "sha8:a7a3c2d5"
+            ],
+            "parameter_uncertainties": [
+              {
+                "node_id": "sha8:8c881a48",
+                "distribution": "sha8:1942c0ed"
+              },
+              {
+                "node_id": "sha8:308758da",
+                "distribution": "sha8:ba951532",
+                "std": "sha8:43da8542"
+              },
+              {
+                "node_id": "sha8:0535956e",
+                "distribution": "sha8:ba951532",
+                "std": "sha8:0eb70497"
+              },
+              {
+                "node_id": "sha8:6d199f5c",
+                "distribution": "sha8:ba951532",
+                "std": "sha8:0eb70497"
+              },
+              {
+                "node_id": "sha8:7acf3529",
+                "distribution": "sha8:ba951532",
+                "std": "sha8:0eb70497"
+              }
+            ],
+            "include_e_values": true,
+            "include_voi": true,
+            "sha8:014551ca": true,
+            "goal_threshold": "sha8:23ec8b26",
+            "sha8:3b427f61": "sha8:5b22ba8a",
+            "goal_constraints": [
+              {
+                "constraint_id": "sha8:df83e644",
+                "node_id": "sha8:0535956e",
+                "operator": "sha8:6e37671b",
+                "value": "sha8:e4313468",
+                "label": "sha8:f17286bb",
+                "value_frame": "sha8:5b22ba8a",
+                "level_domain": {
+                  "min": "sha8:98ff0732",
+                  "max": "sha8:150b49c1"
+                }
+              }
+            ],
+            "goal_threshold_strict": true,
+            "seed": "sha8:6e01e784"
+          },
+          "response_payload": {
+            "version": "sha8:9b883907",
+            "endpoint_version": "sha8:f5d8ad75",
+            "sha8:4e742476": "sha8:5c9db4d5",
+            "build": "dev",
+            "timestamp": "sha8:32acd85c",
+            "analysis_status": "sha8:f50d73cd",
+            "robustness_status": "sha8:f50d73cd",
+            "sha8:cfa4d862": "sha8:f50d73cd",
+            "critiques": [
+              {
+                "id": "sha8:a6740f60",
+                "code": "sha8:4893fcf3",
+                "severity": "sha8:27f6305a",
+                "message": "sha8:ba90a84b",
+                "source": "sha8:3170590e",
+                "affected_option_ids": [
+                  "sha8:e86d9f07"
+                ],
+                "suggestion": "sha8:2ccb1dcc"
+              },
+              {
+                "id": "sha8:6e9f900e",
+                "code": "sha8:753eecc9",
+                "severity": "sha8:46737d50",
+                "message": "sha8:4c2bc9fa",
+                "source": "sha8:3170590e",
+                "affected_node_ids": [
+                  "sha8:0535956e",
+                  "sha8:6d199f5c",
+                  "sha8:7acf3529",
+                  "sha8:308758da",
+                  "sha8:8c881a48"
+                ],
+                "suggestion": "sha8:c4451232"
+              }
+            ],
+            "sha8:b5500e3d": {
+              "sha8:74b3d631": "sha8:bbeadaac",
+              "sha8:d113ab69": "sha8:bbeadaac",
+              "options_count": "sha8:1c9d43b6",
+              "sha8:6f0121ca": "sha8:c8ab29e9",
+              "n_samples": "sha8:4beff890",
+              "sha8:92bd01d3": "sha8:1c9d43b6",
+              "sha8:c64402d4": false
+            },
+            "sha8:2e174d4c": {
+              "direction": "sha8:ac639ce9",
+              "sha8:b66b0f7e": false,
+              "status": "sha8:f50d73cd"
+            },
+            "options": [
+              {
+                "id": "sha8:ed77b38d",
+                "label": "sha8:43be7021",
+                "outcome": {
+                  "mean": "sha8:b77b530e",
+                  "std": "sha8:3615c480",
+                  "p10": "sha8:f17376f0",
+                  "p50": "sha8:37880c12",
+                  "p90": "sha8:242e793e",
+                  "n_samples": "sha8:4beff890",
+                  "n_valid_samples": "sha8:4beff890",
+                  "validity_ratio": "sha8:150b49c1",
+                  "percentiles_source": "sha8:c751bd55"
+                },
+                "downside": {
+                  "cvar_10": "sha8:0632aa9f",
+                  "p05": "sha8:1ae50f0c",
+                  "expected_regret": "sha8:98ff0732"
+                },
+                "win_probability": "sha8:150b49c1",
+                "probability_of_goal": "sha8:150b49c1",
+                "constraint_analysis": {
+                  "constraints": [
+                    {
+                      "constraint_id": "sha8:df83e644",
+                      "node_id": "sha8:0535956e",
+                      "operator": "sha8:6e37671b",
+                      "threshold": "sha8:e4313468",
+                      "label": "sha8:f17286bb",
+                      "prob_satisfied": "sha8:150b49c1",
+                      "binding": false,
+                      "level_out_of_domain_fraction": "sha8:98ff0732",
+                      "frame_verdict": "sha8:b5cbfc75",
+                      "value": "sha8:e4313468"
+                    }
+                  ],
+                  "joint_probability": "sha8:150b49c1"
+                },
+                "status": "sha8:f50d73cd"
+              },
+              {
+                "id": "sha8:e86d9f07",
+                "label": "sha8:a84fb613",
+                "outcome": {
+                  "mean": "sha8:a0edfc7b",
+                  "std": "sha8:2bdfc34f",
+                  "p10": "sha8:555d4763",
+                  "p50": "sha8:555d4763",
+                  "p90": "sha8:555d4763",
+                  "n_samples": "sha8:4beff890",
+                  "n_valid_samples": "sha8:4beff890",
+                  "validity_ratio": "sha8:150b49c1",
+                  "percentiles_source": "sha8:c751bd55"
+                },
+                "downside": {
+                  "cvar_10": "sha8:fb75f20c",
+                  "p05": "sha8:555d4763",
+                  "expected_regret": "sha8:bd592329"
+                },
+                "win_probability": "sha8:98ff0732",
+                "probability_of_goal": "sha8:98ff0732",
+                "constraint_analysis": {
+                  "constraints": [
+                    {
+                      "constraint_id": "sha8:df83e644",
+                      "node_id": "sha8:0535956e",
+                      "operator": "sha8:6e37671b",
+                      "threshold": "sha8:e4313468",
+                      "label": "sha8:f17286bb",
+                      "prob_satisfied": "sha8:150b49c1",
+                      "binding": false,
+                      "level_out_of_domain_fraction": "sha8:98ff0732",
+                      "frame_verdict": "sha8:b5cbfc75",
+                      "value": "sha8:e4313468"
+                    }
+                  ],
+                  "joint_probability": "sha8:150b49c1"
+                },
+                "status": "sha8:f50d73cd"
+              }
+            ],
+            "robustness": {
+              "level": "sha8:c21915aa",
+              "confidence": "sha8:150b49c1",
+              "confidence_basis": "sha8:64daee76",
+              "is_robust": true,
+              "sha8:86c36d58": [],
+              "robust_edges": [
+                "sha8:2cb732e5",
+                "sha8:79329c2f",
+                "sha8:4ec13a69",
+                "sha8:dc3eabb8"
+              ],
+              "recommendation_stability": "sha8:150b49c1",
+              "edge_e_values": [
+                {
+                  "edge_id": "sha8:dc3eabb8",
+                  "from_id": "sha8:8c881a48",
+                  "to_id": "sha8:0535956e",
+                  "is_unflippable": true,
+                  "flip_direction": "sha8:fa5c0ee9",
+                  "current_mean": "sha8:0eb70497",
+                  "flip_mean": "sha8:0eb70497",
+                  "baseline_winner_id": "sha8:ed77b38d",
+                  "stability": {
+                    "n_seeds": "sha8:72cfc945",
+                    "n_seeds_flipped": "sha8:98ff0732",
+                    "seed_flip_means": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  }
+                },
+                {
+                  "edge_id": "sha8:2cb732e5",
+                  "from_id": "sha8:0535956e",
+                  "to_id": "sha8:308758da",
+                  "is_unflippable": true,
+                  "flip_direction": "sha8:fa5c0ee9",
+                  "current_mean": "sha8:cc62434e",
+                  "flip_mean": "sha8:cc62434e",
+                  "baseline_winner_id": "sha8:ed77b38d",
+                  "stability": {
+                    "n_seeds": "sha8:72cfc945",
+                    "n_seeds_flipped": "sha8:98ff0732",
+                    "seed_flip_means": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  }
+                },
+                {
+                  "edge_id": "sha8:79329c2f",
+                  "from_id": "sha8:6d199f5c",
+                  "to_id": "sha8:308758da",
+                  "is_unflippable": true,
+                  "flip_direction": "sha8:fa5c0ee9",
+                  "current_mean": "sha8:0eb70497",
+                  "flip_mean": "sha8:0eb70497",
+                  "baseline_winner_id": "sha8:ed77b38d",
+                  "stability": {
+                    "n_seeds": "sha8:72cfc945",
+                    "n_seeds_flipped": "sha8:98ff0732",
+                    "seed_flip_means": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  }
+                },
+                {
+                  "edge_id": "sha8:4ec13a69",
+                  "from_id": "sha8:7acf3529",
+                  "to_id": "sha8:a46700b8",
+                  "is_unflippable": true,
+                  "flip_direction": "sha8:fa5c0ee9",
+                  "current_mean": "sha8:edaa5a9d",
+                  "flip_mean": "sha8:edaa5a9d",
+                  "baseline_winner_id": "sha8:ed77b38d",
+                  "stability": {
+                    "n_seeds": "sha8:72cfc945",
+                    "n_seeds_flipped": "sha8:98ff0732",
+                    "seed_flip_means": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null
+                    ]
+                  }
+                }
+              ],
+              "edge_sensitivity": [
+                {
+                  "edge_id": "sha8:2cb732e5",
+                  "from_id": "sha8:0535956e",
+                  "to_id": "sha8:308758da",
+                  "sensitivity_type": "sha8:f52a979d",
+                  "sensitivity_score": "sha8:150b49c1",
+                  "direction": "sha8:880ca894",
+                  "elasticity": "sha8:3cb5074f",
+                  "importance_rank": "sha8:150b49c1",
+                  "interpretation": "sha8:07ff3283"
+                },
+                {
+                  "edge_id": "sha8:dc3eabb8",
+                  "from_id": "sha8:8c881a48",
+                  "to_id": "sha8:0535956e",
+                  "sensitivity_type": "sha8:f52a979d",
+                  "sensitivity_score": "sha8:276d895b",
+                  "direction": "sha8:880ca894",
+                  "elasticity": "sha8:39afdfb6",
+                  "importance_rank": "sha8:1c9d43b6",
+                  "interpretation": "sha8:b51b8fc2"
+                },
+                {
+                  "edge_id": "sha8:dc3eabb8",
+                  "from_id": "sha8:8c881a48",
+                  "to_id": "sha8:0535956e",
+                  "sensitivity_type": "sha8:174e9c0c",
+                  "sensitivity_score": "sha8:a828cd82",
+                  "direction": "sha8:880ca894",
+                  "elasticity": "sha8:e317effb",
+                  "importance_rank": "sha8:15b3a07c",
+                  "interpretation": "sha8:b55b313b"
+                },
+                {
+                  "edge_id": "sha8:2cb732e5",
+                  "from_id": "sha8:0535956e",
+                  "to_id": "sha8:308758da",
+                  "sensitivity_type": "sha8:174e9c0c",
+                  "sensitivity_score": "sha8:5287298d",
+                  "direction": "sha8:b6999ed2",
+                  "elasticity": "sha8:98e9af80",
+                  "importance_rank": "sha8:6e32d358",
+                  "interpretation": "sha8:c7b96857"
+                },
+                {
+                  "edge_id": "sha8:79329c2f",
+                  "from_id": "sha8:6d199f5c",
+                  "to_id": "sha8:308758da",
+                  "sensitivity_type": "sha8:f52a979d",
+                  "sensitivity_score": "sha8:10bb5f6a",
+                  "direction": "sha8:880ca894",
+                  "elasticity": "sha8:00f994c8",
+                  "importance_rank": "sha8:d28c5e38",
+                  "interpretation": "sha8:4c69f4cf"
+                },
+                {
+                  "edge_id": "sha8:4ec13a69",
+                  "from_id": "sha8:7acf3529",
+                  "to_id": "sha8:a46700b8",
+                  "sensitivity_type": "sha8:f52a979d",
+                  "sensitivity_score": "sha8:0444e53a",
+                  "direction": "sha8:880ca894",
+                  "elasticity": "sha8:4d7e6a29",
+                  "importance_rank": "sha8:bbeadaac",
+                  "interpretation": "sha8:70eabc3e"
+                },
+                {
+                  "edge_id": "sha8:79329c2f",
+                  "from_id": "sha8:6d199f5c",
+                  "to_id": "sha8:308758da",
+                  "sensitivity_type": "sha8:174e9c0c",
+                  "sensitivity_score": "sha8:1f23867b",
+                  "direction": "sha8:880ca894",
+                  "elasticity": "sha8:f9b146a6",
+                  "importance_rank": "sha8:8c8544c0",
+                  "interpretation": "sha8:faaa9c39"
+                },
+                {
+                  "edge_id": "sha8:4ec13a69",
+                  "from_id": "sha8:7acf3529",
+                  "to_id": "sha8:a46700b8",
+                  "sensitivity_type": "sha8:174e9c0c",
+                  "sensitivity_score": "sha8:34e3cfb8",
+                  "direction": "sha8:b6999ed2",
+                  "elasticity": "sha8:e455fe1f",
+                  "importance_rank": "sha8:4f545847",
+                  "interpretation": "sha8:625b191e"
+                }
+              ]
+            },
+            "factor_sensitivity": [
+              {
+                "node_id": "sha8:8c881a48",
+                "label": "sha8:e79ede92",
+                "sensitivity_score": "sha8:98ff0732",
+                "sha8:78e9c77c": "sha8:150b49c1",
+                "elasticity": "sha8:98ff0732",
+                "sha8:c95d9268": "sha8:98ff0732",
+                "direction": "sha8:880ca894",
+                "confidence": "sha8:ac0404bc",
+                "confidence_source": "sha8:cac899ea",
+                "confidence_provenance": {
+                  "method_version": "sha8:561a8dc2",
+                  "sha8:ee2cc9d5": false
+                },
+                "importance_rank": "sha8:150b49c1",
+                "sha8:23cb269c": "sha8:ad50c5d1",
+                "interpretation": "sha8:3475ae0b",
+                "value_source": "sha8:41efc1e8",
+                "zero_reason": "sha8:1942c0ed",
+                "sha8:ffca1d05": false,
+                "influence_score": "sha8:150b49c1",
+                "influence_rank": "sha8:150b49c1"
+              },
+              {
+                "node_id": "sha8:308758da",
+                "label": "sha8:3b70fce4",
+                "sensitivity_score": "sha8:98ff0732",
+                "sha8:78e9c77c": "sha8:ac0404bc",
+                "elasticity": "sha8:98ff0732",
+                "sha8:c95d9268": "sha8:98ff0732",
+                "direction": "sha8:880ca894",
+                "confidence": "sha8:56e2b5c8",
+                "confidence_source": "sha8:cac899ea",
+                "confidence_provenance": {
+                  "method_version": "sha8:561a8dc2",
+                  "sha8:ee2cc9d5": false
+                },
+                "importance_rank": "sha8:1c9d43b6",
+                "sha8:23cb269c": "sha8:cd18833f",
+                "interpretation": "sha8:bee4db75",
+                "value_source": "sha8:41efc1e8",
+                "zero_reason": "sha8:8dbe2a58",
+                "sha8:ffca1d05": false,
+                "influence_score": "sha8:8a4c6fd8",
+                "influence_rank": "sha8:1c9d43b6"
+              },
+              {
+                "node_id": "sha8:0535956e",
+                "label": "sha8:f17286bb",
+                "sensitivity_score": "sha8:98ff0732",
+                "sha8:78e9c77c": "sha8:833a9b1a",
+                "elasticity": "sha8:98ff0732",
+                "sha8:c95d9268": "sha8:98ff0732",
+                "direction": "sha8:880ca894",
+                "confidence": "sha8:a4359f70",
+                "confidence_source": "sha8:cac899ea",
+                "confidence_provenance": {
+                  "method_version": "sha8:561a8dc2",
+                  "sha8:ee2cc9d5": false
+                },
+                "importance_rank": "sha8:15b3a07c",
+                "sha8:23cb269c": "sha8:23a4e0ba",
+                "interpretation": "sha8:b1615ff7",
+                "value_source": "sha8:76dfceb0",
+                "value_extraction_type": "sha8:152b633e",
+                "zero_reason": "sha8:8dbe2a58",
+                "sha8:ffca1d05": false,
+                "influence_score": "sha8:1c63b8f7",
+                "influence_rank": "sha8:6e32d358"
+              },
+              {
+                "node_id": "sha8:6d199f5c",
+                "label": "sha8:faa2a941",
+                "sensitivity_score": "sha8:98ff0732",
+                "sha8:78e9c77c": "sha8:d70df4a3",
+                "elasticity": "sha8:98ff0732",
+                "sha8:c95d9268": "sha8:98ff0732",
+                "direction": "sha8:880ca894",
+                "confidence": "sha8:22cde6b5",
+                "confidence_source": "sha8:cac899ea",
+                "confidence_provenance": {
+                  "method_version": "sha8:561a8dc2",
+                  "sha8:ee2cc9d5": false
+                },
+                "importance_rank": "sha8:6e32d358",
+                "sha8:23cb269c": "sha8:3cfa1274",
+                "interpretation": "sha8:d721fd59",
+                "value_source": "sha8:76dfceb0",
+                "value_extraction_type": "sha8:152b633e",
+                "zero_reason": "sha8:8dbe2a58",
+                "sha8:ffca1d05": false,
+                "influence_score": "sha8:ff40f731",
+                "influence_rank": "sha8:d28c5e38"
+              },
+              {
+                "node_id": "sha8:7acf3529",
+                "label": "sha8:b95b7086",
+                "sensitivity_score": "sha8:98ff0732",
+                "sha8:78e9c77c": "sha8:98ff0732",
+                "elasticity": "sha8:98ff0732",
+                "sha8:c95d9268": "sha8:98ff0732",
+                "direction": "sha8:880ca894",
+                "confidence": "sha8:6e15c5cf",
+                "confidence_source": "sha8:cac899ea",
+                "confidence_provenance": {
+                  "method_version": "sha8:561a8dc2",
+                  "sha8:ee2cc9d5": false
+                },
+                "importance_rank": "sha8:d28c5e38",
+                "sha8:23cb269c": "sha8:d1801c8b",
+                "interpretation": "sha8:3cdcfe2e",
+                "value_source": "sha8:76dfceb0",
+                "value_extraction_type": "sha8:152b633e",
+                "zero_reason": "sha8:8dbe2a58",
+                "sha8:ffca1d05": false,
+                "influence_score": "sha8:14e1176a",
+                "influence_rank": "sha8:15b3a07c"
+              }
+            ],
+            "inference_warnings": [
+              {
+                "code": "sha8:157eb8ee",
+                "field": "sha8:6840e678",
+                "detail": {
+                  "goal_node_id": "sha8:a46700b8",
+                  "sha8:767b39d3": "sha8:ac639ce9",
+                  "reason": "sha8:785b3e97",
+                  "message": "sha8:d44defed"
+                },
+                "severity": "sha8:27f6305a"
+              }
+            ],
+            "p_win_sensitivity": [
+              {
+                "factor_id": "sha8:8c881a48",
+                "sha8:685b4dec": "sha8:98ff0732",
+                "sha8:ab02030e": "sha8:98ff0732",
+                "sha8:91075dc7": "sha8:150b49c1",
+                "sha8:af80119d": "sha8:150b49c1",
+                "sha8:406ed5f6": "sha8:22cb11ae",
+                "method": "sha8:cd067e98",
+                "n_samples": "sha8:8ccc4d5a",
+                "status": "sha8:e52efc19",
+                "sha8:f3fb78cd": false,
+                "sha8:eb4c4f5f": "sha8:107e4dff",
+                "sha8:37223824": "sha8:c9c27b61",
+                "sha8:c99083ee": "sha8:a93538c7"
+              },
+              {
+                "factor_id": "sha8:308758da",
+                "sha8:685b4dec": "sha8:98ff0732",
+                "sha8:ab02030e": "sha8:98ff0732",
+                "sha8:91075dc7": "sha8:150b49c1",
+                "sha8:af80119d": "sha8:150b49c1",
+                "sha8:406ed5f6": "sha8:22cb11ae",
+                "method": "sha8:cd067e98",
+                "n_samples": "sha8:8ccc4d5a",
+                "status": "sha8:e52efc19",
+                "sha8:f3fb78cd": false,
+                "sha8:eb4c4f5f": "sha8:107e4dff",
+                "sha8:37223824": "sha8:c9c27b61",
+                "sha8:c99083ee": "sha8:a93538c7"
+              },
+              {
+                "factor_id": "sha8:0535956e",
+                "sha8:685b4dec": "sha8:98ff0732",
+                "sha8:ab02030e": "sha8:98ff0732",
+                "sha8:91075dc7": "sha8:150b49c1",
+                "sha8:af80119d": "sha8:150b49c1",
+                "sha8:406ed5f6": "sha8:22cb11ae",
+                "method": "sha8:cd067e98",
+                "n_samples": "sha8:8ccc4d5a",
+                "status": "sha8:e52efc19",
+                "sha8:f3fb78cd": false,
+                "sha8:eb4c4f5f": "sha8:107e4dff",
+                "sha8:37223824": "sha8:c9c27b61",
+                "sha8:c99083ee": "sha8:a93538c7"
+              },
+              {
+                "factor_id": "sha8:6d199f5c",
+                "sha8:685b4dec": "sha8:98ff0732",
+                "sha8:ab02030e": "sha8:98ff0732",
+                "sha8:91075dc7": "sha8:150b49c1",
+                "sha8:af80119d": "sha8:150b49c1",
+                "sha8:406ed5f6": "sha8:22cb11ae",
+                "method": "sha8:cd067e98",
+                "n_samples": "sha8:8ccc4d5a",
+                "status": "sha8:e52efc19",
+                "sha8:f3fb78cd": false,
+                "sha8:eb4c4f5f": "sha8:107e4dff",
+                "sha8:37223824": "sha8:c9c27b61",
+                "sha8:c99083ee": "sha8:a93538c7"
+              },
+              {
+                "factor_id": "sha8:7acf3529",
+                "sha8:685b4dec": "sha8:98ff0732",
+                "sha8:ab02030e": "sha8:98ff0732",
+                "sha8:91075dc7": "sha8:150b49c1",
+                "sha8:af80119d": "sha8:150b49c1",
+                "sha8:406ed5f6": "sha8:22cb11ae",
+                "method": "sha8:cd067e98",
+                "n_samples": "sha8:8ccc4d5a",
+                "status": "sha8:e52efc19",
+                "sha8:f3fb78cd": false,
+                "sha8:eb4c4f5f": "sha8:107e4dff",
+                "sha8:37223824": "sha8:c9c27b61",
+                "sha8:c99083ee": "sha8:a93538c7"
+              }
+            ],
+            "decision_evpi": "sha8:98ff0732",
+            "factor_evppi": [
+              {
+                "factor_id": "sha8:308758da",
+                "sha8:3b10b207": "sha8:98ff0732",
+                "sha8:d107c9e5": "sha8:98ff0732",
+                "sha8:546a5f6a": "sha8:0c1104b1",
+                "sha8:ff8ebf04": "sha8:0c1104b1",
+                "sha8:9cb6917b": "sha8:0da1c42d",
+                "method": "sha8:fd3f481f",
+                "sha8:7afcd1f6": "sha8:6e32d358",
+                "n_samples": "sha8:4beff890",
+                "sha8:d77114ec": false,
+                "sha8:5b920f2a": true,
+                "sha8:eb4c4f5f": "sha8:98ff0732",
+                "status": "sha8:e52efc19",
+                "sha8:71715196": false,
+                "status_reason": "sha8:27d198aa"
+              },
+              {
+                "factor_id": "sha8:0535956e",
+                "sha8:3b10b207": "sha8:98ff0732",
+                "sha8:d107c9e5": "sha8:98ff0732",
+                "sha8:546a5f6a": "sha8:0c1104b1",
+                "sha8:ff8ebf04": "sha8:0c1104b1",
+                "sha8:9cb6917b": "sha8:0da1c42d",
+                "method": "sha8:fd3f481f",
+                "sha8:7afcd1f6": "sha8:6e32d358",
+                "n_samples": "sha8:4beff890",
+                "sha8:d77114ec": false,
+                "sha8:5b920f2a": true,
+                "sha8:eb4c4f5f": "sha8:98ff0732",
+                "status": "sha8:e52efc19",
+                "sha8:71715196": false,
+                "status_reason": "sha8:27d198aa"
+              },
+              {
+                "factor_id": "sha8:6d199f5c",
+                "sha8:3b10b207": "sha8:98ff0732",
+                "sha8:d107c9e5": "sha8:98ff0732",
+                "sha8:546a5f6a": "sha8:0c1104b1",
+                "sha8:ff8ebf04": "sha8:0c1104b1",
+                "sha8:9cb6917b": "sha8:0da1c42d",
+                "method": "sha8:fd3f481f",
+                "sha8:7afcd1f6": "sha8:6e32d358",
+                "n_samples": "sha8:4beff890",
+                "sha8:d77114ec": false,
+                "sha8:5b920f2a": true,
+                "sha8:eb4c4f5f": "sha8:98ff0732",
+                "status": "sha8:e52efc19",
+                "sha8:71715196": false,
+                "status_reason": "sha8:27d198aa"
+              },
+              {
+                "factor_id": "sha8:7acf3529",
+                "sha8:3b10b207": "sha8:98ff0732",
+                "sha8:d107c9e5": "sha8:98ff0732",
+                "sha8:546a5f6a": "sha8:0c1104b1",
+                "sha8:ff8ebf04": "sha8:0c1104b1",
+                "sha8:9cb6917b": "sha8:0da1c42d",
+                "method": "sha8:fd3f481f",
+                "sha8:7afcd1f6": "sha8:6e32d358",
+                "n_samples": "sha8:4beff890",
+                "sha8:d77114ec": false,
+                "sha8:5b920f2a": true,
+                "sha8:eb4c4f5f": "sha8:98ff0732",
+                "status": "sha8:e52efc19",
+                "sha8:71715196": false,
+                "status_reason": "sha8:27d198aa"
+              }
+            ],
+            "factor_flip_values": [
+              {
+                "factor_id": "sha8:8c881a48",
+                "current_value": "sha8:ad50c5d1",
+                "flip_value": "sha8:59edf190",
+                "direction": "sha8:fa5c0ee9",
+                "flip_reason": "sha8:188daac1",
+                "alternative_winner_id": "sha8:e86d9f07",
+                "baseline_winner_id": "sha8:ed77b38d",
+                "stability": {
+                  "n_seeds": "sha8:72cfc945",
+                  "n_seeds_flipped": "sha8:72cfc945",
+                  "band_min": "sha8:59edf190",
+                  "band_median": "sha8:59edf190",
+                  "band_max": "sha8:59edf190",
+                  "band_width": "sha8:98ff0732",
+                  "seed_flip_values": [
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190",
+                    "sha8:59edf190"
+                  ]
+                }
+              },
+              {
+                "factor_id": "sha8:6d199f5c",
+                "current_value": "sha8:3cfa1274",
+                "flip_reason": "sha8:4a7c007e",
+                "baseline_winner_id": "sha8:ed77b38d"
+              },
+              {
+                "factor_id": "sha8:7acf3529",
+                "current_value": "sha8:d1801c8b",
+                "flip_reason": "sha8:4a7c007e",
+                "baseline_winner_id": "sha8:ed77b38d"
+              }
+            ],
+            "sensitivity_reference_option_id": "sha8:ed77b38d",
+            "sha8:dff8b805": [
+              {
+                "node_id": "sha8:a46700b8",
+                "sha8:ef87eb97": "sha8:863f5d8e",
+                "sha8:f8da8dec": "sha8:61d2abd5",
+                "sha8:44d8f4c6": "sha8:41efc1e8",
+                "level": "sha8:555d4763",
+                "sha8:c5de2f37": "sha8:98ff0732",
+                "sha8:7d1bd2d2": {
+                  "sha8:ed77b38d": "sha8:98ff0732",
+                  "sha8:e86d9f07": "sha8:98ff0732"
+                }
+              },
+              {
+                "node_id": "sha8:308758da",
+                "sha8:ef87eb97": "sha8:863f5d8e",
+                "sha8:f8da8dec": "sha8:61d2abd5",
+                "sha8:44d8f4c6": "sha8:41efc1e8",
+                "level": "sha8:cd18833f",
+                "sha8:c5de2f37": "sha8:98ff0732",
+                "sha8:5b5759d8": true
+              },
+              {
+                "node_id": "sha8:0535956e",
+                "sha8:ef87eb97": "sha8:863f5d8e",
+                "sha8:f8da8dec": "sha8:5587fa25",
+                "sha8:44d8f4c6": "sha8:76dfceb0",
+                "level": "sha8:23a4e0ba",
+                "sha8:c5de2f37": "sha8:98ff0732",
+                "sha8:35d84e40": "sha8:150b49c1",
+                "sha8:7d1bd2d2": {
+                  "sha8:ed77b38d": "sha8:98ff0732",
+                  "sha8:e86d9f07": "sha8:98ff0732"
+                },
+                "sha8:5b5759d8": true
+              }
+            ],
+            "identity_evaluations": [
+              {
+                "node_id": "sha8:a46700b8",
+                "operation": "sha8:d1ce5b95",
+                "factor_ids": [
+                  "sha8:8c881a48",
+                  "sha8:308758da"
+                ],
+                "addends": [],
+                "stated_in_brief": true,
+                "evaluated": true,
+                "level_source": "sha8:5a3c5ad9",
+                "reconciliation": {
+                  "reconstructed": "sha8:272a73dd",
+                  "stated": "sha8:d249f942",
+                  "mismatch_share": "sha8:bbc98710"
+                }
+              }
+            ],
+            "structural_influence": [
+              {
+                "node_id": "sha8:8c881a48",
+                "influence_score": "sha8:150b49c1",
+                "influence_rank": "sha8:150b49c1"
+              },
+              {
+                "node_id": "sha8:308758da",
+                "influence_score": "sha8:8a4c6fd8",
+                "influence_rank": "sha8:1c9d43b6"
+              },
+              {
+                "node_id": "sha8:0535956e",
+                "influence_score": "sha8:1c63b8f7",
+                "influence_rank": "sha8:6e32d358"
+              },
+              {
+                "node_id": "sha8:6d199f5c",
+                "influence_score": "sha8:ff40f731",
+                "influence_rank": "sha8:d28c5e38"
+              },
+              {
+                "node_id": "sha8:7acf3529",
+                "influence_score": "sha8:14e1176a",
+                "influence_rank": "sha8:15b3a07c"
+              }
+            ],
+            "auto_noise_applied": false,
+            "sha8:fb80f066": {
+              "sha8:a66ff529": false,
+              "calibration_status": "sha8:0845d4ec",
+              "sha8:7a4e17c5": {
+                "expected_regret": "sha8:6532f9cb",
+                "win_probability": "sha8:6532f9cb",
+                "factor_evppi": "sha8:6532f9cb",
+                "sha8:a773d504": "sha8:6532f9cb",
+                "decision_evpi": "sha8:6532f9cb",
+                "p05": "sha8:6532f9cb",
+                "p10": "sha8:6532f9cb",
+                "p50": "sha8:6532f9cb",
+                "p90": "sha8:6532f9cb",
+                "mean": "sha8:6532f9cb",
+                "cvar_10": "sha8:6532f9cb",
+                "probability_of_goal": "sha8:6532f9cb"
+              },
+              "sha8:d5c4192e": []
+            },
+            "request_id": "sha8:703ba028",
+            "processing_time_ms": "sha8:c868c3cd",
+            "seed_used": "sha8:6e01e784",
+            "seed_source": "sha8:d6358b89"
+          },
+          "request_digest": {
+            "sha256": "41786498fb8c7c1e7ddfa0f797ad8cea6ea47f9dc3b4c9cc90af0da351c7c01b",
+            "bytes": 3390,
+            "key_manifest": [
+              "analysis_types",
+              "goal_constraints",
+              "goal_node_id",
+              "goal_threshold",
+              "goal_threshold_frame",
+              "goal_threshold_strict",
+              "graph",
+              "include_e_values",
+              "include_factor_flips",
+              "include_voi",
+              "n_samples",
+              "options",
+              "parameter_uncertainties",
+              "request_id",
+              "seed"
+            ]
+          },
+          "response_digest": {
+            "sha256": "8535283c36f5965815bc1fe7dc3f60c8c80e9ce7360a15aa01c9e0c15d12c0c5",
+            "bytes": 17451,
+            "key_manifest": [
+              "analysis_status",
+              "auto_noise_applied",
+              "build",
+              "critiques",
+              "decision_evpi",
+              "endpoint_version",
+              "engine_version",
+              "factor_evppi",
+              "factor_flip_values",
+              "factor_sensitivity",
+              "factor_sensitivity_status",
+              "identity_evaluations",
+              "inference_warnings",
+              "node_levels",
+              "objective_ranking",
+              "options",
+              "p_win_sensitivity",
+              "processing_time_ms",
+              "request_echo",
+              "request_id",
+              "robustness",
+              "robustness_status",
+              "sample_population_provenance",
+              "seed_source",
+              "seed_used",
+              "sensitivity_reference_option_id",
+              "structural_influence",
+              "timestamp",
+              "version"
+            ]
+          }
+        }
+      ]
+    },
+    "meta": {
+      "seed_used": "1254899477",
+      "seed_source": "client_generated",
+      "n_samples": 10000,
+      "detail_level": "standard",
+      "latency_ms": 21639.610957999997,
+      "normalization_ms": 61.972999999999956,
+      "validation_ms": 30.344750000000204,
+      "isl_ms": 21179.392208999998,
+      "cee_ms": 0,
+      "build": "af4cd56",
+      "computed_at": "2026-09-30T11:17:25.005329Z",
+      "request_id_chain": {
+        "ui": "req-ssr-B",
+        "plot": "req-ssr-B",
+        "isl": "req-ssr-B",
+        "isl_echoed": "req-ssr-B",
+        "cee": null,
+        "cee_echoed": null,
+        "all_match": true,
+        "chain_complete": true
+      },
+      "feature_flags": {
+        "SCM_LITE_ENABLE": "0",
+        "PROD_SCM_LITE_PLACEHOLDER": "0",
+        "ADAPTIVE_K_ENABLE": "0",
+        "CONFIDENCE_CALIBRATED": "0",
+        "IDENT_TAG_ENABLE": "0",
+        "PROVENANCE_ENABLE": "0",
+        "ENABLE_DUAL_BELIEFS": "0",
+        "ENABLE_NOISY_OR": "0",
+        "ENABLE_LOGISTIC": "0",
+        "ENABLE_NOISY_AND_NOT": "0",
+        "ENABLE_MIXED_COMBINATION": "0",
+        "ENABLE_TRACE_CACHING": "0",
+        "ENABLE_STRATIFIED_SAMPLING": "0",
+        "ENABLE_IMPORTANCE_SAMPLING": "0",
+        "ENABLE_OPTION_PROBABILITIES": "0",
+        "RATE_LIMIT_ENABLED": "1",
+        "TOKEN_RL_ENABLE": "0",
+        "RL_CB_ENABLE": "0",
+        "PROMETHEUS_METRICS": "0",
+        "PROMETHEUS_ENABLE": "0",
+        "OPS_SNAPSHOT_ENABLE": "0",
+        "METRICS": "0",
+        "AUTH_ENABLED": "0",
+        "AUTH_V2_ENABLED": "0",
+        "TEST_ROUTES": "0",
+        "CORS_DEV": "0",
+        "OPENAPI_DEV": "0",
+        "COMPARE_VIEW_ENABLE": "0",
+        "INSPECTOR_DEBUG_ENABLE": "0",
+        "FEATURE_STREAM": "0",
+        "STREAM_PARITY_ENABLE": "0",
+        "WHATIF_DELTA_ENABLE": "0",
+        "CEE_ORCHESTRATOR_ENABLED": "0",
+        "DECISION_REVIEW_ENABLE": "0",
+        "ENABLE_FACTS_ASSEMBLY": "0",
+        "ENABLE_REVIEW_PASS": "0",
+        "ENABLE_VALIDATE_PATCH": "0",
+        "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+        "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "0",
+        "facts_assembly": false,
+        "review_pass": false
+      }
+    }
+  }
+}

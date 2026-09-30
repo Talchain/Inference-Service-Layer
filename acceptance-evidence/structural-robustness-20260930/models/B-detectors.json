@@ -1,0 +1,24 @@
+{
+  "proposeProductIdentity_A": null,
+  "unreadGoalProduct_A": {
+    "goal": {
+      "id": "mrr",
+      "label": "MRR",
+      "level": 75000,
+      "unit": "£/month",
+      "typed": true
+    },
+    "rate": {
+      "id": "pro_plan_price",
+      "label": "Pro plan price",
+      "level": 49,
+      "unit": "£ per subscriber per month"
+    },
+    "count": {
+      "id": "pro_paying_subscribers",
+      "label": "Pro paying subscribers",
+      "level": 1500,
+      "unit": "subscribers"
+    }
+  }
+}

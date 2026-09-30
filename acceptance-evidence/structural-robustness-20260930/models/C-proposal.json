@@ -1,0 +1,9 @@
+{
+  "outcome_id": "mrr",
+  "operation": "product",
+  "factor_ids": [
+    "pro_plan_price",
+    "pro_paying_subscribers"
+  ],
+  "words": "Is “MRR” your “Pro plan price” × “Pro paying subscribers”? £49 × 1,500 = £73,500, close to your £75,000. If yes, Olumi will calculate “MRR” that way, and you can run the analysis again."
+}

@@ -1,0 +1,2530 @@
+{
+  "A-cur-s1254899477": {
+    "tag": "A-cur-s1254899477",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 4735,
+    "seed_sent": "1254899477",
+    "n_samples": 10000,
+    "seed_used": "1254899477",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77096.87431650796,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77410.28903292715,
+        "p90_gbp": 78370.01861881094,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8605
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.1395
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8605,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 0.53125,
+        "rank": 2,
+        "importance_rank": 1
+      },
+      "non_pro_mrr": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.1275,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.04250000000000001,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "pro_plan_price": {
+        "score": 0.52105,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": 200,
+      "recommended": "raise_to_59",
+      "display_verdict": "robust",
+      "level": "high",
+      "fragile_edges": [
+        "pro_plan_price->mrr"
+      ],
+      "goal_figures_shown": {
+        "raise_to_59": true,
+        "keep_49_price": true
+      },
+      "outcome_mean_shown": {
+        "raise_to_59": 77096.87431650796,
+        "keep_49_price": 74999.99999999999
+      },
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": {
+        "version": 1,
+        "basis": "isl_structural",
+        "ranked_factor_ids": [
+          "non_pro_mrr",
+          "pro_paying_subscribers",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "species": "single",
+        "lever_policy": "du_union",
+        "lever_ids": [
+          "pro_plan_price"
+        ],
+        "separability": {
+          "top_pair_separable": true,
+          "method": "relative_gap_0.10_provisional"
+        },
+        "rank_stability": {
+          "max_rank_flip_rate": 0.35,
+          "min_attribution_stability": "negligible"
+        }
+      }
+    },
+    "control_direct_vs_plot_isl_diff_keys": []
+  },
+  "A-served3-s1254899477": {
+    "tag": "A-served3-s1254899477",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 11108,
+    "seed_sent": "1254899477",
+    "n_samples": 10000,
+    "seed_used": "1254899477",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77096.87431650796,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77410.28903292715,
+        "p90_gbp": 78370.01861881094,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8440333333333238
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.12303333333333344
+      },
+      "raise_to_54": {
+        "mean_gbp": 76048.43715825398,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 76205.1445164636,
+        "p90_gbp": 76685.00930940548,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0329333333333332
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8440333333333238,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 0.53125,
+        "rank": 2,
+        "importance_rank": 1
+      },
+      "non_pro_mrr": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.1275,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.04250000000000001,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "pro_plan_price": {
+        "score": 0.52105,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": 200,
+      "recommended": "raise_to_59",
+      "display_verdict": "robust",
+      "level": "high",
+      "fragile_edges": [
+        "pro_plan_price->mrr"
+      ],
+      "goal_figures_shown": {
+        "raise_to_59": true,
+        "keep_49_price": true,
+        "raise_to_54": true
+      },
+      "outcome_mean_shown": {
+        "raise_to_59": 77096.87431650796,
+        "keep_49_price": 74999.99999999999,
+        "raise_to_54": 76048.43715825398
+      },
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": {
+        "version": 1,
+        "basis": "isl_structural",
+        "ranked_factor_ids": [
+          "non_pro_mrr",
+          "pro_paying_subscribers",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "species": "single",
+        "lever_policy": "du_union",
+        "lever_ids": [
+          "pro_plan_price"
+        ],
+        "separability": {
+          "top_pair_separable": true,
+          "method": "relative_gap_0.10_provisional"
+        },
+        "rank_stability": {
+          "max_rank_flip_rate": 0.35,
+          "min_attribution_stability": "negligible"
+        }
+      }
+    },
+    "control_direct_vs_plot_isl_diff_keys": []
+  },
+  "B-cur-s1254899477": {
+    "tag": "B-cur-s1254899477",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 9297,
+    "seed_sent": "1254899477",
+    "n_samples": 10000,
+    "seed_used": "1254899477",
+    "identity_forwarded": [
+      "mrr"
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 89780.26270413389,
+        "p10_gbp": 89296.44293301941,
+        "p50_gbp": 89883.91745104251,
+        "p90_gbp": 90061.22448979592,
+        "p_goal": 1.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 1.0
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 1.0,
+      "fragile_edges_v1": [],
+      "flippable_edges": []
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_plan_price": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "pro_paying_subscribers": {
+        "score": 0.8296759861291723,
+        "rank": 2,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.19912223667100135,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.0663740788903338,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "non_pro_mrr": {
+        "score": 0.26981332882249504,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [
+      [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "warning"
+      ],
+      [
+        "FACTOR_STABILITY_ANCHORED",
+        "info"
+      ]
+    ],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": 200,
+      "recommended": "raise_to_59",
+      "display_verdict": "robust",
+      "level": "high",
+      "fragile_edges": [],
+      "goal_figures_shown": {
+        "raise_to_59": true,
+        "keep_49_price": true
+      },
+      "outcome_mean_shown": {
+        "raise_to_59": 89780.26270413389,
+        "keep_49_price": 74999.99999999999
+      },
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": {
+        "version": 1,
+        "basis": "isl_structural",
+        "ranked_factor_ids": [
+          "pro_paying_subscribers",
+          "non_pro_mrr",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "species": "single",
+        "lever_policy": "du_union",
+        "lever_ids": [
+          "pro_plan_price"
+        ],
+        "separability": {
+          "top_pair_separable": true,
+          "method": "relative_gap_0.10_provisional"
+        },
+        "rank_stability": {
+          "max_rank_flip_rate": null,
+          "min_attribution_stability": null
+        }
+      }
+    },
+    "control_direct_vs_plot_isl_diff_keys": []
+  },
+  "B-served3-s1254899477": {
+    "tag": "B-served3-s1254899477",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 7441,
+    "seed_sent": "1254899477",
+    "n_samples": 10000,
+    "seed_used": "1254899477",
+    "identity_forwarded": [
+      "mrr"
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 89780.26270413389,
+        "p10_gbp": 89296.44293301941,
+        "p50_gbp": 89883.91745104251,
+        "p90_gbp": 90061.22448979592,
+        "p_goal": 1.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 1.0
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      },
+      "raise_to_54": {
+        "mean_gbp": 82402.03651247636,
+        "p10_gbp": 82180.6274646782,
+        "p50_gbp": 82449.47173563793,
+        "p90_gbp": 82530.61224489796,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 1.0,
+      "fragile_edges_v1": [],
+      "flippable_edges": []
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_plan_price": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "pro_paying_subscribers": {
+        "score": 0.8296759861291723,
+        "rank": 2,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.19912223667100135,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.0663740788903338,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "non_pro_mrr": {
+        "score": 0.26981332882249504,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [
+      [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "warning"
+      ],
+      [
+        "FACTOR_STABILITY_ANCHORED",
+        "info"
+      ]
+    ],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": 200,
+      "recommended": "raise_to_59",
+      "display_verdict": "robust",
+      "level": "high",
+      "fragile_edges": [],
+      "goal_figures_shown": {
+        "raise_to_59": true,
+        "keep_49_price": true,
+        "raise_to_54": true
+      },
+      "outcome_mean_shown": {
+        "raise_to_59": 89780.26270413389,
+        "keep_49_price": 74999.99999999999,
+        "raise_to_54": 82402.03651247636
+      },
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": {
+        "version": 1,
+        "basis": "isl_structural",
+        "ranked_factor_ids": [
+          "pro_paying_subscribers",
+          "non_pro_mrr",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "species": "single",
+        "lever_policy": "du_union",
+        "lever_ids": [
+          "pro_plan_price"
+        ],
+        "separability": {
+          "top_pair_separable": true,
+          "method": "relative_gap_0.10_provisional"
+        },
+        "rank_stability": {
+          "max_rank_flip_rate": null,
+          "min_attribution_stability": null
+        }
+      }
+    },
+    "control_direct_vs_plot_isl_diff_keys": []
+  },
+  "C-cur-s1254899477": {
+    "tag": "C-cur-s1254899477",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 7446,
+    "seed_sent": "1254899477",
+    "n_samples": 10000,
+    "seed_used": "1254899477",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77101.71813785548,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77424.28017833154,
+        "p90_gbp": 78366.18902554714,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.85955
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.14045
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.85955,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.08000000000000002,
+        "rank": 4,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.24,
+        "rank": 3,
+        "importance_rank": 3
+      },
+      "pro_plan_price": {
+        "score": 0.9808,
+        "rank": 2,
+        "importance_rank": 4
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": 200,
+      "recommended": null,
+      "display_verdict": "not_assessed",
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {
+        "raise_to_59": false,
+        "keep_49_price": false
+      },
+      "outcome_mean_shown": {
+        "raise_to_59": null,
+        "keep_49_price": null
+      },
+      "withheld_codes": [
+        "GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED"
+      ],
+      "identities_not_forwarded": [
+        {
+          "node_id": "mrr",
+          "reason": "inferred_identity_unconfirmed",
+          "frameless_node_ids": []
+        }
+      ],
+      "driver_order": {
+        "version": 1,
+        "basis": "isl_structural",
+        "ranked_factor_ids": [
+          "pro_paying_subscribers",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "species": "single",
+        "lever_policy": "du_union",
+        "lever_ids": [
+          "pro_plan_price"
+        ],
+        "separability": {
+          "top_pair_separable": true,
+          "method": "relative_gap_0.10_provisional"
+        },
+        "rank_stability": {
+          "max_rank_flip_rate": null,
+          "min_attribution_stability": null
+        }
+      }
+    },
+    "control_direct_vs_plot_isl_diff_keys": []
+  },
+  "C-served3-s1254899477": {
+    "tag": "C-served3-s1254899477",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 8893,
+    "seed_sent": "1254899477",
+    "n_samples": 10000,
+    "seed_used": "1254899477",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77101.71813785548,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77424.28017833154,
+        "p90_gbp": 78366.18902554714,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8433333333333245
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.12423333333333321
+      },
+      "raise_to_54": {
+        "mean_gbp": 76050.85906892775,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 76212.14008916577,
+        "p90_gbp": 76683.09451277358,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.03243333333333324
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8433333333333245,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.08000000000000002,
+        "rank": 4,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.24,
+        "rank": 3,
+        "importance_rank": 3
+      },
+      "pro_plan_price": {
+        "score": 0.9808,
+        "rank": 2,
+        "importance_rank": 4
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": 200,
+      "recommended": null,
+      "display_verdict": "not_assessed",
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {
+        "raise_to_59": false,
+        "keep_49_price": false,
+        "raise_to_54": false
+      },
+      "outcome_mean_shown": {
+        "raise_to_59": null,
+        "keep_49_price": null,
+        "raise_to_54": null
+      },
+      "withheld_codes": [
+        "GOAL_PROBABILITY_IDENTITY_NOT_EVALUATED"
+      ],
+      "identities_not_forwarded": [
+        {
+          "node_id": "mrr",
+          "reason": "inferred_identity_unconfirmed",
+          "frameless_node_ids": []
+        }
+      ],
+      "driver_order": {
+        "version": 1,
+        "basis": "isl_structural",
+        "ranked_factor_ids": [
+          "pro_paying_subscribers",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "species": "single",
+        "lever_policy": "du_union",
+        "lever_ids": [
+          "pro_plan_price"
+        ],
+        "separability": {
+          "top_pair_separable": true,
+          "method": "relative_gap_0.10_provisional"
+        },
+        "rank_stability": {
+          "max_rank_flip_rate": null,
+          "min_attribution_stability": null
+        }
+      }
+    },
+    "control_direct_vs_plot_isl_diff_keys": []
+  },
+  "A-cur-s1": {
+    "tag": "A-cur-s1",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 11608,
+    "seed_sent": "1",
+    "n_samples": 10000,
+    "seed_used": "1",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77078.77295455661,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77388.06334804132,
+        "p90_gbp": 78367.66637471045,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.85665
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.14335
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.85665,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 0.53125,
+        "rank": 2,
+        "importance_rank": 1
+      },
+      "non_pro_mrr": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.1275,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.04250000000000001,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "pro_plan_price": {
+        "score": 0.52105,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "A-served3-s1": {
+    "tag": "A-served3-s1",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 7605,
+    "seed_sent": "1",
+    "n_samples": 10000,
+    "seed_used": "1",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77078.77295455661,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77388.06334804132,
+        "p90_gbp": 78367.66637471045,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8404999999999906
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.1271999999999998
+      },
+      "raise_to_54": {
+        "mean_gbp": 76039.3864772783,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 76194.03167402066,
+        "p90_gbp": 76683.83318735524,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.03229999999999991
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8404999999999906,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 0.53125,
+        "rank": 2,
+        "importance_rank": 1
+      },
+      "non_pro_mrr": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.1275,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.04250000000000001,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "pro_plan_price": {
+        "score": 0.52105,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "B-cur-s1": {
+    "tag": "B-cur-s1",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 19261,
+    "seed_sent": "1",
+    "n_samples": 10000,
+    "seed_used": "1",
+    "identity_forwarded": [
+      "mrr"
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 89778.72704778567,
+        "p10_gbp": 89288.50299321934,
+        "p50_gbp": 89886.31757473362,
+        "p90_gbp": 90061.22448979592,
+        "p_goal": 1.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 1.0
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 1.0,
+      "fragile_edges_v1": [],
+      "flippable_edges": []
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_plan_price": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "pro_paying_subscribers": {
+        "score": 0.8296759861291723,
+        "rank": 2,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.19912223667100135,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.0663740788903338,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "non_pro_mrr": {
+        "score": 0.26981332882249504,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [
+      [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "warning"
+      ],
+      [
+        "FACTOR_STABILITY_ANCHORED",
+        "info"
+      ]
+    ],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "B-served3-s1": {
+    "tag": "B-served3-s1",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 10453,
+    "seed_sent": "1",
+    "n_samples": 10000,
+    "seed_used": "1",
+    "identity_forwarded": [
+      "mrr"
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 89778.72704778567,
+        "p10_gbp": 89288.50299321934,
+        "p50_gbp": 89886.31757473362,
+        "p90_gbp": 90061.22448979592,
+        "p_goal": 1.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 1.0
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      },
+      "raise_to_54": {
+        "mean_gbp": 82401.33375448649,
+        "p10_gbp": 82176.9939329053,
+        "p50_gbp": 82450.57009732707,
+        "p90_gbp": 82530.61224489796,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 1.0,
+      "fragile_edges_v1": [],
+      "flippable_edges": []
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_plan_price": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "pro_paying_subscribers": {
+        "score": 0.8296759861291723,
+        "rank": 2,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.19912223667100135,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.0663740788903338,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "non_pro_mrr": {
+        "score": 0.26981332882249504,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [
+      [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "warning"
+      ],
+      [
+        "FACTOR_STABILITY_ANCHORED",
+        "info"
+      ]
+    ],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "C-cur-s1": {
+    "tag": "C-cur-s1",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 3868,
+    "seed_sent": "1",
+    "n_samples": 10000,
+    "seed_used": "1",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77056.08384363053,
+        "p10_gbp": 74996.53444579836,
+        "p50_gbp": 77379.91259514628,
+        "p90_gbp": 78374.28127945185,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.84755
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.15245
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.84755,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.08000000000000002,
+        "rank": 4,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.24,
+        "rank": 3,
+        "importance_rank": 3
+      },
+      "pro_plan_price": {
+        "score": 0.9808,
+        "rank": 2,
+        "importance_rank": 4
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "C-served3-s1": {
+    "tag": "C-served3-s1",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 3570,
+    "seed_sent": "1",
+    "n_samples": 10000,
+    "seed_used": "1",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77056.08384363053,
+        "p10_gbp": 74996.53444579836,
+        "p50_gbp": 77379.91259514628,
+        "p90_gbp": 78374.28127945185,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8305666666666551
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.13546666666666582
+      },
+      "raise_to_54": {
+        "mean_gbp": 76028.04192181527,
+        "p10_gbp": 74998.26722289917,
+        "p50_gbp": 76189.95629757314,
+        "p90_gbp": 76687.14063972593,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.03396666666666648
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8305666666666551,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.08000000000000002,
+        "rank": 4,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.24,
+        "rank": 3,
+        "importance_rank": 3
+      },
+      "pro_plan_price": {
+        "score": 0.9808,
+        "rank": 2,
+        "importance_rank": 4
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "A-cur-s20260930": {
+    "tag": "A-cur-s20260930",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 4397,
+    "seed_sent": "20260930",
+    "n_samples": 10000,
+    "seed_used": "20260930",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77092.1490797845,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77393.25033401052,
+        "p90_gbp": 78375.58681580357,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8583
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.1417
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8583,
+      "fragile_edges_v1": [
+        "non_pro_mrr->mrr",
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 0.53125,
+        "rank": 2,
+        "importance_rank": 1
+      },
+      "non_pro_mrr": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.1275,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.04250000000000001,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "pro_plan_price": {
+        "score": 0.52105,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "A-served3-s20260930": {
+    "tag": "A-served3-s20260930",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 9730,
+    "seed_sent": "20260930",
+    "n_samples": 10000,
+    "seed_used": "20260930",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77092.1490797845,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77393.25033401052,
+        "p90_gbp": 78375.58681580357,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8423333333333236
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.12573333333333345
+      },
+      "raise_to_54": {
+        "mean_gbp": 76046.07453989226,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 76196.62516700526,
+        "p90_gbp": 76687.7934079018,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.031933333333333265
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8423333333333236,
+      "fragile_edges_v1": [
+        "non_pro_mrr->mrr",
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 0.53125,
+        "rank": 2,
+        "importance_rank": 1
+      },
+      "non_pro_mrr": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.1275,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.04250000000000001,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "pro_plan_price": {
+        "score": 0.52105,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "B-cur-s20260930": {
+    "tag": "B-cur-s20260930",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 7174,
+    "seed_sent": "20260930",
+    "n_samples": 10000,
+    "seed_used": "20260930",
+    "identity_forwarded": [
+      "mrr"
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 89774.93609048064,
+        "p10_gbp": 89287.43008546122,
+        "p50_gbp": 89881.28772137214,
+        "p90_gbp": 90061.22448979592,
+        "p_goal": 1.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 1.0
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 1.0,
+      "fragile_edges_v1": [],
+      "flippable_edges": []
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_plan_price": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "pro_paying_subscribers": {
+        "score": 0.8296759861291723,
+        "rank": 2,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.19912223667100135,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.0663740788903338,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "non_pro_mrr": {
+        "score": 0.26981332882249504,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [
+      [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "warning"
+      ],
+      [
+        "FACTOR_STABILITY_ANCHORED",
+        "info"
+      ]
+    ],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "B-served3-s20260930": {
+    "tag": "B-served3-s20260930",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 10904,
+    "seed_sent": "20260930",
+    "n_samples": 10000,
+    "seed_used": "20260930",
+    "identity_forwarded": [
+      "mrr"
+    ],
+    "identity_evaluations": [
+      {
+        "node_id": "mrr",
+        "operation": "product",
+        "factor_ids": [
+          "pro_plan_price",
+          "pro_paying_subscribers"
+        ],
+        "addends": [],
+        "stated_in_brief": true,
+        "evaluated": true,
+        "level_source": "stated_level",
+        "reconciliation": {
+          "reconstructed": 73500.0,
+          "stated": 75000.0,
+          "mismatch_share": 0.02
+        }
+      }
+    ],
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 89774.93609048064,
+        "p10_gbp": 89287.43008546122,
+        "p50_gbp": 89881.28772137214,
+        "p90_gbp": 90061.22448979592,
+        "p_goal": 1.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 1.0
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      },
+      "raise_to_54": {
+        "mean_gbp": 82399.59890961809,
+        "p10_gbp": 82176.50294121935,
+        "p50_gbp": 82448.26830002606,
+        "p90_gbp": 82530.61224489796,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.0
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 1.0,
+      "fragile_edges_v1": [],
+      "flippable_edges": []
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_plan_price": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "pro_paying_subscribers": {
+        "score": 0.8296759861291723,
+        "rank": 2,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.19912223667100135,
+        "rank": 4,
+        "importance_rank": 3
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.0663740788903338,
+        "rank": 5,
+        "importance_rank": 4
+      },
+      "non_pro_mrr": {
+        "score": 0.26981332882249504,
+        "rank": 3,
+        "importance_rank": 5
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      },
+      {
+        "factor_id": "non_pro_mrr",
+        "current_value": 0.015,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [
+      [
+        "DEGENERATE_OPTION_ZERO_VARIANCE",
+        "warning"
+      ],
+      [
+        "FACTOR_STABILITY_ANCHORED",
+        "info"
+      ]
+    ],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "C-cur-s20260930": {
+    "tag": "C-cur-s20260930",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 2331,
+    "seed_sent": "20260930",
+    "n_samples": 10000,
+    "seed_used": "20260930",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77069.43506047069,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77393.1148507372,
+        "p90_gbp": 78371.70937713167,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.8503
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.1497
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.8503,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.08000000000000002,
+        "rank": 4,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.24,
+        "rank": 3,
+        "importance_rank": 3
+      },
+      "pro_plan_price": {
+        "score": 0.9808,
+        "rank": 2,
+        "importance_rank": 4
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  },
+  "C-served3-s20260930": {
+    "tag": "C-served3-s20260930",
+    "isl_calls": 1,
+    "isl_status": 200,
+    "isl_ms": 4102,
+    "seed_sent": "20260930",
+    "n_samples": 10000,
+    "seed_used": "20260930",
+    "identity_forwarded": [],
+    "identity_evaluations": null,
+    "options": {
+      "raise_to_59": {
+        "mean_gbp": 77069.43506047069,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 77393.1148507372,
+        "p90_gbp": 78371.70937713167,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.833699999999988
+      },
+      "keep_49_price": {
+        "mean_gbp": 74999.99999999999,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 75000.0,
+        "p90_gbp": 75000.0,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.1330999999999992
+      },
+      "raise_to_54": {
+        "mean_gbp": 76034.71753023534,
+        "p10_gbp": 75000.0,
+        "p50_gbp": 76196.55742536859,
+        "p90_gbp": 76685.85468856584,
+        "p_goal": 0.0,
+        "p_churn_ok": 1.0,
+        "p_joint": 1.0,
+        "win": 0.033199999999999855
+      }
+    },
+    "robustness": {
+      "level": "high",
+      "is_robust": true,
+      "recommendation_stability": 0.833699999999988,
+      "fragile_edges_v1": [
+        "pro_plan_price->mrr"
+      ],
+      "flippable_edges": [
+        {
+          "edge": "pro_plan_price->mrr",
+          "current": 0.5,
+          "flip": 0.009599
+        }
+      ]
+    },
+    "isl_top_option": "raise_to_59",
+    "factor_influence": {
+      "pro_paying_subscribers": {
+        "score": 1.0,
+        "rank": 1,
+        "importance_rank": 1
+      },
+      "monthly_new_pro_subscribers": {
+        "score": 0.08000000000000002,
+        "rank": 4,
+        "importance_rank": 2
+      },
+      "monthly_churn": {
+        "score": 0.24,
+        "rank": 3,
+        "importance_rank": 3
+      },
+      "pro_plan_price": {
+        "score": 0.9808,
+        "rank": 2,
+        "importance_rank": 4
+      }
+    },
+    "factor_flips": [
+      {
+        "factor_id": "pro_plan_price",
+        "current_value": 0.245,
+        "flip_value": 0.295,
+        "flip_reason": "found",
+        "alternative_winner_id": "keep_49_price"
+      },
+      {
+        "factor_id": "monthly_new_pro_subscribers",
+        "current_value": 0.09,
+        "flip_value": null,
+        "flip_reason": "structurally_invariant",
+        "alternative_winner_id": null
+      }
+    ],
+    "isl_warnings": [
+      "GOAL_DIRECTION_UNATTESTED"
+    ],
+    "isl_critiques": [],
+    "phase_degraded": [],
+    "statuses": {
+      "analysis_status": "computed",
+      "robustness_status": "computed",
+      "factor_sensitivity_status": "computed"
+    },
+    "plot": {
+      "status": null,
+      "recommended": null,
+      "display_verdict": null,
+      "level": null,
+      "fragile_edges": [],
+      "goal_figures_shown": {},
+      "outcome_mean_shown": {},
+      "withheld_codes": [],
+      "identities_not_forwarded": null,
+      "driver_order": null
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "served_source": "olumi-assistants-service@2cd78237 fixture served-gate5-mrr-m0-and-cut-costs-15f48f0b.json .mrr_m0.plot_body (served CEE ef042ce)",
+  "local": "runs/A-served-replay.plot-response.json",
+  "n_leaf_fields_compared": 525,
+  "differing": [
+    {
+      "path": "decision_brief.brief_id",
+      "served": "19206ab1-cc2a-4a74-befc-87f3d6b721b8",
+      "local": "169a87a7-8e4f-49d0-81e7-5acad990c8bd"
+    },
+    {
+      "path": "decision_brief.created_at",
+      "served": "2026-09-30T04:47:22.154Z",
+      "local": "2026-09-30T11:15:48.767Z"
+    },
+    {
+      "path": "decision_brief.analysis_summary.goal_fit",
+      "served": 0,
+      "local": null
+    },
+    {
+      "path": "decision_brief.analysis_summary.leading_option",
+      "served": "Raise to \u00a359",
+      "local": null
+    },
+    {
+      "path": "decision_brief.analysis_summary.robustness_band",
+      "served": "robust",
+      "local": null
+    },
+    {
+      "path": "decision_brief.analysis_summary.win_probability",
+      "served": 0.8440333333333238,
+      "local": null
+    }
+  ]
+}
