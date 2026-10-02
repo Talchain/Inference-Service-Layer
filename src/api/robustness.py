@@ -735,10 +735,10 @@ async def _analyze_robustness_v2_legacy(
         # What FastAPI rendered from the returned model (response_model=None), with non-finite
         # floats as null: byte-identical whenever every float is finite.
         body = jsonable_encoder(response)
-        # SCIENCE/DSK horizon EXPERIMENT: the key exists only when the request asked for a horizon, so a request
-        # without one gets byte-for-byte today's body (no new `"horizon_view": null`).
-        if body.get("horizon_view") is None:
-            body.pop("horizon_view", None)
+        # SCIENCE/DSK horizon EXPERIMENT: only a request that asked for a horizon gets the key; every other
+        # request renders exactly the model, as before.
+        if response._horizon_view is not None:
+            body["horizon_view"] = jsonable_encoder(response._horizon_view)
         return JSONResponse(content=_non_finite_to_null(body))
 
     except ValidationError as e:

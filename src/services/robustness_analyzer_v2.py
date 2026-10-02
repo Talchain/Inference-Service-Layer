@@ -4558,8 +4558,8 @@ class RobustnessAnalyzerV2:
             identity_evaluations=identity_evaluations(request.graph, factor_centres(request))
             or None,
             structural_influence=structural_influence or None,
-            horizon_view=horizon_view,
         )
+        response._horizon_view = horizon_view
 
         self.logger.info(
             "robustness_v2_analysis_complete",

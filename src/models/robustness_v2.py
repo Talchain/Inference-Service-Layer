@@ -2630,10 +2630,10 @@ class RobustnessResponseV2(BaseModel):
         description="Every factor node's structural influence, one cohort and one normalisation. "
         "Present on every graph where the factor phase runs; absent when it does not.",
     )
-    # SCIENCE/DSK horizon EXPERIMENT: present only when the request asked (the route drops the key otherwise).
-    horizon_view: Optional[HorizonViewV2] = Field(
-        None, description="EXPERIMENT. P(best) per week up to the request's horizon; absent unless requested."
-    )
+    # SCIENCE/DSK horizon EXPERIMENT: a PRIVATE attribute, never serialised and never in this model's schema, so
+    # every route that renders the model keeps today's body byte for byte. The analyze/v2 route adds a
+    # `horizon_view` key beside the body only when the request asked for a horizon.
+    _horizon_view: Optional[HorizonViewV2] = PrivateAttr(default=None)
 
     model_config = {
         "populate_by_name": True,
