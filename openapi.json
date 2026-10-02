@@ -3800,6 +3800,204 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HorizonCheckpointV2": {
+        "properties": {
+          "leader_option_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leader Option Id"
+          },
+          "p_best": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "P Best",
+            "type": "object"
+          },
+          "week": {
+            "title": "Week",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "week",
+          "p_best"
+        ],
+        "title": "HorizonCheckpointV2",
+        "type": "object"
+      },
+      "HorizonFlipV2": {
+        "properties": {
+          "from_option_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Option Id"
+          },
+          "to_option_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Option Id"
+          },
+          "week": {
+            "title": "Week",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "week"
+        ],
+        "title": "HorizonFlipV2",
+        "type": "object"
+      },
+      "HorizonOnsetV2": {
+        "description": "One option's timing for the horizon view (SCIENCE/DSK experiment, #85 5947449217).",
+        "properties": {
+          "onset_weeks": {
+            "description": "Weeks before the option has any effect",
+            "maximum": 260.0,
+            "minimum": 0.0,
+            "title": "Onset Weeks",
+            "type": "number"
+          },
+          "option_id": {
+            "description": "An option id in this request",
+            "minLength": 1,
+            "title": "Option Id",
+            "type": "string"
+          },
+          "ramp_weeks": {
+            "default": 0.0,
+            "description": "Weeks from its first effect to its full effect (0 = all at once)",
+            "maximum": 260.0,
+            "minimum": 0.0,
+            "title": "Ramp Weeks",
+            "type": "number"
+          }
+        },
+        "required": [
+          "option_id",
+          "onset_weeks"
+        ],
+        "title": "HorizonOnsetV2",
+        "type": "object"
+      },
+      "HorizonRequestV2": {
+        "description": "Ask for P(best) at each week up to a horizon (EXPERIMENT; absent \u2192 compute byte-identical).",
+        "properties": {
+          "evaluate": {
+            "default": "cumulative",
+            "description": "'at' ranks the goal in week t; 'cumulative' ranks what each option has delivered over weeks 1..t",
+            "enum": [
+              "at",
+              "cumulative"
+            ],
+            "title": "Evaluate",
+            "type": "string"
+          },
+          "horizon_weeks": {
+            "description": "The horizon, in weeks from the decision",
+            "maximum": 260.0,
+            "minimum": 1.0,
+            "title": "Horizon Weeks",
+            "type": "integer"
+          },
+          "onsets": {
+            "description": "Per-option timing; an option not listed is in force from week 1 (today's assumption)",
+            "items": {
+              "$ref": "#/components/schemas/HorizonOnsetV2"
+            },
+            "maxItems": 10,
+            "title": "Onsets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "horizon_weeks"
+        ],
+        "title": "HorizonRequestV2",
+        "type": "object"
+      },
+      "HorizonViewV2": {
+        "description": "'WHEN does it pay off?' (EXPERIMENT). See ``src/services/horizon_view.py`` for the model.",
+        "properties": {
+          "checkpoints": {
+            "items": {
+              "$ref": "#/components/schemas/HorizonCheckpointV2"
+            },
+            "title": "Checkpoints",
+            "type": "array"
+          },
+          "evaluate": {
+            "enum": [
+              "at",
+              "cumulative"
+            ],
+            "title": "Evaluate",
+            "type": "string"
+          },
+          "flips": {
+            "items": {
+              "$ref": "#/components/schemas/HorizonFlipV2"
+            },
+            "title": "Flips",
+            "type": "array"
+          },
+          "horizon_weeks": {
+            "title": "Horizon Weeks",
+            "type": "integer"
+          },
+          "leader_at_horizon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leader At Horizon"
+          },
+          "method": {
+            "const": "closed_form_onset_ramp_v0",
+            "title": "Method"
+          },
+          "onsets": {
+            "items": {
+              "$ref": "#/components/schemas/HorizonOnsetV2"
+            },
+            "title": "Onsets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "method",
+          "horizon_weeks",
+          "evaluate",
+          "onsets",
+          "checkpoints",
+          "flips"
+        ],
+        "title": "HorizonViewV2",
+        "type": "object"
+      },
       "ISLResponseV2": {
         "description": "Enhanced response with explicit status fields and diagnostics.",
         "example": {
@@ -6821,6 +7019,17 @@
             ],
             "description": "Causal graph with dual uncertainty edges"
           },
+          "horizon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HorizonRequestV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EXPERIMENT. P(best) at each week up to horizon_weeks, from the same draws (closed-form onset ramp)."
+          },
           "include_e_values": {
             "default": false,
             "description": "Compute E-value analogue per edge (minimum strength perturbation to flip recommendation). Gated for performance \u2014 adds up to 2s latency.",
@@ -7122,6 +7331,17 @@
             },
             "title": "Factor Sensitivity",
             "type": "array"
+          },
+          "horizon_view": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HorizonViewV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EXPERIMENT. P(best) per week up to the request's horizon; absent unless requested."
           },
           "identity_evaluations": {
             "anyOf": [
