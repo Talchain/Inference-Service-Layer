@@ -71,6 +71,7 @@ from src.models.robustness_v2 import (
     SampledInterventionRange,
     RobustnessRequestV2,
     RobustnessResponseV2,
+    HorizonViewV2,
     RobustnessResult,
     SensitivityResult,
     StabilityThresholdsResponse,
@@ -115,6 +116,7 @@ from src.models.critique import (
 )
 from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
 from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
+from src.services.horizon_view import compute_horizon_view
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
 from src.utils.evppi import (
@@ -3425,11 +3427,39 @@ class RobustnessAnalyzerV2:
                 # same reference (the reference evaluator draws no epsilon, so adding a
                 # node to this set cannot shift any stream or any other number).
                 | ({request.goal_node_id} if request.goal_node_id in anchored_levels else set())
+                # SCIENCE/DSK horizon EXPERIMENT: the view's "before the option acts" value is this same
+                # no-intervention draw. Only when the request asks — an absent horizon adds nothing here.
+                | ({request.goal_node_id} if request.horizon is not None else set())
             )
             or None,
             objective=objective_plan,
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
+
+        # SCIENCE/DSK horizon EXPERIMENT (#85 5947449217): "WHEN does it pay off?". Read from the SAME pre-noise,
+        # CRN-aligned outcomes that produced win_probability (before `_apply_auto_scaled_noise` reassigns them), with
+        # every draw decided by the ONE winner owner. Runs only when asked; draws no RNG.
+        horizon_view: Optional[HorizonViewV2] = None
+        if request.horizon is not None:
+            horizon_plan = objective_plan or ObjectivePlan(sense="maximise", attested=False)
+
+            def _horizon_winners(finite: Dict[str, float], sq: Optional[float]) -> List[str]:
+                return self._winners_for_draw(
+                    finite, horizon_plan, sq if horizon_plan.needs_status_quo_reference else None
+                )
+
+            horizon_view = HorizonViewV2.model_validate(
+                compute_horizon_view(
+                    option_ids=[o.id for o in request.options],
+                    option_outcomes=option_outcomes,
+                    status_quo=status_quo_outcomes,
+                    onsets={o.option_id: (o.onset_weeks, o.ramp_weeks) for o in request.horizon.onsets},
+                    horizon_weeks=request.horizon.horizon_weeks,
+                    evaluate=request.horizon.evaluate,
+                    n_samples=request.n_samples,
+                    winners_for_draw=_horizon_winners,
+                )
+            )
 
         # B2 CRN-fix (CODE-REVIEW-ISL F1): expected_regret is a JOINT Common-
         # Random-Numbers metric and MUST be computed from the PRE-noise outcomes
@@ -4528,6 +4558,7 @@ class RobustnessAnalyzerV2:
             identity_evaluations=identity_evaluations(request.graph, factor_centres(request))
             or None,
             structural_influence=structural_influence or None,
+            horizon_view=horizon_view,
         )
 
         self.logger.info(
