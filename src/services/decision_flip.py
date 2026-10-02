@@ -162,7 +162,8 @@ def p_best(values: np.ndarray, sense: str, n_samples: int) -> np.ndarray:
     winners = finite & (v == best) & finite.any(axis=0)
     counts = winners.sum(axis=0)
     share = np.where(counts > 0, 1.0 / np.maximum(counts, 1), 0.0)
-    return (winners * share).sum(axis=1) / n_samples
+    out: np.ndarray = (winners * share).sum(axis=1) / n_samples
+    return out
 
 
 def _leader(p: np.ndarray, option_ids: Sequence[str]) -> str:
@@ -207,7 +208,7 @@ def compute_decision_flip_block(dreq: Any) -> Any:
     option_ids = [o.id for o in base.options]
     master, _ = compute_effective_seed(base)
 
-    def run(seed: int, link: Optional[Tuple[str, str]] = None, mean: Optional[float] = None, capture: bool = True):
+    def run(seed: int, link: Optional[Tuple[str, str]] = None, mean: Optional[float] = None, capture: bool = True) -> Any:
         q = base.model_copy(update={"seed": str(seed)}, deep=True)
         if link is not None:
             for e in q.graph.edges:
@@ -224,13 +225,13 @@ def compute_decision_flip_block(dreq: Any) -> Any:
     head = run(master, capture=False)
     leader = head.recommended_option_id
     links_out: List[Any] = []
-    sense = None
+    sense: str = "maximise"
     seeds = [_child_seed(master, i) for i in range(dreq.replicates)]
     replicate_base: Dict[int, Any] = {}
     for s in seeds:
         r = run(s)
         replicate_base[s] = r
-        sense = r._mc_draws["objective"].sense if r._mc_draws["objective"] is not None else "maximise"
+        sense = str(r._mc_draws["objective"].sense) if r._mc_draws["objective"] is not None else "maximise"
     unstable = any(r.recommended_option_id != leader for r in replicate_base.values())
 
     for ref in dreq.links:

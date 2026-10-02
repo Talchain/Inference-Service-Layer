@@ -214,3 +214,37 @@ async def run_offloaded(
     # 2.477(i): paired with the worker's encoder. NOT model_validate_json — see
     # encode_analysis_response for the measured failure that pairing caused.
     return decode_analysis_response(result_json)
+
+
+async def run_decision_flip_offloaded(app: Any, dreq: Any, request_id: str) -> Any:
+    """SCIENCE ROBUSTNESS (EXPERIMENT): the decision-flip block through the SAME pool, deadline and self-healing as
+    :func:`run_offloaded`. A deadline breach raises :class:`AnalysisDeadlineExceeded` (the route's typed 504, which CEE
+    answers with RC's honest-limit line), never a hang."""
+    from src.models.robustness_v2 import DecisionFlipBlockV2
+    from src.services.robustness_worker import run_decision_flip_v2
+
+    payload = dreq.model_dump_json()
+    pool = getattr(app.state, "analysis_pool", None)
+    deadline = ANALYSIS_HARD_DEADLINE_S
+    if pool is None:
+        return DecisionFlipBlockV2.model_validate_json(run_decision_flip_v2(payload))
+    loop = asyncio.get_running_loop()
+    try:
+        fut = loop.run_in_executor(pool, run_decision_flip_v2, payload)
+    except RuntimeError:
+        _swap_in_fresh_pool(app, pool)
+        return DecisionFlipBlockV2.model_validate_json(run_decision_flip_v2(payload))
+    try:
+        out = await asyncio.wait_for(fut, timeout=deadline)
+    except asyncio.TimeoutError:
+        _fresh, killed = _hard_kill_and_recreate(app, pool)
+        fut.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
+        logger.warning(
+            "isl_decision_flip_offload_deadline",
+            extra={"request_id": request_id, "deadline_s": deadline, "killed_pids": killed},
+        )
+        raise AnalysisDeadlineExceeded(deadline)
+    except BrokenProcessPool:
+        _swap_in_fresh_pool(app, pool)
+        return DecisionFlipBlockV2.model_validate_json(run_decision_flip_v2(payload))
+    return DecisionFlipBlockV2.model_validate_json(out)
