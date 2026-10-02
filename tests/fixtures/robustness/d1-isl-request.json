@@ -1,0 +1,232 @@
+{
+ "request_id": "56b5adea-422b-4ad0-86d0-c057f9584a33",
+ "graph": {
+  "nodes": [
+   {
+    "id": "quarterly_revenue",
+    "kind": "goal",
+    "label": "Quarterly revenue",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "sprint_capacity_for_ai_reporting",
+    "kind": "factor",
+    "label": "Sprint capacity for AI reporting",
+    "observed_state": {
+     "value": 0,
+     "unit": "%",
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "sprint_capacity_for_integration_fix",
+    "kind": "factor",
+    "label": "Sprint capacity for integration fix",
+    "observed_state": {
+     "value": 0,
+     "unit": "%",
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "ai_reporting_module_availability",
+    "kind": "factor",
+    "label": "AI reporting module availability",
+    "observed_state": {
+     "value": 0,
+     "unit": "0-1",
+     "source": "cee_inference",
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "enterprise_prospect_signing_likelihood",
+    "kind": "factor",
+    "label": "Enterprise prospect signing likelihood",
+    "observed_state": {
+     "value": 0.1,
+     "unit": "%",
+     "source": "cee_inference",
+     "raw_value": 10,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "integration_step_bug_resolution",
+    "kind": "factor",
+    "label": "Integration-step bug resolution",
+    "observed_state": {
+     "value": 0,
+     "unit": "0-1",
+     "source": "cee_inference"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "trial_profile_abandonment_rate",
+    "kind": "factor",
+    "label": "Trial profile abandonment rate",
+    "observed_state": {
+     "value": 0.15,
+     "unit": "%",
+     "source": "brief_extraction",
+     "raw_value": 15,
+     "cap": 100
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "revenue_lost_to_trial_abandonment",
+    "kind": "risk",
+    "label": "Revenue lost to trial abandonment",
+    "intercept": 0,
+    "epsilon_std": 0
+   }
+  ],
+  "edges": [
+   {
+    "from": "sprint_capacity_for_ai_reporting",
+    "to": "ai_reporting_module_availability",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.25,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "ai_reporting_module_availability",
+    "to": "enterprise_prospect_signing_likelihood",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.6,
+     "std": 0.3
+    }
+   },
+   {
+    "from": "enterprise_prospect_signing_likelihood",
+    "to": "quarterly_revenue",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "sprint_capacity_for_integration_fix",
+    "to": "integration_step_bug_resolution",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.25,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "integration_step_bug_resolution",
+    "to": "trial_profile_abandonment_rate",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": -0.15,
+     "std": 0.075
+    }
+   },
+   {
+    "from": "trial_profile_abandonment_rate",
+    "to": "revenue_lost_to_trial_abandonment",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "revenue_lost_to_trial_abandonment",
+    "to": "quarterly_revenue",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": -0.5,
+     "std": 0.125
+    }
+   }
+  ]
+ },
+ "options": [
+  {
+   "id": "ai_reporting_module_sprint",
+   "label": "AI Reporting Module Sprint",
+   "interventions": {
+    "sprint_capacity_for_ai_reporting": 1,
+    "sprint_capacity_for_integration_fix": 0
+   }
+  },
+  {
+   "id": "integration_bug_fix_sprint",
+   "label": "Integration Bug Fix Sprint",
+   "interventions": {
+    "sprint_capacity_for_ai_reporting": 0,
+    "sprint_capacity_for_integration_fix": 1
+   }
+  },
+  {
+   "id": "continue_current_plan",
+   "label": "Continue Current Plan",
+   "interventions": {
+    "sprint_capacity_for_ai_reporting": 0,
+    "sprint_capacity_for_integration_fix": 0
+   }
+  }
+ ],
+ "goal_node_id": "quarterly_revenue",
+ "n_samples": 10000,
+ "analysis_types": [
+  "comparison",
+  "sensitivity",
+  "robustness"
+ ],
+ "parameter_uncertainties": [
+  {
+   "node_id": "sprint_capacity_for_ai_reporting",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "sprint_capacity_for_integration_fix",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "ai_reporting_module_availability",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "enterprise_prospect_signing_likelihood",
+   "distribution": "normal",
+   "std": 0.1
+  },
+  {
+   "node_id": "integration_step_bug_resolution",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "trial_profile_abandonment_rate",
+   "distribution": "normal",
+   "std": 0.1
+  }
+ ],
+ "include_e_values": true,
+ "include_voi": true,
+ "include_factor_flips": true,
+ "seed": "42"
+}
