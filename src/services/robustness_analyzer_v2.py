@@ -3431,6 +3431,16 @@ class RobustnessAnalyzerV2:
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
 
+        # SCIENCE ROBUSTNESS (EXPERIMENT): the decision-flip worker asks, in-process and privately, for the SAME
+        # pre-noise CRN population win_probability is read from (before `_apply_auto_scaled_noise` reassigns it).
+        mc_draws: Optional[Dict[str, Any]] = None
+        if request._capture_draws:
+            mc_draws = {
+                "option_outcomes": {oid: list(vals) for oid, vals in option_outcomes.items()},
+                "status_quo": list(status_quo_outcomes),
+                "objective": objective_plan,
+            }
+
         # B2 CRN-fix (CODE-REVIEW-ISL F1): expected_regret is a JOINT Common-
         # Random-Numbers metric and MUST be computed from the PRE-noise outcomes
         # -- the exact CRN-aligned population that produced winner_per_sample /
@@ -4529,6 +4539,7 @@ class RobustnessAnalyzerV2:
             or None,
             structural_influence=structural_influence or None,
         )
+        response._mc_draws = mc_draws
 
         self.logger.info(
             "robustness_v2_analysis_complete",
@@ -4729,6 +4740,9 @@ class RobustnessAnalyzerV2:
             else None
         )
 
+        capture_tie_rng: Optional[SeededRNG] = (
+            SeededRNG(compute_effective_seed(request)[0] + 5) if request._capture_draws else None
+        )
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
@@ -4856,7 +4870,13 @@ class RobustnessAnalyzerV2:
                 # while eliminating insertion-order bias that arises from always
                 # picking winners[0].  We reuse sampler.rng so the RNG stream
                 # remains a single deterministic sequence — no new sub-seed needed.
-                winner_per_sample.append(str(sampler.rng.choice(winners)))
+                # SCIENCE ROBUSTNESS (EXPERIMENT): the shared edge stream is consumed only on a tied draw, and
+                # whether a tie sits at the top depends on the outcomes, so a probe that moves one link's mean
+                # desynchronises every later edge draw. The decision-flip capture needs exact common random numbers
+                # across probes, so it alone breaks ties from its own stream. win_probability never reads this
+                # choice (ties split the credit above); an ordinary analysis is byte-identical.
+                tie_rng = capture_tie_rng if capture_tie_rng is not None else sampler.rng
+                winner_per_sample.append(str(tie_rng.choice(winners)))
 
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
