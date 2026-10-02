@@ -103,7 +103,9 @@ from typing import Any, Sequence, Tuple  # noqa: E402
 import numpy as np  # noqa: E402
 
 AFFINE_METHOD = "affine_crn_replicates_v1"
-BOUND_ABS = 0.02
+# 0.01 = the miss tolerance itself (2 Oct): at 0.02 one D1 request quoted a median 0.012 from the 100k reference (its
+# four replicates spread 0.015). Calibrated on D1 + D3, then validated on D2 held out.
+BOUND_ABS = 0.01
 BOUND_REL = 0.15
 GRID_STEP = 0.0025
 CHECK_TOL = 1e-9

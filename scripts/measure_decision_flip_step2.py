@@ -7,7 +7,9 @@ on ordinary-mode analyses with P(best) pooled over seeds 1001..1010 (tol 0.001).
 from the reference, or quoted / no_change where the reference disagrees on existence. Wall clock per request.
 
 Fixtures (tests/fixtures/robustness/): R3's served graphs translated by PLoT /v2/run at 4526e432 (D1 = A-Q-D1-BUILD,
-D3 = A-Q-D3-BUILD). D3-CLAMPED is a CONSTRUCTED negative control (no served model carries a clamp): D3 with
+D3 = A-Q-D3-BUILD). D3 is sent with goal_direction 'minimise' exactly as CEE derives it (goal_sense_reading typed_change_sign; served
+leader switch_to_gcp). D2 (A-Q-D2-BUILD) is HELD OUT: the licence bound was fixed on D1 + D3 before D2 was run.
+D3-CLAMPED is a CONSTRUCTED negative control (no served model carries a clamp): D3 with
 epsilon_std 0.05 on monthly_cloud_savings, so the link INTO it must be withheld and the link OUT of it stays clean.
 
 usage: ISL_AUTH_DISABLED=true python scripts/measure_decision_flip_step2.py <out.json> [<step1-result.json>]
@@ -34,6 +36,11 @@ D3_PATH = [("gcp_workload_share", "monthly_cloud_overspend_during_migration"),
            ("migration_preparation_effort", "monthly_cloud_overspend_during_migration"),
            ("monthly_cloud_overspend_during_migration", "monthly_spend"),
            ("monthly_cloud_savings", "monthly_spend")]
+D2_PATH = [("angel_fundraising_admin_time", "distraction_from_investment_firm_fundraising"),
+           ("distraction_from_investment_firm_fundraising", "securing_funding"),
+           ("hours_per_week_on_angel_outreach", "angel_fundraising_admin_time"),
+           ("hours_per_week_on_angel_outreach", "qualified_angel_investor_conversations"),
+           ("qualified_angel_investor_conversations", "securing_funding")]
 REF_SEEDS = range(1001, 1011)
 MISS_TOL = 0.01
 
@@ -69,7 +76,8 @@ def ref_threshold(q, link):
 
 def main(out_path, step1_path=None):
     cases = {"D1": (load("d1-isl-request.json"), D1_PATH), "D3": (load("d3-isl-request.json"), D3_PATH),
-             "D3-CLAMPED": (load("d3-isl-request.json", {"monthly_cloud_savings": 0.05}), D3_PATH)}
+             "D3-CLAMPED": (load("d3-isl-request.json", {"monthly_cloud_savings": 0.05}), D3_PATH),
+             "D2-HELDOUT": (load("d2-isl-request.json"), D2_PATH)}
     prior = json.load(open(step1_path)) if step1_path else {}
     out = {}
     for name, (q, path) in cases.items():

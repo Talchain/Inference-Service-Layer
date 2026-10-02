@@ -1,5 +1,5 @@
 {
- "request_id": "2bf01416-4575-4a2d-bd98-94d3c809b294",
+ "request_id": "c80b8065-ff1b-414b-b3e5-71831d1a87da",
  "graph": {
   "nodes": [
    {
@@ -203,5 +203,6 @@
  "include_factor_flips": true,
  "goal_threshold": -0.2,
  "goal_threshold_frame": "change_rel",
+ "goal_direction": "minimise",
  "seed": "42"
 }
