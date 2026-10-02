@@ -1351,6 +1351,58 @@
         "title": "CritiqueV2",
         "type": "object"
       },
+      "DecisionFlipLinkRefV2": {
+        "description": "One link whose tipping point is asked for (a directed edge of the request's graph).",
+        "properties": {
+          "from_id": {
+            "minLength": 1,
+            "title": "From Id",
+            "type": "string"
+          },
+          "to_id": {
+            "minLength": 1,
+            "title": "To Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from_id",
+          "to_id"
+        ],
+        "title": "DecisionFlipLinkRefV2",
+        "type": "object"
+      },
+      "DecisionFlipRequestV2": {
+        "description": "On demand: where would the recommendation change if each link were WEAKER?",
+        "properties": {
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionFlipLinkRefV2"
+            },
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Links",
+            "type": "array"
+          },
+          "replicates": {
+            "default": 4,
+            "description": "K replicate seeds; a link is quoted only when they agree",
+            "maximum": 8.0,
+            "minimum": 2.0,
+            "title": "Replicates",
+            "type": "integer"
+          },
+          "request": {
+            "$ref": "#/components/schemas/RobustnessRequestV2"
+          }
+        },
+        "required": [
+          "request",
+          "links"
+        ],
+        "title": "DecisionFlipRequestV2",
+        "type": "object"
+      },
       "DecisionRule": {
         "description": "Conditional decision rule based on observed state.",
         "example": {
@@ -9370,6 +9422,103 @@
           }
         },
         "summary": "Analyze robustness with dual uncertainty (v2.2 schema)",
+        "tags": [
+          "FACET Robustness"
+        ]
+      }
+    },
+    "/api/v1/robustness/decision-flip/v2": {
+      "post": {
+        "description": "SCIENCE ROBUSTNESS (EXPERIMENT, not called by any served path). For each requested link: the link strength at which the analyser's recommendation would change, from K replicate seeds, quoted only when they agree (range <= 0.02 and <= 15% of the median), otherwise an honest absence with a reason.",
+        "operationId": "decision_flip_v2_api_v1_robustness_decision_flip_v2_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Request-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Request-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionFlipRequestV2"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Unknown link or invalid request"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Caller concurrency limit exceeded"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service at compute capacity"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Exceeded the hard compute deadline"
+          }
+        },
+        "summary": "EXPERIMENT: where would the recommendation change if each link were weaker?",
         "tags": [
           "FACET Robustness"
         ]
