@@ -11,9 +11,11 @@ answers a different question. On D1 it says capacity→availability can fall to 
 recommendation itself changes at ≈0.05–0.075 (#85 5948121821). Its stability band samples 10 single worlds per run, so
 the band moves from run to run and still does not describe the decision.
 
-THE ESTIMATOR. ``leader_at(x)`` runs the analyser's own Monte Carlo with the link's central value set to ``x``. The
-request seed is unchanged, so every probe sees the same random numbers (ISL's CRN invariant, #218), and the
-recommendation as a function of ``x`` is free of between-probe sampling noise. The search is in two stages:
+THE ESTIMATOR. ``leader_at(x)`` runs the analyser's own Monte Carlo with the link's central value set to ``x`` and the
+request seed unchanged. CORRECTION (2 Oct, step 2): that seed does NOT give every probe the same random numbers. A
+tied draw is broken from the shared edge stream, so moving the mean desynchronised later draws (D1: from draw 55).
+Step 1's 0-miss results were measured, not derived, and stand; the fast path below restores exact CRN in capture
+mode. The search is in two stages:
 - a coarse grid from the current value towards the bound finds the NEAREST change of recommendation, which guards
   against a curve that changes more than once;
 - bisection then narrows that bracket to ``tol``.
