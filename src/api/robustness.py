@@ -398,9 +398,9 @@ async def _admit_and_run(
     response_model=None,
     summary="EXPERIMENT: where would the recommendation change if each link were weaker?",
     description=(
-        "SCIENCE ROBUSTNESS (EXPERIMENT, not called by any served path). For each requested link: the link strength "
+        "SCIENCE ROBUSTNESS, on demand only (PLoT /v2/run decision_flip). For each requested link: the link strength "
         "at which the analyser's recommendation would change, from K replicate seeds, quoted only when they agree "
-        "(range <= 0.02 and <= 15% of the median), otherwise an honest absence with a reason."
+        "(range <= 0.01 and <= 15% of the median), otherwise an honest absence with a reason."
     ),
     responses={
         422: {"description": "Unknown link or invalid request"},

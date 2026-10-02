@@ -9429,7 +9429,7 @@
     },
     "/api/v1/robustness/decision-flip/v2": {
       "post": {
-        "description": "SCIENCE ROBUSTNESS (EXPERIMENT, not called by any served path). For each requested link: the link strength at which the analyser's recommendation would change, from K replicate seeds, quoted only when they agree (range <= 0.02 and <= 15% of the median), otherwise an honest absence with a reason.",
+        "description": "SCIENCE ROBUSTNESS, on demand only (PLoT /v2/run decision_flip). For each requested link: the link strength at which the analyser's recommendation would change, from K replicate seeds, quoted only when they agree (range <= 0.01 and <= 15% of the median), otherwise an honest absence with a reason.",
         "operationId": "decision_flip_v2_api_v1_robustness_decision_flip_v2_post",
         "parameters": [
           {
