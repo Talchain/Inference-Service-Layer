@@ -2680,7 +2680,11 @@ class DecisionFlipLinkV2(BaseModel):
     reason: Optional[str] = Field(None, description="Why a link is absent (machine code), else None")
     current_mean: float
     threshold: Optional[float] = Field(None, description="Median of the replicates; present only when quoted")
-    replicate_thresholds: List[Optional[float]] = Field(default_factory=list)
+    replicate_thresholds: Optional[List[Optional[float]]] = Field(
+        None,
+        description="One entry per replicate (None = that replicate found no change); None when no replicate ran "
+        "(an absence decided before any search: ranking_not_supported, leader_unstable, link_at_zero, nonlinear_downstream)",
+    )
     replicate_range: Optional[float] = None
     to_option_id: Optional[str] = Field(None, description="The option that would lead past the threshold")
 

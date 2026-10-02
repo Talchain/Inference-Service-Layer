@@ -159,12 +159,14 @@ def test_block_on_d1_quotes_clean_links_and_withholds_a_clamped_one():
     assert clean.leader_option_id == "ai_reporting_module_sprint"
     for link in clean.links:
         assert link.status in ("quoted", "absent", "no_change")
+        assert link.replicate_thresholds is not None and len(link.replicate_thresholds) == 2  # one per replicate
         if link.status == "quoted":
             assert link.to_option_id == "integration_bug_fix_sprint" and 0 < link.threshold < link.current_mean
     clamped = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
         {"request": d1(n=2000, eps={SIGNING: 0.05}), "links": links, "replicates": 2}))
     first = clamped.links[0]
     assert first.status == "absent" and first.reason == f"nonlinear_downstream:clamp:{SIGNING}"
+    assert first.replicate_thresholds is None  # no replicate ran: null, never an empty or all-null list
 
 
 def test_unknown_link_is_refused():
