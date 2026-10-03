@@ -53,6 +53,21 @@ class IdentityEvaluation(BaseModel):
         ),
     )
     reconciliation: Optional[IdentityReconciliation] = None
+    # Proposal (3) (AIQ 5876233408): the typed carrier of WHOSE today's level this is. PLoT forwards
+    # this block verbatim, so the UI binds it beside a goal's probability_of_goal (Panel 5876811906).
+    level_author: Optional[Literal["user", "olumi"]] = Field(
+        None,
+        description=(
+            "identity_inputs only: 'user' when every operand's level today is the user's, else "
+            "'olumi' (the weakest operand decides). A goal anchored on it is scored from Olumi's "
+            "estimate of today's level when 'olumi'"
+        ),
+    )
+    today_level: Optional[float] = Field(
+        None,
+        allow_inf_nan=False,
+        description="identity_inputs only: the level its inputs give today, in USER units",
+    )
 
     model_config = {"extra": "forbid"}
 
@@ -62,4 +77,9 @@ class IdentityEvaluation(BaseModel):
             raise ValueError("an identity is evaluated XOR it names its withheld_reason")
         if self.evaluated != (self.level_source is not None):
             raise ValueError("level_source is stated for an evaluated identity only")
+        from_inputs = self.level_source == "identity_inputs"
+        if from_inputs != (self.level_author is not None):
+            raise ValueError("level_author is stated for identity_inputs, and only there")
+        if self.today_level is not None and not from_inputs:
+            raise ValueError("today_level is stated for identity_inputs only")
         return self
