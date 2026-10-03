@@ -1785,6 +1785,55 @@ def factor_centres(request: RobustnessRequestV2) -> Dict[str, float]:
         for u in request.parameter_uncertainties or []
         if u.node_id in nodes
     }
+
+
+@dataclass(frozen=True)
+class IdentityLevelAnchor:
+    """Proposal (3) (AIQ #72 5876233408): today's level of a target that states no level of
+    its own, from its EVALUATED identity's operands.
+
+    ``level`` is in USER units: each operand's level today x its execution frame, combined by
+    the identity (condition 4: never a product of normalised operands). ``frame`` is the
+    target's own execution frame, which turns it into the model's frame. ``estimated_operands``
+    are the participants whose base is not the user's (condition 2: the level is only as much
+    the user's as its weakest operand, so one is enough to make it Olumi's estimate)."""
+
+    level: float
+    frame: float
+    estimated_operands: Tuple[str, ...]
+
+    @property
+    def author(self) -> Literal["user", "olumi"]:
+        return "olumi" if self.estimated_operands else "user"
+
+
+def identity_level_anchor(
+    request: RobustnessRequestV2, target_id: str
+) -> Optional[IdentityLevelAnchor]:
+    """The anchor, or None when this run's plan for ``target_id`` is absent, withheld, or reads
+    a stated level (condition 1: this run's evaluation only; condition 3: a stated level is
+    anchored by the caller, never re-derived here)."""
+    plan = resolve_identity_plans(request.graph, factor_centres(request)).get(target_id)
+    return None if plan is None else _anchor_of(plan, request.graph)
+
+
+def _anchor_of(plan: IdentityPlan, graph: GraphV2) -> Optional[IdentityLevelAnchor]:
+    """ONE computation of the anchor, read by the resolver (``identity_level_anchor``) and by the
+    wire disclosure (``identity_evaluations``), so the level a goal is scored from and the one
+    the UI shows beside it cannot drift apart."""
+    if not plan.evaluated or plan.target_level is not None:
+        return None
+    nodes = {node.id: node for node in graph.nodes}
+    level = _identity_term(
+        plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
+    ) + math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
+    return IdentityLevelAnchor(
+        level=level,
+        frame=plan.frames[plan.node_id],
+        estimated_operands=tuple(
+            i for i in plan.participants if baseline_owner(nodes[i].observed_state) != "user"
+        ),
+    )
 def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[str, float]:
     """R3-5: ``_compute_structural_influence``'s own normalisation, over ``node_ids`` only.
 
@@ -2072,6 +2121,7 @@ def identity_evaluations(
     for plan in resolve_identity_plans(graph, factor_centres).values():
         identity = nodes[plan.node_id].nonlinear_identity
         assert identity is not None
+        anchor = _anchor_of(plan, graph)
         reconciliation = (
             IdentityReconciliation(
                 reconstructed=plan.reconstructed,
@@ -2098,6 +2148,11 @@ def identity_evaluations(
                     else "stated_level" if plan.target_level is not None else "identity_inputs"
                 ),
                 reconciliation=reconciliation,
+                level_author=None if anchor is None else anchor.author,
+                # Non-finite only on an overflowing product, which the resolver refuses by name.
+                today_level=(
+                    anchor.level if anchor is not None and math.isfinite(anchor.level) else None
+                ),
             )
         )
     return out
@@ -2736,6 +2791,9 @@ class GoalThresholdPlan:
     # which turns a normalised change into a fraction of today's raw level.
     stated_origin: float = 0.0
     stated_scale: float = 1.0
+    # Proposal (3): set only when ``goal_baseline`` came from an evaluated identity's operands
+    # (the target states no level); None whenever a stated base anchors the plan.
+    level_from_identity: Optional[IdentityLevelAnchor] = None
 
     @property
     def needs_status_quo_reference(self) -> bool:
@@ -5853,7 +5911,7 @@ class RobustnessAnalyzerV2:
         # disclosure vocabulary — reason names, warning codes, detail keys and
         # user-facing messages are this channel's, supplied below, so a consumer
         # keying on ``reason == "root_goal"`` is unaffected by the fold.
-        return RobustnessAnalyzerV2._resolve_threshold_in_sample_frame(
+        plan, warning = RobustnessAnalyzerV2._resolve_threshold_in_sample_frame(
             request,
             target_id=goal_id,
             threshold=threshold,
@@ -5875,6 +5933,47 @@ class RobustnessAnalyzerV2:
                 "intercept": "goal_intercept",
             },
             refuse=refuse,
+        )
+        if plan is None or plan.level_from_identity is None:
+            return plan, warning
+        anchor = plan.level_from_identity
+        # Proposal (3): the goal's level today was not stated, so say whose it is and what it
+        # is, in user units. Rides as 'warning' because PLoT hides 'info', and an Olumi
+        # estimate presented as the user's base is the one reading this must prevent.
+        estimated = list(anchor.estimated_operands)
+        # PLoT forwards the message, node_id and node_label (never the other detail keys), so the
+        # message names nodes by their labels: it is the copy the user reads.
+        labels = {node.id: node.label for node in request.graph.nodes}
+        goal_label = labels.get(goal_id, goal_id)
+        whose = (
+            "every input's level today is the user's, so this is the user's base"
+            if anchor.author == "user"
+            else f"{', '.join(labels[i] for i in estimated)} "
+            f"{'is' if len(estimated) == 1 else 'are'} Olumi's "
+            f"{'estimate' if len(estimated) == 1 else 'estimates'}, so this is Olumi's estimate "
+            f"of today's {goal_label}, not the user's"
+        )
+        return plan, InferenceWarning(
+            code="GOAL_LEVEL_FROM_IDENTITY_INPUTS",
+            field=f"nodes[{goal_id}].nonlinear_identity",
+            detail={
+                "goal_node_id": goal_id,
+                "node_id": goal_id,
+                "node_label": goal_label,
+                "level_source": "identity_inputs",
+                "level_author": anchor.author,
+                "frame_verdict": plan.frame_verdict,
+                "today_level": anchor.level,
+                "frame": anchor.frame,
+                "goal_baseline": plan.goal_baseline,
+                "estimated_operand_ids": estimated,
+                "message": (
+                    f"{goal_label} has no level stated for today, so the chance of reaching the "
+                    f"goal is measured from the level its inputs give today: "
+                    f"{anchor.level:,.2f} in its own units; {whose}."
+                ),
+            },
+            severity="warning",
         )
 
     # The magnitude bound the level conversion trusts. Derived from the
@@ -6244,6 +6343,17 @@ class RobustnessAnalyzerV2:
 
         observed = target_node.observed_state
         baseline = observed.baseline if observed is not None else None
+        # Proposal (3) (AIQ #72 5876233408): a target that states no level today (served
+        # R3-A1b: the brief's goal carries only unit, source and cap, so it reaches ISL with
+        # no observed_state), whose identity THIS run evaluates from its inputs, is anchored at the level
+        # those inputs give today, in its own frame. The plan stays a level plan, so every
+        # guard below still applies and a belief-edge parent enters as a change, never as part
+        # of today. A stated level wins (condition 3: the anchor reads only a plan with no
+        # stated level); a withheld or absent identity leaves the refusal below as it was
+        # (condition 1).
+        anchor = identity_level_anchor(request, target_id) if baseline is None else None
+        if anchor is not None:
+            baseline = anchor.level / anchor.frame
         if baseline is None:
             return refuse(
                 reasons["missing_baseline"],
@@ -6346,6 +6456,12 @@ class RobustnessAnalyzerV2:
                 level_threshold=threshold,
                 goal_baseline=baseline,
                 pinned_levels=set_levels,
+                frame_verdict=(
+                    "estimate_only"
+                    if anchor is not None and anchor.author != "user"
+                    else "scored"
+                ),
+                level_from_identity=anchor,
             ),
             None,
         )

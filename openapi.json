@@ -4364,6 +4364,22 @@
             "title": "Factor Ids",
             "type": "array"
           },
+          "level_author": {
+            "anyOf": [
+              {
+                "enum": [
+                  "user",
+                  "olumi"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "identity_inputs only: 'user' when every operand's level today is the user's, else 'olumi' (the weakest operand decides). A goal anchored on it is scored from Olumi's estimate of today's level when 'olumi'",
+            "title": "Level Author"
+          },
           "level_source": {
             "anyOf": [
               {
@@ -4405,6 +4421,18 @@
           "stated_in_brief": {
             "title": "Stated In Brief",
             "type": "boolean"
+          },
+          "today_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "identity_inputs only: the level its inputs give today, in USER units",
+            "title": "Today Level"
           },
           "withheld_reason": {
             "anyOf": [
