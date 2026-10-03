@@ -3800,6 +3800,74 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "HorizonOnsetV2": {
+        "description": "One option's timing for the horizon view (SCIENCE/DSK experiment, #85 5947449217).",
+        "properties": {
+          "onset_weeks": {
+            "description": "Weeks before the option has any effect",
+            "maximum": 260.0,
+            "minimum": 0.0,
+            "title": "Onset Weeks",
+            "type": "number"
+          },
+          "option_id": {
+            "description": "An option id in this request",
+            "minLength": 1,
+            "title": "Option Id",
+            "type": "string"
+          },
+          "ramp_weeks": {
+            "default": 0.0,
+            "description": "Weeks from its first effect to its full effect (0 = all at once)",
+            "maximum": 260.0,
+            "minimum": 0.0,
+            "title": "Ramp Weeks",
+            "type": "number"
+          }
+        },
+        "required": [
+          "option_id",
+          "onset_weeks"
+        ],
+        "title": "HorizonOnsetV2",
+        "type": "object"
+      },
+      "HorizonRequestV2": {
+        "description": "Ask for P(best) at each week up to a horizon (EXPERIMENT; absent \u2192 compute byte-identical).",
+        "properties": {
+          "evaluate": {
+            "default": "cumulative",
+            "description": "'at' ranks the goal in week t; 'cumulative' ranks what each option has delivered over weeks 1..t",
+            "enum": [
+              "at",
+              "cumulative"
+            ],
+            "title": "Evaluate",
+            "type": "string"
+          },
+          "horizon_weeks": {
+            "description": "The horizon, in weeks from the decision",
+            "maximum": 260.0,
+            "minimum": 1.0,
+            "title": "Horizon Weeks",
+            "type": "integer"
+          },
+          "onsets": {
+            "description": "Per-option timing; an option not listed is in force from week 1 (today's assumption)",
+            "items": {
+              "$ref": "#/components/schemas/HorizonOnsetV2"
+            },
+            "maxItems": 10,
+            "title": "Onsets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "horizon_weeks"
+        ],
+        "title": "HorizonRequestV2",
+        "type": "object"
+      },
       "ISLResponseV2": {
         "description": "Enhanced response with explicit status fields and diagnostics.",
         "example": {
@@ -6848,6 +6916,17 @@
               }
             ],
             "description": "Causal graph with dual uncertainty edges"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HorizonRequestV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "EXPERIMENT. P(best) at each week up to horizon_weeks, from the same draws (closed-form onset ramp)."
           },
           "include_e_values": {
             "default": false,

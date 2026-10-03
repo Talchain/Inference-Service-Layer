@@ -1067,6 +1067,31 @@ class ControlCandidate(BaseModel):
     }
 
 
+class HorizonOnsetV2(BaseModel):
+    """One option's timing for the horizon view (SCIENCE/DSK experiment, #85 5947449217)."""
+
+    option_id: str = Field(..., min_length=1, description="An option id in this request")
+    onset_weeks: float = Field(..., ge=0, le=260, description="Weeks before the option has any effect")
+    ramp_weeks: float = Field(
+        0.0, ge=0, le=260, description="Weeks from its first effect to its full effect (0 = all at once)"
+    )
+
+
+class HorizonRequestV2(BaseModel):
+    """Ask for P(best) at each week up to a horizon (EXPERIMENT; absent → compute byte-identical)."""
+
+    horizon_weeks: int = Field(..., ge=1, le=260, description="The horizon, in weeks from the decision")
+    evaluate: Literal["at", "cumulative"] = Field(
+        "cumulative",
+        description="'at' ranks the goal in week t; 'cumulative' ranks what each option has delivered over weeks 1..t",
+    )
+    onsets: List[HorizonOnsetV2] = Field(
+        default_factory=list,
+        max_length=MAX_OPTIONS,
+        description="Per-option timing; an option not listed is in force from week 1 (today's assumption)",
+    )
+
+
 class RobustnessRequestV2(BaseModel):
     """
     V2.2 robustness analysis request.
@@ -1334,6 +1359,12 @@ class RobustnessRequestV2(BaseModel):
         "disclose only — compute is byte-identical whether or not this field "
         "is present. Each node_id may appear at most once and must exist in "
         "the graph.",
+    )
+    # SCIENCE/DSK horizon EXPERIMENT (#85 5947449217): "WHEN does it pay off?". Absent → nothing is computed and
+    # the response carries no horizon key.
+    horizon: Optional[HorizonRequestV2] = Field(
+        None,
+        description="EXPERIMENT. P(best) at each week up to horizon_weeks, from the same draws (closed-form onset ramp).",
     )
 
     @field_validator("options")
@@ -2400,6 +2431,30 @@ class ObjectiveRanking(BaseModel):
     )
 
 
+class HorizonCheckpointV2(BaseModel):
+    week: int
+    p_best: Dict[str, float]
+    leader_option_id: Optional[str] = None
+
+
+class HorizonFlipV2(BaseModel):
+    week: int
+    from_option_id: Optional[str] = None
+    to_option_id: Optional[str] = None
+
+
+class HorizonViewV2(BaseModel):
+    """'WHEN does it pay off?' (EXPERIMENT). See ``src/services/horizon_view.py`` for the model."""
+
+    method: Literal["closed_form_onset_ramp_v0"]
+    horizon_weeks: int
+    evaluate: Literal["at", "cumulative"]
+    onsets: List[HorizonOnsetV2]
+    checkpoints: List[HorizonCheckpointV2]
+    flips: List[HorizonFlipV2]
+    leader_at_horizon: Optional[str] = None
+
+
 class RobustnessResponseV2(BaseModel):
     """V2.2 robustness analysis response."""
 
@@ -2575,6 +2630,10 @@ class RobustnessResponseV2(BaseModel):
         description="Every factor node's structural influence, one cohort and one normalisation. "
         "Present on every graph where the factor phase runs; absent when it does not.",
     )
+    # SCIENCE/DSK horizon EXPERIMENT: a PRIVATE attribute, never serialised and never in this model's schema, so
+    # every route that renders the model keeps today's body byte for byte. The analyze/v2 route adds a
+    # `horizon_view` key beside the body only when the request asked for a horizon.
+    _horizon_view: Optional[HorizonViewV2] = PrivateAttr(default=None)
 
     model_config = {
         "populate_by_name": True,
