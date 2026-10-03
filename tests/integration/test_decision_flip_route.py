@@ -6,6 +6,12 @@ import copy
 import json
 import pathlib
 
+import pytest
+
+from src.api.main import app
+from src.services.analysis_pool import create_analysis_pool
+from src.services.compute_governor import ComputeGovernor
+
 FIXTURE = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "robustness" / "d1-isl-request.json"
 ROUTE = "/api/v1/robustness/decision-flip/v2"
 L1 = {"from_id": "sprint_capacity_for_ai_reporting", "to_id": "ai_reporting_module_availability"}
@@ -17,7 +23,24 @@ def body(links=(L1,), n=2000, replicates=2):
     return {"request": q, "links": list(links), "replicates": replicates}
 
 
-async def test_d1_returns_a_typed_block(client):
+@pytest.fixture
+def real_pool():
+    """A real one-worker pool, as startup installs it: the block never computes without one (review 5972444369).
+    The test client does not run the app's startup, so the rows that compute a block install it themselves."""
+    saved = {a: getattr(app.state, a) for a in ("analysis_pool", "governor", "analysis_workers") if hasattr(app.state, a)}
+    app.state.analysis_workers = 1
+    app.state.governor = ComputeGovernor(workers=1, queue_max=2)
+    app.state.analysis_pool = create_analysis_pool(1)
+    yield
+    app.state.analysis_pool.shutdown(wait=True, cancel_futures=True)  # idle by now; a non-waiting shutdown races
+    for a in ("analysis_pool", "governor", "analysis_workers"):
+        if hasattr(app.state, a):
+            delattr(app.state, a)
+    for a, v in saved.items():
+        setattr(app.state, a, v)
+
+
+async def test_d1_returns_a_typed_block(client, real_pool):
     r = await client.post(ROUTE, json=body())
     assert r.status_code == 200, r.text[:400]
     b = r.json()
@@ -27,7 +50,7 @@ async def test_d1_returns_a_typed_block(client):
     assert len(link["replicate_thresholds"]) == 2
 
 
-async def test_unknown_link_is_a_client_error(client):
+async def test_unknown_link_is_a_client_error(client, real_pool):
     r = await client.post(ROUTE, json=body(links=({"from_id": "nope", "to_id": "quarterly_revenue"},)))
     assert r.status_code == 422 and "DECISION_FLIP_UNKNOWN_LINK" in r.text
 
@@ -63,3 +86,17 @@ async def test_a_worker_that_stays_dead_is_the_typed_503_with_retry_after(client
     r = await client.post(ROUTE, json=body())
     assert r.status_code == 503 and r.headers.get("Retry-After")
     assert "analysis_worker_unavailable" in r.text
+
+
+async def test_a_pool_that_never_started_is_the_typed_503_never_an_inline_run(client):
+    # Review 5972444369: startup failed, analysis_pool = None. Before: the whole block ran on the event loop.
+    saved = getattr(app.state, "analysis_pool", "<unset>")
+    app.state.analysis_pool = None
+    try:
+        r = await client.post(ROUTE, json=body())
+    finally:
+        if saved == "<unset>":
+            delattr(app.state, "analysis_pool")
+        else:
+            app.state.analysis_pool = saved
+    assert r.status_code == 503 and r.headers.get("Retry-After") and "analysis_worker_unavailable" in r.text

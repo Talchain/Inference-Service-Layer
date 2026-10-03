@@ -157,16 +157,27 @@ def test_block_on_d1_quotes_clean_links_and_withholds_a_clamped_one():
     clean = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
         {"request": d1(n=2000), "links": links, "replicates": 2}))
     assert clean.leader_option_id == "ai_reporting_module_sprint"
-    for link in clean.links:
-        assert link.status in ("quoted", "absent", "no_change")
-        assert link.replicate_thresholds is not None and len(link.replicate_thresholds) == 2  # one per replicate
-        if link.status == "quoted":
-            assert link.to_option_id == "integration_bug_fix_sprint" and 0 < link.threshold < link.current_mean
+    # Review 5972444369 (non-blocking): each link's exact outcome, not "any status". At n = 2000, K = 2 both replicates
+    # find the change but spread beyond the 0.01 licence, so both links are withheld with their evidence.
+    got = [(lk.from_id, lk.status, lk.reason, lk.replicate_thresholds) for lk in clean.links]
+    assert got == [
+        (L1[0], "absent", "replicates_spread", pytest.approx([0.05375, 0.06375], abs=1e-9)),
+        (SIGNING, "absent", "replicates_spread", pytest.approx([0.09125, 0.10625], abs=1e-9)),
+    ]
     clamped = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
         {"request": d1(n=2000, eps={SIGNING: 0.05}), "links": links, "replicates": 2}))
     first = clamped.links[0]
     assert first.status == "absent" and first.reason == f"nonlinear_downstream:clamp:{SIGNING}"
     assert first.replicate_thresholds is None  # no replicate ran: null, never an empty or all-null list
+
+
+def test_block_on_d1_at_its_own_sample_size_quotes_the_tipping_point():
+    # The quoted path end to end, pinned by identity (review 5972444369): D1 as served (n = 10,000), K = 4.
+    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
+        {"request": d1(n=10000), "links": [{"from_id": L1[0], "to_id": L1[1]}], "replicates": 4}))
+    (link,) = block.links
+    assert (link.status, link.reason, link.to_option_id) == ("quoted", None, "integration_bug_fix_sprint")
+    assert link.threshold == pytest.approx(0.0625, abs=1e-9) and link.replicate_range <= df.BOUND_ABS
 
 
 def test_unknown_link_is_refused():

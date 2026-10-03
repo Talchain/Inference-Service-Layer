@@ -114,8 +114,16 @@ def test_the_event_loop_is_never_handed_the_block_by_name():
     import inspect
 
     src = inspect.getsource(ap.run_decision_flip_offloaded)
-    tail = src.split("loop = asyncio.get_running_loop()", 1)[1]
-    assert "run_decision_flip_v2(payload)" not in tail
+    assert "run_decision_flip_v2(payload)" not in src  # never inline, with or without a pool
+
+
+async def test_a_pool_that_never_started_is_a_typed_503_never_inline(harness):
+    # Review 5972444369: startup leaves analysis_pool = None when the pool fails to start (src/api/main.py).
+    started = time.monotonic()
+    with pytest.raises(Overload) as err:
+        await ap.run_decision_flip_offloaded(harness.make(None), harness.dreq, "rid")
+    assert (err.value.status_code, err.value.reason) == (503, "analysis_worker_unavailable")
+    assert harness.inline == [] and time.monotonic() - started < 0.5
 
 
 def test_asyncio_is_the_loop_under_test():
