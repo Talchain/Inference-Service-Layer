@@ -183,14 +183,78 @@ def affine_threshold(
     """
     n = max(1, int(math.ceil(abs(current) / step)))
     hold = current
+    found: Dict[str, Any] = {"exists": False, "hold": None, "flip": None, "to_option_id": None}
     for k in range(1, n + 1):
         x = current - current * k / n
         t = (current - x) / current
         who = _leader(p_best(x0 + t * (x1 - x0), sense, n_samples), option_ids)
         if who != lead:
-            return {"exists": True, "hold": hold, "flip": x, "to_option_id": who}
+            found = {"exists": True, "hold": hold, "flip": x, "to_option_id": who}
+            break
         hold = x
-    return {"exists": False, "hold": None, "flip": None, "to_option_id": None}
+    # The grid only LOOKS at its points (review 5963778665 P1: a 900-draw case where B leads on (0.248, 0.249) and the
+    # grid, stepping 0.25 → 0.2475, reported "no change"). Certify the stretch the grid claims `lead` holds over — up
+    # to its `hold`, or all the way to 0 when it found nothing — with the exact check; never trust the grid alone.
+    t_max = (current - found["hold"]) / current if found["exists"] else 1.0
+    try:
+        missed = first_leader_change(x0, x1, option_ids, lead, sense, t_max) is not None
+        found.update(crossing_check="exact", crossing_missed=missed)
+    except ValueError:
+        found.update(crossing_check="unavailable", crossing_missed=True)
+    return found
+
+
+def first_leader_change(
+    x0: np.ndarray, x1: np.ndarray, option_ids: Sequence[str], lead: str, sense: str, t_max: float,
+) -> Optional[float]:
+    """The smallest ``t`` in (0, ``t_max``] after which the recommendation is not ``lead``, or None. EXACT, no grid.
+
+    ``t`` runs from the current mean (0) to a mean of 0 (1); a draw's option values are straight lines in ``t`` (the
+    affine path). A draw's winner can therefore change only where two of ITS lines cross, so between consecutive
+    crossings of one draw its winner is fixed, and the win shares (hence the leader) are step functions that change
+    only at those times. One evaluation per gap of every draw, replayed in time order, visits every interval the grid
+    could step over. Shares are counted in exact integer units, ties split as ``p_best`` splits them; the leader is the
+    first option holding the maximum, as ``_leader``. A leader that differs only AT one crossing time (a zero-width
+    tie) is not a change over any range of the link and is not reported.
+
+    Raises ``ValueError`` when a value is not finite: the lines are then not lines and nothing can be certified.
+    """
+    if sense not in ("maximise", "minimise"):
+        raise ValueError(f"DECISION_FLIP_SENSE_UNSUPPORTED: {sense}")
+    if not (np.all(np.isfinite(x0)) and np.all(np.isfinite(x1))):
+        raise ValueError("DECISION_FLIP_NONFINITE_DRAWS")
+    if t_max <= 0:
+        return None
+    sign = 1.0 if sense == "maximise" else -1.0
+    v0, slope = sign * x0, sign * (x1 - x0)  # options × draws; the winner is now always the maximum
+    n_opt, n_draw = v0.shape
+    ii, kk = np.triu_indices(n_opt, 1)
+    den = slope[ii] - slope[kk]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tc = np.where(den != 0, (v0[kk] - v0[ii]) / den, np.inf)
+    # A crossing outside (0, t_max) sits AT t_max, where it can change nothing inside the range.
+    tc = np.sort(np.where((tc > 0) & (tc < t_max), tc, t_max), axis=0)  # pairs × draws
+    bounds = np.vstack([np.zeros((1, n_draw)), tc, np.full((1, n_draw), t_max)])
+    mids = (bounds[:-1] + bounds[1:]) / 2  # one point inside every gap of every draw
+    vals = v0[:, None, :] + mids[None, :, :] * slope[:, None, :]  # options × gaps × draws
+    win = vals == vals.max(axis=0)[None]
+    unit = math.lcm(*range(1, n_opt + 1))
+    shares = win * (unit // win.sum(axis=0))[None]  # integer share units; an exact tie splits the draw
+    lead_i = list(option_ids).index(lead)
+    totals = shares[:, 0, :].sum(axis=1)
+    if int(np.argmax(totals)) != lead_i:
+        return 0.0
+    delta = shares[:, 1:, :] - shares[:, :-1, :]  # the change at each inner bound (a crossing time)
+    changed = np.any(delta != 0, axis=0)
+    if not changed.any():
+        return None
+    t_ev, d_ev = tc[changed], delta[:, changed].T
+    order = np.argsort(t_ev, kind="stable")
+    t_ev, d_ev = t_ev[order], d_ev[order]
+    state = totals[None, :] + np.cumsum(d_ev, axis=0)
+    last = np.r_[t_ev[1:] != t_ev[:-1], True]  # an interval's state is the one after its LAST change
+    off = np.nonzero(np.argmax(state[last], axis=1) != lead_i)[0]
+    return float(t_ev[last][off[0]]) if off.size else None
 
 
 def _child_seed(master: int, i: int) -> int:
@@ -225,12 +289,16 @@ def compute_decision_flip_block(dreq: Any) -> Any:
         return np.array([oo[o] for o in option_ids], dtype=float)
 
     head = run(master, capture=False)
-    leader = head.recommended_option_id
+    # A WITHHELD ranking has no leader (review 5963778665 P1). The analyser's `recommended_option_id` is then max() over
+    # an all-zero tally, i.e. the FIRST option by array order: reversing the options names the other one. Export null
+    # and let every link be the honest `ranking_not_supported` absence, without spending the replicates.
+    ranking = getattr(head, "objective_ranking", None)
+    leader = head.recommended_option_id if ranking is None or ranking.status == "computed" else None
     links_out: List[Any] = []
     sense: str = "maximise"
     seeds = [_child_seed(master, i) for i in range(dreq.replicates)]
     replicate_base: Dict[int, Any] = {}
-    for s in seeds:
+    for s in seeds if leader is not None else []:
         r = run(s)
         replicate_base[s] = r
         sense = str(r._mc_draws["objective"].sense) if r._mc_draws["objective"] is not None else "maximise"
@@ -254,6 +322,7 @@ def compute_decision_flip_block(dreq: Any) -> Any:
             links_out.append(DecisionFlipLinkV2(status="absent", reason=why, **common))
             continue
 
+        assert leader is not None  # a null leader is the `ranking_not_supported` absence above
         per_seed: List[Dict[str, Any]] = []
         for s in seeds:
             x0 = matrix(replicate_base[s])
@@ -269,6 +338,15 @@ def compute_decision_flip_block(dreq: Any) -> Any:
 
         found = [r for r in per_seed if r["exists"]]
         ths = [((r["hold"] + r["flip"]) / 2) if r["exists"] else None for r in per_seed]
+        # Neither "no change" nor a quoted bracket stands unless the exact check certified the stretch it rests on.
+        if any(r["crossing_check"] != "exact" for r in per_seed):
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="crossing_check_unavailable",
+                                                replicate_thresholds=ths, **common))
+            continue
+        if any(r["crossing_missed"] for r in per_seed):
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="crossing_between_grid_points",
+                                                replicate_thresholds=ths, **common))
+            continue
         if not found:
             links_out.append(DecisionFlipLinkV2(status="no_change", replicate_thresholds=ths, **common))
             continue

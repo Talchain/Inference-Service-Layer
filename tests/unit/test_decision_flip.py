@@ -183,3 +183,94 @@ def test_the_exact_rerun_withholds_a_link_the_straight_line_got_wrong(monkeypatc
     block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate({"request": q, "replicates": 2, "links": [
         {"from_id": "ai_reporting_module_availability", "to_id": SIGNING}]}))
     assert (block.links[0].status, block.links[0].reason) == ("absent", "affine_check_failed")
+
+
+# ── Review 5963778665 (CHANGES_REQUIRED @10c42c87): the three P1s ────────────────────────────────────────────────────
+
+
+def _lines(groups):
+    """(x0, x1) for options [A, B] from (A@t0, A@t1, B@t0, B@t1, count) groups. t = 0 is the current mean, t = 1 is 0."""
+    cols = [g[:4] for g in groups for _ in range(g[4])]
+    a = np.array(cols, dtype=float)
+    return np.array([a[:, 0], a[:, 2]]), np.array([a[:, 1], a[:, 3]])
+
+
+# 900 draws. A leads at the current mean and again from t = 0.008; B leads ONLY on t in (0.004, 0.008), i.e. a link
+# mean in (0.248, 0.249) for current 0.25: strictly between the grid points 0.25 and 0.2475 (the reviewer's case:
+# "A leads at 0.25, B leads at 0.2485").
+SHORT_B = [
+    (0.0, 1.0, 0.008, 0.008, 2),  # B until t = 0.008, then A
+    (0.004, 0.004, 0.0, 1.0, 2),  # A until t = 0.004, then B
+    (1.0, 1.0, 0.0, 0.0, 449),    # A throughout
+    (0.0, 0.0, 1.0, 1.0, 447),    # B throughout
+]
+
+
+def _leader_at(x0, x1, t):
+    return df._leader(df.p_best(x0 + t * (x1 - x0), "maximise", x0.shape[1]), ["A", "B"])
+
+
+def test_p1_fixture_really_has_a_short_winning_interval_between_grid_points():
+    # Precondition for the two rows below: without it they would pass for the wrong reason.
+    x0, x1 = _lines(SHORT_B)
+    assert x0.shape == (2, 900)
+    assert _leader_at(x0, x1, 0.0) == "A" and _leader_at(x0, x1, 0.006) == "B"  # mean 0.25 vs 0.2485
+    assert all(_leader_at(x0, x1, k / 100) == "A" for k in range(0, 101))  # every 0.0025 grid point says A
+
+
+def test_p1_a_short_interval_the_grid_steps_over_is_never_certified_as_no_change():
+    x0, x1 = _lines(SHORT_B)
+    res = df.affine_threshold(x0, x1, 0.25, ["A", "B"], "A", "maximise", 900)
+    assert res["exists"] is False  # the grid alone saw nothing ...
+    assert res["crossing_missed"] is True  # ... and the exhaustive check refuses to call that "no change"
+
+
+def test_p1_an_earlier_missed_interval_also_voids_a_later_grid_flip():
+    # Four A-always draws now lose to B from t = 0.5: the grid finds THAT flip, but A did not hold all the way down to
+    # it, so its bracket would overstate how far the link can weaken.
+    x0, x1 = _lines(SHORT_B[:2] + [(1.0, -1.0, 0.0, 0.0, 4), (1.0, 1.0, 0.0, 0.0, 445), (0.0, 0.0, 1.0, 1.0, 447)])
+    assert _leader_at(x0, x1, 0.75) == "B"
+    res = df.affine_threshold(x0, x1, 0.25, ["A", "B"], "A", "maximise", 900)
+    assert res["exists"] is True and res["crossing_missed"] is True
+
+
+def test_p1_controls_a_monotone_crossing_and_a_true_no_change_stay_certified():
+    x0 = np.array([[1.0, 1.0], [0.4, 0.4]])
+    x1 = np.array([[0.0, 0.0], [0.4, 0.4]])
+    found = df.affine_threshold(x0, x1, 1.0, ["A", "B"], "A", "maximise", 2, step=0.01)
+    assert found["exists"] is True and found["crossing_missed"] is False
+    flat0, flat1 = _lines([(1.0, 1.0, 0.0, 0.0, 6), (0.0, 0.5, 0.2, 0.2, 3)])
+    none = df.affine_threshold(flat0, flat1, 0.25, ["A", "B"], "A", "maximise", 9)
+    assert none["exists"] is False and none["crossing_missed"] is False
+
+
+def test_p1_the_block_withholds_a_link_whose_crossing_check_failed(monkeypatch):
+    real = df.affine_threshold
+
+    def missed(*a, **k):
+        out = real(*a, **k)
+        out.update(exists=False, hold=None, flip=None, to_option_id=None, crossing_missed=True)
+        return out
+
+    monkeypatch.setattr(df, "affine_threshold", missed)
+    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
+        {"request": d1(n=2000), "links": [{"from_id": L1[0], "to_id": L1[1]}], "replicates": 2}))
+    (link,) = block.links
+    assert (link.status, link.reason) == ("absent", "crossing_between_grid_points")  # never "no_change"
+
+
+from tests.unit.test_goal_direction_objective_ranking import (  # noqa: E402
+    _WITHHOLD_WITNESS_OPTIONS,
+    _withhold_witness_payload,
+)
+
+
+@pytest.mark.parametrize("order", ["forward", "reversed"])
+def test_p1_a_withheld_ranking_exports_no_leader_in_either_option_order(order):
+    options = _WITHHOLD_WITNESS_OPTIONS if order == "forward" else list(reversed(_WITHHOLD_WITNESS_OPTIONS))
+    q = _withhold_witness_payload(options=options, include_path_decomposition=False, include_voi=False)
+    assert RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**q)).objective_ranking.status == "withheld"
+    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
+        {"request": q, "links": [{"from_id": "mid", "to_id": "goal"}], "replicates": 2}))
+    assert block.leader_option_id is None  # never the analyser's first-option placeholder
+    assert [(lk.status, lk.reason) for lk in block.links] == [("absent", "ranking_not_supported")]
