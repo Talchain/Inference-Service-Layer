@@ -285,3 +285,77 @@ def test_p1_a_withheld_ranking_exports_no_leader_in_either_option_order(order):
         {"request": q, "links": [{"from_id": "mid", "to_id": "goal"}], "replicates": 2}))
     assert block.leader_option_id is None  # never the analyser's first-option placeholder
     assert [(lk.status, lk.reason) for lk in block.links] == [("absent", "ranking_not_supported")]
+
+
+# ── Review 5972142902 (CHANGES_REQUIRED @8e888af8): an EXACT tie is decided by the analyser's float tally ─────────────
+
+def _tie_case():
+    """The reviewer's 100 finite draws, options [A, C, B], current mean 0.25.
+
+    A-only; 91 three-way ties; A-only; two C-only; three three-way ties; then two moving draws:
+    (A, C, B) = (0.004 - t, -1, 0) and (t - 0.008, -1, 0). On t in (0.004, 0.008) A, C and B hold EXACTLY equal
+    shares, and the analyser's float tally (1.0 per clear win, 1/3 per three-way tie, summed in draw order) names C.
+    """
+    ids = ["A", "C", "B"]
+    rows = []  # (A0, A1, C0, C1, B0, B1)
+    rows.append((1, 1, 0, 0, 0, 0))
+    rows += [(0, 0, 0, 0, 0, 0)] * 91
+    rows.append((1, 1, 0, 0, 0, 0))
+    rows += [(0, 0, 1, 1, 0, 0)] * 2
+    rows += [(0, 0, 0, 0, 0, 0)] * 3
+    rows.append((0.004, 0.004 - 1, -1, -1, 0, 0))
+    rows.append((-0.008, 1 - 0.008, -1, -1, 0, 0))
+    a = np.array(rows, dtype=float)
+    return ids, np.array([a[:, 0], a[:, 2], a[:, 4]]), np.array([a[:, 1], a[:, 3], a[:, 5]])
+
+
+def _analyser_leader(ids, values):
+    """The analyser's own rule, written out: `option_wins[w] += 1.0 / len(winners)` in draw order, then the FIRST
+    option holding the maximum (`max(option_wins, key=...)` over insertion order)."""
+    wins = {o: 0.0 for o in ids}
+    for d in range(values.shape[1]):
+        col = {o: float(values[i, d]) for i, o in enumerate(ids)}
+        best = max(col.values())
+        winners = [o for o, v in col.items() if v == best]
+        for w in winners:
+            wins[w] += 1.0 / len(winners)
+    return max(wins, key=lambda k: wins[k])
+
+
+def test_review2_the_tie_fixture_is_what_the_reviewer_reproduced():
+    ids, x0, x1 = _tie_case()
+    at = lambda t: x0 + t * (x1 - x0)
+    assert x0.shape == (3, 100)
+    assert _analyser_leader(ids, at(0.0)) == "A" and _analyser_leader(ids, at(0.006)) == "C"  # mean 0.2485 -> C
+    assert ids[int(np.argmax(df.p_best(at(0.006), "maximise", 100)))] == "C"
+    assert all(_analyser_leader(ids, at(k / 100)) == "A" for k in range(0, 101))  # every grid point says A
+
+
+def test_review2_an_exact_tie_names_the_analysers_leader_never_the_first_option():
+    ids, x0, x1 = _tie_case()
+    change = df.first_leader_change(x0, x1, ids, "A", "maximise", 1.0)
+    assert change is not None and change[1] == "C" and abs(change[0] - 0.004) < 1e-12  # C, not "no change", not A
+    res = df.affine_threshold(x0, x1, 0.25, ids, "A", "maximise", 100)
+    assert res["exists"] is True and res["to_option_id"] == "C" and res["crossing_missed"] is True
+    assert abs((res["hold"] + res["flip"]) / 2 - 0.249) < 1e-12
+
+
+def test_review2_too_many_tied_intervals_is_withheld_as_leader_unstable_never_no_change(monkeypatch):
+    monkeypatch.setattr(df, "MAX_TIED_INTERVALS", 0)
+    ids, x0, x1 = _tie_case()
+    res = df.affine_threshold(x0, x1, 0.25, ids, "A", "maximise", 100)
+    assert res["uncertified"] is True and res["exists"] is False
+    real = df.affine_threshold
+
+    def tied(*a, **k):
+        out = real(*a, **k)
+        out.update(exists=False, hold=None, flip=None, to_option_id=None, uncertified=True)
+        return out
+
+    monkeypatch.setattr(df, "affine_threshold", tied)
+    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
+        {"request": d1(n=2000), "links": [{"from_id": L1[0], "to_id": L1[1]}], "replicates": 2}))
+    (link,) = block.links
+    # 0.75.0's closed vocabulary (R9): an existing PRE-SEARCH reason, so no replicates and no range on the wire.
+    assert (link.status, link.reason, link.replicate_thresholds, link.replicate_range) == (
+        "absent", "leader_unstable", None, None)

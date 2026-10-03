@@ -109,6 +109,8 @@ BOUND_ABS = 0.01
 BOUND_REL = 0.15
 GRID_STEP = 0.0025
 CHECK_TOL = 1e-9
+# Exact-tie intervals the sweep replays through the analyser's float tally per call (~ms each at n = 10,000).
+MAX_TIED_INTERVALS = 1024
 STRIPPED = {
     "include_e_values": False,
     "include_voi": False,
@@ -198,7 +200,13 @@ def affine_threshold(
     # it replaces the grid's answer as an ordinary bracket, so the replicate agreement, the licence and the real re-run
     # below judge it exactly as they judge any other, and no new absence reason is needed on the wire.
     t_max = (current - found["hold"]) / current if found["exists"] else 1.0
-    nearer = first_leader_change(x0, x1, option_ids, lead, sense, t_max)
+    try:
+        nearer = first_leader_change(x0, x1, option_ids, lead, sense, t_max)
+    except TieBudgetExceeded:
+        # Too many EXACT ties to replay: the recommendation along this link is decided by float tie-breaks throughout,
+        # so nothing (neither "no change" nor a bracket) is certified. The block withholds it as `leader_unstable`.
+        return {"exists": False, "hold": None, "flip": None, "to_option_id": None, "crossing_missed": False,
+                "uncertified": True}
     found["crossing_missed"] = nearer is not None
     if nearer is not None:
         t_star, to, half = nearer
@@ -218,8 +226,14 @@ def first_leader_change(
     only at those times. One evaluation per gap of every draw, replayed in time order, visits every interval the grid
     could step over. Shares are counted in exact integer units with ``p_best``'s rule: the best FINITE option wins, an
     exact tie splits the draw, and a draw with no finite option credits nobody. On (0, 1] an option's value in a draw is
-    finite exactly when both endpoints are, so a non-finite one simply never wins there. The leader is the first option
-    holding the maximum, as ``_leader``.
+    finite exactly when both endpoints are, so a non-finite one simply never wins there.
+
+    ⚠ AN EXACT TIE IS THE ANALYSER'S TO BREAK (review 5972142902). The recommendation is the first option holding the
+    maximum of the analyser's FLOAT tally (``option_wins[w] += 1.0 / len(winners)``, summed in draw order). Away from
+    an exact tie the integer count and that tally name the same option: their gap is at least one share unit, far above
+    float rounding. On an exact tie in integer units, rounding decides, and the first option need not win (100 draws
+    with 94 three-way ties: the tally names C, the integer tie-break A). So a tied interval's leader is the analyser's
+    float tally replayed at a point inside it, at most ``MAX_TIED_INTERVALS`` times; beyond that ``TieBudgetExceeded``.
 
     ``half_width``: half the shorter of the two intervals either side of ``t``, so ``t - half_width`` still has today's
     leader and ``t + half_width`` the new one (at ``t = 0``, half the first interval). A leader that differs only AT one
@@ -256,18 +270,52 @@ def first_leader_change(
     last = np.r_[t_ev[1:] != t_ev[:-1], True] if t_ev.size else np.zeros(0, dtype=bool)
     times = t_ev[last]  # the distinct change times; an interval's state is the one after its LAST change there
     states = (totals[None, :] + np.cumsum(d_ev, axis=0))[last]
-    if int(np.argmax(totals)) != lead_i:  # the draws already disagree just past the current mean
-        nxt = float(times[0]) if times.size else t_max
-        return (0.0, option_ids[int(np.argmax(totals))], nxt / 2) if nxt > 0 else None
-    off = np.nonzero(np.argmax(states, axis=1) != lead_i)[0]
-    if not off.size:
-        return None
-    i = int(off[0])
+    budget = [MAX_TIED_INTERVALS]
+
+    def analyser_leader(t: float) -> int:
+        v = np.where(fin, v0 + t * slope, -np.inf)
+        w = (v == v.max(axis=0)[None]) & fin
+        share = np.where(w, 1.0 / np.maximum(w.sum(axis=0), 1)[None], 0.0)
+        tally = np.add.accumulate(share, axis=1)[:, -1]  # one addition at a time, in draw order: option_wins' own sum
+        return int(np.argmax(tally))
+
+    def leader(state: np.ndarray, t_inside: float) -> int:
+        if int((state == state.max()).sum()) > 1:
+            if budget[0] <= 0:
+                raise TieBudgetExceeded()
+            budget[0] -= 1
+            return analyser_leader(t_inside)
+        return int(np.argmax(state))
+
+    nxt_after = np.r_[times[1:], t_max] if times.size else np.zeros(0)
+    inside_after = (times + nxt_after) / 2  # a point inside the interval that follows each change
+    first_bound = float(times[0]) if times.size else t_max
+    w0 = leader(totals, first_bound / 2)
+    if w0 != lead_i:  # the draws already disagree just past the current mean
+        return (0.0, option_ids[w0], first_bound / 2) if first_bound > 0 else None
+    tied = (states == states.max(axis=1, keepdims=True)).sum(axis=1) > 1
+    plain = np.nonzero(~tied & (np.argmax(states, axis=1) != lead_i))[0]  # untied changes: no replay needed
+    stop = int(plain[0]) if plain.size else int(times.size)
+    hit: Optional[Tuple[int, int]] = None
+    for j in np.nonzero(tied[:stop])[0]:  # tied intervals before the first untied change, in time order
+        who = leader(states[j], float(inside_after[j]))
+        if who != lead_i:
+            hit = (int(j), who)
+            break
+    if hit is None:
+        if not plain.size:
+            return None
+        hit = (stop, int(np.argmax(states[stop])))
+    i, to_i = hit
     t_star = float(times[i])
     prev = float(times[i - 1]) if i > 0 else 0.0
     nxt = float(times[i + 1]) if i + 1 < times.size else t_max
     half = min(t_star - prev, nxt - t_star) / 2
-    return (t_star, option_ids[int(np.argmax(states[i]))], half) if half > 0 else None
+    return (t_star, option_ids[to_i], half) if half > 0 else None
+
+
+class TieBudgetExceeded(Exception):
+    """More exact ties than ``MAX_TIED_INTERVALS`` to replay through the analyser's float tally."""
 
 
 def _child_seed(master: int, i: int) -> int:
@@ -349,6 +397,10 @@ def compute_decision_flip_block(dreq: Any) -> Any:
             res["x1"] = x1
             per_seed.append(res)
 
+        if any(r.get("uncertified") for r in per_seed):
+            # 0.75.0's vocabulary is closed (R9): the existing `leader_unstable`, in its pre-search shape.
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="leader_unstable", **common))
+            continue
         found = [r for r in per_seed if r["exists"]]
         ths = [((r["hold"] + r["flip"]) / 2) if r["exists"] else None for r in per_seed]
         if not found:
