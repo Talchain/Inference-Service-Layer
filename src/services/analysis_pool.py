@@ -226,6 +226,7 @@ async def run_decision_flip_offloaded(app: Any, dreq: Any, request_id: str) -> A
     event loop after a worker died bypassed the deadline and stalled every other request on this worker. A dead or
     shut-down pool is replaced and the block resubmitted ONCE, offloaded, inside the deadline that remains; a second
     failure is the governor's typed 503 (``analysis_worker_unavailable``, Retry-After), which the route already maps.
+    So is a pool that never started.
     """
     from src.models.robustness_v2 import DecisionFlipBlockV2
     from src.services.compute_governor import Overload
@@ -235,7 +236,9 @@ async def run_decision_flip_offloaded(app: Any, dreq: Any, request_id: str) -> A
     pool = getattr(app.state, "analysis_pool", None)
     deadline = ANALYSIS_HARD_DEADLINE_S  # read here so monkeypatch/edit takes effect
     if pool is None:
-        return DecisionFlipBlockV2.model_validate_json(run_decision_flip_v2(payload))
+        # Startup creates the pool unconditionally; None means it FAILED to start (src/api/main.py). Unlike one
+        # analysis, this block must never run on the event loop (review 5972444369): the governor's typed 503.
+        raise Overload(503, "analysis_worker_unavailable")
     loop = asyncio.get_running_loop()
     deadline_at = loop.time() + deadline
     for attempt in (1, 2):
