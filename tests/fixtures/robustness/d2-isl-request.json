@@ -1,0 +1,273 @@
+{
+ "request_id": "76f9cbc6-afa6-48a8-b79a-551790489ea9",
+ "graph": {
+  "nodes": [
+   {
+    "id": "securing_funding",
+    "kind": "goal",
+    "label": "securing funding",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "hours_per_week_on_investment_firm_cold_emails",
+    "kind": "factor",
+    "label": "Hours per week on investment-firm cold emails",
+    "observed_state": {
+     "value": 0.2,
+     "unit": "hours/week",
+     "source": "cee_inference",
+     "raw_value": 8,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "hours_per_week_finding_warm_connections",
+    "kind": "factor",
+    "label": "Hours per week finding warm connections",
+    "observed_state": {
+     "value": 0.1,
+     "unit": "hours/week",
+     "source": "cee_inference",
+     "raw_value": 4,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "hours_per_week_on_angel_outreach",
+    "kind": "factor",
+    "label": "Hours per week on angel outreach",
+    "observed_state": {
+     "value": 0,
+     "unit": "hours/week",
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "investment_firm_responsiveness",
+    "kind": "factor",
+    "label": "Investment-firm responsiveness",
+    "observed_state": {
+     "value": 0.05,
+     "unit": "%",
+     "source": "cee_inference",
+     "raw_value": 5,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "angel_investor_responsiveness",
+    "kind": "factor",
+    "label": "Angel investor responsiveness",
+    "observed_state": {
+     "value": 0.1,
+     "unit": "%",
+     "source": "cee_inference",
+     "raw_value": 10,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "distraction_from_investment_firm_fundraising",
+    "kind": "risk",
+    "label": "Distraction from investment-firm fundraising",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "qualified_investment_firm_conversations",
+    "kind": "outcome",
+    "label": "Qualified investment-firm conversations",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "investment_firm_deals_closed",
+    "kind": "outcome",
+    "label": "Investment-firm deals closed",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "qualified_angel_investor_conversations",
+    "kind": "outcome",
+    "label": "Qualified angel investor conversations",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "angel_fundraising_admin_time",
+    "kind": "outcome",
+    "label": "Angel fundraising admin time",
+    "intercept": 0,
+    "epsilon_std": 0
+   }
+  ],
+  "edges": [
+   {
+    "from": "hours_per_week_on_investment_firm_cold_emails",
+    "to": "qualified_investment_firm_conversations",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.09999999999999999,
+     "std": 0.049999999999999996
+    }
+   },
+   {
+    "from": "hours_per_week_finding_warm_connections",
+    "to": "qualified_investment_firm_conversations",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.19999999999999998,
+     "std": 0.09999999999999999
+    }
+   },
+   {
+    "from": "investment_firm_responsiveness",
+    "to": "qualified_investment_firm_conversations",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.2,
+     "std": 0.1
+    }
+   },
+   {
+    "from": "qualified_investment_firm_conversations",
+    "to": "investment_firm_deals_closed",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.25
+    }
+   },
+   {
+    "from": "investment_firm_deals_closed",
+    "to": "securing_funding",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.39999999999999997,
+     "std": 0.19999999999999998
+    }
+   },
+   {
+    "from": "hours_per_week_on_angel_outreach",
+    "to": "qualified_angel_investor_conversations",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.13999999999999999,
+     "std": 0.06999999999999999
+    }
+   },
+   {
+    "from": "angel_investor_responsiveness",
+    "to": "qualified_angel_investor_conversations",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.2,
+     "std": 0.1
+    }
+   },
+   {
+    "from": "qualified_angel_investor_conversations",
+    "to": "securing_funding",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "hours_per_week_on_angel_outreach",
+    "to": "angel_fundraising_admin_time",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.3,
+     "std": 0.15
+    }
+   },
+   {
+    "from": "angel_fundraising_admin_time",
+    "to": "distraction_from_investment_firm_fundraising",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "distraction_from_investment_firm_fundraising",
+    "to": "securing_funding",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": -0.5,
+     "std": 0.125
+    }
+   }
+  ]
+ },
+ "options": [
+  {
+   "id": "continue_current_outreach",
+   "label": "Continue current outreach",
+   "interventions": {
+    "hours_per_week_on_angel_outreach": 0
+   }
+  },
+  {
+   "id": "angel_investor_outreach",
+   "label": "Angel investor outreach",
+   "interventions": {
+    "hours_per_week_on_angel_outreach": 0.2
+   }
+  }
+ ],
+ "goal_node_id": "securing_funding",
+ "n_samples": 10000,
+ "analysis_types": [
+  "comparison",
+  "sensitivity",
+  "robustness"
+ ],
+ "parameter_uncertainties": [
+  {
+   "node_id": "hours_per_week_on_investment_firm_cold_emails",
+   "distribution": "normal",
+   "std": 0.1
+  },
+  {
+   "node_id": "hours_per_week_finding_warm_connections",
+   "distribution": "normal",
+   "std": 0.1
+  },
+  {
+   "node_id": "hours_per_week_on_angel_outreach",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "investment_firm_responsiveness",
+   "distribution": "normal",
+   "std": 0.1
+  },
+  {
+   "node_id": "angel_investor_responsiveness",
+   "distribution": "normal",
+   "std": 0.1
+  }
+ ],
+ "include_e_values": true,
+ "include_voi": true,
+ "include_factor_flips": true,
+ "seed": "42"
+}

@@ -214,3 +214,58 @@ async def run_offloaded(
     # 2.477(i): paired with the worker's encoder. NOT model_validate_json — see
     # encode_analysis_response for the measured failure that pairing caused.
     return decode_analysis_response(result_json)
+
+
+async def run_decision_flip_offloaded(app: Any, dreq: Any, request_id: str) -> Any:
+    """SCIENCE ROBUSTNESS (EXPERIMENT): the decision-flip block through the SAME pool, deadline and self-healing as
+    :func:`run_offloaded`. A deadline breach raises :class:`AnalysisDeadlineExceeded` (the route's typed 504, which CEE
+    answers with RC's honest-limit line), never a hang.
+
+    ⚠ NEVER INLINE ONCE A POOL EXISTS (review 5963778665 P1). Unlike :func:`run_offloaded`, whose in-process fallback is
+    one analysis, this block is K replicates × links of Monte Carlo (up to the whole hard deadline). Computing it on the
+    event loop after a worker died bypassed the deadline and stalled every other request on this worker. A dead or
+    shut-down pool is replaced and the block resubmitted ONCE, offloaded, inside the deadline that remains; a second
+    failure is the governor's typed 503 (``analysis_worker_unavailable``, Retry-After), which the route already maps.
+    So is a pool that never started.
+    """
+    from src.models.robustness_v2 import DecisionFlipBlockV2
+    from src.services.compute_governor import Overload
+    from src.services.robustness_worker import run_decision_flip_v2
+
+    payload = dreq.model_dump_json()
+    pool = getattr(app.state, "analysis_pool", None)
+    deadline = ANALYSIS_HARD_DEADLINE_S  # read here so monkeypatch/edit takes effect
+    if pool is None:
+        # Startup creates the pool unconditionally; None means it FAILED to start (src/api/main.py). Unlike one
+        # analysis, this block must never run on the event loop (review 5972444369): the governor's typed 503.
+        raise Overload(503, "analysis_worker_unavailable")
+    loop = asyncio.get_running_loop()
+    deadline_at = loop.time() + deadline
+    for attempt in (1, 2):
+        remaining = deadline_at - loop.time()
+        if remaining <= 0:
+            raise AnalysisDeadlineExceeded(deadline)
+        try:
+            fut = loop.run_in_executor(pool, run_decision_flip_v2, payload)
+        except RuntimeError:  # the pool was shut down under us (a sibling's self-heal)
+            pool = _swap_in_fresh_pool(app, pool)
+            continue
+        try:
+            out = await asyncio.wait_for(fut, timeout=remaining)
+        except asyncio.TimeoutError:
+            _fresh, killed = _hard_kill_and_recreate(app, pool)
+            fut.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
+            logger.warning(
+                "isl_decision_flip_offload_deadline",
+                extra={"request_id": request_id, "deadline_s": deadline, "killed_pids": killed},
+            )
+            raise AnalysisDeadlineExceeded(deadline)
+        except BrokenProcessPool:
+            logger.warning(
+                "isl_decision_flip_worker_failed",
+                extra={"request_id": request_id, "attempt": attempt, "remaining_s": remaining},
+            )
+            pool = _swap_in_fresh_pool(app, pool)
+            continue
+        return DecisionFlipBlockV2.model_validate_json(out)
+    raise Overload(503, "analysis_worker_unavailable")

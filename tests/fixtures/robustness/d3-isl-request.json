@@ -1,0 +1,208 @@
+{
+ "request_id": "c80b8065-ff1b-414b-b3e5-71831d1a87da",
+ "graph": {
+  "nodes": [
+   {
+    "id": "monthly_spend",
+    "kind": "goal",
+    "label": "Monthly spend",
+    "observed_state": {
+     "value": 0.8,
+     "baseline": 0.8,
+     "unit": "£/month",
+     "source": "brief_extraction",
+     "raw_value": 45000,
+     "cap": 56250
+    },
+    "intercept": 0,
+    "epsilon_std": 0,
+    "raw_range": {
+     "min": 0,
+     "max": 56250
+    }
+   },
+   {
+    "id": "gcp_workload_share",
+    "kind": "factor",
+    "label": "GCP workload share",
+    "observed_state": {
+     "value": 0,
+     "unit": "proportion",
+     "source": "cee_inference"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "migration_preparation_effort",
+    "kind": "factor",
+    "label": "Migration preparation effort",
+    "observed_state": {
+     "value": 0,
+     "unit": "person-weeks",
+     "source": "cee_inference",
+     "raw_value": 0,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "gcp_savings_at_full_migration",
+    "kind": "factor",
+    "label": "GCP savings at full migration",
+    "observed_state": {
+     "value": 0.3375,
+     "unit": "£/month",
+     "source": "cee_inference",
+     "raw_value": 6750,
+     "extractionType": "inferred"
+    },
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "monthly_cloud_overspend_during_migration",
+    "kind": "risk",
+    "label": "Monthly cloud overspend during migration",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "monthly_cloud_savings",
+    "kind": "outcome",
+    "label": "Monthly cloud savings",
+    "intercept": 0,
+    "epsilon_std": 0
+   },
+   {
+    "id": "migration_downtime",
+    "kind": "outcome",
+    "label": "Migration downtime",
+    "intercept": 0,
+    "epsilon_std": 0
+   }
+  ],
+  "edges": [
+   {
+    "from": "gcp_workload_share",
+    "to": "monthly_cloud_savings",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "gcp_savings_at_full_migration",
+    "to": "monthly_cloud_savings",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.5,
+     "std": 0.125
+    }
+   },
+   {
+    "from": "monthly_cloud_savings",
+    "to": "monthly_spend",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": -0.3555555555555555,
+     "std": 0.17777777777777776
+    }
+   },
+   {
+    "from": "gcp_workload_share",
+    "to": "migration_downtime",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.3125,
+     "std": 0.15625
+    }
+   },
+   {
+    "from": "migration_preparation_effort",
+    "to": "migration_downtime",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": -0.375,
+     "std": 0.1875
+    }
+   },
+   {
+    "from": "gcp_workload_share",
+    "to": "monthly_cloud_overspend_during_migration",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.3,
+     "std": 0.15
+    }
+   },
+   {
+    "from": "migration_preparation_effort",
+    "to": "monthly_cloud_overspend_during_migration",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": -0.3,
+     "std": 0.15
+    }
+   },
+   {
+    "from": "monthly_cloud_overspend_during_migration",
+    "to": "monthly_spend",
+    "exists_probability": 0.8,
+    "strength": {
+     "mean": 0.17777777777777776,
+     "std": 0.08888888888888888
+    }
+   }
+  ]
+ },
+ "options": [
+  {
+   "id": "switch_to_gcp",
+   "label": "Switch to GCP",
+   "interventions": {
+    "gcp_workload_share": 1,
+    "migration_preparation_effort": 0.4
+   }
+  },
+  {
+   "id": "stay_on_aws",
+   "label": "Stay on AWS",
+   "interventions": {
+    "gcp_workload_share": 0,
+    "migration_preparation_effort": 0
+   }
+  }
+ ],
+ "goal_node_id": "monthly_spend",
+ "n_samples": 10000,
+ "analysis_types": [
+  "comparison",
+  "sensitivity",
+  "robustness"
+ ],
+ "parameter_uncertainties": [
+  {
+   "node_id": "gcp_workload_share",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "migration_preparation_effort",
+   "distribution": "point_mass"
+  },
+  {
+   "node_id": "gcp_savings_at_full_migration",
+   "distribution": "normal",
+   "std": 0.1
+  }
+ ],
+ "include_e_values": true,
+ "include_voi": true,
+ "include_factor_flips": true,
+ "goal_threshold": -0.2,
+ "goal_threshold_frame": "change_rel",
+ "goal_direction": "minimise",
+ "seed": "42"
+}

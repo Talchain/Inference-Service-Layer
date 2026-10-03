@@ -1335,6 +1335,9 @@ class RobustnessRequestV2(BaseModel):
         "is present. Each node_id may appear at most once and must exist in "
         "the graph.",
     )
+    # SCIENCE ROBUSTNESS (decision flip, EXPERIMENT): a PRIVATE flag the decision-flip worker sets in-process to ask
+    # analyze() for its pre-noise draws. Never on the wire, never in the schema.
+    _capture_draws: bool = PrivateAttr(default=False)
 
     @field_validator("options")
     @classmethod
@@ -2575,6 +2578,9 @@ class RobustnessResponseV2(BaseModel):
         description="Every factor node's structural influence, one cohort and one normalisation. "
         "Present on every graph where the factor phase runs; absent when it does not.",
     )
+    # SCIENCE ROBUSTNESS (EXPERIMENT): the pre-noise CRN draws, set only when the request's private
+    # `_capture_draws` asked. Never serialised, not in the schema.
+    _mc_draws: Optional[Dict[str, Any]] = PrivateAttr(default=None)
 
     model_config = {
         "populate_by_name": True,
@@ -2649,3 +2655,46 @@ def detect_schema_version(request: Dict[str, Any]) -> str:
         raise ValueError(
             "Unknown request schema - must contain 'graph'+'options' (v2) " "or 'causal_model' (v1)"
         )
+
+
+# ── SCIENCE ROBUSTNESS step 2 (EXPERIMENT; programme-docs #85 lease 5948579361) ─────────────────────────────────────
+class DecisionFlipLinkRefV2(BaseModel):
+    """One link whose tipping point is asked for (a directed edge of the request's graph)."""
+
+    from_id: str = Field(..., min_length=1)
+    to_id: str = Field(..., min_length=1)
+
+
+class DecisionFlipRequestV2(BaseModel):
+    """On demand: where would the recommendation change if each link were WEAKER?"""
+
+    request: RobustnessRequestV2
+    links: List[DecisionFlipLinkRefV2] = Field(..., min_length=1, max_length=12)
+    replicates: int = Field(4, ge=2, le=8, description="K replicate seeds; a link is quoted only when they agree")
+
+
+class DecisionFlipLinkV2(BaseModel):
+    from_id: str
+    to_id: str
+    status: Literal["quoted", "absent", "no_change"]
+    reason: Optional[str] = Field(None, description="Why a link is absent (machine code), else None")
+    current_mean: float
+    threshold: Optional[float] = Field(None, description="Median of the replicates; present only when quoted")
+    replicate_thresholds: Optional[List[Optional[float]]] = Field(
+        None,
+        description="One entry per replicate (None = that replicate found no change); None when no replicate ran "
+        "(an absence decided before any search: ranking_not_supported, leader_unstable, link_at_zero, nonlinear_downstream)",
+    )
+    replicate_range: Optional[float] = None
+    to_option_id: Optional[str] = Field(None, description="The option that would lead past the threshold")
+
+
+class DecisionFlipBlockV2(BaseModel):
+    method: Literal["affine_crn_replicates_v1"]
+    leader_option_id: Optional[str]
+    replicates: int
+    bound_abs: float
+    bound_rel: float
+    grid_step: float
+    links: List[DecisionFlipLinkV2]
+

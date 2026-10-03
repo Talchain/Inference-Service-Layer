@@ -65,13 +65,15 @@ from src.models.response_v2 import (
 from src.models.responses import ErrorCode, ErrorResponse, RecoveryHints
 from src.models.robustness import RobustnessRequest, RobustnessResponse
 from src.models.robustness_v2 import (
+    DecisionFlipRequestV2,
     FactorSensitivityResult,
     RobustnessRequestV2,
     RobustnessResponseV2,
     detect_schema_version,
 )
-from src.services.analysis_pool import AnalysisDeadlineExceeded, run_offloaded
+from src.services.analysis_pool import AnalysisDeadlineExceeded, run_decision_flip_offloaded, run_offloaded
 from src.services.compute_governor import RETRY_AFTER_SECONDS, ComputeGovernor, Overload
+from src.services.decision_flip import STRIPPED as DECISION_FLIP_STRIPPED
 from src.services.robustness_analyzer import RobustnessAnalyzer
 from src.services.robustness_analyzer_v2 import (
     COMPLEXITY_FORMULA_VERSION,
@@ -389,6 +391,58 @@ async def _admit_and_run(
             },
         )
     return response, None
+
+
+@router.post(
+    "/decision-flip/v2",
+    response_model=None,
+    summary="EXPERIMENT: where would the recommendation change if each link were weaker?",
+    description=(
+        "SCIENCE ROBUSTNESS, on demand only (PLoT /v2/run decision_flip). For each requested link: the link strength "
+        "at which the analyser's recommendation would change, from K replicate seeds, quoted only when they agree "
+        "(range <= 0.01 and <= 15% of the median), otherwise an honest absence with a reason."
+    ),
+    responses={
+        422: {"description": "Unknown link or invalid request"},
+        429: {"model": ErrorResponse, "description": "Caller concurrency limit exceeded"},
+        503: {"model": ErrorResponse, "description": "Service at compute capacity"},
+        504: {"model": ErrorResponse, "description": "Exceeded the hard compute deadline"},
+    },
+)
+async def decision_flip_v2(
+    dreq: DecisionFlipRequestV2,
+    http_request: Request,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-Id"),
+    x_api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+) -> Any:
+    inbound_id = dreq.request.request_id or x_request_id
+    request_id = sanitize_request_id(inbound_id)[0] if inbound_id else f"isl-{uuid.uuid4().hex[:12]}"
+    app = http_request.app
+    governor = _ensure_governor(app)
+    # One task on ONE worker, like one analysis: charged its stripped Monte Carlo runs, capped at one analysis's max.
+    runs = 1 + dreq.replicates * (1 + len(dreq.links)) + 2 * len(dreq.links)
+    stripped = dreq.request.model_copy(update=DECISION_FLIP_STRIPPED)
+    cost = min(compute_weighted_cost(stripped).total * runs, get_max_cost_units())
+    try:
+        async with governor.admit(cost, x_api_key):
+            block = await run_decision_flip_offloaded(app, dreq, request_id)
+    except Overload as overload:
+        body = _overload_error_response(overload, request_id)
+        return JSONResponse(
+            status_code=overload.status_code,
+            content=body.model_dump(exclude_none=True),
+            headers={"Retry-After": str(overload.retry_after), "X-Request-Id": request_id},
+        )
+    except AnalysisDeadlineExceeded as deadline:
+        body = _deadline_error_response(deadline, request_id)
+        return JSONResponse(
+            status_code=504,
+            content=body.model_dump(exclude_none=True),
+            headers={"Retry-After": str(RETRY_AFTER_SECONDS), "X-Request-Id": request_id},
+        )
+    except ValueError as e:
+        raise_invalid_input(logger, "decision_flip_invalid_input", request_id, e)
+    return JSONResponse(content=block.model_dump(mode="json"), headers={"X-Request-Id": request_id})
 
 
 # Initialize services

@@ -1,0 +1,443 @@
+"""
+Decision-level flip threshold (SCIENCE ROBUSTNESS step 1; EXPERIMENT. SCIENCE/DSK, programme-docs #85 5948121821).
+
+THE QUESTION a user can be told: "the recommendation would change if <link> were weaker than X". The recommendation is
+the analyser's ``recommended_option_id``. That is a statement about the WHOLE Monte Carlo, with every other link's
+stated uncertainty integrated over.
+
+WHY NOT TODAY'S ``flip_mean``. ``_compute_edge_e_values`` searches the flip point in ONE world: every other link held
+at ``mean × exists_probability``, one deterministic evaluation per option. It is stable (identical across seeds), but it
+answers a different question. On D1 it says capacity→availability can fall to 0.025 before the lead changes, while the
+recommendation itself changes at ≈0.05–0.075 (#85 5948121821). Its stability band samples 10 single worlds per run, so
+the band moves from run to run and still does not describe the decision.
+
+THE ESTIMATOR. ``leader_at(x)`` runs the analyser's own Monte Carlo with the link's central value set to ``x`` and the
+request seed unchanged. CORRECTION (2 Oct, step 2): that seed does NOT give every probe the same random numbers. A
+tied draw is broken from the shared edge stream, so moving the mean desynchronised later draws (D1: from draw 55).
+Step 1's 0-miss results were measured, not derived, and stand; the fast path below restores exact CRN in capture
+mode. The search is in two stages:
+- a coarse grid from the current value towards the bound finds the NEAREST change of recommendation, which guards
+  against a curve that changes more than once;
+- bisection then narrows that bracket to ``tol``.
+The answer is a bracket ``[hold, flip]`` (the recommendation holds at ``hold`` and has changed at ``flip``) and its
+midpoint, or an honest "no change between here and the bound".
+"""
+
+from __future__ import annotations
+
+from typing import Callable, Dict, List, Optional
+
+LeaderAt = Callable[[float], str]
+
+
+def decision_flip_threshold(
+    leader_at: LeaderAt,
+    current: float,
+    bound: float,
+    tol: float = 0.0025,
+    grid: int = 8,
+    max_bisect: int = 30,
+) -> Dict[str, object]:
+    """Nearest value between ``current`` and ``bound`` at which ``leader_at`` stops returning today's leader."""
+    if grid < 1 or tol <= 0:
+        raise ValueError("DECISION_FLIP_BAD_PARAMS")
+    calls = 0
+
+    def probe(x: float) -> str:
+        nonlocal calls
+        calls += 1
+        return leader_at(x)
+
+    lead = probe(current)
+    hold: float = current
+    flip: Optional[float] = None
+    to: Optional[str] = None
+    for i in range(1, grid + 1):
+        x = current + (bound - current) * i / grid
+        who = probe(x)
+        if who != lead:
+            flip, to = x, who
+            break
+        hold = x
+    if flip is None:
+        return {"exists": False, "leader": lead, "threshold": None, "bracket": None, "to_option_id": None, "evaluations": calls}
+
+    steps = 0
+    while abs(flip - hold) > tol and steps < max_bisect:
+        mid = (hold + flip) / 2
+        who = probe(mid)
+        if who == lead:
+            hold = mid
+        else:
+            flip, to = mid, who
+        steps += 1
+    bracket: List[float] = sorted([hold, flip])
+    return {
+        "exists": True,
+        "leader": lead,
+        "threshold": (hold + flip) / 2,
+        "bracket": bracket,
+        "to_option_id": to,
+        "evaluations": calls,
+    }
+
+
+# ── Step 2: the affine fast path (#85 lease 5948579361; DL guard 2 Oct) ─────────────────────────────────────────────
+#
+# WHY IT IS EXACT. ISL's evaluator is linear in every edge strength (a node is Σ parent · strength + intercept, a DAG
+# uses each edge at most once on a path), and on the SAME draws (CRN) the sampled strength of the moved link is
+# `exists · (mean + std · z)`. So each draw's goal value, for every option and for the status-quo reading, is AFFINE
+# in the link's mean: two Monte Carlo runs (mean = current, mean = 0) give it for every mean in between.
+#
+# WHERE IT IS NOT. A node with epsilon_std > 0 is clamped to [0, 1] after its noise, and an evaluated PRODUCT identity
+# multiplies its operands. Either DOWNSTREAM of the link makes a draw's value piecewise or quadratic in the mean, and a
+# crossing can then hide where the straight line says "no change". Such a link never takes this path: it is an honest
+# absence (`downstream_nonlinearity`). Every quoted point is then re-run for real and must reproduce the predicted win
+# shares (`affine_check_failed` otherwise).
+
+import hashlib  # noqa: E402
+import math  # noqa: E402
+from collections import defaultdict  # noqa: E402
+from typing import Any, Sequence, Tuple  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+AFFINE_METHOD = "affine_crn_replicates_v1"
+# 0.01 = the miss tolerance itself (2 Oct): at 0.02 one D1 request quoted a median 0.012 from the 100k reference (its
+# four replicates spread 0.015). Calibrated on D1 + D3, then validated on D2 held out.
+BOUND_ABS = 0.01
+BOUND_REL = 0.15
+GRID_STEP = 0.0025
+CHECK_TOL = 1e-9
+# Exact-tie intervals the sweep replays through the analyser's float tally per call (~ms each at n = 10,000).
+MAX_TIED_INTERVALS = 1024
+STRIPPED = {
+    "include_e_values": False,
+    "include_voi": False,
+    "include_factor_flips": False,
+    "include_path_decomposition": False,
+    "analysis_types": ["comparison"],
+}
+
+
+def downstream_nonlinearity(request: Any, from_id: str, to_id: str) -> Optional[str]:
+    """Why the goal is NOT affine in this link's strength, or None when it is. Static: read off the graph."""
+    from src.services.robustness_analyzer_v2 import _resolve_structural_identity_plans
+
+    children: Dict[str, List[str]] = defaultdict(list)
+    for e in request.graph.edges:
+        if getattr(e, "edge_type", None) == "bidirected":
+            continue
+        children[e.from_].append(e.to)
+    cone: set = set()
+    stack = [to_id]
+    while stack:
+        n = stack.pop()
+        if n in cone:
+            continue
+        cone.add(n)
+        stack.extend(children.get(n, []))
+    nodes = {n.id: n for n in request.graph.nodes}
+    for nid in sorted(cone):
+        node = nodes.get(nid)
+        if node is not None and (getattr(node, "epsilon_std", 0.0) or 0.0) > 0:
+            return f"clamp:{nid}"
+    for nid, plan in sorted(_resolve_structural_identity_plans(request.graph).items()):
+        if nid in cone and plan.evaluated and plan.operation != "sum":
+            return f"identity:{nid}"
+    return None
+
+
+def p_best(values: np.ndarray, sense: str, n_samples: int) -> np.ndarray:
+    """P(best) per option for (options × draws) values: ISL's winner rule for maximise / minimise, vectorised.
+
+    A draw credits only its finite options; the best value wins and an exact tie splits the draw; a draw with no finite
+    option credits nobody. Pinned against the canonical ``_winners_for_draw`` (tests/unit/test_decision_flip.py).
+    """
+    finite = np.isfinite(values)
+    if sense == "maximise":
+        v = np.where(finite, values, -np.inf)
+        best = v.max(axis=0)
+    elif sense == "minimise":
+        v = np.where(finite, values, np.inf)
+        best = v.min(axis=0)
+    else:
+        raise ValueError(f"DECISION_FLIP_SENSE_UNSUPPORTED: {sense}")
+    winners = finite & (v == best) & finite.any(axis=0)
+    counts = winners.sum(axis=0)
+    share = np.where(counts > 0, 1.0 / np.maximum(counts, 1), 0.0)
+    out: np.ndarray = (winners * share).sum(axis=1) / n_samples
+    return out
+
+
+def _leader(p: np.ndarray, option_ids: Sequence[str]) -> str:
+    # ISL's recommendation rule: max(option_wins, key=...) → the FIRST option holding the maximum.
+    return option_ids[int(np.argmax(p))]
+
+
+def affine_threshold(
+    x0: np.ndarray, x1: np.ndarray, current: float, option_ids: Sequence[str], lead: str, sense: str,
+    n_samples: int, step: float = GRID_STEP,
+) -> Dict[str, Any]:
+    """Nearest mean between ``current`` and 0 where the recommendation stops being ``lead``, on a ``step`` grid.
+
+    ``x0`` / ``x1``: (options × draws) pre-noise outcomes with the link's mean at ``current`` / at 0, same draws.
+    """
+    n = max(1, int(math.ceil(abs(current) / step)))
+    hold = current
+    found: Dict[str, Any] = {"exists": False, "hold": None, "flip": None, "to_option_id": None}
+    for k in range(1, n + 1):
+        x = current - current * k / n
+        t = (current - x) / current
+        who = _leader(p_best(x0 + t * (x1 - x0), sense, n_samples), option_ids)
+        if who != lead:
+            found = {"exists": True, "hold": hold, "flip": x, "to_option_id": who}
+            break
+        hold = x
+    # The grid only LOOKS at its points (review 5963778665 P1: a 900-draw case where B leads on (0.248, 0.249) and the
+    # grid, stepping 0.25 -> 0.2475, reported "no change"). Check the stretch the grid says `lead` holds over (to its
+    # `hold`, or all the way to 0 when it found nothing) EXACTLY. A change the grid stepped over is the NEAREST change:
+    # it replaces the grid's answer as an ordinary bracket, so the replicate agreement, the licence and the real re-run
+    # below judge it exactly as they judge any other, and no new absence reason is needed on the wire.
+    t_max = (current - found["hold"]) / current if found["exists"] else 1.0
+    try:
+        nearer = first_leader_change(x0, x1, option_ids, lead, sense, t_max)
+    except TieBudgetExceeded:
+        # Too many EXACT ties to replay: the recommendation along this link is decided by float tie-breaks throughout,
+        # so nothing (neither "no change" nor a bracket) is certified. The block withholds it as `leader_unstable`.
+        return {"exists": False, "hold": None, "flip": None, "to_option_id": None, "crossing_missed": False,
+                "uncertified": True}
+    found["crossing_missed"] = nearer is not None
+    if nearer is not None:
+        t_star, to, half = nearer
+        found = {"exists": True, "hold": current - current * max(t_star - half, 0.0),
+                 "flip": current - current * (t_star + half), "to_option_id": to, "crossing_missed": True}
+    return found
+
+
+def first_leader_change(
+    x0: np.ndarray, x1: np.ndarray, option_ids: Sequence[str], lead: str, sense: str, t_max: float,
+) -> Optional[Tuple[float, str, float]]:
+    """The first change of recommendation in (0, ``t_max``], EXACTLY: ``(t, new_leader, half_width)``, or None.
+
+    ``t`` runs from the current mean (0) to a mean of 0 (1); a draw's option values are straight lines in ``t`` (the
+    affine path). A draw's winner can therefore change only where two of ITS lines cross, so between consecutive
+    crossings of one draw its winner is fixed, and the win shares (hence the leader) are step functions that change
+    only at those times. One evaluation per gap of every draw, replayed in time order, visits every interval the grid
+    could step over. Shares are counted in exact integer units with ``p_best``'s rule: the best FINITE option wins, an
+    exact tie splits the draw, and a draw with no finite option credits nobody. On (0, 1] an option's value in a draw is
+    finite exactly when both endpoints are, so a non-finite one simply never wins there.
+
+    ⚠ AN EXACT TIE IS THE ANALYSER'S TO BREAK (review 5972142902). The recommendation is the first option holding the
+    maximum of the analyser's FLOAT tally (``option_wins[w] += 1.0 / len(winners)``, summed in draw order). Away from
+    an exact tie the integer count and that tally name the same option: their gap is at least one share unit, far above
+    float rounding. On an exact tie in integer units, rounding decides, and the first option need not win (100 draws
+    with 94 three-way ties: the tally names C, the integer tie-break A). So a tied interval's leader is the analyser's
+    float tally replayed at a point inside it, at most ``MAX_TIED_INTERVALS`` times; beyond that ``TieBudgetExceeded``.
+
+    ``half_width``: half the shorter of the two intervals either side of ``t``, so ``t - half_width`` still has today's
+    leader and ``t + half_width`` the new one (at ``t = 0``, half the first interval). A leader that differs only AT one
+    crossing time (a zero-width tie) is not a change over any range of the link and is not reported.
+    """
+    if sense not in ("maximise", "minimise"):
+        raise ValueError(f"DECISION_FLIP_SENSE_UNSUPPORTED: {sense}")
+    if t_max <= 0:
+        return None
+    sign = 1.0 if sense == "maximise" else -1.0
+    fin = np.isfinite(x0) & np.isfinite(x1)
+    a0, a1 = np.where(fin, x0, 0.0), np.where(fin, x1, 0.0)  # never inf - inf
+    v0, slope = sign * a0, sign * (a1 - a0)  # options × draws; the winner is now always the maximum
+    n_opt, n_draw = v0.shape
+    ii, kk = np.triu_indices(n_opt, 1)
+    den = slope[ii] - slope[kk]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tc = np.where(fin[ii] & fin[kk] & (den != 0), (v0[kk] - v0[ii]) / den, np.inf)
+    # A crossing outside (0, t_max) sits AT t_max, where it can change nothing inside the range.
+    tc = np.sort(np.where((tc > 0) & (tc < t_max), tc, t_max), axis=0)  # pairs × draws
+    bounds = np.vstack([np.zeros((1, n_draw)), tc, np.full((1, n_draw), t_max)])
+    mids = (bounds[:-1] + bounds[1:]) / 2  # one point inside every gap of every draw
+    vals = np.where(fin[:, None, :], v0[:, None, :] + mids[None, :, :] * slope[:, None, :], -np.inf)
+    win = (vals == vals.max(axis=0)[None]) & fin[:, None, :]
+    unit = math.lcm(*range(1, n_opt + 1))
+    shares = win * (unit // np.maximum(win.sum(axis=0), 1))[None]  # integer units; an exact tie splits the draw
+    lead_i = list(option_ids).index(lead)
+    totals = shares[:, 0, :].sum(axis=1)
+    delta = shares[:, 1:, :] - shares[:, :-1, :]  # the change at each inner bound (a crossing time)
+    changed = np.any(delta != 0, axis=0)
+    t_ev, d_ev = tc[changed], delta[:, changed].T
+    order = np.argsort(t_ev, kind="stable")
+    t_ev, d_ev = t_ev[order], d_ev[order]
+    last = np.r_[t_ev[1:] != t_ev[:-1], True] if t_ev.size else np.zeros(0, dtype=bool)
+    times = t_ev[last]  # the distinct change times; an interval's state is the one after its LAST change there
+    states = (totals[None, :] + np.cumsum(d_ev, axis=0))[last]
+    budget = [MAX_TIED_INTERVALS]
+
+    def analyser_leader(t: float) -> int:
+        v = np.where(fin, v0 + t * slope, -np.inf)
+        w = (v == v.max(axis=0)[None]) & fin
+        share = np.where(w, 1.0 / np.maximum(w.sum(axis=0), 1)[None], 0.0)
+        tally = np.add.accumulate(share, axis=1)[:, -1]  # one addition at a time, in draw order: option_wins' own sum
+        return int(np.argmax(tally))
+
+    def leader(state: np.ndarray, t_inside: float) -> int:
+        if int((state == state.max()).sum()) > 1:
+            if budget[0] <= 0:
+                raise TieBudgetExceeded()
+            budget[0] -= 1
+            return analyser_leader(t_inside)
+        return int(np.argmax(state))
+
+    nxt_after = np.r_[times[1:], t_max] if times.size else np.zeros(0)
+    inside_after = (times + nxt_after) / 2  # a point inside the interval that follows each change
+    first_bound = float(times[0]) if times.size else t_max
+    w0 = leader(totals, first_bound / 2)
+    if w0 != lead_i:  # the draws already disagree just past the current mean
+        return (0.0, option_ids[w0], first_bound / 2) if first_bound > 0 else None
+    tied = (states == states.max(axis=1, keepdims=True)).sum(axis=1) > 1
+    plain = np.nonzero(~tied & (np.argmax(states, axis=1) != lead_i))[0]  # untied changes: no replay needed
+    stop = int(plain[0]) if plain.size else int(times.size)
+    hit: Optional[Tuple[int, int]] = None
+    for j in np.nonzero(tied[:stop])[0]:  # tied intervals before the first untied change, in time order
+        who = leader(states[j], float(inside_after[j]))
+        if who != lead_i:
+            hit = (int(j), who)
+            break
+    if hit is None:
+        if not plain.size:
+            return None
+        hit = (stop, int(np.argmax(states[stop])))
+    i, to_i = hit
+    t_star = float(times[i])
+    prev = float(times[i - 1]) if i > 0 else 0.0
+    nxt = float(times[i + 1]) if i + 1 < times.size else t_max
+    half = min(t_star - prev, nxt - t_star) / 2
+    return (t_star, option_ids[to_i], half) if half > 0 else None
+
+
+class TieBudgetExceeded(Exception):
+    """More exact ties than ``MAX_TIED_INTERVALS`` to replay through the analyser's float tally."""
+
+
+def _child_seed(master: int, i: int) -> int:
+    return int(hashlib.sha256(f"{master}:decision_flip:{i}".encode()).hexdigest()[:8], 16)
+
+
+def compute_decision_flip_block(dreq: Any) -> Any:
+    """The on-demand block: per link quoted / absent / no_change, under the K-replicate licence."""
+    from src.models.robustness_v2 import DecisionFlipBlockV2, DecisionFlipLinkV2, RobustnessRequestV2
+    from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2, compute_effective_seed
+
+    base = dreq.request.model_copy(update=STRIPPED, deep=True)
+    edges = {(e.from_, e.to): e for e in base.graph.edges}
+    for ref in dreq.links:
+        if (ref.from_id, ref.to_id) not in edges:
+            raise ValueError(f"DECISION_FLIP_UNKNOWN_LINK: {ref.from_id}->{ref.to_id}")
+    option_ids = [o.id for o in base.options]
+    master, _ = compute_effective_seed(base)
+
+    def run(seed: int, link: Optional[Tuple[str, str]] = None, mean: Optional[float] = None, capture: bool = True) -> Any:
+        q = base.model_copy(update={"seed": str(seed)}, deep=True)
+        if link is not None:
+            for e in q.graph.edges:
+                if (e.from_, e.to) == link:
+                    e.strength.mean = mean
+        q = RobustnessRequestV2.model_validate(q.model_dump(by_alias=True))
+        q._capture_draws = capture
+        return RobustnessAnalyzerV2().analyze(q)
+
+    def matrix(resp: Any) -> np.ndarray:
+        oo = resp._mc_draws["option_outcomes"]
+        return np.array([oo[o] for o in option_ids], dtype=float)
+
+    head = run(master, capture=False)
+    # A WITHHELD ranking has no leader (review 5963778665 P1). The analyser's `recommended_option_id` is then max() over
+    # an all-zero tally, i.e. the FIRST option by array order: reversing the options names the other one. Export null
+    # and let every link be the honest `ranking_not_supported` absence, without spending the replicates.
+    ranking = getattr(head, "objective_ranking", None)
+    leader = head.recommended_option_id if ranking is None or ranking.status == "computed" else None
+    links_out: List[Any] = []
+    sense: str = "maximise"
+    seeds = [_child_seed(master, i) for i in range(dreq.replicates)]
+    replicate_base: Dict[int, Any] = {}
+    for s in seeds if leader is not None else []:
+        r = run(s)
+        replicate_base[s] = r
+        sense = str(r._mc_draws["objective"].sense) if r._mc_draws["objective"] is not None else "maximise"
+    unstable = any(r.recommended_option_id != leader for r in replicate_base.values())
+
+    for ref in dreq.links:
+        link = (ref.from_id, ref.to_id)
+        current = float(edges[link].strength.mean)
+        common = {"from_id": ref.from_id, "to_id": ref.to_id, "current_mean": current}
+        why = None
+        if leader is None or sense not in ("maximise", "minimise"):
+            why = "ranking_not_supported"
+        elif unstable:
+            why = "leader_unstable"
+        elif current == 0:
+            why = "link_at_zero"
+        else:
+            why = downstream_nonlinearity(base, *link)
+            why = f"nonlinear_downstream:{why}" if why else None
+        if why is not None:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason=why, **common))
+            continue
+
+        assert leader is not None  # a null leader is the `ranking_not_supported` absence above
+        per_seed: List[Dict[str, Any]] = []
+        for s in seeds:
+            x0 = matrix(replicate_base[s])
+            # The capture must reproduce the analyser's own win shares before the line is trusted.
+            wp = {o.option_id: o.win_probability for o in replicate_base[s].results}
+            if not np.allclose(p_best(x0, sense, base.n_samples), [wp[o] for o in option_ids], atol=CHECK_TOL, rtol=0):
+                raise RuntimeError("DECISION_FLIP_CAPTURE_MISMATCH")
+            x1 = matrix(run(s, link, 0.0))
+            res = affine_threshold(x0, x1, current, option_ids, leader, sense, base.n_samples)
+            res["seed"] = s
+            res["x1"] = x1
+            per_seed.append(res)
+
+        if any(r.get("uncertified") for r in per_seed):
+            # 0.75.0's vocabulary is closed (R9): the existing `leader_unstable`, in its pre-search shape.
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="leader_unstable", **common))
+            continue
+        found = [r for r in per_seed if r["exists"]]
+        ths = [((r["hold"] + r["flip"]) / 2) if r["exists"] else None for r in per_seed]
+        if not found:
+            links_out.append(DecisionFlipLinkV2(status="no_change", replicate_thresholds=ths, **common))
+            continue
+        if len(found) < len(per_seed):
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="replicates_disagree", replicate_thresholds=ths, **common))
+            continue
+        if len({r["to_option_id"] for r in found}) > 1:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="replicates_disagree_on_option", replicate_thresholds=ths, **common))
+            continue
+        vals = sorted(t for t in ths if t is not None)
+        median = float(np.median(vals))
+        spread = vals[-1] - vals[0]
+        if spread > BOUND_ABS or spread > BOUND_REL * abs(median):
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="replicates_spread", replicate_thresholds=ths,
+                                                replicate_range=spread, **common))
+            continue
+
+        # EXACT RE-RUN at the quoted point: the replicate nearest the median, both sides of its bracket, for real.
+        near = min(found, key=lambda r: abs((r["hold"] + r["flip"]) / 2 - median))
+        x0 = matrix(replicate_base[near["seed"]])
+        x1 = near["x1"]
+        ok = True
+        for x, expect in ((near["flip"], near["to_option_id"]), (near["hold"], leader)):
+            real = run(near["seed"], link, x)  # capture mode: the SAME draws the prediction was read from
+            t = (current - x) / current
+            predicted = p_best(x0 + t * (x1 - x0), sense, base.n_samples)
+            actual = np.array([{o.option_id: o.win_probability for o in real.results}[o] for o in option_ids])
+            if real.recommended_option_id != expect or not np.allclose(predicted, actual, atol=CHECK_TOL, rtol=0):
+                ok = False
+        if not ok:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="affine_check_failed", replicate_thresholds=ths,
+                                                replicate_range=spread, **common))
+            continue
+        links_out.append(DecisionFlipLinkV2(status="quoted", threshold=median, replicate_thresholds=ths,
+                                            replicate_range=spread, to_option_id=found[0]["to_option_id"], **common))
+
+    return DecisionFlipBlockV2(method=AFFINE_METHOD, leader_option_id=leader, replicates=dreq.replicates,
+                               bound_abs=BOUND_ABS, bound_rel=BOUND_REL, grid_step=GRID_STEP, links=links_out)

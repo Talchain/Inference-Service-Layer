@@ -91,3 +91,16 @@ def run_robustness_v2(request_json: str) -> str:
     request = RobustnessRequestV2.model_validate_json(request_json)
     response = RobustnessAnalyzerV2().analyze(request)
     return encode_analysis_response(response)
+
+
+def run_decision_flip_v2(payload_json: str) -> str:
+    """SCIENCE ROBUSTNESS (EXPERIMENT): the on-demand decision-flip block, in the worker process.
+
+    One task runs the whole block sequentially on ONE worker: at Render's 0.5 CPU, splitting it across workers buys no
+    wall clock, and a single task keeps the hard deadline and the compute governor's accounting as for one analysis.
+    """
+    from src.models.robustness_v2 import DecisionFlipRequestV2
+    from src.services.decision_flip import compute_decision_flip_block
+
+    out: str = compute_decision_flip_block(DecisionFlipRequestV2.model_validate_json(payload_json)).model_dump_json()
+    return out
