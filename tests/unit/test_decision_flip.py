@@ -218,45 +218,56 @@ def test_p1_fixture_really_has_a_short_winning_interval_between_grid_points():
     assert all(_leader_at(x0, x1, k / 100) == "A" for k in range(0, 101))  # every 0.0025 grid point says A
 
 
-def test_p1_a_short_interval_the_grid_steps_over_is_never_certified_as_no_change():
+def test_p1_a_short_interval_the_grid_steps_over_is_found_never_called_no_change():
     x0, x1 = _lines(SHORT_B)
     res = df.affine_threshold(x0, x1, 0.25, ["A", "B"], "A", "maximise", 900)
-    assert res["exists"] is False  # the grid alone saw nothing ...
-    assert res["crossing_missed"] is True  # ... and the exhaustive check refuses to call that "no change"
+    assert res["exists"] is True and res["to_option_id"] == "B" and res["crossing_missed"] is True
+    assert res["hold"] > 0.249 > res["flip"]  # B takes over at t = 0.004, i.e. a mean of 0.249
+    assert abs((res["hold"] + res["flip"]) / 2 - 0.249) < 1e-12  # the bracket is centred on the exact crossing
+    t = lambda x: (0.25 - x) / 0.25
+    assert _leader_at(x0, x1, t(res["hold"])) == "A" and _leader_at(x0, x1, t(res["flip"])) == "B"
 
 
-def test_p1_an_earlier_missed_interval_also_voids_a_later_grid_flip():
-    # Four A-always draws now lose to B from t = 0.5: the grid finds THAT flip, but A did not hold all the way down to
-    # it, so its bracket would overstate how far the link can weaken.
+def test_p1_an_earlier_missed_interval_replaces_a_later_grid_flip():
+    # Four A-always draws now lose to B from t = 0.5: the grid finds THAT flip (a mean near 0.125), but A did not hold
+    # all the way down to it. The nearest change is the one at 0.249, and it is the one reported.
     x0, x1 = _lines(SHORT_B[:2] + [(1.0, -1.0, 0.0, 0.0, 4), (1.0, 1.0, 0.0, 0.0, 445), (0.0, 0.0, 1.0, 1.0, 447)])
     assert _leader_at(x0, x1, 0.75) == "B"
     res = df.affine_threshold(x0, x1, 0.25, ["A", "B"], "A", "maximise", 900)
-    assert res["exists"] is True and res["crossing_missed"] is True
+    assert res["exists"] is True and res["crossing_missed"] is True and res["to_option_id"] == "B"
+    assert abs((res["hold"] + res["flip"]) / 2 - 0.249) < 1e-12
 
 
-def test_p1_controls_a_monotone_crossing_and_a_true_no_change_stay_certified():
+def test_p1_controls_a_monotone_crossing_and_a_true_no_change_keep_the_grid_answer():
     x0 = np.array([[1.0, 1.0], [0.4, 0.4]])
     x1 = np.array([[0.0, 0.0], [0.4, 0.4]])
     found = df.affine_threshold(x0, x1, 1.0, ["A", "B"], "A", "maximise", 2, step=0.01)
     assert found["exists"] is True and found["crossing_missed"] is False
+    assert found["hold"] >= 0.4 > found["flip"] and found["hold"] - found["flip"] <= 0.0100001  # the grid's bracket
     flat0, flat1 = _lines([(1.0, 1.0, 0.0, 0.0, 6), (0.0, 0.5, 0.2, 0.2, 3)])
     none = df.affine_threshold(flat0, flat1, 0.25, ["A", "B"], "A", "maximise", 9)
     assert none["exists"] is False and none["crossing_missed"] is False
 
 
-def test_p1_the_block_withholds_a_link_whose_crossing_check_failed(monkeypatch):
-    real = df.affine_threshold
-
-    def missed(*a, **k):
-        out = real(*a, **k)
-        out.update(exists=False, hold=None, flip=None, to_option_id=None, crossing_missed=True)
-        return out
-
-    monkeypatch.setattr(df, "affine_threshold", missed)
-    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
-        {"request": d1(n=2000), "links": [{"from_id": L1[0], "to_id": L1[1]}], "replicates": 2}))
-    (link,) = block.links
-    assert (link.status, link.reason) == ("absent", "crossing_between_grid_points")  # never "no_change"
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("sense", ["maximise", "minimise"])
+def test_p1_the_exact_sweep_agrees_with_a_dense_scan_including_non_finite_draws(seed, sense):
+    # p_best's own rule throughout: a non-finite option never wins a draw, a draw with none credits nobody.
+    rng = np.random.default_rng(seed)
+    x0, x1 = rng.normal(size=(3, 40)), rng.normal(size=(3, 40))
+    x0[0, 3], x1[1, 7], x0[2, 11], x1[2, 11] = math.nan, math.inf, -math.inf, 1.0
+    x0[:, 19] = math.nan
+    ids = ["A", "B", "C"]
+    ts = np.linspace(0.0, 1.0, 20_001)[1:]
+    with np.errstate(invalid="ignore"):  # the scan itself does inf - inf; the sweep under test never does
+        who = [ids[int(np.argmax(df.p_best(x0 + t * (x1 - x0), sense, 40)))] for t in ts]
+    lead = who[0]
+    exact = df.first_leader_change(x0, x1, ids, lead, sense, 1.0)
+    brute = next(((float(t), w) for t, w in zip(ts, who) if w != lead), None)
+    if brute is None:
+        assert exact is None
+    else:
+        assert exact is not None and exact[1] == brute[1] and exact[0] <= brute[0] <= exact[0] + 5e-5
 
 
 from tests.unit.test_goal_direction_objective_ranking import (  # noqa: E402
