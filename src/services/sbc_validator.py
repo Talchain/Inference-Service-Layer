@@ -171,7 +171,7 @@ def _sample_true_world(
 
     For each edge:
     - existence: Bernoulli(exists_probability)
-    - strength: Normal(mean, std) clipped to [-1, 1]
+    - strength: Normal(mean, std), unbounded (the engine's law since ISL #200; no +/-1 clip)
 
     Returns:
         (true_strengths, true_existence) dictionaries keyed by "idx:from->to".
