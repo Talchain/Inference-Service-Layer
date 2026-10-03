@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.61.0",
     "omission_count": 51,
-    "superset_count": 82
+    "superset_count": 83
   },
   "omissions": [
     {
@@ -728,6 +728,11 @@
       "isl_model": "OptionResultV2",
       "prop": "downside",
       "reason": "ISL superset — OptionResultV2.downside is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "prop": "sampled_intervention_ranges",
+      "reason": "ISL superset — OptionResultV2.sampled_intervention_ranges is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: TEMPORAL step 1 (olumi-programme-docs #75 5911362141; R3 science ruling 5909972020, AIQ words 5909998288). Additive and optional: present only on an option whose limit row was scored from a stated range; PLoT keys its fail-closed forward on it. Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "RobustnessResultV2",

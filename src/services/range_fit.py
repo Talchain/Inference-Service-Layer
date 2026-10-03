@@ -98,6 +98,29 @@ def _quantile_targets(coverage: float) -> Tuple[float, float]:
     return (1.0 - coverage) / 2.0, (1.0 + coverage) / 2.0
 
 
+def fit_lognormal_range(
+    low: float, high: float, coverage: float = RATIFIED_COVERAGE
+) -> Tuple[float, float]:
+    """TEMPORAL step 1 (R3 #75 5909972020): the lognormal whose central ``coverage`` interval
+    is exactly [low, high], so at the ratified 0.5 the stated bounds are its QUARTILES.
+
+    Returns ``(mu, sigma)`` of ln X. Closed form, pure, zero RNG draws. Positive support is
+    the reason for the family: a duration is never negative (a normal on 5–20 days puts 13%
+    of its draws below 0). Deliberately NOT a ``FittedDistribution`` family: that model's
+    validator routes every non-normal family to beta, and the S3 disclosure contract is not
+    this one's to change.
+    """
+    if not (0.0 < coverage < 1.0):
+        raise ValueError(f"coverage must be in (0, 1), got {coverage}")
+    if not (math.isfinite(low) and math.isfinite(high)) or not (0.0 < low < high):
+        raise ValueError(f"a lognormal range needs 0 < low < high, got ({low}, {high})")
+    q_lo, q_hi = _quantile_targets(coverage)
+    z_lo, z_hi = float(norm.ppf(q_lo)), float(norm.ppf(q_hi))
+    sigma = (math.log(high) - math.log(low)) / (z_hi - z_lo)
+    mu = math.log(low) - z_lo * sigma
+    return mu, sigma
+
+
 def _refuse(
     code: str,
     message: str,

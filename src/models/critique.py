@@ -382,6 +382,40 @@ STRUCTURAL_INFLUENCE_TRUNCATED = CritiqueDefinition(
     ),
 )
 
+FACTOR_STABILITY_ANCHORED = CritiqueDefinition(
+    code="FACTOR_STABILITY_ANCHORED",
+    severity="info",
+    source="analysis",
+    # AIQ #72 5882847470: an identity with a stated level is anchored to each draw's status quo, so the
+    # one-at-a-time probe reads only the reference option's change through it (keep-current: T = o).
+    # A factor seen only through such a node gets no stability claim from that probe.
+    message_template=(
+        "Sensitivity stability is withheld for {factor_ids}: every path from them to the goal runs "
+        "through {anchors}, which is anchored to its stated level, so the one-at-a-time check cannot "
+        "see them"
+    ),
+    default_suggestion=(
+        "Read the structural influence and the options' outcomes for these factors instead"
+    ),
+)
+
+STRUCTURAL_INFLUENCE_GATED = CritiqueDefinition(
+    code="STRUCTURAL_INFLUENCE_GATED",
+    severity="info",
+    source="analysis",
+    # AIQ #72 5881683705 (1b): a factor whose EVERY path to the goal runs through a product with
+    # another input at 0 today has influence exactly 0 at today's centre. That 0 is a GATE the
+    # decision exists to move, not "no influence", so its score and rank are WITHHELD.
+    message_template=(
+        "Structural influence is withheld for {factor_ids}: every path from them to the goal "
+        "runs through a product with another input at 0 today, so their influence depends on "
+        "the option chosen"
+    ),
+    default_suggestion=(
+        "Read the options' outcomes for these factors; today's 0 is a gate, not 'no influence'"
+    ),
+)
+
 MARGINAL_SWITCH_TRUNCATED = CritiqueDefinition(
     code="MARGINAL_SWITCH_TRUNCATED",
     severity="warning",

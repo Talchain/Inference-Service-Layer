@@ -32,6 +32,7 @@ from typing import (
     NamedTuple,
     Optional,
     Sequence,
+    Set,
     Tuple,
     cast,
 )
@@ -55,6 +56,7 @@ from src.models.robustness_v2 import (
     GoalConstraint,
     GraphV2,
     InferenceWarning,
+    INTERVENTION_RANGE_SAMPLED_MEANINGS,
     InterventionOption,
     LevelDomain,
     NodeV2,
@@ -66,6 +68,7 @@ from src.models.robustness_v2 import (
     PathContribution,
     PathDecomposition,
     ResponseMetadataV2,
+    SampledInterventionRange,
     RobustnessRequestV2,
     RobustnessResponseV2,
     RobustnessResult,
@@ -106,10 +109,12 @@ from src.models.critique import (
     HIGH_TIE_RATE,
     IDENTITY_NOT_EVALUATED as IDENTITY_NOT_EVALUATED_CRITIQUE,
     MARGINAL_SWITCH_TRUNCATED,
+    FACTOR_STABILITY_ANCHORED,
+    STRUCTURAL_INFLUENCE_GATED,
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
-from src.services.range_fit import resolve_range_fits
+from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
 from src.utils.evppi import (
@@ -563,6 +568,10 @@ def get_max_cost_units() -> int:
                 DEFAULT_MAX_COST_UNITS,
             )
     return DEFAULT_MAX_COST_UNITS
+
+
+# AIQ 5880886200 (ISL #209): the relative band within which a goal draw is ON its threshold (|v − t| ≤ tol·max(1, |t|)).
+GOAL_THRESHOLD_TIE_TOLERANCE = 1e-9
 
 
 @dataclass(frozen=True)
@@ -1682,8 +1691,10 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
        ``identity_frame_missing``: a frame is never inferred from "compatible" operands;
     2. every participant has a level today (``status_quo_level``), else
        ``identity_operand_missing``;
-    3. a product has no zero operand and no zero stated target, else
-       ``identity_zero_level`` (its ratio and relative check are undefined there);
+    3. a product WITH a stated target has no zero operand and no zero target, else
+       ``identity_zero_level`` (its ratio ``k`` and relative check are undefined there). With
+       no stated target there is no ratio (``T = term + A + L`` per draw), so a zero operand
+       is an ordinary level (AIQ #72 5881596876: the cloud share 0 today);
     4. with a stated target ``o``, in user units, else ``identity_inconsistent``:
        product ``|o - (term + addends)| / |o| <= 5%``; sum (no ratio, so 0 is an ordinary
        level) ``|o - (term + addends)| <= 5% x max(|o|, sum|parts|)``.
@@ -1731,8 +1742,10 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
         if len(levels) != len(participants):
             plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
             continue
-        if identity.operation == "product" and (
-            any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0
+        if (
+            identity.operation == "product"
+            and target_level is not None
+            and (any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0)
         ):
             plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
             continue
@@ -1830,6 +1843,118 @@ def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[
     if max_influence < 1e-10:
         return {node_id: 0.0 for node_id in node_ids}
     return {node_id: raw[node_id] / max_influence for node_id in node_ids}
+
+
+def zero_gated_factor_ids(
+    graph: GraphV2,
+    factor_ids: List[str],
+    goal_node_id: str,
+    centres: Optional[Mapping[str, float]] = None,
+) -> Dict[str, List[str]]:
+    """AIQ #72 5881683705 (1b): the factors whose EVERY path to the goal runs through a product
+    with ANOTHER operand at 0 today. Their influence at today's centre is exactly 0 by that gate
+    (``identity_partials``: the others' product), not by cancellation, so it is withheld.
+
+    An operand edge ``(i, product)`` is gated when some other operand's level today is 0 (only an
+    evaluated product with no stated level can have one: rule 3). A factor is gated when it reaches
+    the goal, but not once every gated edge is removed. Each gated factor maps to the zero operands
+    that gate it (``gated_by``, the typed carrier PLoT and the UI read)."""
+    if not any(node.nonlinear_identity is not None for node in graph.nodes):
+        return {}
+    gated_edges: Dict[Tuple[str, str], List[str]] = {}
+    for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items():
+        if not (plan.evaluated and plan.operation == "product"):
+            continue
+        for i in plan.factor_ids:
+            zeros = [j for j in plan.factor_ids if j != i and plan.levels[j] == 0.0]
+            if zeros:
+                gated_edges[(i, node_id)] = zeros
+    if not gated_edges:
+        return {}
+    every: Dict[str, List[str]] = {}
+    ungated: Dict[str, List[str]] = {}
+    for edge in graph.edges:
+        every.setdefault(str(edge.from_), []).append(str(edge.to))
+        if (str(edge.from_), str(edge.to)) not in gated_edges:
+            ungated.setdefault(str(edge.from_), []).append(str(edge.to))
+
+    def reaches(start: str, adjacency: Dict[str, List[str]], target: Optional[str] = None) -> bool:
+        goal = goal_node_id if target is None else target
+        seen, stack = {start}, [start]
+        while stack:
+            node_id = stack.pop()
+            if node_id == goal:
+                return True
+            for nxt in adjacency.get(node_id, ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return False
+
+    def reaches_node(start: str, target: str) -> bool:
+        return reaches(start, every, target)
+
+    gated: Dict[str, List[str]] = {}
+    for f in factor_ids:
+        if f == goal_node_id or not reaches(f, every) or reaches(f, ungated):
+            continue
+        gated[f] = sorted(
+            {
+                z
+                for (i, product), zeros in gated_edges.items()
+                # only a gated edge on a factor-to-goal path gates it (PR Review #213 5882196850)
+                if (i == f or reaches_node(f, i)) and reaches(product, every)
+                for z in zeros
+            }
+        )
+    return gated
+
+
+def anchored_blind_factor_ids(
+    graph: GraphV2,
+    factor_ids: List[str],
+    goal_node_id: str,
+    centres: Optional[Mapping[str, float]] = None,
+) -> Dict[str, List[str]]:
+    """AIQ #72 5882847470: the factors the one-at-a-time probe cannot see, each mapped to the
+    anchored identities that blind it.
+
+    An evaluated identity with a STATED level is anchored to this draw's status quo
+    (``_identity_value``: ``T = o + k * (term - term_sq) + ...``). A perturbed factor moves the
+    draw and its status quo together, so through that node the probe reads only the reference
+    option's own change: under keep-current, ``T = o`` whatever the factor does. A factor whose
+    EVERY path to the goal passes through such a node gives a reading about the probe, not about
+    the factor, so no stability claim is made from it."""
+    anchored = {
+        node_id
+        for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items()
+        if plan.evaluated and plan.target_level is not None
+    }
+    if not anchored:
+        return {}
+    children: Dict[str, List[str]] = {}
+    for edge in graph.edges:
+        children.setdefault(str(edge.from_), []).append(str(edge.to))
+
+    def reached(start: str, *, avoid: Set[str]) -> Set[str]:
+        seen, stack = {start}, [start]
+        while stack:
+            node_id = stack.pop()
+            for nxt in children.get(node_id, ()):
+                if nxt not in seen and nxt not in avoid:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    blind: Dict[str, List[str]] = {}
+    for f in factor_ids:
+        every = reached(f, avoid=set())
+        if f == goal_node_id or goal_node_id not in every:
+            continue  # the goal itself, or disconnected: not this question
+        if f in anchored or goal_node_id not in reached(f, avoid=anchored):
+            # name only the anchors on a path to the goal (PR Review #213's provenance rule)
+            blind[f] = sorted(a for a in anchored & every if goal_node_id in reached(a, avoid=set()))
+    return blind
 
 
 def identity_partials(
@@ -2554,6 +2679,43 @@ class PhaseDeadline:
 
 # R1 S2: refusals a consumer keys on BY NAME (R&C's CEE ask, #72 5871316082). Every other refusal keeps
 # its channel's generic code (GOAL_THRESHOLD_NOT_CONVERTIBLE / CONSTRAINT_NOT_CONVERTIBLE).
+# TEMPORAL step 1, R3 #75 5911436566 (1): a point counts as the range's middle when it lies
+# between the fitted P40 and P60. z at 0.60 of the standard normal.
+INTERVENTION_RANGE_MIDDLE_Z = 0.2533471031357997
+
+
+def _lognormal_limit_probability(median: float, sigma: float, operator: str, limit: float) -> float:
+    """Closed-form P(X op limit) for X lognormal with this median and log-scale sigma."""
+    if limit <= 0.0:
+        below = 0.0
+    else:
+        below = 0.5 * (1.0 + math.erf(math.log(limit / median) / (sigma * math.sqrt(2.0))))
+    return below if operator == "<=" else 1.0 - below
+
+
+def _clamped_limit_probability(
+    untruncated: float,
+    operator: str,
+    limit: float,
+    low: Optional[float],
+    high: Optional[float],
+) -> float:
+    """P(clamp(X) op limit): what a truncating reader would report. Clamping moves only the
+    mass beyond a bound onto that bound, so the answer changes only when the limit itself
+    lies beyond a bound."""
+    if operator == "<=":
+        if high is not None and limit >= high:
+            return 1.0
+        if low is not None and limit < low:
+            return 0.0
+    else:
+        if low is not None and limit <= low:
+            return 1.0
+        if high is not None and limit > high:
+            return 0.0
+    return untruncated
+
+
 R1_NAMED_REFUSAL_CODES: Dict[str, str] = {
     "goal_base_missing": "GOAL_BASE_MISSING",
     "change_of_a_change": "CHANGE_OF_A_CHANGE",
@@ -3237,6 +3399,19 @@ class RobustnessAnalyzerV2:
         )
         inference_warnings.extend(constraint_frame_warnings)
         constraint_plans = self._complete_constraint_plans(request, scored_constraint_plans)
+        # TEMPORAL step 1: each option's stated range on a SCORED limit's target, drawn on its
+        # own tagged stream. {} (and nothing drawn) when no option states a range.
+        intervention_range_series = (
+            self._intervention_range_series(
+                request,
+                seed,
+                {request.goal_constraints[i].node_id for i in scored_constraint_plans}
+                if request.goal_constraints
+                else set(),
+            )
+            if any(option.intervention_ranges for option in request.options)
+            else {}
+        )
 
         # ROADMAP 2.1192: WHAT "wins" MEANS for this request. Resolved here,
         # beside the threshold plan it reuses and BEFORE the Monte Carlo, for
@@ -3508,7 +3683,37 @@ class RobustnessAnalyzerV2:
             status_quo_node_values,
             level_domains=level_domains,
             goal_level_anchor=anchored_levels.get(request.goal_node_id),
+            range_series=intervention_range_series or None,
         )
+        # TEMPORAL step 1: name each option whose joint was held back because a limit row was
+        # scored from its stated range beside other limits (B5: an absence always has a name).
+        for result in results:
+            analysis = result.constraint_analysis
+            if (
+                result.sampled_intervention_ranges
+                and analysis is not None
+                and len(analysis.constraints) > 1
+            ):
+                inference_warnings.append(
+                    InferenceWarning(
+                        code="CONSTRAINT_JOINT_WITHHELD",
+                        field=f"results[{result.option_id}].constraint_analysis.joint_probability",
+                        detail={
+                            "option_id": result.option_id,
+                            "reason": "intervention_range_joint_deferred",
+                            "sampled_node_ids": [
+                                r.node_id for r in result.sampled_intervention_ranges
+                            ],
+                            "message": (
+                                "This option's limits include one scored from a stated range. "
+                                "Their joint chance and conditionals are held back until the "
+                                "dependence between the range and the model is defined; each "
+                                "limit's own chance is shown."
+                            ),
+                        },
+                        severity="warning",
+                    )
+                )
         # B1a: per anchored node whose level is reported (the goal band, a limit's
         # target), the share of each option's reported levels that left the node's
         # domain. Report-only: it reads the unclamped reported levels and moves nothing.
@@ -3880,6 +4085,21 @@ class RobustnessAnalyzerV2:
                     "its metric is P(joint_goal) and at least one goal constraint "
                     "could not be resolved into its target's sample frame. Base "
                     "analysis is unaffected.",
+                )
+            )
+        elif request.include_voi and any(r.sampled_intervention_ranges for r in results):
+            # TEMPORAL step 1: this phase's metric re-evaluates the limits at each option's
+            # POINT, so for a range-scored limit it would read a different model from the row
+            # beside it. Held back (Paul, 30 Sep) and disclosed, never computed.
+            inference_warnings.append(
+                self._optional_phase_unavailable_warning(
+                    "EVPI_UNAVAILABLE",
+                    "p_win_sensitivity",
+                    "intervention_ranges_deferred",
+                    _elapsed_ms(),
+                    "Win-probability sensitivity (p_win_sensitivity) was skipped: a goal "
+                    "constraint was scored from a stated range, which this phase does not yet "
+                    "sample. Base analysis is unaffected.",
                 )
             )
         elif request.include_voi and factor_sampler.has_uncertainties():
@@ -6618,6 +6838,17 @@ class RobustnessAnalyzerV2:
                     severity="warning",
                 )
 
+            # TEMPORAL step 1: a limit a stated range bears on is refused by NAME on any
+            # doubt about the range, BEFORE a plan exists, so it is never scored at the point
+            # (the false 100% / 0% the range exists to replace). All options, like every
+            # other plan-time refusal; the joint follows B5.
+            range_refusal = RobustnessAnalyzerV2._intervention_range_refusal(request, constraint)
+            if range_refusal is not None:
+                reason, message, extra = range_refusal
+                _, range_warning = refuse(reason, f"goal_constraints[{index}]", message, **extra)
+                warnings.append(range_warning)
+                continue
+
             plan, warning = RobustnessAnalyzerV2._resolve_threshold_in_sample_frame(
                 request,
                 target_id=constraint.node_id,
@@ -6679,6 +6910,7 @@ class RobustnessAnalyzerV2:
         constraint_plans: Dict[int, "GoalThresholdPlan"],
         status_quo_node_values: Dict[str, List[float]],
         option_id: str,
+        range_series: Optional[Dict[str, List[float]]] = None,
     ) -> Dict[int, List[float]]:
         """Put every constraint's samples into the frame ITS threshold is stated in.
 
@@ -6711,6 +6943,18 @@ class RobustnessAnalyzerV2:
             # (on a non-root target its samples are that level in the model's frame).
             set_level = dict(plan.pinned_levels).get(option_id)
             if set_level is not None:
+                sampled = (range_series or {}).get(constraint.node_id)
+                if sampled is not None:
+                    # TEMPORAL step 1: the option sets the target to a stated RANGE, so its
+                    # level is that draw of the range, not one number on every draw. The
+                    # plan-time refusal admits only a 'level' limit on a root whose point lies
+                    # in the range's P40–P60 without moving the verdict, and the series is
+                    # already in the limit's frame.
+                    assert not plan.change_frame, "a ranged pin is scored only for a level limit"
+                    pairs_draw_for_draw = len(sampled) == len(samples)
+                    assert pairs_draw_for_draw, "the range series must pair with the Monte Carlo"
+                    resolved[index] = list(sampled)
+                    continue
                 resolved[index] = [set_level] * len(samples)
                 continue
             if plan.level_threshold is None:
@@ -6754,6 +6998,7 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
         level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
         goal_level_anchor: Optional[float] = None,
+        range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -6831,14 +7076,24 @@ class RobustnessAnalyzerV2:
             # untruth in one direction and the "100% chance" untruth in the other.
             probability_of_goal = None
             if goal_threshold_plan is not None:
+                # S4 (B) (#72 5879133964): a STRICT goal ("above £85k") is met only strictly past the
+                # threshold, so a draw exactly on it (a status quo holding the goal there) is not met.
+                # Absent / False: ">=" ("<=" when minimising), byte-identical to before.
+                strict = request.goal_threshold_strict is True
+                minimise = request.goal_direction == "minimise"
+
+                # AIQ 5880886200: a draw within a relative GOAL_THRESHOLD_TIE_TOLERANCE of the threshold is ON it — not
+                # met when strict, met when not. A held option's compared level (the goal baseline, paired) and the
+                # threshold arrive by different arithmetic, so an exact comparison let one ulp decide 0% vs 100%.
+                def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
+                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
+                    past = values < threshold if minimise else values > threshold
+                    return np.asarray(past & ~on if strict else past | on, dtype=bool)
+
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
                     compared = samples_array
-                    meets = (
-                        compared <= goal_threshold_plan.delta_threshold
-                        if request.goal_direction == "minimise"
-                        else compared >= goal_threshold_plan.delta_threshold
-                    )
+                    meets = meets_threshold(compared, goal_threshold_plan.delta_threshold)
                 else:
                     # Level frame: recover the goal's LEVEL per draw by adding the
                     # option's causal effect to the level the goal is actually at.
@@ -6851,11 +7106,9 @@ class RobustnessAnalyzerV2:
                     if goal_domain is not None and not goal_threshold_plan.change_frame:
                         # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
-                    meets = (
-                        compared <= goal_threshold_plan.level_threshold
-                        if request.goal_direction == "minimise"
-                        else compared >= goal_threshold_plan.level_threshold
-                    )
+                    # A plan with no delta threshold is a level plan: both are set at one site.
+                    assert goal_threshold_plan.level_threshold is not None
+                    meets = meets_threshold(compared, goal_threshold_plan.level_threshold)
 
                 # 2.477(j) — FINITENESS GATE. This comparison used to run over the
                 # RAW array, and `+inf >= anything` is True. So the one shape that
@@ -7010,6 +7263,7 @@ class RobustnessAnalyzerV2:
 
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
+            sampled_ranges: Optional[List[SampledInterventionRange]] = None
             if request.goal_constraints and constraint_node_values:
                 analysis_dict = self._compute_constraint_analysis(
                     constraint_node_values,
@@ -7018,6 +7272,7 @@ class RobustnessAnalyzerV2:
                     constraint_plans,
                     status_quo_node_values,
                     level_domains=level_domains,
+                    range_series=(range_series or {}).get(option.id),
                 )
                 if analysis_dict:
                     # Convert dict to ConstraintAnalysis model
@@ -7047,6 +7302,18 @@ class RobustnessAnalyzerV2:
                         joint_probability=analysis_dict["joint_probability"],
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
+                    sampled_ranges = [
+                        SampledInterventionRange(
+                            node_id=node_id,
+                            meaning=option.intervention_ranges[node_id].meaning,
+                            family="lognormal",
+                            coverage=RATIFIED_COVERAGE,
+                            low=option.intervention_ranges[node_id].low,
+                            high=option.intervention_ranges[node_id].high,
+                        )
+                        for node_id in analysis_dict["sampled_range_node_ids"]
+                        if option.intervention_ranges
+                    ] or None
 
             option_result = OptionResult(
                 option_id=option.id,
@@ -7064,6 +7331,7 @@ class RobustnessAnalyzerV2:
                 win_probability=wins[option.id] / request.n_samples,
                 probability_of_goal=probability_of_goal,
                 constraint_analysis=constraint_analysis_result,
+                sampled_intervention_ranges=sampled_ranges,
             )
             # B2 CRN-fix (F1): attach the PRE-noise joint regret so the V2
             # emission layer emits the CRN-aligned value instead of recomputing it
@@ -7408,6 +7676,204 @@ class RobustnessAnalyzerV2:
         design — the tag is the only per-site variation)."""
         return int(hashlib.sha256(f"{seed}:{phase}:{node_id}".encode()).hexdigest()[:8], 16)
 
+    # --- TEMPORAL step 1: per-option stated ranges (R3 #75 5909972020) ---------------------
+    # A range moves ONLY its own option's probability of a 'level' limit on the node it sets.
+    # These helpers never call evaluate(), so they are not priced phases (no _compute_/_run_).
+
+    @staticmethod
+    def _intervention_range_refusal(
+        request: RobustnessRequestV2, constraint: GoalConstraint
+    ) -> Optional[Tuple[str, str, Dict[str, Any]]]:
+        """``(reason, message, detail)`` when a stated range bears on this limit and cannot be
+        honestly sampled for it, else None. First failing rule wins; FAIL CLOSED throughout.
+
+        1. A range upstream of the target is not propagated in step 1, so the limit would be
+           scored at the point: refused (``intervention_range_not_propagated``).
+        For each option that states a range ON the target:
+        2. its meaning must be one ISL samples (``intervention_range_meaning_unsupported``);
+        3. the limit must be a 'level' (``intervention_range_frame_unsupported``);
+        4. the target must be a root, so no reported-level clamp can truncate the draws
+           silently (``intervention_range_non_root_target``);
+        5. R3 #75 5911436566 (1): the option's point must lie between the fitted P40 and P60,
+           else the user gave two different middles (``intervention_range_point_conflict``);
+        6. and the verdict's side (more likely than not, or not) must be the same with the
+           median at the range's middle and moved to the point, else no chance is shown and
+           the user is asked (``intervention_range_point_flips_verdict``);
+        7. R3 (3): the range is NEVER truncated. A limit's ``level_domain`` does not clamp it
+           (the row names the tail as ``level_out_of_domain_fraction``), but if clamping would
+           move the verdict to the other side, no chance is shown
+           (``intervention_range_truncation_flips_verdict``);
+        8. the quartiles must be in the normalised domain, like any level operand
+           (``constraint_values_outside_normalised_domain``).
+
+        Rules 6 and 7 use the closed-form lognormal CDF, so the check is exact and draws
+        nothing. (A coverage-0.5-vs-0.8 flip cannot happen for one duration: both readings
+        share the median, so the side is the sign of ln(limit / median) under either.)
+        """
+        target = constraint.node_id
+        ranged = [
+            (option, node_id, stated)
+            for option in request.options
+            for node_id, stated in sorted((option.intervention_ranges or {}).items())
+        ]
+        if not ranged:
+            return None
+
+        children: Dict[str, List[str]] = {}
+        for edge in request.graph.edges:
+            children.setdefault(edge.from_, []).append(edge.to)
+        for option, node_id, _ in ranged:
+            if node_id == target:
+                continue
+            frontier, seen = list(children.get(node_id, [])), set()
+            while frontier:
+                current = frontier.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                frontier.extend(children.get(current, []))
+            if target in seen:
+                return (
+                    "intervention_range_not_propagated",
+                    f"Option '{option.id}' states a range for '{node_id}', upstream of this "
+                    "limit's target. Step 1 samples a range only for a limit on the node the "
+                    "option sets, so this limit would be scored at the point. It is omitted.",
+                    {"option_id": option.id, "ranged_node_id": node_id},
+                )
+
+        parents = {edge.to for edge in request.graph.edges}
+        for option, node_id, stated in ranged:
+            if node_id != target:
+                continue
+            ident = {"option_id": option.id, "ranged_node_id": node_id}
+            if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
+                return (
+                    "intervention_range_meaning_unsupported",
+                    f"Option '{option.id}' states its range as '{stated.meaning}'. ISL samples "
+                    "only a likely range (read as the quartiles); another meaning is a "
+                    "different claim, so this limit is omitted rather than misread.",
+                    {**ident, "meaning": stated.meaning},
+                )
+            if constraint.value_frame != "level":
+                return (
+                    "intervention_range_frame_unsupported",
+                    "A stated range is sampled only for a 'level' limit in step 1; this limit "
+                    f"is '{constraint.value_frame}'. It is omitted.",
+                    ident,
+                )
+            if node_id in parents:
+                return (
+                    "intervention_range_non_root_target",
+                    f"'{node_id}' has causes in the graph, so its reported level may be "
+                    "clamped, which would truncate the range's draws silently. It is omitted.",
+                    ident,
+                )
+            mu, sigma = fit_lognormal_range(stated.low, stated.high)
+            median_raw = math.exp(mu)
+            point_raw = stated.from_frame(option.interventions[node_id])
+            middle_lo = math.exp(mu - INTERVENTION_RANGE_MIDDLE_Z * sigma)
+            middle_hi = math.exp(mu + INTERVENTION_RANGE_MIDDLE_Z * sigma)
+            point_detail = {
+                **ident,
+                "point": point_raw,
+                "implied_median": median_raw,
+                "middle_band": [middle_lo, middle_hi],
+                "low": stated.low,
+                "high": stated.high,
+            }
+            if not (point_raw > 0.0 and middle_lo <= point_raw <= middle_hi):
+                return (
+                    "intervention_range_point_conflict",
+                    f"Option '{option.id}' gives '{node_id}' as {point_raw:g} and also as "
+                    f"{stated.low:g}–{stated.high:g}, whose middle is {median_raw:g}. Ask which "
+                    "Olumi should treat as the middle; the limit is omitted until then.",
+                    point_detail,
+                )
+            limit_raw = stated.from_frame(constraint.value)
+
+            def more_likely_than_not(median: float) -> bool:
+                return (
+                    _lognormal_limit_probability(median, sigma, constraint.operator, limit_raw)
+                    >= 0.5
+                )
+
+            if more_likely_than_not(median_raw) != more_likely_than_not(point_raw):
+                return (
+                    "intervention_range_point_flips_verdict",
+                    f"Whether this limit is more likely met than not depends on taking "
+                    f"{median_raw:g} or {point_raw:g} as the middle of '{node_id}'. No chance "
+                    "is shown; ask which the user means.",
+                    point_detail,
+                )
+            domain = constraint.level_domain
+            if domain is not None:
+                lo_raw = None if domain.min is None else stated.from_frame(domain.min)
+                hi_raw = None if domain.max is None else stated.from_frame(domain.max)
+                untruncated = _lognormal_limit_probability(
+                    median_raw, sigma, constraint.operator, limit_raw
+                )
+                truncated = _clamped_limit_probability(
+                    untruncated, constraint.operator, limit_raw, lo_raw, hi_raw
+                )
+                if (untruncated >= 0.5) != (truncated >= 0.5):
+                    return (
+                        "intervention_range_truncation_flips_verdict",
+                        "Cutting the range at the limit's stated bounds would move this limit "
+                        "to the other side of more-likely-than-not. The range is never "
+                        "truncated, so no chance is shown; ask how sure the user is.",
+                        {
+                            **ident,
+                            "untruncated": untruncated,
+                            "truncated": truncated,
+                            "level_domain_min": domain.min,
+                            "level_domain_max": domain.max,
+                        },
+                    )
+            limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
+            operands = {
+                f"pinned_range_low[{option.id}]": stated.to_frame(stated.low),
+                f"pinned_range_high[{option.id}]": stated.to_frame(stated.high),
+            }
+            out_of_domain = {k: v for k, v in operands.items() if abs(v) > limit}
+            if out_of_domain:
+                return (
+                    "constraint_values_outside_normalised_domain",
+                    f"Range operands {sorted(out_of_domain)} exceed |{limit}|, so they are not "
+                    "in the normalised domain; raw units were probably sent unnormalised.",
+                    {**ident, "out_of_domain": out_of_domain, "domain_limit": limit},
+                )
+        return None
+
+    @staticmethod
+    def _intervention_range_series(
+        request: RobustnessRequestV2,
+        seed: int,
+        scored_target_ids: Optional[Set[str]] = None,
+    ) -> Dict[str, Dict[str, List[float]]]:
+        """``{option_id: {node_id: per-draw level in the node's frame}}`` for each sampled range.
+
+        Only ranges whose meaning ISL samples, and (when given) only on a scored limit's
+        target. Each (option, node) draws from ITS OWN tagged stream, created only when it is
+        needed, so no existing stream moves and one option's range never moves another's
+        draws. ``{}`` when nothing is ranged: the request is then byte-identical.
+        """
+        series: Dict[str, Dict[str, List[float]]] = {}
+        for option in request.options:
+            for node_id, stated in sorted((option.intervention_ranges or {}).items()):
+                if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
+                    continue
+                if scored_target_ids is not None and node_id not in scored_target_ids:
+                    continue
+                mu, sigma = fit_lognormal_range(stated.low, stated.high)
+                rng = SeededRNG(
+                    RobustnessAnalyzerV2._per_factor_seed(
+                        seed, "intervention_range", f"{option.id}:{node_id}"
+                    )
+                )
+                raw = np.exp(mu + sigma * rng.normal_array(0.0, 1.0, request.n_samples))
+                series.setdefault(option.id, {})[node_id] = [stated.to_frame(float(x)) for x in raw]
+        return series
+
     def _compute_factor_sensitivity(
         self,
         request: RobustnessRequestV2,
@@ -7686,11 +8152,37 @@ class RobustnessAnalyzerV2:
                 )
             )
 
+        # AIQ #72 5881683705 (1b): a factor whose every path runs through a product with another
+        # operand at 0 today is WITHHELD (a gate, not "no influence"), never 0 and never ranked.
+        gated_by = zero_gated_factor_ids(
+                request.graph,
+                every_factor or factor_node_ids,
+                str(request.goal_node_id),
+                centres=factor_centres(request),
+        )
+        gated = set(gated_by)
+        if gated and critiques is not None:
+            critiques.append(
+                STRUCTURAL_INFLUENCE_GATED.build(
+                    factor_ids=", ".join(sorted(gated)),
+                    affected_node_ids=sorted(gated),
+                    seed=rng.seed,
+                )
+            )
+
+        # AIQ #72 5882619314 (2): the one-at-a-time row reads at today's centre, where the zero operand makes a
+        # gated factor's outcome diff exactly 0 — a false "no effect" for a factor that matters once the option
+        # moves. `elasticity` and `importance_rank` are required, so there is no field to null: omit the row
+        # (the 2.514(a) precedent below), as for a factor ISL never analysed. The gate rides `gated_by`.
+        sensitivities = [s for s in sensitivities if str(s["node_id"]) not in gated]
+
         # Add influence scores to sensitivities (None when the cohort truncated —
-        # a normalized score is only ever published when it is exact).
+        # a normalized score is only ever published when it is exact — or the factor is gated).
         for s in sensitivities:
             s["influence_score"] = (
-                influence_scores.get(str(s["node_id"]), 0.0) if influence_exact else None
+                influence_scores.get(str(s["node_id"]), 0.0)
+                if influence_exact and str(s["node_id"]) not in gated
+                else None
             )
 
         # Sort by absolute elasticity for importance_rank
@@ -7701,11 +8193,16 @@ class RobustnessAnalyzerV2:
         # re-publish the unsound ordering).
         if influence_exact:
             sorted_by_influence = sorted(
-                sensitivities, key=lambda x: float(x["influence_score"]), reverse=True
+                (s for s in sensitivities if s["influence_score"] is not None),
+                key=lambda x: float(x["influence_score"]),
+                reverse=True,
             )
             influence_rank_map: Dict[str, Optional[int]] = {
-                s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)
+                s["node_id"]: None for s in sensitivities
             }
+            influence_rank_map.update(
+                {s["node_id"]: i + 1 for i, s in enumerate(sorted_by_influence)}
+            )
         else:
             influence_rank_map = {s["node_id"]: None for s in sensitivities}
 
@@ -7723,13 +8220,20 @@ class RobustnessAnalyzerV2:
                         )
                     )
                 structural_influence_out.extend(
-                    StructuralInfluence(node_id=node_id) for node_id in every_factor
+                    StructuralInfluence(node_id=node_id, gated_by=gated_by.get(node_id))
+                    for node_id in every_factor
                 )
             else:
-                ranked = sorted(every_factor, key=lambda node_id: every_scores[node_id], reverse=True)
+                ranked = sorted(
+                    (node_id for node_id in every_factor if node_id not in gated),
+                    key=lambda node_id: every_scores[node_id],
+                    reverse=True,
+                )
                 rank_of = {node_id: i + 1 for i, node_id in enumerate(ranked)}
                 structural_influence_out.extend(
-                    StructuralInfluence(
+                    StructuralInfluence(node_id=node_id, gated_by=gated_by[node_id])
+                    if node_id in gated
+                    else StructuralInfluence(
                         node_id=node_id,
                         influence_score=every_scores[node_id],
                         influence_rank=rank_of[node_id],
@@ -7760,6 +8264,24 @@ class RobustnessAnalyzerV2:
             n_bootstrap_override=self._n_bootstrap_override,
         )
 
+        # AIQ #72 5882847470: no stability claim from a blind probe. The rows keep their shape (every
+        # other consumer sees the same fields); only the bootstrap stability read off the probe is withheld.
+        blind = anchored_blind_factor_ids(
+            request.graph,
+            [str(s["node_id"]) for s in sensitivities],
+            str(request.goal_node_id),
+            centres=factor_centres(request),
+        )
+        if blind and critiques is not None:
+            critiques.append(
+                FACTOR_STABILITY_ANCHORED.build(
+                    factor_ids=", ".join(sorted(blind)),
+                    anchors=", ".join(sorted({a for anchors in blind.values() for a in anchors})),
+                    affected_node_ids=sorted(blind),
+                    seed=rng.seed,
+                )
+            )
+
         # Convert to results with ranks
         results = []
         rank = 0
@@ -7788,6 +8310,7 @@ class RobustnessAnalyzerV2:
             zero_reason = s.get("zero_reason")  # type: ignore[assignment]
             if (
                 influence_exact
+                and s["influence_score"] is not None  # gated (1b): has a path, not disconnected
                 and abs(float(s["elasticity"])) < 1e-10
                 and float(s["influence_score"]) < 1e-10
             ):
@@ -7796,7 +8319,7 @@ class RobustnessAnalyzerV2:
                 zero_reason = ZeroSensitivityReason.DISCONNECTED
 
             node_id = str(s["node_id"])
-            bs = bootstrap_stability.get(node_id, {})
+            bs = {} if node_id in blind else bootstrap_stability.get(node_id, {})
 
             results.append(
                 FactorSensitivityResult(
@@ -11185,6 +11708,7 @@ class RobustnessAnalyzerV2:
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
         level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
+        range_series: Optional[Dict[str, List[float]]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -11236,6 +11760,21 @@ class RobustnessAnalyzerV2:
         scored_plans = {
             position: constraint_plans[index] for position, index in enumerate(scored_indices)
         }
+        # TEMPORAL step 1: the rows this option scores from a stated range. The JOINT across a
+        # range-scored row and any other row is held back (with its conditionals): the range is
+        # sampled independently of the model, and that dependence is not yet defined (Paul, 30
+        # Sep). A single limit keeps its joint, which is that row.
+        sampled_range_node_ids = sorted(
+            {
+                constraint.node_id
+                for position, constraint in enumerate(scored)
+                if constraint.node_id in (range_series or {})
+                and option_id in dict(scored_plans[position].pinned_levels)
+            }
+        )
+        range_joint_deferred = bool(sampled_range_node_ids) and len(scored) > 1
+        if range_joint_deferred:
+            joint_emitted = False
 
         # Put every scored constraint's samples into the frame ITS threshold is
         # stated in, once, before any comparison sees them.
@@ -11245,6 +11784,7 @@ class RobustnessAnalyzerV2:
             scored_plans,
             status_quo_node_values or {},
             option_id,
+            range_series=range_series,
         )
         # B1a (AIQ 5855046894 (2)): a 'level' limit on an ANCHORED node reads its level
         # CLAMPED to the node's domain, so every figure in the block (probability, joint,
@@ -11370,5 +11910,9 @@ class RobustnessAnalyzerV2:
             "constraints": constraint_results,
             # B5: ABSENT while any constraint is unscored — never the subset joint.
             "joint_probability": joint_probability if joint_emitted else None,
-            "conditional_probabilities": conditional_probs if conditional_probs else None,
+            "conditional_probabilities": (
+                conditional_probs if conditional_probs and not range_joint_deferred else None
+            ),
+            "sampled_range_node_ids": sampled_range_node_ids,
+            "range_joint_deferred": range_joint_deferred,
         }

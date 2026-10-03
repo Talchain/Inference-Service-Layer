@@ -442,7 +442,7 @@
                 "type": "null"
               }
             ],
-            "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset.",
+            "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset. Also ABSENT (with the conditionals) for an option whose rows mix a limit scored from a stated range with other limits (TEMPORAL step 1), named by CONSTRAINT_JOINT_WITHHELD.",
             "title": "Joint Probability"
           }
         },
@@ -492,7 +492,7 @@
                 "type": "null"
               }
             ],
-            "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset.",
+            "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset. Also ABSENT (with the conditionals) for an option whose rows mix a limit scored from a stated range with other limits (TEMPORAL step 1), named by CONSTRAINT_JOINT_WITHHELD.",
             "title": "Joint Probability"
           }
         },
@@ -4544,6 +4544,21 @@
             "title": "Id",
             "type": "string"
           },
+          "intervention_ranges": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/InterventionRange"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "node_id -> the option's stated range for the value it sets there. Each key must also be in `interventions` (the point, within the range's P40-P60).",
+            "title": "Intervention Ranges"
+          },
           "interventions": {
             "additionalProperties": {
               "type": "number"
@@ -4565,6 +4580,69 @@
           "interventions"
         ],
         "title": "InterventionOption",
+        "type": "object"
+      },
+      "InterventionRange": {
+        "description": "TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).\n\nThe caller states the range and what it MEANS, never a distribution family: ISL chooses\nthe science-owned family for the meaning and echoes what it used\n(``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);\n``normalisation`` maps them onto the node's frame (absent = the frame is raw units).\nThe option's point in ``interventions`` stays. It must lie between the range's fitted\nP40 and P60 without moving the verdict's side, or the limit is refused and the user\nasked (R3 #75 5911436566 (1)). The range is scored with its own median.",
+        "properties": {
+          "high": {
+            "description": "The stated bad case, raw units (> low)",
+            "exclusiveMinimum": 0.0,
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "description": "The stated good case, raw units (> 0)",
+            "exclusiveMinimum": 0.0,
+            "title": "Low",
+            "type": "number"
+          },
+          "meaning": {
+            "description": "What the user's words say the range is. Sampled only for 'likely_range' (read as the quartiles, lognormal); any other meaning refuses the limit by name.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Meaning",
+            "type": "string"
+          },
+          "normalisation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterventionRangeNormalisation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw \u2192 node-frame map (computational only, never a bound)"
+          }
+        },
+        "required": [
+          "low",
+          "high",
+          "meaning"
+        ],
+        "title": "InterventionRange",
+        "type": "object"
+      },
+      "InterventionRangeNormalisation": {
+        "description": "How the caller's normaliser maps this node's RAW units onto its [0, 1] frame.\n\nA COMPUTATIONAL map only (PLoT's affine intervention normaliser), never a bound on\nwhat the quantity can take: a draw beyond ``raw_at_one`` is valid arithmetic. A\nsemantic bound is the limit's own ``level_domain``, which a range must not cross\n(TEMPORAL step 1 refuses it; R3 rules truncate vs refuse).",
+        "properties": {
+          "raw_at_one": {
+            "description": "The raw value the normaliser maps to 1",
+            "title": "Raw At One",
+            "type": "number"
+          },
+          "raw_at_zero": {
+            "description": "The raw value the normaliser maps to 0",
+            "title": "Raw At Zero",
+            "type": "number"
+          }
+        },
+        "required": [
+          "raw_at_zero",
+          "raw_at_one"
+        ],
+        "title": "InterventionRangeNormalisation",
         "type": "object"
       },
       "InterventionRegion": {
@@ -5326,6 +5404,21 @@
             "description": "P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
             "title": "Probability Of Goal"
           },
+          "sampled_intervention_ranges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SampledInterventionRange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stated ranges ISL sampled to score this option's limits. Absent when none.",
+            "title": "Sampled Intervention Ranges"
+          },
           "win_probability": {
             "description": "P(this option is best)",
             "maximum": 1.0,
@@ -5405,6 +5498,21 @@
             ],
             "description": "P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
             "title": "Probability Of Goal"
+          },
+          "sampled_intervention_ranges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SampledInterventionRangeV2"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "TEMPORAL step 1: the stated ranges ISL sampled to score this option's own limits (each read as the quartiles of a lognormal). Present iff a limit row of this option was scored from a range; a consumer that sent a range and finds no entry here must not show that limit's probability.",
+            "title": "Sampled Intervention Ranges"
           },
           "status": {
             "description": "Option-specific status",
@@ -6721,6 +6829,18 @@
             "description": "Declares which frame goal_threshold is expressed in. 'delta' = already in the goal SAMPLES' own frame (change from the model's origin); used as-is, no conversion. 'level' = an absolute level of the goal quantity, which MUST share the domain of the graph's observed_state values \u2014 whatever that domain is. ISL cannot verify the domain; the producer attests it. (ISL applies only a magnitude sanity guard derived from the evaluator's own [0, 1] node-value clamp, which catches raw units sent where normalised values were expected but cannot confirm the converse.) ISL converts a 'level' threshold into the sample frame before comparing. When absent, or when a 'level' threshold cannot be converted, probability_of_goal is OMITTED and a structured inference warning names what was missing \u2014 ISL never guesses a frame and never emits a fabricated or clamped probability.",
             "title": "Goal Threshold Frame"
           },
+          "goal_threshold_strict": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when the goal must be strictly PAST goal_threshold ('above', 'over', 'more than'; 'below', 'under', 'less than' when minimising): probability_of_goal then counts a draw exactly on the threshold as NOT met. Absent or false: 'at least' / 'at most', as before. Requires goal_threshold.",
+            "title": "Goal Threshold Strict"
+          },
           "graph": {
             "allOf": [
               {
@@ -7541,6 +7661,96 @@
           "metric_populations"
         ],
         "title": "SamplePopulationProvenanceV2",
+        "type": "object"
+      },
+      "SampledInterventionRange": {
+        "description": "TEMPORAL step 1 echo: a stated range ISL SAMPLED to score this option's limit(s).\n\nPresent only when at least one of the option's constraint rows was scored from the\nrange; PLoT's fail-closed forward keys on it. Says how the range was read, so every\nsurface can name the reading (AIQ #75 5909998288).",
+        "properties": {
+          "coverage": {
+            "description": "Central share of mass the stated bounds hold (0.5 = quartiles)",
+            "title": "Coverage",
+            "type": "number"
+          },
+          "family": {
+            "const": "lognormal",
+            "description": "The family ISL chose for that meaning",
+            "title": "Family"
+          },
+          "high": {
+            "description": "Stated bad case, raw units",
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "description": "Stated good case, raw units",
+            "title": "Low",
+            "type": "number"
+          },
+          "meaning": {
+            "description": "The stated meaning ISL read (e.g. 'likely_range')",
+            "title": "Meaning",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "The node whose range was sampled",
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "meaning",
+          "family",
+          "coverage",
+          "low",
+          "high"
+        ],
+        "title": "SampledInterventionRange",
+        "type": "object"
+      },
+      "SampledInterventionRangeV2": {
+        "description": "TEMPORAL step 1: a stated range ISL sampled to score this option's limit(s).",
+        "properties": {
+          "coverage": {
+            "description": "Central share of mass the stated bounds hold (0.5 = the quartiles)",
+            "title": "Coverage",
+            "type": "number"
+          },
+          "family": {
+            "const": "lognormal",
+            "description": "The family ISL chose for that meaning",
+            "title": "Family"
+          },
+          "high": {
+            "description": "Stated bad case, raw units",
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "description": "Stated good case, raw units",
+            "title": "Low",
+            "type": "number"
+          },
+          "meaning": {
+            "description": "The stated meaning ISL read (e.g. 'likely_range')",
+            "title": "Meaning",
+            "type": "string"
+          },
+          "node_id": {
+            "description": "The node whose range was sampled",
+            "title": "Node Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node_id",
+          "meaning",
+          "family",
+          "coverage",
+          "low",
+          "high"
+        ],
+        "title": "SampledInterventionRangeV2",
         "type": "object"
       },
       "ScenarioDescription": {
@@ -8467,6 +8677,21 @@
       "StructuralInfluence": {
         "description": "One factor node's structural influence on the goal, normalised over EVERY factor node.",
         "properties": {
+          "gated_by": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set only when the score is withheld because EVERY path from this factor to the goal runs through a product with another input at 0 today: those zero inputs. The influence depends on the option chosen (STRUCTURAL_INFLUENCE_GATED); a consumer shows that, never 0 and never a rank.",
+            "title": "Gated By"
+          },
           "influence_rank": {
             "anyOf": [
               {
@@ -8477,7 +8702,7 @@
                 "type": "null"
               }
             ],
-            "description": "Rank by influence_score, 1 = highest, over every factor node. None when the walk truncated.",
+            "description": "Rank by influence_score, 1 = highest, over every factor node with a score. None when the walk truncated or the factor is gated.",
             "title": "Influence Rank"
           },
           "influence_score": {
@@ -8491,7 +8716,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sum of |path strengths| to the goal, normalised to 0-1 across EVERY factor node (an evaluated identity's operand and addend edges carry its partial at the centre). None for every row when the walk truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED).",
+            "description": "Expected NET effect on the goal: |sum of signed path strengths|, each edge at mean x exists_probability, normalised to 0-1 across EVERY factor node (an evaluated identity's operand and addend edges carry its partial at the centre). None for every row when the walk truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED), and for a factor whose every path runs through a product with another input at 0 today (STRUCTURAL_INFLUENCE_GATED).",
             "title": "Influence Score"
           },
           "node_id": {

@@ -17,7 +17,7 @@ its own module because ``response_v2`` cannot import ``robustness_v2`` (circular
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -30,13 +30,21 @@ class StructuralInfluence(BaseModel):
         None,
         ge=0.0,
         le=1.0,
-        description="Sum of |path strengths| to the goal, normalised to 0-1 across EVERY factor node "
-        "(an evaluated identity's operand and addend edges carry its partial at the centre). "
-        "None for every row when the walk truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED).",
+        description="Expected NET effect on the goal: |sum of signed path strengths|, each edge at "
+        "mean x exists_probability, normalised to 0-1 across EVERY factor node (an evaluated identity's "
+        "operand and addend edges carry its partial at the centre). None for every row when the walk "
+        "truncated (exact-or-null; STRUCTURAL_INFLUENCE_TRUNCATED), and for a factor whose every path runs "
+        "through a product with another input at 0 today (STRUCTURAL_INFLUENCE_GATED).",
+    )
+    gated_by: Optional[List[str]] = Field(
+        None,
+        description="Set only when the score is withheld because EVERY path from this factor to the goal "
+        "runs through a product with another input at 0 today: those zero inputs. The influence depends on "
+        "the option chosen (STRUCTURAL_INFLUENCE_GATED); a consumer shows that, never 0 and never a rank.",
     )
     influence_rank: Optional[int] = Field(
         None,
         ge=1,
-        description="Rank by influence_score, 1 = highest, over every factor node. None when the "
-        "walk truncated.",
+        description="Rank by influence_score, 1 = highest, over every factor node with a score. None "
+        "when the walk truncated or the factor is gated.",
     )
