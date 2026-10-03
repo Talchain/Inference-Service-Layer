@@ -49,3 +49,17 @@ async def test_analyze_v2_is_unchanged_by_the_new_route(client):
     q.update({"n_samples": 500, "seed": "7"})
     a = (await client.post("/api/v1/robustness/analyze/v2", json=copy.deepcopy(q))).json()
     assert "horizon_view" not in a and "decision_flip" not in json.dumps(a)
+
+
+async def test_a_worker_that_stays_dead_is_the_typed_503_with_retry_after(client, monkeypatch):
+    # Review 5972142902 follow-up: the helper's second-failure Overload reaches the caller as the governor's own 503.
+    import src.api.robustness as route
+    from src.services.compute_governor import Overload
+
+    async def dead(*a, **k):
+        raise Overload(503, "analysis_worker_unavailable")
+
+    monkeypatch.setattr(route, "run_decision_flip_offloaded", dead)
+    r = await client.post(ROUTE, json=body())
+    assert r.status_code == 503 and r.headers.get("Retry-After")
+    assert "analysis_worker_unavailable" in r.text

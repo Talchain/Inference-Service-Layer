@@ -109,6 +109,8 @@ BOUND_ABS = 0.01
 BOUND_REL = 0.15
 GRID_STEP = 0.0025
 CHECK_TOL = 1e-9
+# Exact-tie intervals the sweep replays through the analyser's float tally per call (~ms each at n = 10,000).
+MAX_TIED_INTERVALS = 1024
 STRIPPED = {
     "include_e_values": False,
     "include_voi": False,
@@ -183,14 +185,137 @@ def affine_threshold(
     """
     n = max(1, int(math.ceil(abs(current) / step)))
     hold = current
+    found: Dict[str, Any] = {"exists": False, "hold": None, "flip": None, "to_option_id": None}
     for k in range(1, n + 1):
         x = current - current * k / n
         t = (current - x) / current
         who = _leader(p_best(x0 + t * (x1 - x0), sense, n_samples), option_ids)
         if who != lead:
-            return {"exists": True, "hold": hold, "flip": x, "to_option_id": who}
+            found = {"exists": True, "hold": hold, "flip": x, "to_option_id": who}
+            break
         hold = x
-    return {"exists": False, "hold": None, "flip": None, "to_option_id": None}
+    # The grid only LOOKS at its points (review 5963778665 P1: a 900-draw case where B leads on (0.248, 0.249) and the
+    # grid, stepping 0.25 -> 0.2475, reported "no change"). Check the stretch the grid says `lead` holds over (to its
+    # `hold`, or all the way to 0 when it found nothing) EXACTLY. A change the grid stepped over is the NEAREST change:
+    # it replaces the grid's answer as an ordinary bracket, so the replicate agreement, the licence and the real re-run
+    # below judge it exactly as they judge any other, and no new absence reason is needed on the wire.
+    t_max = (current - found["hold"]) / current if found["exists"] else 1.0
+    try:
+        nearer = first_leader_change(x0, x1, option_ids, lead, sense, t_max)
+    except TieBudgetExceeded:
+        # Too many EXACT ties to replay: the recommendation along this link is decided by float tie-breaks throughout,
+        # so nothing (neither "no change" nor a bracket) is certified. The block withholds it as `leader_unstable`.
+        return {"exists": False, "hold": None, "flip": None, "to_option_id": None, "crossing_missed": False,
+                "uncertified": True}
+    found["crossing_missed"] = nearer is not None
+    if nearer is not None:
+        t_star, to, half = nearer
+        found = {"exists": True, "hold": current - current * max(t_star - half, 0.0),
+                 "flip": current - current * (t_star + half), "to_option_id": to, "crossing_missed": True}
+    return found
+
+
+def first_leader_change(
+    x0: np.ndarray, x1: np.ndarray, option_ids: Sequence[str], lead: str, sense: str, t_max: float,
+) -> Optional[Tuple[float, str, float]]:
+    """The first change of recommendation in (0, ``t_max``], EXACTLY: ``(t, new_leader, half_width)``, or None.
+
+    ``t`` runs from the current mean (0) to a mean of 0 (1); a draw's option values are straight lines in ``t`` (the
+    affine path). A draw's winner can therefore change only where two of ITS lines cross, so between consecutive
+    crossings of one draw its winner is fixed, and the win shares (hence the leader) are step functions that change
+    only at those times. One evaluation per gap of every draw, replayed in time order, visits every interval the grid
+    could step over. Shares are counted in exact integer units with ``p_best``'s rule: the best FINITE option wins, an
+    exact tie splits the draw, and a draw with no finite option credits nobody. On (0, 1] an option's value in a draw is
+    finite exactly when both endpoints are, so a non-finite one simply never wins there.
+
+    ⚠ AN EXACT TIE IS THE ANALYSER'S TO BREAK (review 5972142902). The recommendation is the first option holding the
+    maximum of the analyser's FLOAT tally (``option_wins[w] += 1.0 / len(winners)``, summed in draw order). Away from
+    an exact tie the integer count and that tally name the same option: their gap is at least one share unit, far above
+    float rounding. On an exact tie in integer units, rounding decides, and the first option need not win (100 draws
+    with 94 three-way ties: the tally names C, the integer tie-break A). So a tied interval's leader is the analyser's
+    float tally replayed at a point inside it, at most ``MAX_TIED_INTERVALS`` times; beyond that ``TieBudgetExceeded``.
+
+    ``half_width``: half the shorter of the two intervals either side of ``t``, so ``t - half_width`` still has today's
+    leader and ``t + half_width`` the new one (at ``t = 0``, half the first interval). A leader that differs only AT one
+    crossing time (a zero-width tie) is not a change over any range of the link and is not reported.
+    """
+    if sense not in ("maximise", "minimise"):
+        raise ValueError(f"DECISION_FLIP_SENSE_UNSUPPORTED: {sense}")
+    if t_max <= 0:
+        return None
+    sign = 1.0 if sense == "maximise" else -1.0
+    fin = np.isfinite(x0) & np.isfinite(x1)
+    a0, a1 = np.where(fin, x0, 0.0), np.where(fin, x1, 0.0)  # never inf - inf
+    v0, slope = sign * a0, sign * (a1 - a0)  # options × draws; the winner is now always the maximum
+    n_opt, n_draw = v0.shape
+    ii, kk = np.triu_indices(n_opt, 1)
+    den = slope[ii] - slope[kk]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tc = np.where(fin[ii] & fin[kk] & (den != 0), (v0[kk] - v0[ii]) / den, np.inf)
+    # A crossing outside (0, t_max) sits AT t_max, where it can change nothing inside the range.
+    tc = np.sort(np.where((tc > 0) & (tc < t_max), tc, t_max), axis=0)  # pairs × draws
+    bounds = np.vstack([np.zeros((1, n_draw)), tc, np.full((1, n_draw), t_max)])
+    mids = (bounds[:-1] + bounds[1:]) / 2  # one point inside every gap of every draw
+    vals = np.where(fin[:, None, :], v0[:, None, :] + mids[None, :, :] * slope[:, None, :], -np.inf)
+    win = (vals == vals.max(axis=0)[None]) & fin[:, None, :]
+    unit = math.lcm(*range(1, n_opt + 1))
+    shares = win * (unit // np.maximum(win.sum(axis=0), 1))[None]  # integer units; an exact tie splits the draw
+    lead_i = list(option_ids).index(lead)
+    totals = shares[:, 0, :].sum(axis=1)
+    delta = shares[:, 1:, :] - shares[:, :-1, :]  # the change at each inner bound (a crossing time)
+    changed = np.any(delta != 0, axis=0)
+    t_ev, d_ev = tc[changed], delta[:, changed].T
+    order = np.argsort(t_ev, kind="stable")
+    t_ev, d_ev = t_ev[order], d_ev[order]
+    last = np.r_[t_ev[1:] != t_ev[:-1], True] if t_ev.size else np.zeros(0, dtype=bool)
+    times = t_ev[last]  # the distinct change times; an interval's state is the one after its LAST change there
+    states = (totals[None, :] + np.cumsum(d_ev, axis=0))[last]
+    budget = [MAX_TIED_INTERVALS]
+
+    def analyser_leader(t: float) -> int:
+        v = np.where(fin, v0 + t * slope, -np.inf)
+        w = (v == v.max(axis=0)[None]) & fin
+        share = np.where(w, 1.0 / np.maximum(w.sum(axis=0), 1)[None], 0.0)
+        tally = np.add.accumulate(share, axis=1)[:, -1]  # one addition at a time, in draw order: option_wins' own sum
+        return int(np.argmax(tally))
+
+    def leader(state: np.ndarray, t_inside: float) -> int:
+        if int((state == state.max()).sum()) > 1:
+            if budget[0] <= 0:
+                raise TieBudgetExceeded()
+            budget[0] -= 1
+            return analyser_leader(t_inside)
+        return int(np.argmax(state))
+
+    nxt_after = np.r_[times[1:], t_max] if times.size else np.zeros(0)
+    inside_after = (times + nxt_after) / 2  # a point inside the interval that follows each change
+    first_bound = float(times[0]) if times.size else t_max
+    w0 = leader(totals, first_bound / 2)
+    if w0 != lead_i:  # the draws already disagree just past the current mean
+        return (0.0, option_ids[w0], first_bound / 2) if first_bound > 0 else None
+    tied = (states == states.max(axis=1, keepdims=True)).sum(axis=1) > 1
+    plain = np.nonzero(~tied & (np.argmax(states, axis=1) != lead_i))[0]  # untied changes: no replay needed
+    stop = int(plain[0]) if plain.size else int(times.size)
+    hit: Optional[Tuple[int, int]] = None
+    for j in np.nonzero(tied[:stop])[0]:  # tied intervals before the first untied change, in time order
+        who = leader(states[j], float(inside_after[j]))
+        if who != lead_i:
+            hit = (int(j), who)
+            break
+    if hit is None:
+        if not plain.size:
+            return None
+        hit = (stop, int(np.argmax(states[stop])))
+    i, to_i = hit
+    t_star = float(times[i])
+    prev = float(times[i - 1]) if i > 0 else 0.0
+    nxt = float(times[i + 1]) if i + 1 < times.size else t_max
+    half = min(t_star - prev, nxt - t_star) / 2
+    return (t_star, option_ids[to_i], half) if half > 0 else None
+
+
+class TieBudgetExceeded(Exception):
+    """More exact ties than ``MAX_TIED_INTERVALS`` to replay through the analyser's float tally."""
 
 
 def _child_seed(master: int, i: int) -> int:
@@ -225,12 +350,16 @@ def compute_decision_flip_block(dreq: Any) -> Any:
         return np.array([oo[o] for o in option_ids], dtype=float)
 
     head = run(master, capture=False)
-    leader = head.recommended_option_id
+    # A WITHHELD ranking has no leader (review 5963778665 P1). The analyser's `recommended_option_id` is then max() over
+    # an all-zero tally, i.e. the FIRST option by array order: reversing the options names the other one. Export null
+    # and let every link be the honest `ranking_not_supported` absence, without spending the replicates.
+    ranking = getattr(head, "objective_ranking", None)
+    leader = head.recommended_option_id if ranking is None or ranking.status == "computed" else None
     links_out: List[Any] = []
     sense: str = "maximise"
     seeds = [_child_seed(master, i) for i in range(dreq.replicates)]
     replicate_base: Dict[int, Any] = {}
-    for s in seeds:
+    for s in seeds if leader is not None else []:
         r = run(s)
         replicate_base[s] = r
         sense = str(r._mc_draws["objective"].sense) if r._mc_draws["objective"] is not None else "maximise"
@@ -254,6 +383,7 @@ def compute_decision_flip_block(dreq: Any) -> Any:
             links_out.append(DecisionFlipLinkV2(status="absent", reason=why, **common))
             continue
 
+        assert leader is not None  # a null leader is the `ranking_not_supported` absence above
         per_seed: List[Dict[str, Any]] = []
         for s in seeds:
             x0 = matrix(replicate_base[s])
@@ -267,6 +397,10 @@ def compute_decision_flip_block(dreq: Any) -> Any:
             res["x1"] = x1
             per_seed.append(res)
 
+        if any(r.get("uncertified") for r in per_seed):
+            # 0.75.0's vocabulary is closed (R9): the existing `leader_unstable`, in its pre-search shape.
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="leader_unstable", **common))
+            continue
         found = [r for r in per_seed if r["exists"]]
         ths = [((r["hold"] + r["flip"]) / 2) if r["exists"] else None for r in per_seed]
         if not found:

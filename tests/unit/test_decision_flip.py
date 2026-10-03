@@ -183,3 +183,179 @@ def test_the_exact_rerun_withholds_a_link_the_straight_line_got_wrong(monkeypatc
     block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate({"request": q, "replicates": 2, "links": [
         {"from_id": "ai_reporting_module_availability", "to_id": SIGNING}]}))
     assert (block.links[0].status, block.links[0].reason) == ("absent", "affine_check_failed")
+
+
+# ── Review 5963778665 (CHANGES_REQUIRED @10c42c87): the three P1s ────────────────────────────────────────────────────
+
+
+def _lines(groups):
+    """(x0, x1) for options [A, B] from (A@t0, A@t1, B@t0, B@t1, count) groups. t = 0 is the current mean, t = 1 is 0."""
+    cols = [g[:4] for g in groups for _ in range(g[4])]
+    a = np.array(cols, dtype=float)
+    return np.array([a[:, 0], a[:, 2]]), np.array([a[:, 1], a[:, 3]])
+
+
+# 900 draws. A leads at the current mean and again from t = 0.008; B leads ONLY on t in (0.004, 0.008), i.e. a link
+# mean in (0.248, 0.249) for current 0.25: strictly between the grid points 0.25 and 0.2475 (the reviewer's case:
+# "A leads at 0.25, B leads at 0.2485").
+SHORT_B = [
+    (0.0, 1.0, 0.008, 0.008, 2),  # B until t = 0.008, then A
+    (0.004, 0.004, 0.0, 1.0, 2),  # A until t = 0.004, then B
+    (1.0, 1.0, 0.0, 0.0, 449),    # A throughout
+    (0.0, 0.0, 1.0, 1.0, 447),    # B throughout
+]
+
+
+def _leader_at(x0, x1, t):
+    return df._leader(df.p_best(x0 + t * (x1 - x0), "maximise", x0.shape[1]), ["A", "B"])
+
+
+def test_p1_fixture_really_has_a_short_winning_interval_between_grid_points():
+    # Precondition for the two rows below: without it they would pass for the wrong reason.
+    x0, x1 = _lines(SHORT_B)
+    assert x0.shape == (2, 900)
+    assert _leader_at(x0, x1, 0.0) == "A" and _leader_at(x0, x1, 0.006) == "B"  # mean 0.25 vs 0.2485
+    assert all(_leader_at(x0, x1, k / 100) == "A" for k in range(0, 101))  # every 0.0025 grid point says A
+
+
+def test_p1_a_short_interval_the_grid_steps_over_is_found_never_called_no_change():
+    x0, x1 = _lines(SHORT_B)
+    res = df.affine_threshold(x0, x1, 0.25, ["A", "B"], "A", "maximise", 900)
+    assert res["exists"] is True and res["to_option_id"] == "B" and res["crossing_missed"] is True
+    assert res["hold"] > 0.249 > res["flip"]  # B takes over at t = 0.004, i.e. a mean of 0.249
+    assert abs((res["hold"] + res["flip"]) / 2 - 0.249) < 1e-12  # the bracket is centred on the exact crossing
+    t = lambda x: (0.25 - x) / 0.25
+    assert _leader_at(x0, x1, t(res["hold"])) == "A" and _leader_at(x0, x1, t(res["flip"])) == "B"
+
+
+def test_p1_an_earlier_missed_interval_replaces_a_later_grid_flip():
+    # Four A-always draws now lose to B from t = 0.5: the grid finds THAT flip (a mean near 0.125), but A did not hold
+    # all the way down to it. The nearest change is the one at 0.249, and it is the one reported.
+    x0, x1 = _lines(SHORT_B[:2] + [(1.0, -1.0, 0.0, 0.0, 4), (1.0, 1.0, 0.0, 0.0, 445), (0.0, 0.0, 1.0, 1.0, 447)])
+    assert _leader_at(x0, x1, 0.75) == "B"
+    res = df.affine_threshold(x0, x1, 0.25, ["A", "B"], "A", "maximise", 900)
+    assert res["exists"] is True and res["crossing_missed"] is True and res["to_option_id"] == "B"
+    assert abs((res["hold"] + res["flip"]) / 2 - 0.249) < 1e-12
+
+
+def test_p1_controls_a_monotone_crossing_and_a_true_no_change_keep_the_grid_answer():
+    x0 = np.array([[1.0, 1.0], [0.4, 0.4]])
+    x1 = np.array([[0.0, 0.0], [0.4, 0.4]])
+    found = df.affine_threshold(x0, x1, 1.0, ["A", "B"], "A", "maximise", 2, step=0.01)
+    assert found["exists"] is True and found["crossing_missed"] is False
+    assert found["hold"] >= 0.4 > found["flip"] and found["hold"] - found["flip"] <= 0.0100001  # the grid's bracket
+    flat0, flat1 = _lines([(1.0, 1.0, 0.0, 0.0, 6), (0.0, 0.5, 0.2, 0.2, 3)])
+    none = df.affine_threshold(flat0, flat1, 0.25, ["A", "B"], "A", "maximise", 9)
+    assert none["exists"] is False and none["crossing_missed"] is False
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("sense", ["maximise", "minimise"])
+def test_p1_the_exact_sweep_agrees_with_a_dense_scan_including_non_finite_draws(seed, sense):
+    # p_best's own rule throughout: a non-finite option never wins a draw, a draw with none credits nobody.
+    rng = np.random.default_rng(seed)
+    x0, x1 = rng.normal(size=(3, 40)), rng.normal(size=(3, 40))
+    x0[0, 3], x1[1, 7], x0[2, 11], x1[2, 11] = math.nan, math.inf, -math.inf, 1.0
+    x0[:, 19] = math.nan
+    ids = ["A", "B", "C"]
+    ts = np.linspace(0.0, 1.0, 20_001)[1:]
+    with np.errstate(invalid="ignore"):  # the scan itself does inf - inf; the sweep under test never does
+        who = [ids[int(np.argmax(df.p_best(x0 + t * (x1 - x0), sense, 40)))] for t in ts]
+    lead = who[0]
+    exact = df.first_leader_change(x0, x1, ids, lead, sense, 1.0)
+    brute = next(((float(t), w) for t, w in zip(ts, who) if w != lead), None)
+    if brute is None:
+        assert exact is None
+    else:
+        assert exact is not None and exact[1] == brute[1] and exact[0] <= brute[0] <= exact[0] + 5e-5
+
+
+from tests.unit.test_goal_direction_objective_ranking import (  # noqa: E402
+    _WITHHOLD_WITNESS_OPTIONS,
+    _withhold_witness_payload,
+)
+
+
+@pytest.mark.parametrize("order", ["forward", "reversed"])
+def test_p1_a_withheld_ranking_exports_no_leader_in_either_option_order(order):
+    options = _WITHHOLD_WITNESS_OPTIONS if order == "forward" else list(reversed(_WITHHOLD_WITNESS_OPTIONS))
+    q = _withhold_witness_payload(options=options, include_path_decomposition=False, include_voi=False)
+    assert RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**q)).objective_ranking.status == "withheld"
+    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
+        {"request": q, "links": [{"from_id": "mid", "to_id": "goal"}], "replicates": 2}))
+    assert block.leader_option_id is None  # never the analyser's first-option placeholder
+    assert [(lk.status, lk.reason) for lk in block.links] == [("absent", "ranking_not_supported")]
+
+
+# ── Review 5972142902 (CHANGES_REQUIRED @8e888af8): an EXACT tie is decided by the analyser's float tally ─────────────
+
+def _tie_case():
+    """The reviewer's 100 finite draws, options [A, C, B], current mean 0.25.
+
+    A-only; 91 three-way ties; A-only; two C-only; three three-way ties; then two moving draws:
+    (A, C, B) = (0.004 - t, -1, 0) and (t - 0.008, -1, 0). On t in (0.004, 0.008) A, C and B hold EXACTLY equal
+    shares, and the analyser's float tally (1.0 per clear win, 1/3 per three-way tie, summed in draw order) names C.
+    """
+    ids = ["A", "C", "B"]
+    rows = []  # (A0, A1, C0, C1, B0, B1)
+    rows.append((1, 1, 0, 0, 0, 0))
+    rows += [(0, 0, 0, 0, 0, 0)] * 91
+    rows.append((1, 1, 0, 0, 0, 0))
+    rows += [(0, 0, 1, 1, 0, 0)] * 2
+    rows += [(0, 0, 0, 0, 0, 0)] * 3
+    rows.append((0.004, 0.004 - 1, -1, -1, 0, 0))
+    rows.append((-0.008, 1 - 0.008, -1, -1, 0, 0))
+    a = np.array(rows, dtype=float)
+    return ids, np.array([a[:, 0], a[:, 2], a[:, 4]]), np.array([a[:, 1], a[:, 3], a[:, 5]])
+
+
+def _analyser_leader(ids, values):
+    """The analyser's own rule, written out: `option_wins[w] += 1.0 / len(winners)` in draw order, then the FIRST
+    option holding the maximum (`max(option_wins, key=...)` over insertion order)."""
+    wins = {o: 0.0 for o in ids}
+    for d in range(values.shape[1]):
+        col = {o: float(values[i, d]) for i, o in enumerate(ids)}
+        best = max(col.values())
+        winners = [o for o, v in col.items() if v == best]
+        for w in winners:
+            wins[w] += 1.0 / len(winners)
+    return max(wins, key=lambda k: wins[k])
+
+
+def test_review2_the_tie_fixture_is_what_the_reviewer_reproduced():
+    ids, x0, x1 = _tie_case()
+    at = lambda t: x0 + t * (x1 - x0)
+    assert x0.shape == (3, 100)
+    assert _analyser_leader(ids, at(0.0)) == "A" and _analyser_leader(ids, at(0.006)) == "C"  # mean 0.2485 -> C
+    assert ids[int(np.argmax(df.p_best(at(0.006), "maximise", 100)))] == "C"
+    assert all(_analyser_leader(ids, at(k / 100)) == "A" for k in range(0, 101))  # every grid point says A
+
+
+def test_review2_an_exact_tie_names_the_analysers_leader_never_the_first_option():
+    ids, x0, x1 = _tie_case()
+    change = df.first_leader_change(x0, x1, ids, "A", "maximise", 1.0)
+    assert change is not None and change[1] == "C" and abs(change[0] - 0.004) < 1e-12  # C, not "no change", not A
+    res = df.affine_threshold(x0, x1, 0.25, ids, "A", "maximise", 100)
+    assert res["exists"] is True and res["to_option_id"] == "C" and res["crossing_missed"] is True
+    assert abs((res["hold"] + res["flip"]) / 2 - 0.249) < 1e-12
+
+
+def test_review2_too_many_tied_intervals_is_withheld_as_leader_unstable_never_no_change(monkeypatch):
+    monkeypatch.setattr(df, "MAX_TIED_INTERVALS", 0)
+    ids, x0, x1 = _tie_case()
+    res = df.affine_threshold(x0, x1, 0.25, ids, "A", "maximise", 100)
+    assert res["uncertified"] is True and res["exists"] is False
+    real = df.affine_threshold
+
+    def tied(*a, **k):
+        out = real(*a, **k)
+        out.update(exists=False, hold=None, flip=None, to_option_id=None, uncertified=True)
+        return out
+
+    monkeypatch.setattr(df, "affine_threshold", tied)
+    block = df.compute_decision_flip_block(DecisionFlipRequestV2.model_validate(
+        {"request": d1(n=2000), "links": [{"from_id": L1[0], "to_id": L1[1]}], "replicates": 2}))
+    (link,) = block.links
+    # 0.75.0's closed vocabulary (R9): an existing PRE-SEARCH reason, so no replicates and no range on the wire.
+    assert (link.status, link.reason, link.replicate_thresholds, link.replicate_range) == (
+        "absent", "leader_unstable", None, None)
