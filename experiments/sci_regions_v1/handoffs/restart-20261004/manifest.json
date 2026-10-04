@@ -1,0 +1,38 @@
+{
+  "checkpoint_utc": "2026-09-30T21:46:50Z",
+  "thread_id": "01a0e8bb-4828-7423-ba7d-ded9e6bf30ac",
+  "repository": "/Users/paulslee/Documents/GitHub/sci-regions-coordinate-labels",
+  "branch": "sci/regions-contrastive-vulnerability",
+  "head": "68e8c8874eed528422db186852d3a5a1da9a27da",
+  "working_tree": "CLEAN",
+  "remote_head_verified": "68e8c8874eed528422db186852d3a5a1da9a27da",
+  "original_lab_branch_head": "cef7f7c66f1653d5006194f297fbb1eda6c14392",
+  "active_lane_evaluator_processes": 0,
+  "active_subagents": 0,
+  "deployment": "RESEARCH_ONLY; no production deployment",
+  "artifact_sha256": {
+    "experiments/sci_regions_v1/contrastive-vulnerability.json": "d40c815ac20beb69786f22750bf63e4191f255371c48d43e3afb42851825bfc2",
+    "experiments/sci_regions_v1/contrastive-coaching.md": "944e3ff993e6db5ecc95a22f9b7f0d47a5c4e2e611d1f44b59a90af93a5bcf89",
+    "experiments/sci_regions_v1/lab/cases.json": "a7f7c785e85ce048c527dc25736baf837093c6082fcfb4e9cd11e8ff020bb0f7"
+  },
+  "archive_sha256": "34b80c73906227146c911bf6f1f4b4670578392f786eaa295fce2e256af1be8c",
+  "standdown": {
+    "authority": "https://github.com/Talchain/olumi-programme-docs/issues/75#issuecomment-5921620992",
+    "lane_register": "https://github.com/Talchain/olumi-programme-docs/issues/75#issuecomment-5920793386",
+    "status": "STOOD_DOWN",
+    "open_prs": [],
+    "unpushed_work": [],
+    "bundle_sha256": "c118b0c5193cd1728aa2e44517ce8fe8d39816b4365573b4dac333cc2f59794f",
+    "bundle_complete_history_verified": true,
+    "original_checkout_allocated_bytes": 31059968,
+    "resume_rule": "Official named restart from DL/PTL on #75 or #77; no routine polling",
+    "checkout_released": true,
+    "own_temporary_files_released_bytes": 40960,
+    "net_allocated_bytes_released_approx": 26017792,
+    "remote_refs_verified_before_release": [
+      "68e8c8874eed528422db186852d3a5a1da9a27da\trefs/heads/sci/regions-contrastive-vulnerability",
+      "cef7f7c66f1653d5006194f297fbb1eda6c14392\trefs/heads/sci/regions-v1-prototype"
+    ],
+    "handover_receipt": "https://github.com/Talchain/olumi-programme-docs/issues/75#issuecomment-5922309627"
+  }
+}
