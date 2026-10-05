@@ -6,6 +6,13 @@ on:
   push:
     branches: [staging]
 
+# Superseded PR heads stop holding runners (5 Oct 2026, CI OPTIMISER): two runs
+# on one branch 16 s apart both ran in full (20.6 + 10.7 min) on an account whose
+# 20 concurrent jobs every repo shares. Staging pushes always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     name: Lint & Type Check
@@ -92,6 +99,54 @@ jobs:
         # default gate with it. A red build should tell you everything that is
         # red, not just the first thing.
         run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -m "not perf"
+
+  # ⚠⚠ TEMPORARY A/B — CI OPTIMISER, 5 Oct 2026. REMOVED BEFORE REVIEW-READY.
+  # Same run, same runner generation as `test` above, so runner-speed variance
+  # (544 s vs 1,202 s for the same suite on two runs) cannot fake a speedup.
+  #   nocov:  coverage off (addopts --cov... has no fail_under, so it gates nothing)
+  #   xdist:  coverage off + pytest-xdist -n auto (installed ephemerally here)
+  test-ab:
+    name: Test A/B (${{ matrix.arm }})
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        arm: [nocov, xdist]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+      - name: Install dependencies
+        run: poetry install --no-interaction
+      - name: Install pytest-xdist (ephemeral)
+        if: matrix.arm == 'xdist'
+        run: poetry run pip install "pytest-xdist>=3.5,<4"
+      - name: Run tests (${{ matrix.arm }})
+        env:
+          ISL_AUTH_DISABLED: 'true'
+        run: |
+          start=$(date +%s)
+          if [ "${{ matrix.arm }}" = "xdist" ]; then XD="-n auto"; else XD=""; fi
+          set +e
+          poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -m "not perf" --no-cov -rs $XD 2>&1 | tail -60
+          code=${PIPESTATUS[0]}
+          echo "AB arm=${{ matrix.arm }} exit=${code} secs=$(( $(date +%s) - start ))"
+          exit $code
 
   contract-drift:
     name: Contract schema freshness gate
