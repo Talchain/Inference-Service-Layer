@@ -6,6 +6,15 @@ on:
   push:
     branches: [staging]
 
+# Superseded PR heads stop holding runners (5 Oct 2026, CI OPTIMISER): two runs
+# on one branch 16 s apart both ran in full (20.6 + 10.7 min) on an account whose
+# job cap every repo shares. Each PUSH gets its own group (run_id): with one
+# group per branch GitHub cancels an older PENDING push run when a third arrives,
+# even with cancel-in-progress false, so a staging SHA could go unverified.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     name: Lint & Type Check
@@ -91,7 +100,12 @@ jobs:
         # budget breach in one run, not just the first"); this aligns the
         # default gate with it. A red build should tell you everything that is
         # red, not just the first thing.
-        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -m "not perf"
+        # --no-cov -n auto -rs (5 Oct 2026, CI OPTIMISER). Measured in ONE run
+        # (37307633773, same runner generation): baseline 654s; --no-cov 347s;
+        # --no-cov -n auto 233s. All three: 3437 passed, 623 skipped, 1 xfailed.
+        # Coverage gated nothing here (pyproject addopts has no fail_under).
+        # -rs prints every skip reason, so a growing skip count is visible.
+        run: poetry run pytest tests/ --ignore=tests/_archived --ignore=tests/_quarantined -q -m "not perf" --no-cov -n auto -rs
 
   contract-drift:
     name: Contract schema freshness gate
