@@ -8,9 +8,11 @@ on:
 
 # Superseded PR heads stop holding runners (5 Oct 2026, CI OPTIMISER): two runs
 # on one branch 16 s apart both ran in full (20.6 + 10.7 min) on an account whose
-# 20 concurrent jobs every repo shares. Staging pushes always finish.
+# job cap every repo shares. Each PUSH gets its own group (run_id): with one
+# group per branch GitHub cancels an older PENDING push run when a third arrives,
+# even with cancel-in-progress false, so a staging SHA could go unverified.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
