@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.61.0",
     "omission_count": 51,
-    "superset_count": 83
+    "superset_count": 85
   },
   "omissions": [
     {
@@ -728,6 +728,16 @@
       "isl_model": "OptionResultV2",
       "prop": "downside",
       "reason": "ISL superset — OptionResultV2.downside is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "prop": "probability_of_goal_drivers",
+      "reason": "ISL superset — OptionResultV2.probability_of_goal_drivers is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: Delivery Lead ruling on lane isl-4d, 6 Oct 2026 11:17Z (science census 6 Oct 2026 §2.0, steps G4/G5; Paul 6 Oct 2026: an option's headline is its chance of meeting the goal, with its uncertainty and main driver). Additive and optional: present only on an option that carries probability_of_goal. Remove when the schemas pin adopts it (G6)."
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "prop": "probability_of_goal_precision",
+      "reason": "ISL superset — OptionResultV2.probability_of_goal_precision is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: Delivery Lead ruling on lane isl-4d, 6 Oct 2026 11:17Z (science census 6 Oct 2026 §2.0, steps G4/G5; Paul 6 Oct 2026: an option's headline is its chance of meeting the goal, with its uncertainty and main driver). Additive and optional: present only on an option that carries probability_of_goal. Remove when the schemas pin adopts it (G6)."
     },
     {
       "isl_model": "OptionResultV2",

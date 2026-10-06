@@ -31,6 +31,7 @@ from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
 from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
 # Range→distribution disclosure model (ROADMAP 2.720; pure Pydantic, no cycle)
+from src.models.goal_chance import GoalChanceDrivers, GoalChancePrecision
 from src.models.range_fit import RangeFitDisclosure
 from src.models.identity_evaluation import IdentityEvaluation
 from src.models.structural_influence import StructuralInfluence
@@ -485,6 +486,22 @@ class OptionResultV2(BaseModel):
         ge=0,
         le=1,
         description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
+    )
+    # G4 / G5 — additive, optional, omitted whenever probability_of_goal is.
+    probability_of_goal_precision: Optional[GoalChancePrecision] = Field(
+        None,
+        description=(
+            "Simulation precision of probability_of_goal: the informative draws behind it and a "
+            "95% Wilson interval. Monte Carlo precision only, not the model's uncertainty."
+        ),
+    )
+    probability_of_goal_drivers: Optional[GoalChanceDrivers] = Field(
+        None,
+        description=(
+            "The sampled quantities probability_of_goal moves with most: the goal chance within "
+            "the low and high third of each (or with a link absent and present), from the "
+            "draws already made. Numbers only; ranks nothing."
+        ),
     )
     constraint_analysis: Optional["ConstraintAnalysisV2"] = Field(
         None,

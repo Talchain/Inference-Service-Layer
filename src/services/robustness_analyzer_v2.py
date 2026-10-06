@@ -26,6 +26,8 @@ from typing import (
     Any,
     Callable,
     Dict,
+    FrozenSet,
+    KeysView,
     List,
     Literal,
     Mapping,
@@ -114,6 +116,12 @@ from src.models.critique import (
     STRUCTURAL_INFLUENCE_TRUNCATED,
 )
 from src.models.response_v2 import CritiqueIdentityV2, CritiqueV2
+from src.services.goal_chance_drivers import (
+    GoalChanceQuantity,
+    goal_chance_drivers,
+    goal_chance_precision,
+    goal_chance_quantities,
+)
 from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
@@ -1005,6 +1013,15 @@ class DualUncertaintySampler:
         self._fixed: Mapping[Tuple[str, str], float] = fixed or {}
         self._existence_counts: Dict[Tuple[str, str], int] = defaultdict(int)
         self._sample_count = 0
+        # The links absent on each draw, in draw order. An absent link's strength is 0.0 in
+        # the configuration, which a present link can also draw, so absence is recorded
+        # here. Bookkeeping only: it consumes nothing from ``rng``.
+        self.absent_edges_per_sample: List[FrozenSet[Tuple[str, str]]] = []
+
+    @property
+    def fixed_edge_keys(self) -> KeysView[Tuple[str, str]]:
+        """The definitional links this sampler holds fixed and never draws."""
+        return self._fixed.keys()
 
     def sample_edge_configuration(self) -> Dict[Tuple[str, str], float]:
         """
@@ -1015,6 +1032,7 @@ class DualUncertaintySampler:
             If edge doesn't exist in this sample, strength = 0
         """
         config = {}
+        absent: List[Tuple[str, str]] = []
         self._sample_count += 1
 
         for edge in self.edges:
@@ -1034,7 +1052,9 @@ class DualUncertaintySampler:
             else:
                 # Edge doesn't exist in this sample
                 config[edge_key] = 0.0
+                absent.append(edge_key)
 
+        self.absent_edges_per_sample.append(frozenset(absent))
         return config
 
     def sample_n_configurations(self, n: int) -> List[Dict[Tuple[str, str], float]]:
@@ -3446,6 +3466,7 @@ class RobustnessAnalyzerV2:
         inference_warnings.extend(goal_disclosure_warnings)
 
         # Run Monte Carlo simulation
+        absent_record_start = len(sampler.absent_edges_per_sample)
         (
             option_outcomes,
             option_wins,
@@ -3681,6 +3702,29 @@ class RobustnessAnalyzerV2:
                         )
                     )
 
+        # G5: every quantity sampled per draw, aligned with the outcomes, for the drivers of
+        # each option's goal chance. Sliced to this run's draws: the sampler is drawn from
+        # again by later analyses.
+        goal_chance_draws = (
+            goal_chance_quantities(
+                factor_values_per_sample,
+                edge_configs_per_sample,
+                sampler.absent_edges_per_sample[
+                    absent_record_start : absent_record_start + request.n_samples
+                ],
+                sampled_existence={
+                    (edge.from_, edge.to)
+                    for edge in request.graph.edges
+                    if 0.0 < edge.exists_probability < 1.0
+                },
+                fixed_edges=sampler.fixed_edge_keys,
+                correlated_factors=(
+                    set(correlation_plan.factor_order) if correlation_plan is not None else set()
+                ),
+            )
+            if goal_threshold_plan is not None
+            else None
+        )
         results = self._compute_option_results(
             option_outcomes,
             option_wins,
@@ -3694,6 +3738,7 @@ class RobustnessAnalyzerV2:
             level_domains=level_domains,
             goal_level_anchor=anchored_levels.get(request.goal_node_id),
             range_series=intervention_range_series or None,
+            goal_chance_quantities=goal_chance_draws,
         )
         # TEMPORAL step 1: name each option whose joint was held back because a limit row was
         # scored from its stated range beside other limits (B5: an absence always has a name).
@@ -7019,6 +7064,7 @@ class RobustnessAnalyzerV2:
         level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
         goal_level_anchor: Optional[float] = None,
         range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
+        goal_chance_quantities: Optional[Sequence[GoalChanceQuantity]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -7056,6 +7102,10 @@ class RobustnessAnalyzerV2:
                 so the status quo reproduces ``o`` on every draw. REPORT-ONLY: every
                 other figure here (win share, regret, probability_of_goal, the limit
                 block) and every structural analysis keeps reading today's draws.
+            goal_chance_quantities: G5 — every quantity sampled per draw, index-aligned
+                with ``outcomes``. None (a direct caller with no draws to offer) omits
+                ``probability_of_goal_drivers``; the precision block needs only the
+                figure's own counts and is still emitted.
         """
         expected_regret = expected_regret or {}
         level_domains = level_domains or {}
@@ -7095,6 +7145,8 @@ class RobustnessAnalyzerV2:
             # omitted, which is what stops the "< 1% chance of hitting your goal"
             # untruth in one direction and the "100% chance" untruth in the other.
             probability_of_goal = None
+            goal_precision = None
+            goal_drivers = None
             if goal_threshold_plan is not None:
                 # S4 (B) (#72 5879133964): a STRICT goal ("above £85k") is met only strictly past the
                 # threshold, so a draw exactly on it (a status quo holding the goal there) is not met.
@@ -7224,7 +7276,8 @@ class RobustnessAnalyzerV2:
                 informative = np.isfinite(compared)
                 n_informative = int(np.count_nonzero(informative))
                 if n_informative > 0:
-                    candidate = int(np.sum(meets[informative])) / n_informative
+                    n_met = int(np.sum(meets[informative]))
+                    candidate = n_met / n_informative
 
                     # 2.477(m) — WITHHOLD A PARTIAL-POPULATION EXTREMUM.
                     #
@@ -7280,6 +7333,23 @@ class RobustnessAnalyzerV2:
                         probability_of_goal = None
                     else:
                         probability_of_goal = candidate
+                        # G4 / G5: the figure's precision and its drivers, emitted only with
+                        # the figure and counted on the SAME `meets` and `informative`
+                        # arrays, so no threshold, direction, strictness, tolerance or
+                        # frame can differ from it. A quantity series that is not one value
+                        # per draw cannot be aligned, so the drivers are omitted.
+                        goal_precision = goal_chance_precision(n_met, n_informative)
+                        if goal_chance_quantities is not None and all(
+                            quantity.values.size == meets.size
+                            for quantity in goal_chance_quantities
+                        ):
+                            goal_drivers = goal_chance_drivers(
+                                goal_chance_quantities,
+                                meets,
+                                informative,
+                                set_by_option=frozenset(option.interventions)
+                                | frozenset(option.intervention_ranges or {}),
+                            )
 
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
@@ -7350,6 +7420,8 @@ class RobustnessAnalyzerV2:
                 ),
                 win_probability=wins[option.id] / request.n_samples,
                 probability_of_goal=probability_of_goal,
+                probability_of_goal_precision=goal_precision,
+                probability_of_goal_drivers=goal_drivers,
                 constraint_analysis=constraint_analysis_result,
                 sampled_intervention_ranges=sampled_ranges,
             )

@@ -1245,6 +1245,8 @@ async def _analyze_robustness_v2_enhanced(
                         else result.win_probability
                     ),
                     probability_of_goal=result.probability_of_goal,
+                    probability_of_goal_precision=result.probability_of_goal_precision,
+                    probability_of_goal_drivers=result.probability_of_goal_drivers,
                     constraint_analysis=constraint_analysis_v2,
                     # TEMPORAL step 1 echo, V1 → V2 field for field. None → omitted.
                     sampled_intervention_ranges=(
