@@ -25,11 +25,13 @@ CONFIDENCE_LEVEL = 0.95
 _NORMAL = NormalDist()
 _WILSON_Z = _NORMAL.inv_cdf(0.975)
 DROP_REASONS = (
+    "outcome_constant",
     "no_variance",
     "group_below_min_n",
     "tied_at_tercile_boundary",
     "set_by_option",
     "non_finite_values",
+    "zero_spread",
 )
 
 EdgeKey = Tuple[str, str]
@@ -156,15 +158,22 @@ def presence_counts(present: np.ndarray, meets: np.ndarray) -> Union[PresenceCou
     )
 
 
+def _compared_groups(counts: Union[TercileCounts, PresenceCounts]) -> Tuple[GroupCount, GroupCount]:
+    if isinstance(counts, PresenceCounts):
+        return counts.absent, counts.present
+    return counts.low, counts.high
+
+
+def _spread(counts: Union[TercileCounts, PresenceCounts]) -> float:
+    first, second = _compared_groups(counts)
+    return abs(second.chance - first.chance)
+
+
 def _driver_row(
     quantity: GoalChanceQuantity, counts: Union[TercileCounts, PresenceCounts], n_compared: int
 ) -> GoalChanceDriver:
-    first, second = (
-        (counts.absent, counts.present)
-        if isinstance(counts, PresenceCounts)
-        else (counts.low, counts.high)
-    )
-    spread = abs(second.chance - first.chance)
+    first, second = _compared_groups(counts)
+    spread = _spread(counts)
     floor = family_noise_floor(first.n, second.n, n_compared)
     row = GoalChanceDriver(
         quantity_id=quantity.quantity_id,
@@ -195,12 +204,29 @@ def goal_chance_drivers(
     set_by_option: AbstractSet[str] = frozenset(),
     top_n: Optional[int] = TOP_DRIVERS,
 ) -> GoalChanceDrivers:
-    """The largest goal-chance spreads for one option, with every dropped quantity counted.
+    """The largest goal-chance spreads for one option, with every unlisted quantity counted.
 
     ``set_by_option``: node ids the option itself sets. Such a factor's draw still moves the
     option's chance in the level frame, but only through the paired status-quo reference, so
-    "if it turns out low" would mislead for the option that fixes it. It is dropped."""
+    "if it turns out low" would mislead for the option that fixes it. It is dropped.
+
+    A row is listed only when its two groups differ. When every informative draw agrees (the
+    figure is 0 or 1) no grouping can differ, so nothing is evaluated and every candidate is
+    counted as ``outcome_constant``. A quantity that was evaluated and showed no difference
+    is counted as ``zero_spread``; it stays in ``n_compared``, the family the noise floor
+    adjusts for, because it was looked at."""
     dropped = dict.fromkeys(DROP_REASONS, 0)
+    n_met = int(np.count_nonzero(meets & informative))
+    if n_met == 0 or n_met == int(np.count_nonzero(informative)):
+        dropped["outcome_constant"] = len(quantities)
+        return GoalChanceDrivers(
+            min_group_n=MIN_GROUP_N,
+            n_candidates=len(quantities),
+            n_compared=0,
+            n_dropped=len(quantities),
+            dropped_by_reason=dropped,
+            drivers=[],
+        )
     measured: List[Tuple[GoalChanceQuantity, Union[TercileCounts, PresenceCounts]]] = []
     for quantity in quantities:
         if quantity.kind == "factor_value" and quantity.quantity_id in set_by_option:
@@ -217,15 +243,20 @@ def goal_chance_drivers(
             continue
         measured.append((quantity, counts))
 
-    rows = [_driver_row(quantity, counts, len(measured)) for quantity, counts in measured]
-    rows.sort(key=lambda row: (-row.spread, row.kind, row.quantity_id))
+    listed = [
+        _driver_row(quantity, counts, len(measured))
+        for quantity, counts in measured
+        if _spread(counts) > 0
+    ]
+    dropped["zero_spread"] = len(measured) - len(listed)
+    listed.sort(key=lambda row: (-row.spread, row.kind, row.quantity_id))
     return GoalChanceDrivers(
         min_group_n=MIN_GROUP_N,
         n_candidates=len(quantities),
         n_compared=len(measured),
         n_dropped=sum(dropped.values()),
         dropped_by_reason=dropped,
-        drivers=rows if top_n is None else rows[:top_n],
+        drivers=listed if top_n is None else listed[:top_n],
     )
 
 

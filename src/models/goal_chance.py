@@ -67,7 +67,7 @@ class GoalChanceDriver(BaseModel):
     n_absent: Optional[int] = Field(None, ge=1, description="Draws where the link was absent")
     n_present: Optional[int] = Field(None, ge=1, description="Draws where the link was present")
     spread: float = Field(
-        ..., ge=0, le=1, description="Absolute difference between the two groups' goal chances"
+        ..., gt=0, le=1, description="Absolute difference between the two groups' goal chances"
     )
     spread_noise_floor: float = Field(
         ...,
@@ -100,8 +100,18 @@ class GoalChanceDrivers(BaseModel):
     n_compared: int = Field(
         ..., ge=0, description="Quantities evaluated; the family the noise floor adjusts for"
     )
-    n_dropped: int = Field(..., ge=0, description="Quantities considered but not evaluated")
-    dropped_by_reason: Dict[str, int] = Field(..., description="n_dropped, by reason")
+    n_dropped: int = Field(
+        ..., ge=0, description="Quantities with no listable row: the sum of dropped_by_reason"
+    )
+    dropped_by_reason: Dict[str, int] = Field(
+        ...,
+        description=(
+            "n_dropped, by reason. A 'zero_spread' quantity was evaluated (it is also in "
+            "n_compared) and its two groups did not differ; every other reason means the "
+            "quantity was not evaluated. 'outcome_constant': every informative draw agreed, "
+            "so nothing could be compared."
+        ),
+    )
     drivers: List[GoalChanceDriver] = Field(
-        ..., description="The largest spreads, largest first (at most five)"
+        ..., description="The largest non-zero spreads, largest first (at most five)"
     )

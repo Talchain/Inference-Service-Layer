@@ -12,6 +12,7 @@ import importlib
 import json
 import math
 import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,7 +25,15 @@ from src.services.robustness_analyzer_v2 import DualUncertaintySampler, Robustne
 from src.utils.rng import SeededRNG
 
 ENDPOINT = "/api/v1/robustness/analyze/v2?response_version=2"
+SERVED_WIRE = (
+    Path(__file__).parent.parent
+    / "fixtures"
+    / "anchored_delta"
+    / "paul_a295e4a1_served_wire_plot_a6da42b.json"
+)
 DROP_REASONS = {
+    "outcome_constant",
+    "zero_spread",
     "no_variance",
     "group_below_min_n",
     "tied_at_tercile_boundary",
@@ -199,7 +208,10 @@ def test_existence_group_under_thirty_draws_is_dropped_and_counted():
     # Contrast: at an even split the same link is reported (previous test).
     assert set(drivers.dropped_by_reason) == DROP_REASONS
     assert sum(drivers.dropped_by_reason.values()) == drivers.n_dropped
-    assert drivers.n_candidates == drivers.n_compared + drivers.n_dropped
+    # A zero-spread quantity was evaluated, so it is in both counts.
+    assert drivers.n_candidates == (
+        drivers.n_compared + drivers.n_dropped - drivers.dropped_by_reason["zero_spread"]
+    )
     assert drivers.min_group_n == 30
 
 
@@ -262,8 +274,10 @@ def test_quantity_the_option_sets_is_excluded_and_counted(monkeypatch):
     drivers = set_a.probability_of_goal_drivers
     assert not [row for row in drivers.drivers if row.quantity_id == "a"]
     assert drivers.dropped_by_reason["set_by_option"] == 1
-    # Contrast: the option that does not set A drops nothing for that reason.
-    assert results["act"].probability_of_goal_drivers.dropped_by_reason["set_by_option"] == 0
+    # Contrast: an option that does not set A keeps A's row and drops nothing for that reason.
+    plain = analyse()["act"]
+    assert plain.probability_of_goal_drivers.dropped_by_reason["set_by_option"] == 0
+    assert row_for(plain, "a", "factor_value").status == "resolved"
 
 
 def test_correlated_factors_are_flagged_not_suppressed():
@@ -271,7 +285,10 @@ def test_correlated_factors_are_flagged_not_suppressed():
 
     assert row_for(act, "a", "factor_value").correlated is True
     assert row_for(act, "b00", "factor_value").correlated is True
-    assert row_for(act, "a->goal", "link_strength").correlated is None
+    link_rows = [
+        row for row in act.probability_of_goal_drivers.drivers if row.kind == "link_strength"
+    ]
+    assert link_rows and all(row.correlated is None for row in link_rows)
     # Contrast: with no correlation plan nothing is flagged.
     plain = analyse(nulls=1)["act"]
     assert row_for(plain, "a", "factor_value").correlated is None
@@ -297,14 +314,15 @@ def test_tercile_hits_sum_to_the_figure_exactly():
 
 
 def direct_option_result(strict, quantities):
-    """Low third of ``q`` sits exactly ON the threshold, the middle below it, the top above."""
+    """Low third of ``q`` sits exactly ON the threshold, the middle below it, and the top
+    third alternates above and below, so its chance is one half whatever the strictness."""
     request = RobustnessRequestV2(
         **payload_for(threshold=0.5, strict=strict, n_samples=300, direction="maximise")
     )
     analyser = RobustnessAnalyzerV2()
     plan, warning = analyser._resolve_goal_threshold_in_sample_frame(request)
     assert warning is None
-    samples = [0.5] * 100 + [0.25] * 100 + [0.875] * 100
+    samples = [0.5] * 100 + [0.25] * 100 + [0.875, 0.25] * 50
     results = analyser._compute_option_results(
         outcomes={option.id: samples for option in request.options},
         wins={option.id: 0 for option in request.options},
@@ -316,7 +334,7 @@ def direct_option_result(strict, quantities):
 
 
 @pytest.mark.parametrize(
-    ("strict", "expected_figure", "expected_if_low"), [(None, 2 / 3, 1.0), (True, 1 / 3, 0.0)]
+    ("strict", "expected_figure", "expected_if_low"), [(None, 1 / 2, 1.0), (True, 1 / 6, 0.0)]
 )
 def test_drivers_use_the_figures_own_strictness(strict, expected_figure, expected_if_low):
     module = drivers_module()
@@ -329,7 +347,7 @@ def test_drivers_use_the_figures_own_strictness(strict, expected_figure, expecte
     assert result.probability_of_goal == expected_figure
     row = row_for(result, "q", "factor_value")
     # A draw ON the threshold is met unless the goal is strict; the drivers must agree.
-    assert (row.p_goal_if_low, row.p_goal_if_high) == (expected_if_low, 1.0)
+    assert (row.p_goal_if_low, row.p_goal_if_high) == (expected_if_low, 0.5)
     precision = result.probability_of_goal_precision
     assert precision.n_met / precision.n_informative == result.probability_of_goal
 
@@ -370,6 +388,65 @@ def test_quantities_that_cannot_be_split_are_dropped_with_a_reason(values, reaso
     # Contrast: a clean quantity of the same length is split.
     clean = np.arange(max(values.size, 90), dtype=float)
     assert not isinstance(module.tercile_counts(clean, np.arange(clean.size) % 2 == 0), str)
+
+
+# ---------------------------------------------------------------- nothing to compare
+
+
+def test_constant_outcome_lists_no_drivers_on_the_served_wire():
+    """On Paul's served request no draw of any option reaches the target, so no grouping of
+    the draws can differ from the figure: nothing is listed and every candidate is counted.
+    (Control: ``test_main_driver_is_the_uncertain_factor`` lists rows when draws differ.)"""
+    payload = json.loads(SERVED_WIRE.read_text())
+    results = RobustnessAnalyzerV2().analyze(RobustnessRequestV2(**payload)).results
+
+    assert len(results) == 5
+    for result in results:
+        assert result.probability_of_goal == 0.0
+        drivers = result.probability_of_goal_drivers
+        assert drivers.drivers == []
+        assert drivers.n_candidates == 25
+        assert drivers.dropped_by_reason["outcome_constant"] == 25
+        assert (drivers.n_compared, drivers.n_dropped) == (0, 25)
+        # The precision of that zero is still stated.
+        precision = result.probability_of_goal_precision
+        assert (precision.n_met, precision.n_informative) == (0, 10000)
+        assert precision.interval_lower == 0.0 < precision.interval_upper < 0.001
+
+
+def test_constant_outcome_at_one_lists_no_drivers():
+    # Level frame: A cancels against the paired status quo, so "act" meets the target on every draw.
+    act = analyse(frame="level", threshold=0.6)["act"]
+
+    assert act.probability_of_goal == 1.0
+    drivers = act.probability_of_goal_drivers
+    assert drivers.drivers == []
+    assert drivers.dropped_by_reason["outcome_constant"] == drivers.n_candidates == 3
+    assert act.probability_of_goal_precision.interval_upper == 1.0
+
+
+def test_zero_spread_quantity_is_counted_not_listed_and_stays_in_the_family():
+    module = drivers_module()
+    draw = np.arange(300)
+    # Fifty hits in the first hundred draws and fifty in the last hundred.
+    meets = (draw < 50) | ((draw >= 200) & (draw < 250))
+    flat = module.GoalChanceQuantity(
+        quantity_id="flat", kind="factor_value", values=draw.astype(float)
+    )
+    # Ordered so that every hit sits in its low third.
+    real = module.GoalChanceQuantity(
+        quantity_id="real", kind="factor_value", values=-meets.astype(float) + draw * 1e-6
+    )
+
+    drivers = module.goal_chance_drivers([flat, real], meets, np.ones(300, dtype=bool))
+
+    assert [row.quantity_id for row in drivers.drivers] == ["real"]
+    assert (drivers.drivers[0].p_goal_if_low, drivers.drivers[0].p_goal_if_high) == (1.0, 0.0)
+    assert drivers.dropped_by_reason["zero_spread"] == 1
+    assert (drivers.n_candidates, drivers.n_compared, drivers.n_dropped) == (2, 2, 1)
+    # The quantity that showed nothing was still looked at: the floor is shared across both.
+    assert drivers.drivers[0].spread_noise_floor == module.family_noise_floor(100, 100, 2)
+    assert drivers.drivers[0].spread_noise_floor != module.family_noise_floor(100, 100, 1)
 
 
 # ---------------------------------------------------------------- precision

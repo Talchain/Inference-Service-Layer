@@ -3793,8 +3793,8 @@
           },
           "spread": {
             "description": "Absolute difference between the two groups' goal chances",
+            "exclusiveMinimum": 0.0,
             "maximum": 1.0,
-            "minimum": 0.0,
             "title": "Spread",
             "type": "number"
           },
@@ -3840,7 +3840,7 @@
         "description": "What moves ``probability_of_goal`` for one option, from the draws already made.",
         "properties": {
           "drivers": {
-            "description": "The largest spreads, largest first (at most five)",
+            "description": "The largest non-zero spreads, largest first (at most five)",
             "items": {
               "$ref": "#/components/schemas/GoalChanceDriver"
             },
@@ -3851,7 +3851,7 @@
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "n_dropped, by reason",
+            "description": "n_dropped, by reason. A 'zero_spread' quantity was evaluated (it is also in n_compared) and its two groups did not differ; every other reason means the quantity was not evaluated. 'outcome_constant': every informative draw agreed, so nothing could be compared.",
             "title": "Dropped By Reason",
             "type": "object"
           },
@@ -3879,7 +3879,7 @@
             "type": "integer"
           },
           "n_dropped": {
-            "description": "Quantities considered but not evaluated",
+            "description": "Quantities with no listable row: the sum of dropped_by_reason",
             "minimum": 0.0,
             "title": "N Dropped",
             "type": "integer"
