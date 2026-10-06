@@ -3617,6 +3617,344 @@
         "title": "FragileEdgeV2",
         "type": "object"
       },
+      "GoalChanceDriver": {
+        "description": "The goal chance within two groups of this option's informative draws.\n\nA continuous quantity (``factor_value``, ``link_strength``) is split at its thirds and\nreports the low and the high third; ``link_existence`` reports the draws where the link\nwas absent and where it was present. The fields of the other shape are omitted.",
+        "properties": {
+          "correlated": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when the factor is drawn jointly with others: the two chances are then conditional on its correlated factors moving with it",
+            "title": "Correlated"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Link source node id",
+            "title": "From"
+          },
+          "high_lower_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Smallest value of the quantity in the high third",
+            "title": "High Lower Value"
+          },
+          "kind": {
+            "description": "Which sampled quantity the draws were grouped by",
+            "enum": [
+              "factor_value",
+              "link_strength",
+              "link_existence"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "low_upper_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Largest value of the quantity in the low third",
+            "title": "Low Upper Value"
+          },
+          "n_absent": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Draws where the link was absent",
+            "title": "N Absent"
+          },
+          "n_high": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Draws in the high third",
+            "title": "N High"
+          },
+          "n_low": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Draws in the low third",
+            "title": "N Low"
+          },
+          "n_present": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Draws where the link was present",
+            "title": "N Present"
+          },
+          "p_goal_if_absent": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Goal chance within the draws where the link was absent",
+            "title": "P Goal If Absent"
+          },
+          "p_goal_if_high": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Goal chance within the high third of the quantity",
+            "title": "P Goal If High"
+          },
+          "p_goal_if_low": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Goal chance within the low third of the quantity",
+            "title": "P Goal If Low"
+          },
+          "p_goal_if_present": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Goal chance within the draws where the link was present",
+            "title": "P Goal If Present"
+          },
+          "quantity_id": {
+            "description": "Node id, or 'from->to' for a link",
+            "title": "Quantity Id",
+            "type": "string"
+          },
+          "spread": {
+            "description": "Absolute difference between the two groups' goal chances",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Spread",
+            "type": "number"
+          },
+          "spread_noise_floor": {
+            "description": "Largest spread sampling noise alone is expected to produce, adjusted for the number of quantities compared for this option",
+            "minimum": 0.0,
+            "title": "Spread Noise Floor",
+            "type": "number"
+          },
+          "status": {
+            "description": "'resolved' when the spread exceeds spread_noise_floor",
+            "enum": [
+              "resolved",
+              "below_resolution"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Link target node id",
+            "title": "To"
+          }
+        },
+        "required": [
+          "quantity_id",
+          "kind",
+          "spread",
+          "spread_noise_floor",
+          "status"
+        ],
+        "title": "GoalChanceDriver",
+        "type": "object"
+      },
+      "GoalChanceDrivers": {
+        "description": "What moves ``probability_of_goal`` for one option, from the draws already made.",
+        "properties": {
+          "drivers": {
+            "description": "The largest spreads, largest first (at most five)",
+            "items": {
+              "$ref": "#/components/schemas/GoalChanceDriver"
+            },
+            "title": "Drivers",
+            "type": "array"
+          },
+          "dropped_by_reason": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "n_dropped, by reason",
+            "title": "Dropped By Reason",
+            "type": "object"
+          },
+          "method": {
+            "const": "tercile_conditional_v1",
+            "default": "tercile_conditional_v1",
+            "description": "How the draws were grouped",
+            "title": "Method"
+          },
+          "min_group_n": {
+            "description": "Fewest draws a reported group may hold",
+            "title": "Min Group N",
+            "type": "integer"
+          },
+          "n_candidates": {
+            "description": "Sampled quantities considered",
+            "minimum": 0.0,
+            "title": "N Candidates",
+            "type": "integer"
+          },
+          "n_compared": {
+            "description": "Quantities evaluated; the family the noise floor adjusts for",
+            "minimum": 0.0,
+            "title": "N Compared",
+            "type": "integer"
+          },
+          "n_dropped": {
+            "description": "Quantities considered but not evaluated",
+            "minimum": 0.0,
+            "title": "N Dropped",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min_group_n",
+          "n_candidates",
+          "n_compared",
+          "n_dropped",
+          "dropped_by_reason",
+          "drivers"
+        ],
+        "title": "GoalChanceDrivers",
+        "type": "object"
+      },
+      "GoalChancePrecision": {
+        "description": "How precisely the simulation estimated ``probability_of_goal``.\n\nMonte Carlo precision only (``basis``): it narrows with more draws and says nothing about\nhow right the model is. The drivers carry that.",
+        "properties": {
+          "basis": {
+            "const": "simulation_precision",
+            "default": "simulation_precision",
+            "description": "What the interval measures",
+            "title": "Basis"
+          },
+          "confidence_level": {
+            "description": "Coverage of the interval",
+            "exclusiveMaximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Confidence Level",
+            "type": "number"
+          },
+          "interval_lower": {
+            "description": "Lower bound of the interval",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Interval Lower",
+            "type": "number"
+          },
+          "interval_upper": {
+            "description": "Upper bound of the interval",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Interval Upper",
+            "type": "number"
+          },
+          "method": {
+            "const": "wilson_score",
+            "default": "wilson_score",
+            "description": "Interval method",
+            "title": "Method"
+          },
+          "n_informative": {
+            "description": "Draws the figure was counted over (its denominator)",
+            "minimum": 1.0,
+            "title": "N Informative",
+            "type": "integer"
+          },
+          "n_met": {
+            "description": "Informative draws that met the goal",
+            "minimum": 0.0,
+            "title": "N Met",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "confidence_level",
+          "n_informative",
+          "n_met",
+          "interval_lower",
+          "interval_upper"
+        ],
+        "title": "GoalChancePrecision",
+        "type": "object"
+      },
       "GoalConstraint": {
         "description": "A constraint on a goal/outcome node for multi-constraint analysis.\n\nAllows specifying success criteria like \"revenue >= 100k\" or \"cost <= 50k\".\nMultiple constraints can be specified to compute joint probabilities.",
         "example": {
@@ -5456,6 +5794,28 @@
             "description": "P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
             "title": "Probability Of Goal"
           },
+          "probability_of_goal_drivers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalChanceDrivers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sampled quantities probability_of_goal moves with most, from this option's own draws. Absent whenever that figure is."
+          },
+          "probability_of_goal_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalChancePrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Simulation precision of probability_of_goal. Absent whenever that figure is."
+          },
           "sampled_intervention_ranges": {
             "anyOf": [
               {
@@ -5550,6 +5910,28 @@
             ],
             "description": "P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
             "title": "Probability Of Goal"
+          },
+          "probability_of_goal_drivers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalChanceDrivers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sampled quantities probability_of_goal moves with most: the goal chance within the low and high third of each (or with a link absent and present), from the draws already made. Numbers only; ranks nothing."
+          },
+          "probability_of_goal_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GoalChancePrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Simulation precision of probability_of_goal: the informative draws behind it and a 95% Wilson interval. Monte Carlo precision only, not the model's uncertainty."
           },
           "sampled_intervention_ranges": {
             "anyOf": [

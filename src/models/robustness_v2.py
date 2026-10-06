@@ -37,6 +37,7 @@ from src.models.response_v2 import (
 )
 
 # Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
+from src.models.goal_chance import GoalChanceDrivers, GoalChancePrecision
 from src.models.range_fit import RangeFitDisclosure, UserStatedRange
 from src.models.identity_evaluation import IdentityEvaluation
 from src.models.structural_influence import StructuralInfluence
@@ -1917,6 +1918,18 @@ class OptionResult(BaseModel):
         ge=0,
         le=1,
         description="P(outcome >= goal_threshold). Only present when goal_threshold is provided in request.",
+    )
+    # G4 / G5. REGULAR fields, so they survive the offload dump/validate boundary.
+    probability_of_goal_precision: Optional[GoalChancePrecision] = Field(
+        None,
+        description="Simulation precision of probability_of_goal. Absent whenever that figure is.",
+    )
+    probability_of_goal_drivers: Optional[GoalChanceDrivers] = Field(
+        None,
+        description=(
+            "The sampled quantities probability_of_goal moves with most, from this option's "
+            "own draws. Absent whenever that figure is."
+        ),
     )
     constraint_analysis: Optional[ConstraintAnalysis] = Field(
         None,
