@@ -12,7 +12,20 @@ from the figure's. Nothing here draws a random number.
 import math
 from dataclasses import dataclass
 from statistics import NormalDist
-from typing import AbstractSet, List, Literal, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    AbstractSet,
+    Dict,
+    FrozenSet,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 
@@ -30,6 +43,7 @@ DROP_REASONS = (
     "group_below_min_n",
     "tied_at_tercile_boundary",
     "set_by_option",
+    "set_by_option_upstream",
     "non_finite_values",
     "zero_spread",
 )
@@ -202,6 +216,7 @@ def goal_chance_drivers(
     informative: np.ndarray,
     *,
     set_by_option: AbstractSet[str] = frozenset(),
+    upstream_of_set: AbstractSet[str] = frozenset(),
     top_n: Optional[int] = TOP_DRIVERS,
 ) -> GoalChanceDrivers:
     """The largest goal-chance spreads for one option, with every unlisted quantity counted.
@@ -209,6 +224,10 @@ def goal_chance_drivers(
     ``set_by_option``: node ids the option itself sets. Such a factor's draw still moves the
     option's chance in the level frame, but only through the paired status-quo reference, so
     "if it turns out low" would mislead for the option that fixes it. It is dropped.
+
+    ``upstream_of_set``: quantity ids that reach the goal only through a node the option sets
+    (see ``quantities_upstream_of_set``). The option cuts them off, so they too move its chance
+    only through the status-quo reference. They are dropped as ``set_by_option_upstream``.
 
     A row is listed only when its two groups differ. When every informative draw agrees (the
     figure is 0 or 1) no grouping can differ, so nothing is evaluated and every candidate is
@@ -231,6 +250,9 @@ def goal_chance_drivers(
     for quantity in quantities:
         if quantity.kind == "factor_value" and quantity.quantity_id in set_by_option:
             dropped["set_by_option"] += 1
+            continue
+        if quantity.quantity_id in upstream_of_set:
+            dropped["set_by_option_upstream"] += 1
             continue
         counts: Union[TercileCounts, PresenceCounts, str]
         if quantity.kind == "link_existence":
@@ -258,6 +280,51 @@ def goal_chance_drivers(
         dropped_by_reason=dropped,
         drivers=listed if top_n is None else listed[:top_n],
     )
+
+
+def quantities_upstream_of_set(
+    edges: Iterable[EdgeKey], goal_node_id: str, set_nodes: AbstractSet[str]
+) -> FrozenSet[str]:
+    """Quantity ids whose EVERY path to the goal passes through a node the option sets.
+
+    An option that sets a node replaces whatever fed it, so a factor or link that reaches the
+    goal only through that node cannot move the option's own outcome. A quantity with another
+    route to the goal is kept, and so is one with no route at all (it was never upstream of
+    anything the option set). Links are named ``from->to``, as in the driver rows; a link
+    reaches the goal through the node it points at.
+
+    Reachability follows every link from its source to its target, the relation the evaluator
+    propagates along."""
+    if not set_nodes:
+        return frozenset()
+    edge_keys = list(edges)
+    parents: Dict[str, List[str]] = {}
+    for from_node, to_node in edge_keys:
+        parents.setdefault(to_node, []).append(from_node)
+
+    def reaching_goal(blocked: AbstractSet[str]) -> Set[str]:
+        """Nodes with a path to the goal that touches no blocked node (the goal included)."""
+        if goal_node_id in blocked:
+            return set()
+        reached = {goal_node_id}
+        frontier = [goal_node_id]
+        while frontier:
+            for parent in parents.get(frontier.pop(), []):
+                if parent not in reached and parent not in blocked:
+                    reached.add(parent)
+                    frontier.append(parent)
+        return reached
+
+    any_route = reaching_goal(frozenset())
+    free_route = reaching_goal(set_nodes)
+    cut_off = any_route - free_route - set(set_nodes)
+    upstream = set(cut_off)
+    upstream.update(
+        f"{from_node}->{to_node}"
+        for from_node, to_node in edge_keys
+        if to_node in any_route and to_node not in free_route
+    )
+    return frozenset(upstream)
 
 
 def goal_chance_quantities(

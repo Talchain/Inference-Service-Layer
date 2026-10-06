@@ -38,6 +38,7 @@ DROP_REASONS = {
     "group_below_min_n",
     "tied_at_tercile_boundary",
     "set_by_option",
+    "set_by_option_upstream",
     "non_finite_values",
 }
 
@@ -58,8 +59,13 @@ def payload_for(
     lever_exists=1.0,
     options=None,
     correlations=None,
+    upstream=None,
 ):
-    """Goal = A + 0.2 x lever. A is uncertain; each ``b..`` factor is uncertain and irrelevant."""
+    """Goal = A + 0.2 x lever. A is uncertain; each ``b..`` factor is uncertain and irrelevant.
+
+    ``upstream`` adds an uncertain factor Z that reaches the goal only through A (Z -> A).
+    ``"levelled"``: A keeps its own level for today. ``"unlevelled"``: A states no level, so
+    its value is whatever Z gives it."""
     nodes = [
         {"id": "a", "kind": "factor", "label": "A", "observed_state": {"value": 0.5}},
         {"id": "lever", "kind": "factor", "label": "Lever", "observed_state": {"value": 0.0}},
@@ -85,6 +91,23 @@ def payload_for(
         },
     ]
     uncertainties = [{"node_id": "a", "distribution": "normal", "std": 0.2}]
+    if upstream is not None:
+        centre = 0.0 if upstream == "levelled" else 0.5
+        nodes.append(
+            {"id": "z", "kind": "factor", "label": "Z", "observed_state": {"value": centre}}
+        )
+        edges.append(
+            {
+                "from": "z",
+                "to": "a",
+                "exists_probability": 1.0,
+                "strength": {"mean": 1.0, "std": 0.0011},
+            }
+        )
+        uncertainties.append({"node_id": "z", "distribution": "normal", "std": 0.2})
+    if upstream == "unlevelled":
+        nodes[0] = {"id": "a", "kind": "factor", "label": "A"}
+        uncertainties = [u for u in uncertainties if u["node_id"] != "a"]
     for index in range(nulls):
         node_id = f"b{index:02d}"
         nodes.append(
@@ -278,6 +301,100 @@ def test_quantity_the_option_sets_is_excluded_and_counted(monkeypatch):
     plain = analyse()["act"]
     assert plain.probability_of_goal_drivers.dropped_by_reason["set_by_option"] == 0
     assert row_for(plain, "a", "factor_value").status == "resolved"
+
+
+SET_A_OPTIONS = [
+    {"id": "set_a", "label": "Set A", "interventions": {"a": 0.6}},
+    {"id": "act", "label": "Act", "interventions": {"lever": 1.0}},
+]
+
+
+def record_driver_calls(monkeypatch):
+    module = drivers_module()
+    calls = []
+
+    def recording(quantities, meets, informative, **kwargs):
+        calls.append((quantities, meets, informative, kwargs))
+        return module.goal_chance_drivers(quantities, meets, informative, **kwargs)
+
+    monkeypatch.setattr(analyser_module, "goal_chance_drivers", recording)
+    return module, calls
+
+
+def test_quantity_upstream_of_a_set_node_is_excluded_and_counted(monkeypatch):
+    """R3b: Z reaches the goal only through A, and A states no level for today. The option
+    that sets A cuts Z off, yet Z's draw still moves that option's chance, because the paired
+    status quo carries it. Listed, Z would read as the option's main driver."""
+    module, calls = record_driver_calls(monkeypatch)
+    set_a = analyse(frame="level", threshold=0.6, options=SET_A_OPTIONS, upstream="unlevelled")[
+        "set_a"
+    ]
+
+    # The claim, pinned: computed without the exclusion, Z is this option's top driver.
+    quantities, meets, informative, kwargs = calls[0]
+    assert kwargs["upstream_of_set"] == frozenset({"z", "z->a"})
+    unexcluded = module.goal_chance_drivers(
+        quantities, meets, informative, **{**kwargs, "upstream_of_set": frozenset()}
+    )
+    top = unexcluded.drivers[0]
+    assert (top.quantity_id, top.kind, top.status) == ("z", "factor_value", "resolved")
+    assert top.spread > 0.9
+    assert 0.3 < set_a.probability_of_goal < 0.7
+
+    # The wire: no row for Z or its link on that option, and each drop is counted.
+    drivers = set_a.probability_of_goal_drivers
+    assert not [row for row in drivers.drivers if row.quantity_id in {"z", "z->a"}]
+    assert drivers.dropped_by_reason["set_by_option_upstream"] == 2
+    assert drivers.n_compared == unexcluded.n_compared - 2
+
+
+def test_upstream_of_a_levelled_set_node_is_dropped_though_it_cancels(monkeypatch):
+    """When A states its level for today, a setting on A is written as a change from the
+    status quo, so Z cancels exactly and shows nothing. It is still cut off, so it is still
+    dropped: one fewer look for the noise floor to share."""
+    module, calls = record_driver_calls(monkeypatch)
+    set_a = analyse(frame="level", threshold=0.6, options=SET_A_OPTIONS, upstream="levelled")[
+        "set_a"
+    ]
+
+    quantities, meets, informative, kwargs = calls[0]
+    unexcluded = module.goal_chance_drivers(
+        quantities, meets, informative, **{**kwargs, "upstream_of_set": frozenset()}
+    )
+    z_rows = [row for row in unexcluded.drivers if row.quantity_id == "z"]
+    assert [row.status for row in z_rows] == ["below_resolution"]
+
+    drivers = set_a.probability_of_goal_drivers
+    assert not [row for row in drivers.drivers if row.quantity_id in {"z", "z->a"}]
+    assert drivers.dropped_by_reason["set_by_option_upstream"] == 2
+    assert drivers.dropped_by_reason["set_by_option"] == 1
+    assert drivers.drivers[0].spread_noise_floor < unexcluded.drivers[0].spread_noise_floor
+    # Contrast: for an option that leaves A alone, Z keeps its row and nothing is cut off.
+    plain = analyse(upstream="levelled")["act"]
+    assert plain.probability_of_goal_drivers.dropped_by_reason["set_by_option_upstream"] == 0
+    assert row_for(plain, "z", "factor_value").status == "resolved"
+
+
+def test_upstream_of_set_keeps_anything_with_another_route_to_the_goal():
+    module = drivers_module()
+    edges = [
+        ("w", "z"),  # W reaches the goal only through Z, then A
+        ("z", "a"),
+        ("a", "goal"),
+        ("y", "a"),  # Y has two routes: through A, and directly
+        ("y", "goal"),
+        ("lever", "goal"),
+        ("q", "r"),  # no route to the goal at all
+    ]
+
+    assert module.quantities_upstream_of_set(edges, "goal", frozenset({"a"})) == frozenset(
+        {"w", "z", "w->z", "z->a", "y->a"}
+    )
+    # Contrast: with nothing set, nothing is cut off; a set node elsewhere cuts only its own side.
+    assert module.quantities_upstream_of_set(edges, "goal", frozenset()) == frozenset()
+    assert module.quantities_upstream_of_set(edges, "goal", frozenset({"z"})) == frozenset(
+        {"w", "w->z"}
+    )
 
 
 def test_correlated_factors_are_flagged_not_suppressed():

@@ -121,6 +121,7 @@ from src.services.goal_chance_drivers import (
     goal_chance_drivers,
     goal_chance_precision,
     goal_chance_quantities,
+    quantities_upstream_of_set,
 )
 from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
@@ -7343,12 +7344,19 @@ class RobustnessAnalyzerV2:
                             quantity.values.size == meets.size
                             for quantity in goal_chance_quantities
                         ):
+                            set_by_option = frozenset(option.interventions) | frozenset(
+                                option.intervention_ranges or {}
+                            )
                             goal_drivers = goal_chance_drivers(
                                 goal_chance_quantities,
                                 meets,
                                 informative,
-                                set_by_option=frozenset(option.interventions)
-                                | frozenset(option.intervention_ranges or {}),
+                                set_by_option=set_by_option,
+                                upstream_of_set=quantities_upstream_of_set(
+                                    ((edge.from_, edge.to) for edge in request.graph.edges),
+                                    request.goal_node_id,
+                                    set_by_option,
+                                ),
                             )
 
             # Compute constraint analysis if constraints provided
