@@ -89,6 +89,35 @@ ALLOWED_CONTEXTS = frozenset(
     {"runtime", "os", "device", "app", "culture", "cloud_resource", "trace", "response", "profile"}
 )
 
+#: Request headers kept on an event (lower case). Every other header is
+#: dropped: an allowlist, because any header can carry caller-chosen text.
+ALLOWED_HEADERS = frozenset(
+    {
+        "accept",
+        "accept-encoding",
+        "content-length",
+        "content-type",
+        "host",
+        "referer",
+        "user-agent",
+        "x-request-id",
+        "x-trace-id",
+        "x-correlation-id",
+    }
+)
+
+#: Dynamic-sampling-context keys kept. sentry-sdk copies an inbound
+#: ``baggage`` header into the envelope's trace header AFTER before_send, from
+#: ``contexts.trace.dynamic_sampling_context``; anything else in it is
+#: caller-chosen text (e.g. sentry-transaction, sentry-user_segment).
+ALLOWED_DSC_KEYS = frozenset(
+    {"trace_id", "public_key", "sample_rate", "sampled", "environment", "release"}
+)
+
+#: Span ops whose description is SDK-generated (method + URL, middleware or
+#: query name). Any other span keeps only its op as its description.
+SAFE_DESCRIPTION_OP_PREFIXES = ("http.", "middleware.", "db", "cache", "redis", "subprocess")
+
 #: Span attributes that ARE a query or fragment: dropped.
 QUERY_SPAN_KEYS = frozenset({"http.query", "http.fragment", "url.query", "url.fragment"})
 
@@ -212,8 +241,12 @@ def scrub_event(event: Dict[str, Any], hint: Any = None) -> Dict[str, Any]:
         headers = request.get("headers")
         if isinstance(headers, MutableMapping):
             for name in list(headers.keys()):
-                if str(name).lower() in SENSITIVE_HEADERS:
+                lower = str(name).lower()
+                if lower in SENSITIVE_HEADERS or lower not in ALLOWED_HEADERS:
                     del headers[name]
+                elif lower == "referer":
+                    headers[name] = _strip_query(headers[name])
+        request.pop("env", None)
 
     _strip_frame_vars(event.get("exception"))
     _strip_frame_vars(event.get("threads"))
@@ -249,13 +282,23 @@ def scrub_event(event: Dict[str, Any], hint: Any = None) -> Dict[str, Any]:
     trace = contexts.get("trace") if isinstance(contexts, Mapping) else None
     if isinstance(trace, MutableMapping) and isinstance(trace.get("data"), Mapping):
         trace["data"] = _scrub_span_data(trace["data"])
+    if isinstance(trace, MutableMapping) and isinstance(
+        trace.get("dynamic_sampling_context"), Mapping
+    ):
+        trace["dynamic_sampling_context"] = {
+            k: v for k, v in trace["dynamic_sampling_context"].items() if k in ALLOWED_DSC_KEYS
+        }
     for span in event.get("spans") or []:
         if not isinstance(span, MutableMapping):
             continue
         if isinstance(span.get("data"), Mapping):
             span["data"] = _scrub_span_data(span["data"])
         if isinstance(span.get("description"), str):
-            span["description"] = _QUERY_IN_TEXT.sub("", span["description"])
+            op = str(span.get("op") or "")
+            if op.startswith(SAFE_DESCRIPTION_OP_PREFIXES):
+                span["description"] = _QUERY_IN_TEXT.sub("", span["description"])
+            else:
+                span["description"] = op or "span"
 
     return event
 

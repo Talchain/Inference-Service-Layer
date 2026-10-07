@@ -277,6 +277,41 @@ def test_scrub_strips_queries_from_span_data_descriptions_and_transaction() -> N
     assert "http://plot/v2/run" in out and "/v2/robustness" in out
 
 
+def test_inbound_headers_and_baggage_carry_no_caller_text() -> None:
+    transport = _Collect()
+    with sentry_sdk.init(transport=transport, **_contract_options()):
+        TestClient(_app(), raise_server_exceptions=False).post(
+            "/v2/boom",
+            json={"nodes": [{"id": "n1", "label": "plain"}]},
+            headers={
+                "Referer": "https://control.example/work?brief=" + SENTINEL,
+                "X-Decision-Title": SENTINEL,
+                "baggage": "sentry-transaction="
+                + SENTINEL
+                + ",sentry-user_segment="
+                + SENTINEL
+                + ",sentry-release=CONTROL_UPSTREAM",
+            },
+        )
+        sentry_sdk.flush()
+    blob = transport.joined()
+    assert b"compute failed for 1 nodes" in blob  # control: the failure arrives
+    assert b"https://control.example/work" in blob  # control: referer kept, query gone
+    assert SENTINEL.encode() not in blob
+
+
+def test_custom_span_descriptions_are_replaced_by_their_op() -> None:
+    transport = _Collect()
+    with sentry_sdk.init(transport=transport, **_contract_options()):
+        with sentry_sdk.start_transaction(name="CONTROL_TRANSACTION"):
+            with sentry_sdk.start_span(op="compute", description=SENTINEL) as span:
+                span.set_data("node_label", SENTINEL)
+        sentry_sdk.flush()
+    blob = transport.joined()
+    assert b"CONTROL_TRANSACTION" in blob
+    assert SENTINEL.encode() not in blob
+
+
 def test_release_never_falls_back_to_sdk_inference(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SENTRY_RELEASE", "isl@0.1.0")
     opts = build_sentry_options(
