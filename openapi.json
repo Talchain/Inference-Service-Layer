@@ -7060,21 +7060,6 @@
             "title": "Edge Existence Rates",
             "type": "object"
           },
-          "event_risks_applied": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/EventRiskAppliedV1"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "event_risk.v1 echo: one entry per risk node evaluated as an event (one occurrence draw per Monte Carlo draw, shared across options), in node-id order. Absent when the request carried no event_risk. A consumer that sent event_risk and gets no matching echo must fail closed (the risk was evaluated as an ordinary node).",
-            "title": "Event Risks Applied"
-          },
           "execution_time_ms": {
             "description": "Execution time in milliseconds",
             "title": "Execution Time Ms",

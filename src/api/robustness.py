@@ -1618,7 +1618,7 @@ async def _analyze_robustness_v2_enhanced(
             v1_response.metadata.auto_noise_applied, unnoised_constraint_nodes
         )
         # event_risk.v1 echo (request-gated; None on every legacy request).
-        builder.event_risks_applied = v1_response.metadata.event_risks_applied
+        builder.event_risks_applied = v1_response._event_risks_applied
 
         # B3-S1: surface the correlated-factors disclosure (Gaussian copula method,
         # mandatory tail-independence caveat, any Higham PSD projection, suppressed-

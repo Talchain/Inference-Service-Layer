@@ -2201,7 +2201,7 @@ class ISLResponseV2(BaseModel):
         "sample_population_provenance — this boolean cannot say.",
     )
 
-    # event_risk.v1 echo — mirrors V1 _metadata.event_risks_applied. Request-gated: None (absent
+    # event_risk.v1 echo — forwards the analyser's private echo. Request-gated: None (absent
     # under exclude_none) unless the request carried event_risk, so a legacy envelope is
     # byte-identical. PLoT fails closed when it sent event_risk and this does not echo it.
     event_risks_applied: Optional[List[EventRiskAppliedV1]] = Field(

@@ -2277,6 +2277,10 @@ class SCMEvaluatorV2:
             self._children[edge.from_].append(edge.to)
             self._parents[edge.to].append(edge.from_)
 
+        # event_risk.v1: each event risk's occurrence plan. Empty for every legacy graph, so the
+        # branch in _propagate is never taken and the structural equations are unchanged.
+        self._event_risks = resolve_event_risk_plans(graph.nodes)
+
         # B1a-5: today's level of every node whose level an author ATTESTS, root or not
         # (a setting equal to it changes nothing). Attestation is B1a-6's one mapping
         # (``level_anchor_source``): a source-less value never anchors, so it is never
@@ -2286,6 +2290,10 @@ class SCMEvaluatorV2:
         # (``_in_model_frame``). Roots are absent on purpose: their samples ARE levels.
         self._status_quo_levels: Dict[str, float] = {}
         for node in graph.nodes:
+            # Science Q9: an event risk's level today is 0 (not happened), never observed_state.
+            # Keep its explicit reference intervention out of sampled-level reframing.
+            if node.id in self._event_risks:
+                continue
             level = status_quo_level(node)
             if level is None:
                 continue
@@ -2294,9 +2302,6 @@ class SCMEvaluatorV2:
             if self._parents.get(node.id):
                 self._status_quo_levels[node.id] = level
 
-        # event_risk.v1: each event risk's occurrence plan. Empty for every legacy graph, so the
-        # branch in _propagate is never taken and the structural equations are unchanged.
-        self._event_risks = resolve_event_risk_plans(graph.nodes)
         # "realised" for every outcome the user sees; "p_conditional" for the information arms
         # (expected regret, EVPI, EVPPI): see OccurrenceMode in src/services/event_risk.py.
         self._occurrence_mode: OccurrenceMode = occurrence_mode
@@ -4476,9 +4481,11 @@ class RobustnessAnalyzerV2:
         factor_evpc = None
         if request.control_candidates and pre_noise_option_outcomes is not None:
             try:
+                # Science C-EVPI: control arms must share the baseline's p-conditional population.
+                # This is the original evaluator for every legacy request.
                 factor_evpc = self._compute_factor_evpc(
                     request,
-                    evaluator,
+                    information_evaluator,
                     edge_configs_per_sample,
                     factor_values_per_sample,
                     pre_noise_option_outcomes,
@@ -4695,19 +4702,6 @@ class RobustnessAnalyzerV2:
                 n_defaulted_root_nodes=len(defaulted_root_node_ids)
                 if defaulted_root_node_ids
                 else None,
-                # event_risk.v1 echo, request-gated: present only when an event risk was applied
-                # (None is dropped by exclude_none, so a legacy response gains no key). PLoT keys
-                # its fail-closed forward on it: an ISL that dropped event_risk sends no echo.
-                event_risks_applied=[
-                    EventRiskAppliedV1(
-                        node_id=plan.node_id,
-                        occurrence_used=plan.p_mid,
-                        p_low=plan.p_low,
-                        p_high=plan.p_high,
-                    )
-                    for _, plan in sorted(event_risk_plans.items())
-                ]
-                or None,
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
@@ -4752,6 +4746,17 @@ class RobustnessAnalyzerV2:
             structural_influence=structural_influence or None,
         )
         response._mc_draws = mc_draws
+        # event_risk.v1: private transport to the V2 envelope, never serialised on the V1 wire.
+        # PLoT fails closed when it sent event_risk and the V2 envelope carries no matching echo.
+        response._event_risks_applied = [
+            EventRiskAppliedV1(
+                node_id=plan.node_id,
+                occurrence_used=plan.p_mid,
+                p_low=plan.p_low,
+                p_high=plan.p_high,
+            )
+            for _, plan in sorted(event_risk_plans.items())
+        ] or None
 
         self.logger.info(
             "robustness_v2_analysis_complete",

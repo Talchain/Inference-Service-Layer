@@ -197,7 +197,7 @@ class TestLegacyTwin:
             assert abs(result.outcome_distribution.mean - level) <= 0.005
 
     def test_t1_legacy_response_carries_no_echo(self, legacy_response):
-        assert legacy_response.metadata.event_risks_applied is None
+        assert legacy_response._event_risks_applied is None
         dumped = legacy_response.model_dump(by_alias=True, exclude_none=True)
         assert "event_risks_applied" not in dumped["_metadata"]
 
@@ -393,13 +393,13 @@ class TestEvidenceValue:
 
 class TestEcho:
     def test_t5_echo_names_the_applied_event_risks(self, event_response):
-        echo = event_response.metadata.event_risks_applied
+        echo = event_response._event_risks_applied
         assert echo is not None and [e.node_id for e in echo] == ["supplier_fails"]
 
     def test_q5_echo_discloses_the_midpoint_is_used(self, event_response):
         """Science Q5: occurrence marginalises to the midpoint, so the range's width changes no v1
         figure. The echo says so instead of implying the range was propagated."""
-        (echo,) = event_response.metadata.event_risks_applied
+        (echo,) = event_response._event_risks_applied
         assert echo.occurrence_used == pytest.approx(0.10, abs=1e-12)
         assert (echo.p_low, echo.p_high) == (0.05, 0.15)
         assert echo.range_width_propagated is False
@@ -664,3 +664,46 @@ class TestReferenceAtToday:
         assert reference and max(abs(v) for v in reference) < 0.01
         failures = sum(1 for v in draws["option_outcomes"]["status_quo"] if v < -0.2)
         assert 120 <= failures <= 280, failures
+
+
+class TestBuddyRoundTwo:
+    def test_r2_observed_state_on_the_risk_cannot_cancel_the_event(self):
+        """Science Q9: today's reference holds the risk at 0 despite an observed state."""
+        body = supplier_request()
+        risk = next(node for node in body["graph"]["nodes"] if node["id"] == "supplier_fails")
+        risk["observed_state"] = {"value": 0.0, "source": "user"}
+        observed = _result(_analyze(body), "status_quo")
+        control = _result(_analyze(supplier_request()), "status_quo")
+        for result in (observed, control):
+            assert abs(result.probability_of_goal - 0.90) <= 4 * _se(0.90)
+            assert abs(result.outcome_distribution.mean - 0.760) <= 0.005
+        assert observed.probability_of_goal == control.probability_of_goal
+        assert observed.outcome_distribution.mean == control.outcome_distribution.mean
+
+    def test_r2_v1_wire_carries_no_echo_key(self):
+        """The private echo never enters V1 JSON; V2 still forwards it at top level."""
+        from fastapi.testclient import TestClient
+
+        from src.api.main import app
+
+        client = TestClient(app)
+        legacy = client.post(ENDPOINT + "?response_version=1", json=supplier_request(event=False))
+        assert legacy.status_code == 200, legacy.text[:2000]
+        assert "event_risks_applied" not in legacy.text
+        event = client.post(ENDPOINT + "?response_version=2", json=supplier_request())
+        assert event.status_code == 200, event.text[:2000]
+        (echo,) = event.json()["event_risks_applied"]
+        assert echo["node_id"] == "supplier_fails"
+
+    def test_r2_evpc_of_a_no_op_control_is_zero(self):
+        """Setting cost to today's 0 duplicates the best option on the same C-EVPI draws."""
+        response = _analyze(
+            supplier_request(control_candidates=[{"factor_id": "dual_source_cost", "values": [0.0]}])
+        )
+        assert response.factor_evpc is not None
+        (row,) = [r for r in response.factor_evpc if r["factor_id"] == "dual_source_cost"]
+        assert row["best_candidate_value"] == 0.0
+        assert row["evpc"] <= 1e-9, row
+        # Bind the analytic identity too: a negative mismatch must not hide behind the clamp.
+        assert abs(row["evpc_raw"]) <= 1e-9, row
+        assert row["best_do_expected_utility"] == row["baseline_max_expected_utility"]
