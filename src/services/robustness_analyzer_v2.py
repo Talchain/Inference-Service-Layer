@@ -53,6 +53,7 @@ from src.models.robustness_v2 import (
     ConstraintAnalysis,
     ConstraintResult,
     EdgeV2,
+    EventRiskAppliedV1,
     FactorSensitivityResult,
     FragileEdgeEnhanced,
     GoalConstraint,
@@ -124,6 +125,17 @@ from src.services.goal_chance_drivers import (
     quantities_upstream_of_set,
 )
 from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
+from src.services.event_risk import (
+    OCCURRENCE_STREAM_OFFSET,
+    OccurrenceMode,
+    draw_occurrence_state,
+    mitigation_edges as event_risk_mitigation_edges,
+    occurrence_p_key,
+    occurrence_value,
+    resolve_event_risk_graph,
+    resolve_event_risk_plans,
+    today_levels as event_risk_today_levels,
+)
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
 from src.utils.downside import decision_evpi_from_regrets, expected_regret_per_option
 from src.utils.evppi import (
@@ -1451,6 +1463,14 @@ class FactorSampler:
         self._correlated_ids: set = (
             set(correlation_plan.factor_order) if correlation_plan else set()
         )
+        # event_risk.v1: one occurrence state per event risk per draw, from a DEDICATED stream
+        # derived from this sampler's own seed (so the main, EVPI-baseline and EVPI-perfect
+        # samplers each draw occurrence the same way). Created only when an event risk exists:
+        # a legacy request builds no stream and draws nothing (byte-identical).
+        self._event_risks = resolve_event_risk_plans(nodes)
+        self._occurrence_rng: Optional[SeededRNG] = (
+            SeededRNG(rng.seed + OCCURRENCE_STREAM_OFFSET) if self._event_risks else None
+        )
 
     def sample_factor_values(self) -> Dict[str, float]:
         """
@@ -1492,6 +1512,15 @@ class FactorSampler:
             sampled_value = self._sample_from_distribution(uncertainty, mean, node_id)
             factor_values[node_id] = sampled_value
             self._value_sums[node_id] += sampled_value
+
+        # event_risk.v1: AFTER every factor draw, from its own stream, so no factor value moves.
+        # Keyed by the risk's node id; read only by the evaluator's event branch. Not a factor:
+        # never summed into the mean-sampled values, never an EVPPI row.
+        if self._occurrence_rng is not None:
+            for plan in self._event_risks.values():
+                z, p = draw_occurrence_state(plan, self._occurrence_rng)
+                factor_values[plan.node_id] = z
+                factor_values[occurrence_p_key(plan.node_id)] = p
 
         return factor_values
 
@@ -2041,13 +2070,17 @@ def definitional_edges(
 
     They are definitions, not beliefs: the evaluator never reads their sampled strengths,
     and no edge-level output may describe them as uncertain (AIQ ISL #187 5860770241 (3)).
-    A withheld identity's edges stay beliefs (the node is still linear)."""
+    A withheld identity's edges stay beliefs (the node is still linear).
+
+    event_risk.v1: an event risk's preventer -> risk links are definitional too (the evaluator
+    computes the risk from the stated reduction, never from a drawn strength). Empty when no
+    node carries ``event_risk``."""
     return {
         (participant, plan.node_id)
         for plan in resolve_identity_plans(graph, factor_centres).values()
         if plan.evaluated
         for participant in plan.participants
-    }
+    } | event_risk_mitigation_edges(graph)
 
 
 def identity_blocking_critiques(
@@ -2215,6 +2248,7 @@ class SCMEvaluatorV2:
         graph: GraphV2,
         epsilon_rng: Optional[SeededRNG] = None,
         factor_centres: Optional[Mapping[str, float]] = None,
+        occurrence_mode: OccurrenceMode = "realised",
     ):
         """
         Initialize evaluator.
@@ -2259,6 +2293,12 @@ class SCMEvaluatorV2:
             if self._parents.get(node.id):
                 self._status_quo_levels[node.id] = level
 
+        # event_risk.v1: each event risk's occurrence plan. Empty for every legacy graph, so the
+        # branch in _propagate is never taken and the structural equations are unchanged.
+        self._event_risks = resolve_event_risk_plans(graph.nodes)
+        # "realised" for every outcome the user sees; "p_conditional" for the information arms
+        # (expected regret, EVPI, EVPPI): see OccurrenceMode in src/services/event_risk.py.
+        self._occurrence_mode: OccurrenceMode = occurrence_mode
         # R3 slice 1: every declared identity's plan; only an EVALUATED one changes the
         # structural equation (a withheld one is left linear and withheld downstream).
         self._status_quo_cache: Optional[Tuple[_StatusQuoKey, Dict[str, float]]] = None
@@ -2417,6 +2457,13 @@ class SCMEvaluatorV2:
             if node_id in interventions:
                 # Interventional value overrides structural equations
                 node_values[node_id] = interventions[node_id]
+            elif node_id in self._event_risks:
+                # event_risk.v1: occurs (1/0) on a Monte Carlo draw (its z rides in factor_values),
+                # else its expected occurrence. Never the linear sum, never epsilon noise: the
+                # preventer -> risk links are definitional (src/services/event_risk.py).
+                node_values[node_id] = occurrence_value(
+                    self._event_risks[node_id], node_values, factor_values, self._occurrence_mode
+                )
             elif node_id in self._evaluated_identities:
                 node_values[node_id] = self._identity_value(
                     self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
@@ -3100,6 +3147,14 @@ class RobustnessAnalyzerV2:
                         },
                     )
 
+        # event_risk.v1: the ONE graph every phase reads. Each preventer -> risk link becomes its
+        # exact linear coefficient (-p_mid x m, existence 1.0), so coefficient-only phases (path
+        # decomposition, structural influence) agree with the evaluator. The same object comes
+        # back when no node carries event_risk, so a legacy request is untouched.
+        event_risk_graph = resolve_event_risk_graph(request.graph)
+        if event_risk_graph is not request.graph:
+            request = request.model_copy(update={"graph": event_risk_graph})
+
         # Fail closed on cyclic graphs on EVERY path. The V2-enhanced route
         # also blocks cycles pre-analysis via RequestValidator; this guard
         # covers the legacy/V1 route and direct analyzer calls, where a cycle
@@ -3143,6 +3198,22 @@ class RobustnessAnalyzerV2:
         rng_epsilon = SeededRNG(seed + 3) if has_epsilon else None
         evaluator = SCMEvaluatorV2(
             request.graph, epsilon_rng=rng_epsilon, factor_centres=factor_centres(request)
+        )
+        # event_risk.v1 (Science C-EVPI): the information arms (expected regret, the EVPI bound,
+        # factor EVPPI, the per-factor EVPI arms) read each event risk at its p-conditional
+        # expectation, never at whether it happened. Its epsilon stream is a replica of the main
+        # one, consumed in the same order, so both see identical noise. It is the SAME evaluator
+        # when no event risk exists: a legacy request does exactly the work it did before.
+        event_risk_plans = resolve_event_risk_plans(request.graph.nodes)
+        information_evaluator = (
+            SCMEvaluatorV2(
+                request.graph,
+                epsilon_rng=SeededRNG(seed + 3) if has_epsilon else None,
+                factor_centres=factor_centres(request),
+                occurrence_mode="p_conditional",
+            )
+            if event_risk_plans
+            else evaluator
         )
 
         self.logger.info(
@@ -3207,6 +3278,8 @@ class RobustnessAnalyzerV2:
                 not has_observed_value
                 and node.id not in uncertainty_node_ids
                 and node.id not in fully_intervened_node_ids
+                # event_risk.v1: an event risk's value is its occurrence draw, never a default 0.
+                and node.event_risk is None
             ):
                 defaulted_root_node_ids.append(node.id)
 
@@ -3477,6 +3550,7 @@ class RobustnessAnalyzerV2:
             constraint_node_values,
             factor_values_per_sample,
             status_quo_node_values,
+            information_outcomes,
         ) = self._run_monte_carlo(
             request,
             sampler,
@@ -3508,6 +3582,7 @@ class RobustnessAnalyzerV2:
             )
             or None,
             objective=objective_plan,
+            information_evaluator=information_evaluator,
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
 
@@ -3533,7 +3608,10 @@ class RobustnessAnalyzerV2:
         # via OptionResult.pre_noise_expected_regret. cvar_10/p05 intentionally stay on the
         # NOISED samples downstream (marginal tail metrics, consistent with the
         # noised p10/p50/p90/mean).
-        pre_noise_expected_regret = expected_regret_per_option(option_outcomes)
+        # event_risk.v1 (Science C-EVPI): regret is measured against the best choice an INFORMED
+        # team could make, which knows p but never whether the event happens. So it reads the
+        # p-conditional population. That population IS option_outcomes when no event risk exists.
+        pre_noise_expected_regret = expected_regret_per_option(information_outcomes)
 
         # S2 (D-23.8) factor_evppi and S4 (D-23.8) factor_evpc both need the PRE-noise
         # per-option outcomes — the same CRN-aligned joint population that produced
@@ -3547,12 +3625,15 @@ class RobustnessAnalyzerV2:
         if (
             request.include_voi and factor_sampler.has_uncertainties()
         ) or request.control_candidates:
-            pre_noise_option_outcomes = {oid: list(vals) for oid, vals in option_outcomes.items()}
+            pre_noise_option_outcomes = {
+                oid: list(vals) for oid, vals in information_outcomes.items()
+            }
 
         # Disable epsilon noise for post-MC structural analyses
         # (sensitivity, counterfactual, robustness) — these compare structural
         # differences and should not include stochastic per-sample noise.
         evaluator._epsilon_rng = None
+        information_evaluator._epsilon_rng = None
 
         # Compute tie rate
         tie_rate = tie_count / request.n_samples
@@ -4188,7 +4269,7 @@ class RobustnessAnalyzerV2:
                     request,
                     sampler,
                     factor_sampler,
-                    evaluator,
+                    information_evaluator,
                     seed,
                     recommended_option_id,
                     budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
@@ -4600,6 +4681,19 @@ class RobustnessAnalyzerV2:
                 n_defaulted_root_nodes=len(defaulted_root_node_ids)
                 if defaulted_root_node_ids
                 else None,
+                # event_risk.v1 echo, request-gated: present only when an event risk was applied
+                # (None is dropped by exclude_none, so a legacy response gains no key). PLoT keys
+                # its fail-closed forward on it: an ISL that dropped event_risk sends no echo.
+                event_risks_applied=[
+                    EventRiskAppliedV1(
+                        node_id=plan.node_id,
+                        occurrence_used=plan.p_mid,
+                        p_low=plan.p_low,
+                        p_high=plan.p_high,
+                    )
+                    for _, plan in sorted(event_risk_plans.items())
+                ]
+                or None,
             ),
             critiques=critiques,
             inference_warnings=inference_warnings,
@@ -4755,6 +4849,7 @@ class RobustnessAnalyzerV2:
         constraint_target_nodes: Optional[List[str]] = None,
         status_quo_reference_nodes: Optional[List[str]] = None,
         objective: Optional["ObjectivePlan"] = None,
+        information_evaluator: Optional[SCMEvaluatorV2] = None,
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
@@ -4763,6 +4858,7 @@ class RobustnessAnalyzerV2:
         int,
         Optional[Dict[str, Dict[str, List[float]]]],
         List[Dict[str, float]],
+        Dict[str, List[float]],
         Dict[str, List[float]],
     ]:
         """
@@ -4794,11 +4890,26 @@ class RobustnessAnalyzerV2:
               reference for its own target nodes. One structure for one concept —
               a goal-shaped special case beside a constraint-shaped one is how
               two dialects of the same idea start.
+            - information_outcomes: event_risk.v1. Per-draw outcomes with each event risk
+              at its p-conditional expectation (``information_evaluator``), for the
+              information arms (Science C-EVPI). It IS ``option_outcomes`` (the same object)
+              when no separate information evaluator is given (every legacy request).
 
         Note: option_wins uses float to support split-tie handling where ties are
         divided equally among tied options.
         """
         option_outcomes: Dict[str, List[float]] = {opt.id: [] for opt in request.options}
+        separate_information = (
+            information_evaluator is not None and information_evaluator is not evaluator
+        )
+        information_outcomes: Dict[str, List[float]] = (
+            {opt.id: [] for opt in request.options} if separate_information else option_outcomes
+        )
+        # event_risk.v1: the status-quo reference holds every event risk at its level TODAY (0, not
+        # yet happened); today's level B never embodies a future event. Empty for legacy requests.
+        reference_interventions = event_risk_today_levels(
+            resolve_event_risk_plans(request.graph.nodes)
+        )
         option_wins: Dict[str, float] = {opt.id: 0.0 for opt in request.options}
         # 2.477(c): Optional — None marks a draw where no option was finite.
         winner_per_sample: List[Optional[str]] = []
@@ -4863,7 +4974,7 @@ class RobustnessAnalyzerV2:
                 assert status_quo_reference_nodes is not None
                 reference_values = sq_evaluator.evaluate_multi(
                     edge_strengths=edge_config,
-                    interventions={},
+                    interventions=reference_interventions,
                     target_nodes=status_quo_reference_nodes,
                     factor_values=factor_values,
                 )
@@ -4900,6 +5011,16 @@ class RobustnessAnalyzerV2:
 
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
+                if separate_information:
+                    assert information_evaluator is not None
+                    information_outcomes[option.id].append(
+                        information_evaluator.evaluate(
+                            edge_strengths=edge_config,
+                            interventions=option.interventions,
+                            goal_node=request.goal_node_id,
+                            factor_values=factor_values,
+                        )
+                    )
 
             # Track winner with fair tie-breaking (split ties equally).
             #
@@ -4994,6 +5115,7 @@ class RobustnessAnalyzerV2:
             constraint_node_values,
             factor_values_per_sample,
             status_quo_node_values,
+            information_outcomes,
         )
 
     @staticmethod
@@ -10952,6 +11074,11 @@ class RobustnessAnalyzerV2:
             if sq_reference_nodes
             else None
         )
+        # event_risk.v1: the reference holds each event risk at today's level (0), as in the main
+        # Monte Carlo. Empty for legacy requests.
+        reference_interventions = event_risk_today_levels(
+            resolve_event_risk_plans(request.graph.nodes)
+        )
 
         for i in range(n_samples):
             # F7: periodic wall-clock deadline re-check (mirrors the E-value
@@ -10972,7 +11099,7 @@ class RobustnessAnalyzerV2:
             if sq_evaluator is not None:
                 reference_values = sq_evaluator.evaluate_multi(
                     edge_strengths=edge_config,
-                    interventions={},
+                    interventions=reference_interventions,
                     target_nodes=sq_reference_nodes,
                     factor_values=factor_values,
                 )
