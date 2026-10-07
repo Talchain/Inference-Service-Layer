@@ -604,8 +604,10 @@ class TestBuddyRoundOne:
         for result in response.results:
             drivers = result.probability_of_goal_drivers
             assert drivers is not None
-            text = repr(drivers.model_dump())
-            assert "supplier_fails'" not in text and "supplier_fails@p" not in text, text[:600]
+            ids = {row.quantity_id for row in drivers.drivers}
+            assert not ids & {"supplier_fails", "supplier_fails@p"}, ids
+            # Control: the drivers block does see sampled quantities (the severity link is one).
+            assert "supplier_fails->gross_profit" in ids, ids
 
     def test_r1_a_preventer_must_be_a_root_switch(self):
         body = supplier_request()

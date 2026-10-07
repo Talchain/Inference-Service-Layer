@@ -3547,6 +3547,7 @@ class RobustnessAnalyzerV2:
 
         # Run Monte Carlo simulation
         absent_record_start = len(sampler.absent_edges_per_sample)
+        event_risk_information_outcomes: Dict[str, List[float]] = {}
         (
             option_outcomes,
             option_wins,
@@ -3556,7 +3557,6 @@ class RobustnessAnalyzerV2:
             constraint_node_values,
             factor_values_per_sample,
             status_quo_node_values,
-            information_outcomes,
         ) = self._run_monte_carlo(
             request,
             sampler,
@@ -3589,6 +3589,12 @@ class RobustnessAnalyzerV2:
             or None,
             objective=objective_plan,
             information_evaluator=information_evaluator,
+            information_outcomes=event_risk_information_outcomes,
+        )
+        # The p-conditional population when an event risk exists; otherwise the realised one
+        # itself (the same object), so a legacy request computes exactly what it did before.
+        information_outcomes = (
+            event_risk_information_outcomes if event_risk_plans else option_outcomes
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
 
@@ -4858,6 +4864,7 @@ class RobustnessAnalyzerV2:
         status_quo_reference_nodes: Optional[List[str]] = None,
         objective: Optional["ObjectivePlan"] = None,
         information_evaluator: Optional[SCMEvaluatorV2] = None,
+        information_outcomes: Optional[Dict[str, List[float]]] = None,
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
@@ -4866,7 +4873,6 @@ class RobustnessAnalyzerV2:
         int,
         Optional[Dict[str, Dict[str, List[float]]]],
         List[Dict[str, float]],
-        Dict[str, List[float]],
         Dict[str, List[float]],
     ]:
         """
@@ -4898,21 +4904,26 @@ class RobustnessAnalyzerV2:
               reference for its own target nodes. One structure for one concept —
               a goal-shaped special case beside a constraint-shaped one is how
               two dialects of the same idea start.
-            - information_outcomes: event_risk.v1. Per-draw outcomes with each event risk
-              at its p-conditional expectation (``information_evaluator``), for the
-              information arms (Science C-EVPI). It IS ``option_outcomes`` (the same object)
-              when no separate information evaluator is given (every legacy request).
+
+        ``information_outcomes`` (event_risk.v1; an OUT-parameter, so the return shape every
+        caller unpacks is unchanged): when given together with a separate
+        ``information_evaluator``, it is filled with per-draw outcomes in which each event risk
+        sits at its p-conditional expectation, for the per-draw perfect-information choices
+        (Science C-EVPI). Nothing is filled for a legacy request.
 
         Note: option_wins uses float to support split-tie handling where ties are
         divided equally among tied options.
         """
         option_outcomes: Dict[str, List[float]] = {opt.id: [] for opt in request.options}
         separate_information = (
-            information_evaluator is not None and information_evaluator is not evaluator
+            information_evaluator is not None
+            and information_evaluator is not evaluator
+            and information_outcomes is not None
         )
-        information_outcomes: Dict[str, List[float]] = (
-            {opt.id: [] for opt in request.options} if separate_information else option_outcomes
-        )
+        if separate_information:
+            assert information_outcomes is not None
+            for opt in request.options:
+                information_outcomes[opt.id] = []
         # event_risk.v1: the status-quo reference holds every event risk at its level TODAY (0, not
         # yet happened); today's level B never embodies a future event. Empty for legacy requests.
         reference_interventions = event_risk_today_levels(
@@ -5020,7 +5031,7 @@ class RobustnessAnalyzerV2:
                 option_outcomes[option.id].append(outcome)
                 sample_outcomes[option.id] = outcome
                 if separate_information:
-                    assert information_evaluator is not None
+                    assert information_evaluator is not None and information_outcomes is not None
                     information_outcomes[option.id].append(
                         information_evaluator.evaluate(
                             edge_strengths=edge_config,
@@ -5123,7 +5134,6 @@ class RobustnessAnalyzerV2:
             constraint_node_values,
             factor_values_per_sample,
             status_quo_node_values,
-            information_outcomes,
         )
 
     @staticmethod
