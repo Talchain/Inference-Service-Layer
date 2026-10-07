@@ -4746,9 +4746,8 @@ class RobustnessAnalyzerV2:
             structural_influence=structural_influence or None,
         )
         response._mc_draws = mc_draws
-        # event_risk.v1: private transport to the V2 envelope, never serialised on the V1 wire.
         # PLoT fails closed when it sent event_risk and the V2 envelope carries no matching echo.
-        response._event_risks_applied = [
+        response.event_risks_applied = [
             EventRiskAppliedV1(
                 node_id=plan.node_id,
                 occurrence_used=plan.p_mid,

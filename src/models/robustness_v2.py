@@ -2794,8 +2794,10 @@ class RobustnessResponseV2(BaseModel):
     # SCIENCE ROBUSTNESS (EXPERIMENT): the pre-noise CRN draws, set only when the request's private
     # `_capture_draws` asked. Never serialised, not in the schema.
     _mc_draws: Optional[Dict[str, Any]] = PrivateAttr(default=None)
-    # event_risk.v1: request-gated echo for the V2 envelope. Never serialised on the V1 wire.
-    _event_risks_applied: Optional[List[EventRiskAppliedV1]] = PrivateAttr(default=None)
+    # event_risk.v1: a serialised field, not a PrivateAttr; it must survive the worker hop (offload), see TestEventRiskOffloadEcho
+    event_risks_applied: Optional[List[EventRiskAppliedV1]] = Field(
+        None, description="Applied event-risk occurrence probabilities; absent when no event risk was supplied."
+    )
 
     model_config = {
         "populate_by_name": True,
