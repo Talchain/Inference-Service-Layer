@@ -20,8 +20,10 @@ Every Olumi service reports to Sentry on the same terms:
      off): ISL log messages interpolate equations and labels, and they stay
      in the service's own redacted logs;
    - one filter, :func:`scrub_event`, runs on errors AND transactions and
-     removes any request body, cookies, credential headers, frame variables,
-     log breadcrumbs and decision-content keys that reach an event anyway.
+     removes any request body, query, cookies, credential headers, frame
+     variables and log breadcrumbs; ``extra`` and ``contexts`` are ALLOWLISTS
+     (ISL's own operational keys / the SDK's runtime contexts); span data
+     drops queries and redacts decision-content keys.
 
 Known residual (reported, not closed here): the text of an exception message
 is sent as written. A ``raise ValueError(f"... {label}")`` would carry a label.
@@ -77,6 +79,24 @@ SENSITIVE_KEY_SNIPPETS = (
     "apikey",
 )
 
+#: ``extra`` keys ISL itself sets (main.py global handler + request_id). Every
+#: other extra key is replaced by REDACTED: an allowlist, not a key-name guess.
+ALLOWED_EXTRA_KEYS = frozenset({"request_id", "path", "method"})
+
+#: Contexts the SDK fills with runtime facts. Any other context (set by code)
+#: is dropped. ``trace`` is kept but its ``data`` goes through the span rules.
+ALLOWED_CONTEXTS = frozenset(
+    {"runtime", "os", "device", "app", "culture", "cloud_resource", "trace", "response", "profile"}
+)
+
+#: Span attributes that ARE a query or fragment: dropped.
+QUERY_SPAN_KEYS = frozenset({"http.query", "http.fragment", "url.query", "url.fragment"})
+
+#: Span attributes holding a URL: kept with the query stripped.
+URL_SPAN_KEYS = frozenset({"url", "http.url", "url.full", "http.target"})
+
+_QUERY_IN_TEXT = re.compile(r"[?#]\S*")
+
 _LONG_STRING = 200
 _MAX_DEPTH = 8
 _SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$", re.IGNORECASE)
@@ -88,9 +108,16 @@ def resolve_environment(sentry_environment: Optional[str], runtime_environment: 
     return explicit or runtime_environment
 
 
-def resolve_release(git_commit_sha: str) -> Optional[str]:
-    """The full build SHA, or None when the build identity is unknown."""
-    return git_commit_sha if _SHA_RE.match(git_commit_sha or "") else None
+UNIDENTIFIED_RELEASE = "unidentified"
+
+
+def resolve_release(git_commit_sha: str) -> str:
+    """The full build SHA, else ``"unidentified"``.
+
+    Never ``None``: sentry-sdk reads ``None`` as "infer a release" and picks up
+    SENTRY_RELEASE / git / other env, which name something other than this build.
+    """
+    return git_commit_sha if _SHA_RE.match(git_commit_sha or "") else UNIDENTIFIED_RELEASE
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -111,6 +138,15 @@ def _redact(value: Any, depth: int = 0) -> Any:
     if isinstance(value, str) and len(value) > _LONG_STRING:
         return REDACTED
     return value
+
+
+def _scrub_span_data(data: Mapping[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for key, value in _redact(data).items():
+        if key in QUERY_SPAN_KEYS:
+            continue
+        out[key] = _strip_query(value) if key in URL_SPAN_KEYS else value
+    return out
 
 
 def _strip_frame_vars(container: Any) -> None:
@@ -182,16 +218,22 @@ def scrub_event(event: Dict[str, Any], hint: Any = None) -> Dict[str, Any]:
     _strip_frame_vars(event.get("exception"))
     _strip_frame_vars(event.get("threads"))
 
-    if isinstance(event.get("extra"), Mapping):
-        event["extra"] = _redact(event["extra"])
+    extra = event.get("extra")
+    if isinstance(extra, Mapping):
+        event["extra"] = {
+            k: (_redact(v) if k in ALLOWED_EXTRA_KEYS else REDACTED) for k, v in extra.items()
+        }
 
     contexts = event.get("contexts")
     if isinstance(contexts, MutableMapping):
         for key in list(contexts.keys()):
-            if _is_sensitive_key(key):
+            if key not in ALLOWED_CONTEXTS or _is_sensitive_key(key):
                 del contexts[key]
             elif isinstance(contexts[key], Mapping):
                 contexts[key] = _redact(contexts[key])
+
+    if isinstance(event.get("transaction"), str):
+        event["transaction"] = _QUERY_IN_TEXT.sub("", event["transaction"])
 
     def _crumbs(values: list) -> list:
         kept = (scrub_breadcrumb(b) if isinstance(b, Mapping) else None for b in values)
@@ -206,10 +248,14 @@ def scrub_event(event: Dict[str, Any], hint: Any = None) -> Dict[str, Any]:
     # Span data on transactions: same key-class redaction as extra.
     trace = contexts.get("trace") if isinstance(contexts, Mapping) else None
     if isinstance(trace, MutableMapping) and isinstance(trace.get("data"), Mapping):
-        trace["data"] = _redact(trace["data"])
+        trace["data"] = _scrub_span_data(trace["data"])
     for span in event.get("spans") or []:
-        if isinstance(span, MutableMapping) and isinstance(span.get("data"), Mapping):
-            span["data"] = _redact(span["data"])
+        if not isinstance(span, MutableMapping):
+            continue
+        if isinstance(span.get("data"), Mapping):
+            span["data"] = _scrub_span_data(span["data"])
+        if isinstance(span.get("description"), str):
+            span["description"] = _QUERY_IN_TEXT.sub("", span["description"])
 
     return event
 

@@ -206,16 +206,29 @@ def test_scrub_removes_frame_local_variables() -> None:
 
 
 @pytest.mark.parametrize(
-    "key", ["label", "node_labels", "goal_text", "brief", "equations", "query_params"]
+    "key",
+    [
+        "label",
+        "node_labels",
+        "goal_text",
+        "brief",
+        "equations",
+        "query_params",
+        "candidate",
+        "result",
+    ],
 )
-def test_scrub_redacts_decision_content_keys_in_extra_and_contexts(key: str) -> None:
+def test_extra_is_an_allowlist_and_custom_contexts_are_dropped(key: str) -> None:
     event = {
-        "extra": {key: SENTINEL, "error_code": "CONTROL_KEPT"},
-        "contexts": {"compute": {key: SENTINEL, "stage": "CONTROL_STAGE"}},
+        "extra": {key: SENTINEL, "path": "/v2/CONTROL_PATH", "request_id": "CONTROL_RID"},
+        "contexts": {
+            "compute": {key: SENTINEL},
+            "runtime": {"name": "CONTROL_RUNTIME"},
+        },
     }
     out = json.dumps(scrub_event(event))
     assert SENTINEL not in out
-    assert "CONTROL_KEPT" in out and "CONTROL_STAGE" in out
+    assert "CONTROL_PATH" in out and "CONTROL_RID" in out and "CONTROL_RUNTIME" in out
 
 
 def test_scrub_drops_log_breadcrumbs_and_cuts_http_to_its_shape() -> None:
@@ -241,6 +254,40 @@ def test_scrub_drops_log_breadcrumbs_and_cuts_http_to_its_shape() -> None:
     assert SENTINEL not in out
     assert "http://plot/v2/run" in out and "503" in out
     assert scrub_breadcrumb({"type": "log", "message": SENTINEL}) is None
+
+
+def test_scrub_strips_queries_from_span_data_descriptions_and_transaction() -> None:
+    event = {
+        "type": "transaction",
+        "transaction": f"/v2/robustness?label={SENTINEL}",
+        "contexts": {"trace": {"data": {"url.full": f"http://isl/v2?label={SENTINEL}"}}},
+        "spans": [
+            {
+                "description": f"GET http://plot/v2/run?label={SENTINEL}",
+                "data": {
+                    "url": f"http://plot/v2/run?label={SENTINEL}",
+                    "http.query": f"label={SENTINEL}",
+                    "http.fragment": SENTINEL,
+                },
+            }
+        ],
+    }
+    out = json.dumps(scrub_event(event))
+    assert SENTINEL not in out
+    assert "http://plot/v2/run" in out and "/v2/robustness" in out
+
+
+def test_release_never_falls_back_to_sdk_inference(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SENTRY_RELEASE", "isl@0.1.0")
+    opts = build_sentry_options(
+        dsn=DSN,
+        sentry_environment=None,
+        runtime_environment="staging",
+        git_commit_sha="unknown",
+        traces_sample_rate=0.0,
+        profiles_sample_rate=0.0,
+    )
+    assert opts["release"] == "unidentified"
 
 
 def test_scrub_redacts_transaction_span_data() -> None:
@@ -272,6 +319,30 @@ def test_runtime_label_used_when_sentry_environment_unset_or_blank() -> None:
     assert resolve_environment("  ", "staging") == "staging"
 
 
-def test_release_is_the_build_sha_or_none() -> None:
+def test_release_is_the_build_sha_or_unidentified() -> None:
     assert resolve_release(SHA40) == SHA40
-    assert resolve_release("unknown") is None
+    assert resolve_release("unknown") == "unidentified"
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda n: "GET http://plot/" + "a" * n,
+        lambda n: "GET http://plot/x?" + "b" * n,
+        lambda n: ("?a " * (n // 3 + 1))[:n],
+    ],
+)
+def test_query_regex_scales_linearly(make: Any) -> None:
+    import time
+
+    def cost(n: int) -> float:
+        text = make(n)
+        best = float("inf")
+        for _ in range(5):
+            t0 = time.perf_counter()
+            for _ in range(50):
+                scrub_event({"transaction": text})
+            best = min(best, time.perf_counter() - t0)
+        return max(best, 5e-5)
+
+    assert cost(20_000) / cost(5_000) < 8
