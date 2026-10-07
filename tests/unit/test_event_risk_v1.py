@@ -261,10 +261,12 @@ class TestCommonRandomNumbers:
     def test_t2_occurrence_is_its_own_stream(self):
         """Adding the event moves no other draw: edge draws and factor draws equal the legacy twin's,
         draw for draw (occurrence is separate from existence and effect)."""
-        event_rows = _draws(supplier_request(), n=300)
+        # An uncertain factor makes the factor stream draw, so a mutant that draws occurrence from
+        # it would move that factor's values (a factor-free fixture would pass vacuously).
+        event_rows = _draws(_with_uncertain_demand(supplier_request()), n=300)
         # Twin: the legacy graph minus the mitigation link, which the event graph holds as a
         # definition (it draws nothing), so both edge streams draw the same links in order.
-        twin = supplier_request(event=False)
+        twin = _with_uncertain_demand(supplier_request(event=False))
         twin["graph"]["edges"] = [e for e in twin["graph"]["edges"] if e["from"] != "dual_sourcing"]
         legacy_rows = _draws(twin, n=300)
         for event_row, legacy_row in zip(event_rows, legacy_rows):
@@ -277,6 +279,7 @@ class TestCommonRandomNumbers:
                 k: v for k, v in event_row["factors"].items() if not k.startswith("supplier_fails")
             } == legacy_row["factors"]
             assert ("dual_sourcing", "supplier_fails") not in legacy_row["edges"]
+            assert "demand" in legacy_row["factors"]  # control: the factor stream did draw
 
     def test_t2_stream_is_dedicated_and_ordered_p_then_u(self):
         """The occurrence state is drawn from SeededRNG(factor seed + OCCURRENCE_STREAM_OFFSET):
