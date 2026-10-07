@@ -104,49 +104,39 @@ def _init_sentry() -> None:
 
     try:
         import sentry_sdk
-        from sentry_sdk.integrations.fastapi import FastApiIntegration
-        from sentry_sdk.integrations.starlette import StarletteIntegration
+
+        from src.config import GIT_COMMIT_SHA
+        from src.utils.sentry_contract import build_sentry_options, scrub_event
 
         def before_send_filter(event: Any, hint: Any) -> Any:
-            """Add request_id to Sentry events and filter sensitive data."""
+            """Add request_id for correlation, then apply the S-H privacy filter."""
             from src.utils.tracing import get_trace_id
 
-            # Add request_id for correlation
             request_id = get_trace_id()
             if request_id:
                 event.setdefault("tags", {})["request_id"] = request_id
                 event.setdefault("extra", {})["request_id"] = request_id
 
-            # Filter sensitive data from request headers
-            if "request" in event:
-                headers = event["request"].get("headers", {})
-                if isinstance(headers, dict):
-                    headers.pop("Authorization", None)
-                    headers.pop("X-API-Key", None)
-                    headers.pop("x-api-key", None)
+            return scrub_event(event, hint)
 
-            return event
-
-        sentry_sdk.init(
+        options = build_sentry_options(
             dsn=settings.SENTRY_DSN,
-            environment=settings.SENTRY_ENVIRONMENT or settings.ENVIRONMENT,
+            sentry_environment=settings.SENTRY_ENVIRONMENT,
+            runtime_environment=settings.ENVIRONMENT,
+            git_commit_sha=GIT_COMMIT_SHA,
             traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
             profiles_sample_rate=settings.SENTRY_PROFILES_SAMPLE_RATE,
-            integrations=[
-                FastApiIntegration(transaction_style="endpoint"),
-                StarletteIntegration(transaction_style="endpoint"),
-            ],
-            before_send=before_send_filter,
-            release=f"isl@{settings.VERSION}",
-            send_default_pii=False,  # Don't send PII by default
         )
+        options["before_send"] = before_send_filter
+        sentry_sdk.init(**options)
 
         logger.info(
             "Sentry error tracking initialized",
             extra={
-                "environment": settings.SENTRY_ENVIRONMENT or settings.ENVIRONMENT,
+                "environment": options["environment"],
                 "traces_sample_rate": settings.SENTRY_TRACES_SAMPLE_RATE,
-                "release": f"isl@{settings.VERSION}",
+                "release": options["release"],
+                "service": "isl",
             },
         )
 
