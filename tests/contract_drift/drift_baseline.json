@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.61.0",
     "omission_count": 51,
-    "superset_count": 85
+    "superset_count": 86
   },
   "omissions": [
     {
@@ -608,6 +608,11 @@
       "isl_model": "ISLResponseV2",
       "prop": "engine_version",
       "reason": "ISL superset — ISLResponseV2.engine_version is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ISLResponseV2",
+      "prop": "event_risks_applied",
+      "reason": "ISL superset — ISLResponseV2.event_risks_applied is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ISLResponseV2",
