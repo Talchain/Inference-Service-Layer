@@ -1002,7 +1002,11 @@ class TestANaNIdentityDrawIsDroppedNotAveraged:
         d["n_samples"] = self.N_SAMPLES
         response = self._v1(d)
         assert response.status_code == 200, response.text[:300]
-        assert response.content == JSONResponse(content=jsonable_encoder(returned["response"])).body
+        # event_risk.v1 (#229): the model gained `event_risks_applied`; the legacy V1 render omits it when absent,
+        # so the byte-identical oracle is the returned model rendered WITHOUT that absent field.
+        legacy = jsonable_encoder(returned["response"], exclude={"event_risks_applied"})
+        assert returned["response"].event_risks_applied is None
+        assert response.content == JSONResponse(content=legacy).body
 
 
 # ---------------------------------------------------------------------------------------------------------

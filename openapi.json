@@ -7715,6 +7715,21 @@
             "description": "E-value analogue per edge: minimum strength perturbation to flip recommendation. Only included when computed within time budget.",
             "title": "Edge E Values"
           },
+          "event_risks_applied": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EventRiskAppliedV1"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Applied event-risk occurrence probabilities; absent when no event risk was supplied.",
+            "title": "Event Risks Applied"
+          },
           "factor_evpc": {
             "anyOf": [
               {

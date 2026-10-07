@@ -197,7 +197,7 @@ class TestLegacyTwin:
             assert abs(result.outcome_distribution.mean - level) <= 0.005
 
     def test_t1_legacy_response_carries_no_echo(self, legacy_response):
-        assert legacy_response._event_risks_applied is None
+        assert legacy_response.event_risks_applied is None
         dumped = legacy_response.model_dump(by_alias=True, exclude_none=True)
         assert "event_risks_applied" not in dumped["_metadata"]
 
@@ -393,13 +393,13 @@ class TestEvidenceValue:
 
 class TestEcho:
     def test_t5_echo_names_the_applied_event_risks(self, event_response):
-        echo = event_response._event_risks_applied
+        echo = event_response.event_risks_applied
         assert echo is not None and [e.node_id for e in echo] == ["supplier_fails"]
 
     def test_q5_echo_discloses_the_midpoint_is_used(self, event_response):
         """Science Q5: occurrence marginalises to the midpoint, so the range's width changes no v1
         figure. The echo says so instead of implying the range was propagated."""
-        (echo,) = event_response._event_risks_applied
+        (echo,) = event_response.event_risks_applied
         assert echo.occurrence_used == pytest.approx(0.10, abs=1e-12)
         assert (echo.p_low, echo.p_high) == (0.05, 0.15)
         assert echo.range_width_propagated is False
@@ -681,7 +681,7 @@ class TestBuddyRoundTwo:
         assert observed.outcome_distribution.mean == control.outcome_distribution.mean
 
     def test_r2_v1_wire_carries_no_echo_key(self):
-        """The private echo never enters V1 JSON; V2 still forwards it at top level."""
+        """An absent echo never enters legacy V1 JSON; V2 forwards an applied echo."""
         from fastapi.testclient import TestClient
 
         from src.api.main import app
