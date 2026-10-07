@@ -2164,6 +2164,163 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "EventRiskAppliedV1": {
+        "description": "Echo of one applied event risk, with the probability the analysis actually used.\n\nScience Q5: with one occurrence draw per Monte Carlo draw, occurrence marginalises to the\nmidpoint of the stated range. The range's WIDTH therefore changes no v1 figure (goal chance,\nmean, downside). That is disclosed here rather than implied away; only a twin at\n``p_low`` / ``p_high`` shows the width's effect.",
+        "properties": {
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "occurrence_used": {
+            "description": "The probability every v1 figure reflects: the midpoint of the range",
+            "title": "Occurrence Used",
+            "type": "number"
+          },
+          "p_high": {
+            "title": "P High",
+            "type": "number"
+          },
+          "p_low": {
+            "title": "P Low",
+            "type": "number"
+          },
+          "range_width_propagated": {
+            "const": false,
+            "default": false,
+            "description": "Always false in v1: the range's width changes no figure; the midpoint is used",
+            "title": "Range Width Propagated"
+          }
+        },
+        "required": [
+          "node_id",
+          "occurrence_used",
+          "p_low",
+          "p_high"
+        ],
+        "title": "EventRiskAppliedV1",
+        "type": "object"
+      },
+      "EventRiskHorizonV1": {
+        "additionalProperties": false,
+        "description": "The window the occurrence probability is stated over.",
+        "properties": {
+          "months": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 600.0,
+            "title": "Months",
+            "type": "number"
+          }
+        },
+        "required": [
+          "months"
+        ],
+        "title": "EventRiskHorizonV1",
+        "type": "object"
+      },
+      "EventRiskMitigationV1": {
+        "additionalProperties": false,
+        "description": "A preventer: an ordinary factor an option sets (0 = not in place, 1 = in place). While it\nis in place the occurrence probability is scaled by (1 - occurrence_reduction).",
+        "properties": {
+          "factor_id": {
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "occurrence_reduction": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Occurrence Reduction",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor_id",
+          "occurrence_reduction"
+        ],
+        "title": "EventRiskMitigationV1",
+        "type": "object"
+      },
+      "EventRiskOccurrenceV1": {
+        "additionalProperties": false,
+        "description": "P(the event happens at least once within the horizon), as a stated range.",
+        "properties": {
+          "basis": {
+            "description": "Whose figure the range is: the user's, Olumi's estimate, or a reference",
+            "enum": [
+              "user",
+              "olumi",
+              "reference"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "meaning": {
+            "const": "at_least_once_within_horizon",
+            "default": "at_least_once_within_horizon",
+            "description": "What p means: the probability it happens at least once within the horizon",
+            "title": "Meaning"
+          },
+          "p_high": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "P High",
+            "type": "number"
+          },
+          "p_low": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "P Low",
+            "type": "number"
+          }
+        },
+        "required": [
+          "p_low",
+          "p_high",
+          "basis"
+        ],
+        "title": "EventRiskOccurrenceV1",
+        "type": "object"
+      },
+      "EventRiskV1": {
+        "additionalProperties": false,
+        "description": "event_risk.v1 on a ``kind: \"risk\"`` node (see the block comment above).",
+        "properties": {
+          "horizon": {
+            "$ref": "#/components/schemas/EventRiskHorizonV1"
+          },
+          "mitigations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EventRiskMitigationV1"
+                },
+                "maxItems": 8,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mitigations"
+          },
+          "occurrence": {
+            "$ref": "#/components/schemas/EventRiskOccurrenceV1"
+          },
+          "version": {
+            "const": 1,
+            "description": "Contract version; only 1 exists",
+            "title": "Version"
+          }
+        },
+        "required": [
+          "version",
+          "occurrence",
+          "horizon"
+        ],
+        "title": "EventRiskV1",
+        "type": "object"
+      },
       "ExecutionFrameV2": {
         "additionalProperties": false,
         "description": "R3-8: the node's frame as PLoT resolved it (``resolveNodeFrame``: cap -> scale_frame ->\nthe value/raw_value pair). Runtime metadata for an identity's participants: user units are\n``normalised x frame``. Never persisted; never inferred by ISL.",
@@ -4340,6 +4497,21 @@
             "title": "Engine Version",
             "type": "string"
           },
+          "event_risks_applied": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/EventRiskAppliedV1"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "One entry per risk node evaluated as an EVENT (event_risk.v1): its id, the probability every figure reflects (the midpoint of the stated range) and the range. Absent when the request carried no event_risk. A caller that sent event_risk and finds no matching entry must fail closed: the risk was evaluated as an ordinary node.",
+            "title": "Event Risks Applied"
+          },
           "factor_evpc": {
             "anyOf": [
               {
@@ -5288,6 +5460,17 @@
             "minimum": 0.0,
             "title": "Epsilon Std",
             "type": "number"
+          },
+          "event_risk": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EventRiskV1"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "event_risk.v1: the risk is an EVENT that may happen within a horizon. Per Monte Carlo draw it occurs (1) or not (0), with P = p x prod(1 - m x preventer); each child link's strength is the severity conditional on occurrence. Only on kind 'risk'."
           },
           "execution_frame": {
             "anyOf": [

@@ -29,6 +29,7 @@ from src.constants import (
 
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
 from src.models.response_v2 import (
+    EventRiskAppliedV1,
     CorrelationModelV2,
     CritiqueV2,
     InferenceWarning,
@@ -515,6 +516,77 @@ class ExecutionFrameV2(BaseModel):
     model_config = {"extra": "forbid"}
 
 
+# =============================================================================
+# event_risk.v1 (Science 393023, science-richness-P0-20261007.md ruling (a) + §4 PILOT)
+# =============================================================================
+#
+# A risk is an EVENT that may happen within a horizon. Three uncertainties, never merged:
+# OCCURRENCE (does it happen within the horizon; this block), mechanism EXISTENCE (each link's
+# exists_probability) and EFFECT SIZE (each risk->child link's strength, read as the severity
+# CONDITIONAL on occurrence). Opt-in per node: a risk node without this block, and every other
+# node, is evaluated exactly as before. Strict (extra='forbid'): a malformed block is REFUSED
+# (422), never dropped, because a dropped event is an inert risk (D-09) presented as modelled.
+# The semantics live in ONE module, src/services/event_risk.py.
+
+
+class EventRiskOccurrenceV1(BaseModel):
+    """P(the event happens at least once within the horizon), as a stated range."""
+
+    p_low: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    p_high: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+    meaning: Literal["at_least_once_within_horizon"] = Field(
+        "at_least_once_within_horizon",
+        description="What p means: the probability it happens at least once within the horizon",
+    )
+    basis: Literal["user", "olumi", "reference"] = Field(
+        ..., description="Whose figure the range is: the user's, Olumi's estimate, or a reference"
+    )
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "EventRiskOccurrenceV1":
+        if self.p_low > self.p_high:
+            raise ValueError("event_risk.occurrence.p_low must not exceed p_high")
+        return self
+
+
+class EventRiskHorizonV1(BaseModel):
+    """The window the occurrence probability is stated over."""
+
+    months: float = Field(..., gt=0, le=600, allow_inf_nan=False)
+
+    model_config = {"extra": "forbid"}
+
+
+class EventRiskMitigationV1(BaseModel):
+    """A preventer: an ordinary factor an option sets (0 = not in place, 1 = in place). While it
+    is in place the occurrence probability is scaled by (1 - occurrence_reduction)."""
+
+    factor_id: str = Field(..., pattern=r"^[a-z0-9_:-]+$")
+    occurrence_reduction: float = Field(..., ge=0.0, le=1.0, allow_inf_nan=False)
+
+    model_config = {"extra": "forbid"}
+
+
+class EventRiskV1(BaseModel):
+    """event_risk.v1 on a ``kind: "risk"`` node (see the block comment above)."""
+
+    version: Literal[1] = Field(..., description="Contract version; only 1 exists")
+    occurrence: EventRiskOccurrenceV1
+    horizon: EventRiskHorizonV1
+    mitigations: Optional[List[EventRiskMitigationV1]] = Field(None, min_length=1, max_length=8)
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _distinct_mitigations(self) -> "EventRiskV1":
+        ids = [m.factor_id for m in self.mitigations or []]
+        if len(set(ids)) != len(ids):
+            raise ValueError("event_risk.mitigations must name each factor at most once")
+        return self
+
+
 class NodeV2(BaseModel):
     """Node in the v2 causal graph."""
 
@@ -572,6 +644,25 @@ class NodeV2(BaseModel):
     raw_range: Optional[RawRange] = Field(
         None, description="Raw user-unit range of the node's normalisation (R1; read by 'change_rel')."
     )
+    # event_risk.v1 (Science §4 pilot): opt-in occurrence semantics for a 'risk' node. Absent = the
+    # node is evaluated exactly as before (a linear node), byte-identically.
+    event_risk: Optional[EventRiskV1] = Field(
+        None,
+        description=(
+            "event_risk.v1: the risk is an EVENT that may happen within a horizon. Per Monte Carlo "
+            "draw it occurs (1) or not (0), with P = p x prod(1 - m x preventer); each child link's "
+            "strength is the severity conditional on occurrence. Only on kind 'risk'."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _event_risk_only_on_risk(self) -> "NodeV2":
+        if self.event_risk is not None and self.kind.lower() != "risk":
+            raise ValueError(
+                f"EVENT_RISK_WRONG_KIND: event_risk is only valid on a 'risk' node; "
+                f"{self.id} has kind '{self.kind}'"
+            )
+        return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -655,6 +746,71 @@ class GraphV2(BaseModel):
                     raise ValueError(
                         f"nonlinear_identity on {node.id} names {participant}, "
                         "which is not its parent"
+                    )
+        return v
+
+    @field_validator("edges")
+    @classmethod
+    def validate_event_risk_parents(cls, v: List[EdgeV2], info: Any) -> List[EdgeV2]:
+        """event_risk.v1: every mitigation names an existing node that is a PARENT of the risk
+        (the preventer -> risk link the canvas draws), and every parent of an event risk is a
+        named mitigation. A driver (a parent that raises or lowers occurrence by a stated
+        strength) has no probability unit in v1, so it is refused, never approximated."""
+        if "nodes" not in info.data:
+            return v
+        node_kinds = {node.id: node.kind.lower() for node in info.data["nodes"]}
+        node_ids = set(node_kinds)
+        parents: Dict[str, set] = {}
+        for edge in v:
+            parents.setdefault(edge.to, set()).add(edge.from_)
+        for node in info.data["nodes"]:
+            block = node.event_risk
+            if block is None:
+                continue
+            named = {m.factor_id for m in block.mitigations or []}
+            for factor_id in sorted(named):
+                if factor_id not in node_ids:
+                    raise ValueError(
+                        f"EVENT_RISK_UNKNOWN_MITIGATION: event_risk on {node.id} names a "
+                        f"non-existent node: {factor_id}"
+                    )
+                if factor_id not in parents.get(node.id, set()):
+                    raise ValueError(
+                        f"EVENT_RISK_UNKNOWN_MITIGATION: event_risk on {node.id} names "
+                        f"{factor_id}, which is not its parent"
+                    )
+                if parents.get(factor_id):
+                    # A non-root preventer's option level is converted into a model-frame CHANGE
+                    # (SCMEvaluatorV2._in_model_frame), which the occurrence rule would misread as
+                    # its level (Codex buddy r1: 0.10 instead of 0.03).
+                    raise ValueError(
+                        f"EVENT_RISK_PREVENTER_NOT_ROOT: preventer {factor_id} of event risk "
+                        f"{node.id} has parents; in v1 a preventer is a root switch an option sets"
+                    )
+                if node_kinds[factor_id] in NON_INFERENCE_KINDS:
+                    # A decision/option/constraint node is filtered before the evaluator, so the
+                    # mitigation would silently never apply.
+                    raise ValueError(
+                        f"EVENT_RISK_UNKNOWN_MITIGATION: event_risk on {node.id} names "
+                        f"{factor_id} of kind '{node_kinds[factor_id]}', which never reaches the "
+                        "evaluator; a preventer is a factor an option sets"
+                    )
+            drivers = sorted(parents.get(node.id, set()) - named)
+            if drivers:
+                raise ValueError(
+                    f"EVENT_RISK_DRIVER_NOT_SUPPORTED: event risk {node.id} has parents that are "
+                    f"not named mitigations: {drivers}"
+                )
+            # Science Q1: a preventer is a switch for this risk only. A 0/1 switch that also feeds
+            # ordinary linear links is the scale artefact of ruling (c), so it is refused.
+            for factor_id in sorted(named):
+                others = sorted(
+                    edge.to for edge in v if edge.from_ == factor_id and edge.to != node.id
+                )
+                if others:
+                    raise ValueError(
+                        f"EVENT_RISK_PREVENTER_HAS_OTHER_CHILDREN: preventer {factor_id} of event "
+                        f"risk {node.id} also links to {others}"
                     )
         return v
 
@@ -1436,6 +1592,50 @@ class RobustnessRequestV2(BaseModel):
                         f"Option '{option.id}' intervention_ranges['{node_id}'] is not a node "
                         "the option sets (it must also be in interventions)"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def validate_event_risk_roles(self) -> "RobustnessRequestV2":
+        """event_risk.v1: an event risk's occurrence is drawn, never set or scored directly.
+
+        - No option intervenes on it: do(occurs = x) is not an action (an option mitigates
+          through a preventer factor the risk names).
+        - It is not the goal, and it carries no parameter_uncertainty (its uncertainty IS the
+          occurrence draw, which is excluded from EVPPI by construction).
+        """
+        event_ids = {node.id for node in self.graph.nodes if node.event_risk is not None}
+        if not event_ids:
+            return self
+        if self.goal_node_id in event_ids:
+            raise ValueError(
+                f"EVENT_RISK_ROLE_REFUSED: event risk {self.goal_node_id} cannot be the goal"
+            )
+        for option in self.options:
+            for node_id in sorted(set(option.interventions) & event_ids):
+                raise ValueError(
+                    f"EVENT_RISK_ROLE_REFUSED: option '{option.id}' sets event risk {node_id} "
+                    "directly; an option mitigates it through a preventer the risk names"
+                )
+        preventer_ids = {
+            m.factor_id
+            for node in self.graph.nodes
+            if node.event_risk is not None
+            for m in node.event_risk.mitigations or []
+        }
+        for uncertainty in self.parameter_uncertainties or []:
+            if uncertainty.node_id in event_ids:
+                raise ValueError(
+                    f"EVENT_RISK_ROLE_REFUSED: event risk {uncertainty.node_id} cannot carry a "
+                    "parameter_uncertainty (its occurrence is the uncertainty)"
+                )
+            if uncertainty.node_id in preventer_ids:
+                # An uncertain switch makes the occurrence nonlinear in a sampled value, so the
+                # expected-occurrence central reading and the affine flip analysis would no
+                # longer be exact (Codex buddy r1). In v1 a preventer is set, never sampled.
+                raise ValueError(
+                    f"EVENT_RISK_ROLE_REFUSED: preventer {uncertainty.node_id} cannot carry a "
+                    "parameter_uncertainty; an option sets it"
+                )
         return self
 
     @model_validator(mode="after")
@@ -2594,6 +2794,8 @@ class RobustnessResponseV2(BaseModel):
     # SCIENCE ROBUSTNESS (EXPERIMENT): the pre-noise CRN draws, set only when the request's private
     # `_capture_draws` asked. Never serialised, not in the schema.
     _mc_draws: Optional[Dict[str, Any]] = PrivateAttr(default=None)
+    # event_risk.v1: request-gated echo for the V2 envelope. Never serialised on the V1 wire.
+    _event_risks_applied: Optional[List[EventRiskAppliedV1]] = PrivateAttr(default=None)
 
     model_config = {
         "populate_by_name": True,

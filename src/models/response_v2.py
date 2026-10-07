@@ -361,6 +361,27 @@ class OutcomeDistributionV2(BaseModel):
 # =============================================================================
 
 
+# event_risk.v1 echo (ISL robustness_v2 NodeV2.event_risk; src/services/event_risk.py).
+class EventRiskAppliedV1(BaseModel):
+    """Echo of one applied event risk, with the probability the analysis actually used.
+
+    Science Q5: with one occurrence draw per Monte Carlo draw, occurrence marginalises to the
+    midpoint of the stated range. The range's WIDTH therefore changes no v1 figure (goal chance,
+    mean, downside). That is disclosed here rather than implied away; only a twin at
+    ``p_low`` / ``p_high`` shows the width's effect."""
+
+    node_id: str
+    occurrence_used: float = Field(
+        ..., description="The probability every v1 figure reflects: the midpoint of the range"
+    )
+    p_low: float
+    p_high: float
+    range_width_propagated: Literal[False] = Field(
+        False,
+        description="Always false in v1: the range's width changes no figure; the midpoint is used",
+    )
+
+
 class DownsideV2(BaseModel):
     """Per-option DOWNSIDE / tail-risk view (B2), read from the MC outcome
     samples the v2 engine already draws — no new sampling.
@@ -2178,6 +2199,17 @@ class ISLResponseV2(BaseModel):
         "(2026-07-26) the heuristic is DEFAULT OFF (ENABLE_AUTO_SCALED_NOISE), so "
         "this is normally false. For WHICH metrics each population produced, read "
         "sample_population_provenance — this boolean cannot say.",
+    )
+
+    # event_risk.v1 echo — forwards the analyser's private echo. Request-gated: None (absent
+    # under exclude_none) unless the request carried event_risk, so a legacy envelope is
+    # byte-identical. PLoT fails closed when it sent event_risk and this does not echo it.
+    event_risks_applied: Optional[List[EventRiskAppliedV1]] = Field(
+        None,
+        description="One entry per risk node evaluated as an EVENT (event_risk.v1): its id, the "
+        "probability every figure reflects (the midpoint of the stated range) and the range. "
+        "Absent when the request carried no event_risk. A caller that sent event_risk and finds "
+        "no matching entry must fail closed: the risk was evaluated as an ordinary node.",
     )
 
     # Arch step 1 (2026-07-26): per-metric population provenance. `auto_noise_applied`
