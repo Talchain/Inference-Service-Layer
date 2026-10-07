@@ -134,6 +134,7 @@ from src.services.event_risk import (
     occurrence_value,
     resolve_event_risk_graph,
     resolve_event_risk_plans,
+    strip_occurrence_state,
     today_levels as event_risk_today_levels,
 )
 from src.utils.rng import SEED_HASH_VERSION, SeededRNG, compute_seed_from_graph
@@ -3153,7 +3154,11 @@ class RobustnessAnalyzerV2:
         # back when no node carries event_risk, so a legacy request is untouched.
         event_risk_graph = resolve_event_risk_graph(request.graph)
         if event_risk_graph is not request.graph:
-            request = request.model_copy(update={"graph": event_risk_graph})
+            # The seed is derived from the graph AS SENT (the route reports that seed), so pin it
+            # before the rewrite changes the hashed link strengths (Codex buddy r1 P2).
+            request = request.model_copy(
+                update={"graph": event_risk_graph, "seed": compute_effective_seed(request)[0]}
+            )
 
         # Fail closed on cyclic graphs on EVERY path. The V2-enhanced route
         # also blocks cycles pre-analysis via RequestValidator; this guard
@@ -3199,9 +3204,10 @@ class RobustnessAnalyzerV2:
         evaluator = SCMEvaluatorV2(
             request.graph, epsilon_rng=rng_epsilon, factor_centres=factor_centres(request)
         )
-        # event_risk.v1 (Science C-EVPI): the information arms (expected regret, the EVPI bound,
-        # factor EVPPI, the per-factor EVPI arms) read each event risk at its p-conditional
-        # expectation, never at whether it happened. Its epsilon stream is a replica of the main
+        # event_risk.v1 (Science C-EVPI): every per-draw choice made with perfect information
+        # (expected regret, the EVPI bound, and the EVPPI/EVPC population they share) reads each
+        # event risk at its p-conditional expectation, never at whether it happened. Nothing is
+        # ever thresholded on it (Q4). Its epsilon stream is a replica of the main
         # one, consumed in the same order, so both see identical noise. It is the SAME evaluator
         # when no event risk exists: a legacy request does exactly the work it did before.
         event_risk_plans = resolve_event_risk_plans(request.graph.nodes)
@@ -3789,7 +3795,7 @@ class RobustnessAnalyzerV2:
         # again by later analyses.
         goal_chance_draws = (
             goal_chance_quantities(
-                factor_values_per_sample,
+                strip_occurrence_state(factor_values_per_sample, event_risk_plans),
                 edge_configs_per_sample,
                 sampler.absent_edges_per_sample[
                     absent_record_start : absent_record_start + request.n_samples
@@ -4269,7 +4275,9 @@ class RobustnessAnalyzerV2:
                     request,
                     sampler,
                     factor_sampler,
-                    information_evaluator,
+                    # Realised, not p-conditional: these arms hold the policy FIXED and count goal
+                    # attainment / wins, which must never threshold a conditional mean (Q4).
+                    evaluator,
                     seed,
                     recommended_option_id,
                     budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),

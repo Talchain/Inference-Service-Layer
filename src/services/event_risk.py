@@ -114,10 +114,14 @@ def expected_occurrence(plan: EventRiskPlan, node_values: Mapping[str, float]) -
 # - "realised": occurs (1/0) iff z < L. Every outcome the user sees (P(goal), mean, downside,
 #   win share) is computed this way.
 # - "p_conditional": the draw's p-conditional EXPECTATION p * prod(1 - m x) = (p / p_mid) * L.
-#   Every perfect- or partial-information arm (expected regret, the whole-decision EVPI bound,
-#   factor EVPPI and the per-factor EVPI arms) reads the risk this way (Science C-EVPI). A choice
-#   may be credited with knowing which probability is true, never with knowing whether the event
-#   happens: no research can buy that.
+#   Every PER-DRAW CHOICE made with perfect information reads the risk this way (Science C-EVPI):
+#   expected regret and the whole-decision EVPI bound (min regret), and the factor EVPPI / EVPC
+#   regressions that share that population. A choice may be credited with knowing which
+#   probability is true, never with knowing whether the event happens: no research can buy that.
+#   It is NEVER thresholded (Science Q4): a goal chance or a constraint probability read off a
+#   conditional mean is wrong (0.50 instead of 0.90 at threshold 0.76; Codex buddy r1). So the
+#   per-factor EVPI arms, which hold the policy FIXED and count goal attainment or wins, read
+#   "realised".
 OccurrenceMode = Literal["realised", "p_conditional"]
 
 
@@ -153,6 +157,22 @@ def today_levels(plans: Mapping[str, EventRiskPlan]) -> Dict[str, float]:
     reference holds every event risk at 0. Otherwise the event would cancel out of the status quo
     and the figure would read as certain. Empty for every legacy request."""
     return {node_id: 0.0 for node_id in plans}
+
+
+def strip_occurrence_state(
+    factor_values_per_sample: List[Dict[str, float]], plans: Mapping[str, EventRiskPlan]
+) -> List[Dict[str, float]]:
+    """The per-draw factor values without the occurrence state (z and p). z and p are internal
+    draw state, not quantities a reader may attribute a goal chance to; a z "driver" would
+    describe a uniform draw, not the event (Codex buddy r1). Returns the SAME list when no
+    event risk exists (legacy requests are untouched)."""
+    if not plans:
+        return factor_values_per_sample
+    internal = set(plans) | {occurrence_p_key(node_id) for node_id in plans}
+    return [
+        {key: value for key, value in values.items() if key not in internal}
+        for values in factor_values_per_sample
+    ]
 
 
 def mitigation_edges(graph: GraphV2) -> set:
@@ -207,4 +227,5 @@ __all__ = [
     "today_levels",
     "resolve_event_risk_graph",
     "resolve_event_risk_plans",
+    "strip_occurrence_state",
 ]

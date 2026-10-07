@@ -779,6 +779,14 @@ class GraphV2(BaseModel):
                         f"EVENT_RISK_UNKNOWN_MITIGATION: event_risk on {node.id} names "
                         f"{factor_id}, which is not its parent"
                     )
+                if parents.get(factor_id):
+                    # A non-root preventer's option level is converted into a model-frame CHANGE
+                    # (SCMEvaluatorV2._in_model_frame), which the occurrence rule would misread as
+                    # its level (Codex buddy r1: 0.10 instead of 0.03).
+                    raise ValueError(
+                        f"EVENT_RISK_PREVENTER_NOT_ROOT: preventer {factor_id} of event risk "
+                        f"{node.id} has parents; in v1 a preventer is a root switch an option sets"
+                    )
                 if node_kinds[factor_id] in NON_INFERENCE_KINDS:
                     # A decision/option/constraint node is filtered before the evaluator, so the
                     # mitigation would silently never apply.
@@ -1608,11 +1616,25 @@ class RobustnessRequestV2(BaseModel):
                     f"EVENT_RISK_ROLE_REFUSED: option '{option.id}' sets event risk {node_id} "
                     "directly; an option mitigates it through a preventer the risk names"
                 )
+        preventer_ids = {
+            m.factor_id
+            for node in self.graph.nodes
+            if node.event_risk is not None
+            for m in node.event_risk.mitigations or []
+        }
         for uncertainty in self.parameter_uncertainties or []:
             if uncertainty.node_id in event_ids:
                 raise ValueError(
                     f"EVENT_RISK_ROLE_REFUSED: event risk {uncertainty.node_id} cannot carry a "
                     "parameter_uncertainty (its occurrence is the uncertainty)"
+                )
+            if uncertainty.node_id in preventer_ids:
+                # An uncertain switch makes the occurrence nonlinear in a sampled value, so the
+                # expected-occurrence central reading and the affine flip analysis would no
+                # longer be exact (Codex buddy r1). In v1 a preventer is set, never sampled.
+                raise ValueError(
+                    f"EVENT_RISK_ROLE_REFUSED: preventer {uncertainty.node_id} cannot carry a "
+                    "parameter_uncertainty; an option sets it"
                 )
         return self
 

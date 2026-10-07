@@ -577,3 +577,85 @@ class TestScienceConditions:
         precision = result.probability_of_goal_precision
         assert precision is not None
         assert precision.n_met / precision.n_informative == pytest.approx(result.probability_of_goal, abs=1e-12)
+
+
+# =============================================================================
+# Codex buddy r1 findings + Science Q9 conditions
+# =============================================================================
+
+
+def _with_uncertain_demand(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a non-lever uncertain factor so the EVPI / EVPPI phases run."""
+    body["graph"]["nodes"].append(
+        {"id": "demand", "kind": "factor", "label": "Demand", "observed_state": {"value": 0.5}}
+    )
+    body["graph"]["edges"].append(_edge("demand", "gross_profit", 0.1, std=0.05))
+    body["parameter_uncertainties"] = [{"node_id": "demand", "distribution": "normal", "std": 0.1}]
+    body["include_voi"] = True
+    return body
+
+
+class TestBuddyRoundOne:
+    def test_r1_occurrence_state_is_never_a_goal_chance_driver(self):
+        """z and p are internal draw state: no driver row may name them (a z row described a
+        uniform draw, P(goal | low z) = 0.70). Control: the uncertain demand factor IS a driver
+        candidate and the drivers block exists."""
+        response = _analyze(_with_uncertain_demand(supplier_request()))
+        for result in response.results:
+            drivers = result.probability_of_goal_drivers
+            assert drivers is not None
+            text = repr(drivers.model_dump())
+            assert "supplier_fails'" not in text and "supplier_fails@p" not in text, text[:600]
+
+    def test_r1_a_preventer_must_be_a_root_switch(self):
+        body = supplier_request()
+        body["graph"]["nodes"].append({"id": "audit", "kind": "factor", "label": "Supplier audit"})
+        body["graph"]["edges"].append(_edge("audit", "dual_sourcing", 0.5))
+        _refused(body, "EVENT_RISK_PREVENTER_NOT_ROOT")
+
+    def test_r1_a_preventer_carries_no_parameter_uncertainty(self):
+        body = supplier_request(
+            parameter_uncertainties=[{"node_id": "dual_sourcing", "distribution": "normal", "std": 0.1}]
+        )
+        _refused(body, "EVENT_RISK_ROLE_REFUSED")
+
+    def test_r1_fixed_policy_evpi_arms_read_realised_occurrence(self, monkeypatch):
+        """The per-factor EVPI arms hold the policy fixed and count goal attainment / wins, so
+        they must read the REALISED event (thresholding a conditional mean gave 0.50, not 0.90)."""
+        seen: List[str] = []
+        original = RobustnessAnalyzerV2._compute_evpi
+
+        def spy(self, request, sampler, factor_sampler, evaluator, *args, **kwargs):
+            seen.append(evaluator._occurrence_mode)
+            return original(self, request, sampler, factor_sampler, evaluator, *args, **kwargs)
+
+        monkeypatch.setattr(RobustnessAnalyzerV2, "_compute_evpi", spy)
+        _analyze(_with_uncertain_demand(supplier_request(n_samples=1000)))
+        assert seen == ["realised"]
+
+    def test_r1_server_seed_is_the_seed_of_the_graph_as_sent(self):
+        """Without a client seed, the streams use the seed of the graph AS SENT (the one the
+        route reports), not of the rewritten mitigation link."""
+        from src.services.robustness_analyzer_v2 import compute_effective_seed
+
+        body = supplier_request()
+        del body["seed"]
+        request = RobustnessRequestV2(**body)
+        response = RobustnessAnalyzerV2().analyze(request)
+        assert response.metadata.seed_used == compute_effective_seed(request)[0]
+
+
+class TestReferenceAtToday:
+    def test_q9a_the_reference_never_draws_the_event(self):
+        """Science Q9: the status-quo reference holds the event at today's level 0 for every
+        option, so no reference draw ever carries the failure (-0.40). Control: the status-quo
+        OPTION does carry it on about 10% of draws."""
+        request = RobustnessRequestV2(**supplier_request(n_samples=2000))
+        request._capture_draws = True
+        response = RobustnessAnalyzerV2().analyze(request)
+        draws = response._mc_draws
+        assert draws is not None
+        reference = draws["status_quo"]
+        assert reference and max(abs(v) for v in reference) < 0.01
+        failures = sum(1 for v in draws["option_outcomes"]["status_quo"] if v < -0.2)
+        assert 120 <= failures <= 280, failures
