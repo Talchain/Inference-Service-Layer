@@ -1,0 +1,316 @@
+{
+  "analysis_capability_after": [
+    "A per-option robustness statement for the £100k goal across the user's whole range (both readings).",
+    "A per-option churn-limit headroom across the range, including where it reaches zero.",
+    "The single churn-response threshold becomes a range-conditional band, checked on the evaluator.",
+    "Which limit gives way first as the price response rises, per base churn (per option, no ranking)."
+  ],
+  "analysis_capability_before": [
+    "Every churn-limit verdict and the 1.5 pp 'what would change this' threshold silently assume churn is exactly 3%; nothing could be said about how much room the limit has if it isn't.",
+    "The served Evidence card could only say: We can't tell from the current analysis whether checking Monthly churn or Paying subscribers would change the comparison.",
+    "Olumi could not honestly say whether its own churn guess could change any goal or limit verdict."
+  ],
+  "assumptions_to_interpret_it": [
+    "The range is read as two ends to test, not as a distribution: the R3-B analysis is a deterministic sweep (41 points, 0.05 pp apart) with no probability attached to any point.",
+    "The centre stays Olumi's 3%; only the ends come from the (hypothetical) user.",
+    "Everything else is held at the frozen case's values, including SCI-REGIONS' reference churn response (0.5 pp per +£10) and competitive response (£0/month), both exploratory research references.",
+    "Limits are inclusive: a value within 1e-9 of the limit is ON it and still meets '≤'.",
+    "Production-path control only: the engine needs a sigma, so width/4 and width/1.349 were both run and labelled as assumptions."
+  ],
+  "case_model_identity": {
+    "brief": "Given our goal of reaching £100k MRR within 12 months [Currently 75k] while keeping monthly churn under 4%, should we increase the Pro plan price from £49 to £59 per month with the next Pro feature release?",
+    "consumed_from": "ISL sci/regions-contrastive-vulnerability @ 68e8c887 (read-only)",
+    "evaluator": {
+      "commit": "fdb51e84a673993de7cddb85d5b963741941b80a",
+      "evaluator_sha256": "7082e94860d80ef4409aa7e4db7ebe9b9dd7ae3660d92db3faef200ff800cd13",
+      "frozen_files_all_match": true,
+      "graph_sha256": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+      "mapping_sha256": "235ef1db77ae8cdb816a203d49f06501c1f490d525c6219799c0a0211c96fc21"
+    },
+    "graph_id": "pj-20260927T180910Z-A",
+    "models": {
+      "primary": "X_net_reading (SCI-REGIONS' model)",
+      "secondary": "X_gross_reading"
+    },
+    "reference_point": {
+      "churn_response_pp_per_10gbp": 0.5,
+      "competitive_response_gbp_per_month": 0.0
+    }
+  },
+  "caveats": [
+    "The 2–4% range is a HYPOTHETICAL stand-in for what a user might supply; it is not evidence.",
+    "Model-relative results from a frozen research evaluator, not causal truth and not a forecast.",
+    "Only 3 of 6 options have levels; the other 3 are withheld (OPTION_LEVELS_MISSING) and nothing is said about them. No option is ranked.",
+    "The reference churn response (0.5 pp per +£10) and the competitive response (£0) are exploratory research references, not user figures.",
+    "Under reading N the goal does not depend on base churn at all (only a change in churn removes subscribers), so its goal robustness is structural in this model; reading G carries it through the flows.",
+    "Every link spread in this graph is Olumi's template; this experiment ranges only base churn.",
+    "Not served, not integrated, no human-comprehension test."
+  ],
+  "current_value": {
+    "unit": "percent per month",
+    "value": 3
+  },
+  "experiment": "SCI-EVIDENCE range elicitation v1 (experimental local payload, not a product contract)",
+  "experimental_supplied_range": {
+    "high": 4.0,
+    "label": "HYPOTHETICAL USER-SUPPLIED range, experimental control only: not evidence, not a claimed real-world distribution, not Olumi's estimate",
+    "low": 2.0,
+    "unit": "percent per month"
+  },
+  "newly_available_finding": {
+    "churn_response_threshold_band_pp_per_10gbp": {
+      "X_gross_reading": {
+        "2.0": 2.5,
+        "3.0": 1.5,
+        "4.0": 0.5
+      },
+      "X_net_reading": {
+        "2.0": 2.5,
+        "3.0": 1.5,
+        "4.0": 0.5
+      },
+      "reference_sits_on_threshold_at_high_end": true,
+      "reference_value": 0.5,
+      "subject_option": "59_with_feature_release"
+    },
+    "goal_crossing_on_churn_response_axis_pp_per_10gbp": {
+      "X_gross_reading": {
+        "2.0": 2.177051,
+        "3.0": 2.086491,
+        "4.0": 1.993094
+      },
+      "X_net_reading": {
+        "2.0": 2.349588,
+        "3.0": 2.349588,
+        "4.0": 2.349588
+      }
+    },
+    "goal_verdicts_stable_across_range": true,
+    "options_on_the_limit_at_high_end": [
+      "keep_current_pricing",
+      "59_with_feature_release"
+    ],
+    "per_option": {
+      "49_with_feature_release": {
+        "churn_limit_across_range": {
+          "base_churn_at_which_limit_is_reached_pct": 4.5,
+          "margin_at_olumi_point_pp": 1.5,
+          "on_the_limit_somewhere": false,
+          "satisfied_everywhere": true,
+          "smallest_margin_pp": 0.5
+        },
+        "goal_across_range": {
+          "X_gross_reading": {
+            "first_passage_gbp": [
+              101056.18498,
+              103988.203
+            ],
+            "invariant_to_base_churn": false,
+            "verdict_everywhere": "MET"
+          },
+          "X_net_reading": {
+            "first_passage_gbp": [
+              107337.676761,
+              107337.676761
+            ],
+            "invariant_to_base_churn": true,
+            "verdict_everywhere": "MET"
+          }
+        },
+        "label": "£49 with feature release"
+      },
+      "59_with_feature_release": {
+        "churn_limit_across_range": {
+          "base_churn_at_which_limit_is_reached_pct": 4.0,
+          "margin_at_olumi_point_pp": 1.0,
+          "on_the_limit_somewhere": true,
+          "satisfied_everywhere": true,
+          "smallest_margin_pp": 0.0
+        },
+        "goal_across_range": {
+          "X_gross_reading": {
+            "first_passage_gbp": [
+              111278.257087,
+              113991.140762
+            ],
+            "invariant_to_base_churn": false,
+            "verdict_everywhere": "MET"
+          },
+          "X_net_reading": {
+            "first_passage_gbp": [
+              117090.0,
+              117090.0
+            ],
+            "invariant_to_base_churn": true,
+            "verdict_everywhere": "MET"
+          }
+        },
+        "label": "£59 with feature release"
+      },
+      "keep_current_pricing": {
+        "churn_limit_across_range": {
+          "base_churn_at_which_limit_is_reached_pct": 4.0,
+          "margin_at_olumi_point_pp": 1.0,
+          "on_the_limit_somewhere": true,
+          "satisfied_everywhere": true,
+          "smallest_margin_pp": 0.0
+        },
+        "goal_across_range": {
+          "X_gross_reading": {
+            "first_passage_gbp": [
+              93977.221891,
+              96097.761074
+            ],
+            "invariant_to_base_churn": false,
+            "verdict_everywhere": "MISSED"
+          },
+          "X_net_reading": {
+            "first_passage_gbp": [
+              98520.0,
+              98520.0
+            ],
+            "invariant_to_base_churn": true,
+            "verdict_everywhere": "MISSED"
+          }
+        },
+        "label": "Keep current pricing"
+      }
+    },
+    "what_gives_way_first_as_churn_response_rises": {
+      "X_gross_reading": {
+        "2.0": "goal",
+        "3.0": "churn limit",
+        "4.0": "churn limit"
+      },
+      "X_net_reading": {
+        "2.0": "goal",
+        "3.0": "churn limit",
+        "4.0": "churn limit"
+      }
+    },
+    "withheld_options": {
+      "40bb45e7": "OPTION_LEVELS_MISSING",
+      "625ec80a": "OPTION_LEVELS_MISSING",
+      "d1ca58d4": "OPTION_LEVELS_MISSING"
+    }
+  },
+  "production_path_control": {
+    "after_user_spread": [
+      {
+        "distribution": "normal",
+        "node_id": "monthly_churn",
+        "spread_source": "user",
+        "std": 0.005
+      },
+      {
+        "distribution": "normal",
+        "node_id": "monthly_churn",
+        "spread_source": "user",
+        "std": 0.014825796886582655
+      }
+    ],
+    "case": "Paul's current MRR graph (A-graph) on served ISL f7f19e3, exact PLoT request, seed 1254899477",
+    "churn_as_sent_today": {
+      "distribution": "normal",
+      "node_id": "monthly_churn",
+      "std": 0.1
+    },
+    "churn_limit_prob_satisfied_all_variants": [
+      1.0
+    ],
+    "evidence_card_after_user_range": [
+      "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison."
+    ],
+    "evidence_card_before": [
+      "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison."
+    ],
+    "evidence_card_if_plot_labelled_its_default": [
+      "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison.",
+      "Olumi's range for ‘Monthly churn’ is a default width, not one from your evidence."
+    ],
+    "factor_importance_order_before_after": {
+      "after": [
+        "pro_paying_subscribers",
+        "non_pro_mrr",
+        "monthly_new_pro_subscribers",
+        "monthly_churn",
+        "pro_plan_price"
+      ],
+      "before": [
+        "pro_paying_subscribers",
+        "non_pro_mrr",
+        "monthly_churn",
+        "monthly_new_pro_subscribers",
+        "pro_plan_price"
+      ],
+      "note": "Churn and Monthly new Pro subscribers have equal |elasticity| to about 15 significant figures in every variant, so ranks 3 and 4 swap on float noise. It is a tie, not a change in meaning; a consumer that shows this order would show the swap."
+    },
+    "finding": "Today's product path cannot deliver this interaction for a shared observable: a user spread on churn leaves every per-option goal, limit and MRR figure identical (other changes are float noise, plus a tie-driven swap of two factor-importance ranks), the churn-limit chance stays 1.0 because the limit is scored as the option's change against Olumi's held 3% (so it also silently assumes 3%), and the Evidence card's words do not change. The only visible difference available today is the adapter's 'default width' line, and only if PLoT labelled its own synthesised spread (it does not).",
+    "largest_change_in_changed_blocks": {
+      "decision_evpi": {
+        "abs": 6.78e-20,
+        "non_numeric_differences": 0,
+        "rel": 9.3e-16
+      },
+      "factor_evppi": {
+        "abs": 0.000225,
+        "non_numeric_differences": 1,
+        "rel": 0.000911
+      },
+      "factor_sensitivity": {
+        "abs": 1.0,
+        "non_numeric_differences": 8,
+        "rel": 2.0
+      },
+      "options": {
+        "abs": 1.73e-18,
+        "non_numeric_differences": 0,
+        "rel": 9.3e-16
+      },
+      "robustness": {
+        "abs": 0.00054,
+        "non_numeric_differences": 0,
+        "rel": 0.000912
+      }
+    },
+    "per_option_goal_limit_and_mrr_figures_unchanged": true,
+    "reproduced_pinned_served_response": true
+  },
+  "provenance": {
+    "author": "Olumi",
+    "extractionType": "inferred",
+    "note": "Never the user's figure; the brief states only the 4% limit",
+    "observed_state.source": "cee_inference"
+  },
+  "quantity": {
+    "id": "monthly_churn",
+    "label": "Monthly churn (today, before any price change)",
+    "on_paths": [
+      "hard limit: monthly churn ≤ 4% every month",
+      "goal: MRR ≥ £100k by month 12"
+    ]
+  },
+  "requested_range_or_evidence": {
+    "not_asked": "a probability distribution, a confidence level, or a most-likely value",
+    "or": "Any recent figure you trust for monthly churn (e.g. last quarter's), with where it comes from.",
+    "question": "What would you consider a plausible low-to-high range for your monthly churn today, before any price change? A rough 'somewhere between X% and Y%' is enough."
+  },
+  "uncertainty_status_before": "Olumi point estimate only: no range, no std, no user or evidence bound",
+  "user_facing_explanation": [
+    "Under the current model, the £100k goal verdict of every option Olumi can compute stays the same anywhere in your 2–4% range: £49 with feature release and £59 with feature release reach it, Keep current pricing does not.",
+    "£59 with feature release stays within your 4% churn limit across the whole range, but at 4% it sits exactly on the limit with no room to spare (at Olumi's 3% it had 1 point).",
+    "The earlier 'what would change this' point, 1.5 points of extra churn per £10, assumed 3%. Across your range it runs from 2.5 (at 2%) to 0.5 (at 4%), and 0.5 is the model's own working guess for that response.",
+    "So how churn responds to the £10 rise is the check that could change this, and it matters most if today's churn is near the top of your range."
+  ],
+  "verdict": {
+    "basis": {
+      "new_robustness_claim": true,
+      "product_path_can_deliver_today": false,
+      "reference_reaches_threshold_inside_range": true,
+      "threshold_becomes_range_conditional": true,
+      "what_gives_way_first_changes_inside_range": true
+    },
+    "decision": "KEEP",
+    "rule": "KEEP only if the range licenses a new per-option threshold/robustness claim or reveals a crossing the point estimate could not support; otherwise KILL (Science 5911560060)."
+  }
+}

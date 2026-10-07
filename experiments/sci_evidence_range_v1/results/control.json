@@ -1,0 +1,385 @@
+{
+  "churn_uncertainty_as_sent": {
+    "distribution": "normal",
+    "node_id": "monthly_churn",
+    "std": 0.1
+  },
+  "distribution_assumption": "ONLY here: the production engine samples Normal(3 %, sigma). sigma = width/4 (CEE's existing range rule) and width/1.349 (ISL range-fit IQR reading) are both run. Neither is the meaning of the user's range.",
+  "engine": "this checkout's src/ (ISL f7f19e3, the served head), route /api/v1/robustness/analyze/v2",
+  "graph": "A-graph (Paul's current MRR brief, served m0 graph)",
+  "pinned_request_sha256": "76bf9dd8acb83f5355ca931a046646a27f6cb78dffd716c7e9ff8d51f227752e",
+  "reproduction_of_pinned_served_response": {
+    "all_science_fields_equal": true,
+    "fields": {
+      "analysis_status": true,
+      "auto_noise_applied": true,
+      "critiques": true,
+      "decision_evpi": true,
+      "endpoint_version": true,
+      "engine_version": true,
+      "factor_evppi": true,
+      "factor_flip_values": true,
+      "factor_sensitivity": true,
+      "factor_sensitivity_status": true,
+      "inference_warnings": true,
+      "node_levels": true,
+      "objective_ranking": true,
+      "options": true,
+      "p_win_sensitivity": true,
+      "robustness": true,
+      "robustness_status": true,
+      "sample_population_provenance": true,
+      "seed_source": true,
+      "seed_used": true,
+      "sensitivity_reference_option_id": true,
+      "stability_thresholds": true,
+      "structural_influence": true,
+      "version": true
+    }
+  },
+  "variants": {
+    "after_user_range_sd_width_over_1_349": {
+      "churn_uncertainty_sent": {
+        "distribution": "normal",
+        "node_id": "monthly_churn",
+        "spread_source": "user",
+        "std": 0.014825796886582655
+      },
+      "largest_numeric_change_by_block": {
+        "decision_evpi": {
+          "abs": 8.13e-20,
+          "non_numeric_differences": 0,
+          "rel": 1.12e-15
+        },
+        "factor_evppi": {
+          "abs": 0.000202,
+          "non_numeric_differences": 3,
+          "rel": 0.000818
+        },
+        "factor_sensitivity": {
+          "abs": 0.000398,
+          "non_numeric_differences": 0,
+          "rel": 0.000818
+        },
+        "options": {
+          "abs": 8.13e-20,
+          "non_numeric_differences": 0,
+          "rel": 1.12e-15
+        },
+        "robustness": {
+          "abs": 0.000484,
+          "non_numeric_differences": 0,
+          "rel": 0.000817
+        }
+      },
+      "per_option_summary_identical_to_before": true,
+      "science_sha256": "ccecbc12a8f5c6be823937ceccc31bf1b329cc4b0881a9470471a908bd6839f2",
+      "summary": {
+        "abs_elasticity_by_factor": {
+          "monthly_churn": 0.0116653045698004,
+          "monthly_new_pro_subscribers": 0.0116653045698003,
+          "non_pro_mrr": 0.0457462924305895,
+          "pro_paying_subscribers": 0.486054357074993,
+          "pro_plan_price": 0.0
+        },
+        "churn_factor_evppi": {
+          "evppi": 0.0,
+          "noise_floor": 0.0,
+          "spread_source": "user",
+          "status": "below_resolution",
+          "status_reason": "at_or_below_noise_floor"
+        },
+        "churn_factor_sensitivity": {
+          "elasticity": -0.011665304569800392,
+          "importance_rank": 3,
+          "interpretation": "Decision is robust to Monthly churn value variation",
+          "rank_flip_rate": 0.0,
+          "sensitivity_score": 0.024000000000001145
+        },
+        "churn_flip": {
+          "status": "no row for monthly_churn"
+        },
+        "factor_importance_order": [
+          "pro_paying_subscribers",
+          "non_pro_mrr",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "inference_warning_codes": [
+          "GOAL_DIRECTION_UNATTESTED"
+        ],
+        "per_option": {
+          "keep_49_price": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              75000.0,
+              75000.0
+            ],
+            "probability_of_goal": 0.0
+          },
+          "raise_to_59": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              77410.289033,
+              78370.018619
+            ],
+            "probability_of_goal": 0.0
+          }
+        }
+      },
+      "top_level_blocks_changed_vs_before": [
+        "decision_evpi",
+        "factor_evppi",
+        "factor_sensitivity",
+        "options",
+        "robustness"
+      ]
+    },
+    "after_user_range_sd_width_over_4": {
+      "churn_uncertainty_sent": {
+        "distribution": "normal",
+        "node_id": "monthly_churn",
+        "spread_source": "user",
+        "std": 0.005
+      },
+      "largest_numeric_change_by_block": {
+        "decision_evpi": {
+          "abs": 6.78e-20,
+          "non_numeric_differences": 0,
+          "rel": 9.3e-16
+        },
+        "factor_evppi": {
+          "abs": 0.000225,
+          "non_numeric_differences": 1,
+          "rel": 0.000911
+        },
+        "factor_sensitivity": {
+          "abs": 1.0,
+          "non_numeric_differences": 8,
+          "rel": 2.0
+        },
+        "options": {
+          "abs": 1.73e-18,
+          "non_numeric_differences": 0,
+          "rel": 9.3e-16
+        },
+        "robustness": {
+          "abs": 0.00054,
+          "non_numeric_differences": 0,
+          "rel": 0.000912
+        }
+      },
+      "per_option_summary_identical_to_before": true,
+      "science_sha256": "b44074887d38f7210c9b603b21466d9884bb29beddce7205664ec027f5a58545",
+      "summary": {
+        "abs_elasticity_by_factor": {
+          "monthly_churn": 0.0116642047650939,
+          "monthly_new_pro_subscribers": 0.011664204765094,
+          "non_pro_mrr": 0.045741979470957,
+          "pro_paying_subscribers": 0.486008531878898,
+          "pro_plan_price": 0.0
+        },
+        "churn_factor_evppi": {
+          "evppi": 0.0,
+          "noise_floor": 0.0,
+          "spread_source": "user",
+          "status": "below_resolution",
+          "status_reason": "at_or_below_noise_floor"
+        },
+        "churn_factor_sensitivity": {
+          "elasticity": -0.0116642047650939,
+          "importance_rank": 4,
+          "interpretation": "Decision is robust to Monthly churn value variation",
+          "rank_flip_rate": 0.05,
+          "sensitivity_score": 0.024000000000000694
+        },
+        "churn_flip": {
+          "status": "no row for monthly_churn"
+        },
+        "factor_importance_order": [
+          "pro_paying_subscribers",
+          "non_pro_mrr",
+          "monthly_new_pro_subscribers",
+          "monthly_churn",
+          "pro_plan_price"
+        ],
+        "inference_warning_codes": [
+          "GOAL_DIRECTION_UNATTESTED"
+        ],
+        "per_option": {
+          "keep_49_price": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              75000.0,
+              75000.0
+            ],
+            "probability_of_goal": 0.0
+          },
+          "raise_to_59": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              77410.289033,
+              78370.018619
+            ],
+            "probability_of_goal": 0.0
+          }
+        }
+      },
+      "top_level_blocks_changed_vs_before": [
+        "decision_evpi",
+        "factor_evppi",
+        "factor_sensitivity",
+        "options",
+        "robustness"
+      ]
+    },
+    "before_as_sent": {
+      "churn_uncertainty_sent": {
+        "distribution": "normal",
+        "node_id": "monthly_churn",
+        "std": 0.1
+      },
+      "largest_numeric_change_by_block": {},
+      "per_option_summary_identical_to_before": true,
+      "science_sha256": "6a8e8095ac34995814cec2db3ae22999f294bf61eed23b05da1107a7653c5f57",
+      "summary": {
+        "abs_elasticity_by_factor": {
+          "monthly_churn": 0.0116748468447774,
+          "monthly_new_pro_subscribers": 0.0116748468447774,
+          "non_pro_mrr": 0.0457837131167742,
+          "pro_paying_subscribers": 0.486451951865706,
+          "pro_plan_price": 0.0
+        },
+        "churn_factor_evppi": {
+          "evppi": 0.0,
+          "noise_floor": 0.0,
+          "spread_source": null,
+          "status": "below_resolution",
+          "status_reason": "at_or_below_noise_floor"
+        },
+        "churn_factor_sensitivity": {
+          "elasticity": -0.011674846844777423,
+          "importance_rank": 3,
+          "interpretation": "Decision is robust to Monthly churn value variation",
+          "rank_flip_rate": 0.0,
+          "sensitivity_score": 0.02400000000000097
+        },
+        "churn_flip": {
+          "status": "no row for monthly_churn"
+        },
+        "factor_importance_order": [
+          "pro_paying_subscribers",
+          "non_pro_mrr",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "inference_warning_codes": [
+          "GOAL_DIRECTION_UNATTESTED"
+        ],
+        "per_option": {
+          "keep_49_price": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              75000.0,
+              75000.0
+            ],
+            "probability_of_goal": 0.0
+          },
+          "raise_to_59": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              77410.289033,
+              78370.018619
+            ],
+            "probability_of_goal": 0.0
+          }
+        }
+      },
+      "top_level_blocks_changed_vs_before": []
+    },
+    "before_same_default_labelled_template": {
+      "churn_uncertainty_sent": {
+        "distribution": "normal",
+        "node_id": "monthly_churn",
+        "spread_source": "template",
+        "std": 0.1
+      },
+      "largest_numeric_change_by_block": {
+        "factor_evppi": {
+          "abs": 0.0,
+          "non_numeric_differences": 1,
+          "rel": 0.0
+        }
+      },
+      "per_option_summary_identical_to_before": true,
+      "science_sha256": "09a01f4203a198bc407f8a1555310f307e61b68c9fbb89ea7d6c346d0f3f79bf",
+      "summary": {
+        "abs_elasticity_by_factor": {
+          "monthly_churn": 0.0116748468447774,
+          "monthly_new_pro_subscribers": 0.0116748468447774,
+          "non_pro_mrr": 0.0457837131167742,
+          "pro_paying_subscribers": 0.486451951865706,
+          "pro_plan_price": 0.0
+        },
+        "churn_factor_evppi": {
+          "evppi": 0.0,
+          "noise_floor": 0.0,
+          "spread_source": "template",
+          "status": "below_resolution",
+          "status_reason": "at_or_below_noise_floor"
+        },
+        "churn_factor_sensitivity": {
+          "elasticity": -0.011674846844777423,
+          "importance_rank": 3,
+          "interpretation": "Decision is robust to Monthly churn value variation",
+          "rank_flip_rate": 0.0,
+          "sensitivity_score": 0.02400000000000097
+        },
+        "churn_flip": {
+          "status": "no row for monthly_churn"
+        },
+        "factor_importance_order": [
+          "pro_paying_subscribers",
+          "non_pro_mrr",
+          "monthly_churn",
+          "monthly_new_pro_subscribers",
+          "pro_plan_price"
+        ],
+        "inference_warning_codes": [
+          "GOAL_DIRECTION_UNATTESTED"
+        ],
+        "per_option": {
+          "keep_49_price": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              75000.0,
+              75000.0
+            ],
+            "probability_of_goal": 0.0
+          },
+          "raise_to_59": {
+            "churn_limit_prob_satisfied": 1.0,
+            "mrr_p10_p50_p90_gbp": [
+              75000.0,
+              77410.289033,
+              78370.018619
+            ],
+            "probability_of_goal": 0.0
+          }
+        }
+      },
+      "top_level_blocks_changed_vs_before": [
+        "factor_evppi"
+      ]
+    }
+  }
+}

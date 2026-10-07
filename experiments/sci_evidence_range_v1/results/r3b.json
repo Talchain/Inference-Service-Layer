@@ -1,0 +1,4333 @@
+{
+  "constraints_as_stated": [
+    {
+      "constraint_id": "agent-lane:monthly_churn:<=",
+      "label": "Monthly churn",
+      "node_id": "monthly_churn",
+      "operator": "<=",
+      "provenance": "explicit",
+      "provenance_unit_relabelled": {
+        "pre_normalisation_unit": "percent per month",
+        "pre_normalisation_value": 4,
+        "rule": "agent_lane_limit_unit_v1"
+      },
+      "unit": "%",
+      "value": 4,
+      "value_frame": "level"
+    }
+  ],
+  "models": {
+    "X_gross_reading": {
+      "computable_options": [
+        "keep_current_pricing",
+        "59_with_feature_release",
+        "49_with_feature_release"
+      ],
+      "control_regions_threshold_reproduced": true,
+      "control_reheld_at_3pct_equals_frozen": true,
+      "goal": {
+        "operator": ">=",
+        "rule": "FIRST_PASSAGE_BY_MONTH_12",
+        "value_gbp": 100000.0
+      },
+      "identity": {
+        "commit": "fdb51e84a673993de7cddb85d5b963741941b80a",
+        "corpus_files_all_match": true,
+        "evaluator_sha256": "7082e94860d80ef4409aa7e4db7ebe9b9dd7ae3660d92db3faef200ff800cd13",
+        "frozen_files_all_match": true,
+        "graph_sha256": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+        "mapping_sha256": "235ef1db77ae8cdb816a203d49f06501c1f490d525c6219799c0a0211c96fc21"
+      },
+      "limit": {
+        "id": "agent-lane:monthly_churn:<=",
+        "operator": "<=",
+        "value_pct": 4.0
+      },
+      "per_option": {
+        "40bb45e7": {
+          "label": "£59 for new Pro customers; grandfather existing customers",
+          "note": "no levels: nothing about this option is claimed, before or after the range",
+          "status": "WITHHELD",
+          "withheld_reason": "OPTION_LEVELS_MISSING"
+        },
+        "49_with_feature_release": {
+          "across_range_at_reference": {
+            "goal_first_passage_gbp_max": 103988.203,
+            "goal_first_passage_gbp_min": 101056.18498,
+            "goal_invariant_to_base_churn": false,
+            "goal_missed_everywhere": false,
+            "goal_satisfied_everywhere": true,
+            "goal_verdicts_seen": [
+              "MET"
+            ],
+            "limit_satisfied_everywhere": true,
+            "limit_verdicts_seen": [
+              "MET"
+            ],
+            "min_limit_margin_pp": 0.5
+          },
+          "at_olumi_point_3pct": {
+            "churn_pct": 2.5,
+            "goal_first_passage_max_mrr_gbp": 102473.493457,
+            "goal_margin_gbp": 2473.493457,
+            "goal_verdict": "MET",
+            "limit_margin_pp": 1.5,
+            "limit_verdict": "MET",
+            "status": "COMPUTED"
+          },
+          "base_churn_limit_crossing_at_reference": {
+            "at": 4.5,
+            "evaluator_at_crossing": 4.0,
+            "evaluator_just_above": 4.000001,
+            "slope": 1.0,
+            "status": "COMPUTED"
+          },
+          "churn_response_limit_threshold_by_base_churn": {
+            "2.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "3.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "4.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            }
+          },
+          "goal_crossing_on_churn_response_axis_by_base_churn": {
+            "2.0": {
+              "goal_met_everywhere": true,
+              "min_margin_gbp": 3988.203,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "3.0": {
+              "goal_met_everywhere": true,
+              "min_margin_gbp": 2473.493457,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "4.0": {
+              "goal_met_everywhere": true,
+              "min_margin_gbp": 1056.18498,
+              "status": "NO_CROSSING_ON_AXIS"
+            }
+          },
+          "label": "£49 with feature release"
+        },
+        "59_with_feature_release": {
+          "across_range_at_reference": {
+            "goal_first_passage_gbp_max": 113991.140762,
+            "goal_first_passage_gbp_min": 111278.257087,
+            "goal_invariant_to_base_churn": false,
+            "goal_missed_everywhere": false,
+            "goal_satisfied_everywhere": true,
+            "goal_verdicts_seen": [
+              "MET"
+            ],
+            "limit_satisfied_everywhere": true,
+            "limit_verdicts_seen": [
+              "MET",
+              "ON_THRESHOLD"
+            ],
+            "min_limit_margin_pp": 0.0
+          },
+          "at_olumi_point_3pct": {
+            "churn_pct": 3.0,
+            "goal_first_passage_max_mrr_gbp": 112589.675993,
+            "goal_margin_gbp": 12589.675993,
+            "goal_verdict": "MET",
+            "limit_margin_pp": 1.0,
+            "limit_verdict": "MET",
+            "status": "COMPUTED"
+          },
+          "base_churn_limit_crossing_at_reference": {
+            "at": 4.0,
+            "evaluator_at_crossing": 4.0,
+            "evaluator_just_above": 4.000001,
+            "slope": 1.0,
+            "status": "COMPUTED"
+          },
+          "churn_response_limit_threshold_by_base_churn": {
+            "2.0": {
+              "at": 2.5,
+              "evaluator_at_crossing": 4.0,
+              "evaluator_just_above": 4.000001,
+              "slope": 1.0,
+              "status": "COMPUTED"
+            },
+            "3.0": {
+              "at": 1.5,
+              "evaluator_at_crossing": 4.0,
+              "evaluator_just_above": 4.000001,
+              "slope": 1.0,
+              "status": "COMPUTED"
+            },
+            "4.0": {
+              "at": 0.5,
+              "evaluator_at_crossing": 4.0,
+              "evaluator_just_above": 4.000001,
+              "slope": 1.0,
+              "status": "COMPUTED"
+            }
+          },
+          "goal_crossing_on_churn_response_axis_by_base_churn": {
+            "2.0": {
+              "bisected_at": 2.177051,
+              "bracket": [
+                2.125,
+                2.23125
+              ],
+              "met_below": true,
+              "n_crossings_on_grid": 1,
+              "status": "BRACKETED"
+            },
+            "3.0": {
+              "bisected_at": 2.086491,
+              "bracket": [
+                2.01875,
+                2.125
+              ],
+              "met_below": true,
+              "n_crossings_on_grid": 1,
+              "status": "BRACKETED"
+            },
+            "4.0": {
+              "bisected_at": 1.993094,
+              "bracket": [
+                1.9125,
+                2.01875
+              ],
+              "met_below": true,
+              "n_crossings_on_grid": 1,
+              "status": "BRACKETED"
+            }
+          },
+          "label": "£59 with feature release"
+        },
+        "625ec80a": {
+          "label": "Improve trial-to-Pro conversion",
+          "note": "no levels: nothing about this option is claimed, before or after the range",
+          "status": "WITHHELD",
+          "withheld_reason": "OPTION_LEVELS_MISSING"
+        },
+        "d1ca58d4": {
+          "label": "Retention intervention for at-risk accounts",
+          "note": "no levels: nothing about this option is claimed, before or after the range",
+          "status": "WITHHELD",
+          "withheld_reason": "OPTION_LEVELS_MISSING"
+        },
+        "keep_current_pricing": {
+          "across_range_at_reference": {
+            "goal_first_passage_gbp_max": 96097.761074,
+            "goal_first_passage_gbp_min": 93977.221891,
+            "goal_invariant_to_base_churn": false,
+            "goal_missed_everywhere": true,
+            "goal_satisfied_everywhere": false,
+            "goal_verdicts_seen": [
+              "MISSED"
+            ],
+            "limit_satisfied_everywhere": true,
+            "limit_verdicts_seen": [
+              "MET",
+              "ON_THRESHOLD"
+            ],
+            "min_limit_margin_pp": 0.0
+          },
+          "at_olumi_point_3pct": {
+            "churn_pct": 3.0,
+            "goal_first_passage_max_mrr_gbp": 95002.299082,
+            "goal_margin_gbp": -4997.700918,
+            "goal_verdict": "MISSED",
+            "limit_margin_pp": 1.0,
+            "limit_verdict": "MET",
+            "status": "COMPUTED"
+          },
+          "base_churn_limit_crossing_at_reference": {
+            "at": 4.0,
+            "evaluator_at_crossing": 4.0,
+            "evaluator_just_above": 4.000001,
+            "slope": 1.0,
+            "status": "COMPUTED"
+          },
+          "churn_response_limit_threshold_by_base_churn": {
+            "2.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "3.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "4.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            }
+          },
+          "goal_crossing_on_churn_response_axis_by_base_churn": {
+            "2.0": {
+              "goal_met_everywhere": false,
+              "min_margin_gbp": -3902.238926,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "3.0": {
+              "goal_met_everywhere": false,
+              "min_margin_gbp": -4997.700918,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "4.0": {
+              "goal_met_everywhere": false,
+              "min_margin_gbp": -6022.778109,
+              "status": "NO_CROSSING_ON_AXIS"
+            }
+          },
+          "label": "Keep current pricing"
+        }
+      },
+      "structure_note": "flows: gross additions = held net + held churn x held subscribers; churn_out = option churn x current stock (derived_gross, rate_x_stock). Base churn enters both the MRR path and the churn limit.",
+      "sweep": [
+        {
+          "base_churn_pct": 2.0,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.5,
+              "goal_first_passage_max_mrr_gbp": 103988.203,
+              "goal_margin_gbp": 3988.203,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.0,
+              "goal_first_passage_max_mrr_gbp": 113991.140762,
+              "goal_margin_gbp": 13991.140762,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.0,
+              "goal_first_passage_max_mrr_gbp": 96097.761074,
+              "goal_margin_gbp": -3902.238926,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 2.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.05,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.55,
+              "goal_first_passage_max_mrr_gbp": 103910.050325,
+              "goal_margin_gbp": 3910.050325,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.05,
+              "goal_first_passage_max_mrr_gbp": 113918.832706,
+              "goal_margin_gbp": 13918.832706,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.05,
+              "goal_first_passage_max_mrr_gbp": 96041.241118,
+              "goal_margin_gbp": -3958.758882,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.1,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.6,
+              "goal_first_passage_max_mrr_gbp": 103832.157299,
+              "goal_margin_gbp": 3832.157299,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.1,
+              "goal_first_passage_max_mrr_gbp": 113846.764714,
+              "goal_margin_gbp": 13846.764714,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.1,
+              "goal_first_passage_max_mrr_gbp": 95984.908809,
+              "goal_margin_gbp": -4015.091191,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.15,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.65,
+              "goal_first_passage_max_mrr_gbp": 103754.523039,
+              "goal_margin_gbp": 3754.523039,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.15,
+              "goal_first_passage_max_mrr_gbp": 113774.935973,
+              "goal_margin_gbp": 13774.935973,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.15,
+              "goal_first_passage_max_mrr_gbp": 95928.763512,
+              "goal_margin_gbp": -4071.236488,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.2,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.7,
+              "goal_first_passage_max_mrr_gbp": 103677.146671,
+              "goal_margin_gbp": 3677.146671,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.2,
+              "goal_first_passage_max_mrr_gbp": 113703.345669,
+              "goal_margin_gbp": 13703.345669,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.2,
+              "goal_first_passage_max_mrr_gbp": 95872.804591,
+              "goal_margin_gbp": -4127.195409,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.25,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.75,
+              "goal_first_passage_max_mrr_gbp": 103600.027321,
+              "goal_margin_gbp": 3600.027321,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.25,
+              "goal_first_passage_max_mrr_gbp": 113631.992995,
+              "goal_margin_gbp": 13631.992995,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.25,
+              "goal_first_passage_max_mrr_gbp": 95817.031413,
+              "goal_margin_gbp": -4182.968587,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.3,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.8,
+              "goal_first_passage_max_mrr_gbp": 103523.164116,
+              "goal_margin_gbp": 3523.164116,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.3,
+              "goal_first_passage_max_mrr_gbp": 113560.877142,
+              "goal_margin_gbp": 13560.877142,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.3,
+              "goal_first_passage_max_mrr_gbp": 95761.443349,
+              "goal_margin_gbp": -4238.556651,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.35,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.85,
+              "goal_first_passage_max_mrr_gbp": 103446.556189,
+              "goal_margin_gbp": 3446.556189,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.35,
+              "goal_first_passage_max_mrr_gbp": 113489.997308,
+              "goal_margin_gbp": 13489.997308,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.35,
+              "goal_first_passage_max_mrr_gbp": 95706.03977,
+              "goal_margin_gbp": -4293.96023,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.4,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.9,
+              "goal_first_passage_max_mrr_gbp": 103370.202675,
+              "goal_margin_gbp": 3370.202675,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.4,
+              "goal_first_passage_max_mrr_gbp": 113419.352691,
+              "goal_margin_gbp": 13419.352691,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.4,
+              "goal_first_passage_max_mrr_gbp": 95650.820049,
+              "goal_margin_gbp": -4349.179951,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.45,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.95,
+              "goal_first_passage_max_mrr_gbp": 103294.102711,
+              "goal_margin_gbp": 3294.102711,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.45,
+              "goal_first_passage_max_mrr_gbp": 113348.942491,
+              "goal_margin_gbp": 13348.942491,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.45,
+              "goal_first_passage_max_mrr_gbp": 95595.783562,
+              "goal_margin_gbp": -4404.216438,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.5,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.0,
+              "goal_first_passage_max_mrr_gbp": 103218.255436,
+              "goal_margin_gbp": 3218.255436,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.5,
+              "goal_first_passage_max_mrr_gbp": 113278.765914,
+              "goal_margin_gbp": 13278.765914,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.5,
+              "goal_first_passage_max_mrr_gbp": 95540.929687,
+              "goal_margin_gbp": -4459.070313,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.55,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.05,
+              "goal_first_passage_max_mrr_gbp": 103142.659995,
+              "goal_margin_gbp": 3142.659995,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.55,
+              "goal_first_passage_max_mrr_gbp": 113208.822164,
+              "goal_margin_gbp": 13208.822164,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.55,
+              "goal_first_passage_max_mrr_gbp": 95486.257803,
+              "goal_margin_gbp": -4513.742197,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.6,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.1,
+              "goal_first_passage_max_mrr_gbp": 103067.315533,
+              "goal_margin_gbp": 3067.315533,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.6,
+              "goal_first_passage_max_mrr_gbp": 113139.110451,
+              "goal_margin_gbp": 13139.110451,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.6,
+              "goal_first_passage_max_mrr_gbp": 95431.767292,
+              "goal_margin_gbp": -4568.232708,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.65,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.15,
+              "goal_first_passage_max_mrr_gbp": 102992.221197,
+              "goal_margin_gbp": 2992.221197,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.65,
+              "goal_first_passage_max_mrr_gbp": 113069.629987,
+              "goal_margin_gbp": 13069.629987,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.65,
+              "goal_first_passage_max_mrr_gbp": 95377.457537,
+              "goal_margin_gbp": -4622.542463,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.7,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.2,
+              "goal_first_passage_max_mrr_gbp": 102917.37614,
+              "goal_margin_gbp": 2917.37614,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.7,
+              "goal_first_passage_max_mrr_gbp": 113000.379985,
+              "goal_margin_gbp": 13000.379985,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.7,
+              "goal_first_passage_max_mrr_gbp": 95323.327925,
+              "goal_margin_gbp": -4676.672075,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.75,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.25,
+              "goal_first_passage_max_mrr_gbp": 102842.779516,
+              "goal_margin_gbp": 2842.779516,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.75,
+              "goal_first_passage_max_mrr_gbp": 112931.359663,
+              "goal_margin_gbp": 12931.359663,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.75,
+              "goal_first_passage_max_mrr_gbp": 95269.377842,
+              "goal_margin_gbp": -4730.622158,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.8,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.3,
+              "goal_first_passage_max_mrr_gbp": 102768.43048,
+              "goal_margin_gbp": 2768.43048,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.8,
+              "goal_first_passage_max_mrr_gbp": 112862.568238,
+              "goal_margin_gbp": 12862.568238,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.8,
+              "goal_first_passage_max_mrr_gbp": 95215.606679,
+              "goal_margin_gbp": -4784.393321,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.85,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.35,
+              "goal_first_passage_max_mrr_gbp": 102694.328193,
+              "goal_margin_gbp": 2694.328193,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.85,
+              "goal_first_passage_max_mrr_gbp": 112794.004934,
+              "goal_margin_gbp": 12794.004934,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.85,
+              "goal_first_passage_max_mrr_gbp": 95162.013827,
+              "goal_margin_gbp": -4837.986173,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.9,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.4,
+              "goal_first_passage_max_mrr_gbp": 102620.471816,
+              "goal_margin_gbp": 2620.471816,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.9,
+              "goal_first_passage_max_mrr_gbp": 112725.668973,
+              "goal_margin_gbp": 12725.668973,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.9,
+              "goal_first_passage_max_mrr_gbp": 95108.598679,
+              "goal_margin_gbp": -4891.401321,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.95,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.45,
+              "goal_first_passage_max_mrr_gbp": 102546.860515,
+              "goal_margin_gbp": 2546.860515,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.95,
+              "goal_first_passage_max_mrr_gbp": 112657.559583,
+              "goal_margin_gbp": 12657.559583,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.95,
+              "goal_first_passage_max_mrr_gbp": 95055.360631,
+              "goal_margin_gbp": -4944.639369,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.0,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.5,
+              "goal_first_passage_max_mrr_gbp": 102473.493457,
+              "goal_margin_gbp": 2473.493457,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.0,
+              "goal_first_passage_max_mrr_gbp": 112589.675993,
+              "goal_margin_gbp": 12589.675993,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.0,
+              "goal_first_passage_max_mrr_gbp": 95002.299082,
+              "goal_margin_gbp": -4997.700918,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.05,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.55,
+              "goal_first_passage_max_mrr_gbp": 102400.369812,
+              "goal_margin_gbp": 2400.369812,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.05,
+              "goal_first_passage_max_mrr_gbp": 112522.017435,
+              "goal_margin_gbp": 12522.017435,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.05,
+              "goal_first_passage_max_mrr_gbp": 94949.413429,
+              "goal_margin_gbp": -5050.586571,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.1,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.6,
+              "goal_first_passage_max_mrr_gbp": 102327.488753,
+              "goal_margin_gbp": 2327.488753,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.1,
+              "goal_first_passage_max_mrr_gbp": 112454.583143,
+              "goal_margin_gbp": 12454.583143,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.1,
+              "goal_first_passage_max_mrr_gbp": 94896.703075,
+              "goal_margin_gbp": -5103.296925,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.15,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.65,
+              "goal_first_passage_max_mrr_gbp": 102254.849456,
+              "goal_margin_gbp": 2254.849456,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.15,
+              "goal_first_passage_max_mrr_gbp": 112387.372353,
+              "goal_margin_gbp": 12387.372353,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.15,
+              "goal_first_passage_max_mrr_gbp": 94844.167422,
+              "goal_margin_gbp": -5155.832578,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.2,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.7,
+              "goal_first_passage_max_mrr_gbp": 102182.451099,
+              "goal_margin_gbp": 2182.451099,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.2,
+              "goal_first_passage_max_mrr_gbp": 112320.384305,
+              "goal_margin_gbp": 12320.384305,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.2,
+              "goal_first_passage_max_mrr_gbp": 94791.805877,
+              "goal_margin_gbp": -5208.194123,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.25,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.75,
+              "goal_first_passage_max_mrr_gbp": 102110.292864,
+              "goal_margin_gbp": 2110.292864,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.25,
+              "goal_first_passage_max_mrr_gbp": 112253.61824,
+              "goal_margin_gbp": 12253.61824,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.25,
+              "goal_first_passage_max_mrr_gbp": 94739.617847,
+              "goal_margin_gbp": -5260.382153,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.3,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.8,
+              "goal_first_passage_max_mrr_gbp": 102038.373933,
+              "goal_margin_gbp": 2038.373933,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.3,
+              "goal_first_passage_max_mrr_gbp": 112187.073403,
+              "goal_margin_gbp": 12187.073403,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.3,
+              "goal_first_passage_max_mrr_gbp": 94687.60274,
+              "goal_margin_gbp": -5312.39726,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.35,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.85,
+              "goal_first_passage_max_mrr_gbp": 101966.693493,
+              "goal_margin_gbp": 1966.693493,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.35,
+              "goal_first_passage_max_mrr_gbp": 112120.74904,
+              "goal_margin_gbp": 12120.74904,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.35,
+              "goal_first_passage_max_mrr_gbp": 94635.759967,
+              "goal_margin_gbp": -5364.240033,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.4,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.9,
+              "goal_first_passage_max_mrr_gbp": 101895.250733,
+              "goal_margin_gbp": 1895.250733,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.4,
+              "goal_first_passage_max_mrr_gbp": 112054.6444,
+              "goal_margin_gbp": 12054.6444,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.4,
+              "goal_first_passage_max_mrr_gbp": 94584.088943,
+              "goal_margin_gbp": -5415.911057,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.45,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.95,
+              "goal_first_passage_max_mrr_gbp": 101824.044845,
+              "goal_margin_gbp": 1824.044845,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.45,
+              "goal_first_passage_max_mrr_gbp": 111988.758735,
+              "goal_margin_gbp": 11988.758735,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.45,
+              "goal_first_passage_max_mrr_gbp": 94532.589081,
+              "goal_margin_gbp": -5467.410919,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.5,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.0,
+              "goal_first_passage_max_mrr_gbp": 101753.075022,
+              "goal_margin_gbp": 1753.075022,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.5,
+              "goal_first_passage_max_mrr_gbp": 111923.091298,
+              "goal_margin_gbp": 11923.091298,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.5,
+              "goal_first_passage_max_mrr_gbp": 94481.259798,
+              "goal_margin_gbp": -5518.740202,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.55,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.05,
+              "goal_first_passage_max_mrr_gbp": 101682.340461,
+              "goal_margin_gbp": 1682.340461,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.55,
+              "goal_first_passage_max_mrr_gbp": 111857.641346,
+              "goal_margin_gbp": 11857.641346,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.55,
+              "goal_first_passage_max_mrr_gbp": 94430.100514,
+              "goal_margin_gbp": -5569.899486,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.6,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.1,
+              "goal_first_passage_max_mrr_gbp": 101611.840362,
+              "goal_margin_gbp": 1611.840362,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.6,
+              "goal_first_passage_max_mrr_gbp": 111792.408138,
+              "goal_margin_gbp": 11792.408138,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.6,
+              "goal_first_passage_max_mrr_gbp": 94379.110648,
+              "goal_margin_gbp": -5620.889352,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.65,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.15,
+              "goal_first_passage_max_mrr_gbp": 101541.573928,
+              "goal_margin_gbp": 1541.573928,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.65,
+              "goal_first_passage_max_mrr_gbp": 111727.390934,
+              "goal_margin_gbp": 11727.390934,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.65,
+              "goal_first_passage_max_mrr_gbp": 94328.289623,
+              "goal_margin_gbp": -5671.710377,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.7,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.2,
+              "goal_first_passage_max_mrr_gbp": 101471.540361,
+              "goal_margin_gbp": 1471.540361,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.7,
+              "goal_first_passage_max_mrr_gbp": 111662.588999,
+              "goal_margin_gbp": 11662.588999,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.7,
+              "goal_first_passage_max_mrr_gbp": 94277.636865,
+              "goal_margin_gbp": -5722.363135,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.75,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.25,
+              "goal_first_passage_max_mrr_gbp": 101401.73887,
+              "goal_margin_gbp": 1401.73887,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.75,
+              "goal_first_passage_max_mrr_gbp": 111598.001598,
+              "goal_margin_gbp": 11598.001598,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.75,
+              "goal_first_passage_max_mrr_gbp": 94227.151798,
+              "goal_margin_gbp": -5772.848202,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.8,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.3,
+              "goal_first_passage_max_mrr_gbp": 101332.168664,
+              "goal_margin_gbp": 1332.168664,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.8,
+              "goal_first_passage_max_mrr_gbp": 111533.628,
+              "goal_margin_gbp": 11533.628,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.8,
+              "goal_first_passage_max_mrr_gbp": 94176.833851,
+              "goal_margin_gbp": -5823.166149,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.85,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.35,
+              "goal_first_passage_max_mrr_gbp": 101262.828956,
+              "goal_margin_gbp": 1262.828956,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.85,
+              "goal_first_passage_max_mrr_gbp": 111469.467476,
+              "goal_margin_gbp": 11469.467476,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.85,
+              "goal_first_passage_max_mrr_gbp": 94126.682454,
+              "goal_margin_gbp": -5873.317546,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.9,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.4,
+              "goal_first_passage_max_mrr_gbp": 101193.718961,
+              "goal_margin_gbp": 1193.718961,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.9,
+              "goal_first_passage_max_mrr_gbp": 111405.519298,
+              "goal_margin_gbp": 11405.519298,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.9,
+              "goal_first_passage_max_mrr_gbp": 94076.697039,
+              "goal_margin_gbp": -5923.302961,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.95,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.45,
+              "goal_first_passage_max_mrr_gbp": 101124.837895,
+              "goal_margin_gbp": 1124.837895,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.95,
+              "goal_first_passage_max_mrr_gbp": 111341.782743,
+              "goal_margin_gbp": 11341.782743,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.95,
+              "goal_first_passage_max_mrr_gbp": 94026.877039,
+              "goal_margin_gbp": -5973.122961,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 4.0,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.5,
+              "goal_first_passage_max_mrr_gbp": 101056.18498,
+              "goal_margin_gbp": 1056.18498,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 4.0,
+              "goal_first_passage_max_mrr_gbp": 111278.257087,
+              "goal_margin_gbp": 11278.257087,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.0,
+              "limit_verdict": "ON_THRESHOLD",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 4.0,
+              "goal_first_passage_max_mrr_gbp": 93977.221891,
+              "goal_margin_gbp": -6022.778109,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.0,
+              "limit_verdict": "ON_THRESHOLD",
+              "status": "COMPUTED"
+            }
+          }
+        }
+      ]
+    },
+    "X_net_reading": {
+      "computable_options": [
+        "keep_current_pricing",
+        "59_with_feature_release",
+        "49_with_feature_release"
+      ],
+      "control_regions_threshold_reproduced": true,
+      "control_reheld_at_3pct_equals_frozen": true,
+      "goal": {
+        "operator": ">=",
+        "rule": "FIRST_PASSAGE_BY_MONTH_12",
+        "value_gbp": 100000.0
+      },
+      "identity": {
+        "commit": "fdb51e84a673993de7cddb85d5b963741941b80a",
+        "corpus_files_all_match": true,
+        "evaluator_sha256": "7082e94860d80ef4409aa7e4db7ebe9b9dd7ae3660d92db3faef200ff800cd13",
+        "frozen_files_all_match": true,
+        "graph_sha256": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+        "mapping_sha256": "235ef1db77ae8cdb816a203d49f06501c1f490d525c6219799c0a0211c96fc21"
+      },
+      "limit": {
+        "id": "agent-lane:monthly_churn:<=",
+        "operator": "<=",
+        "value_pct": 4.0
+      },
+      "per_option": {
+        "40bb45e7": {
+          "label": "£59 for new Pro customers; grandfather existing customers",
+          "note": "no levels: nothing about this option is claimed, before or after the range",
+          "status": "WITHHELD",
+          "withheld_reason": "OPTION_LEVELS_MISSING"
+        },
+        "49_with_feature_release": {
+          "across_range_at_reference": {
+            "goal_first_passage_gbp_max": 107337.676761,
+            "goal_first_passage_gbp_min": 107337.676761,
+            "goal_invariant_to_base_churn": true,
+            "goal_missed_everywhere": false,
+            "goal_satisfied_everywhere": true,
+            "goal_verdicts_seen": [
+              "MET"
+            ],
+            "limit_satisfied_everywhere": true,
+            "limit_verdicts_seen": [
+              "MET"
+            ],
+            "min_limit_margin_pp": 0.5
+          },
+          "at_olumi_point_3pct": {
+            "churn_pct": 2.5,
+            "goal_first_passage_max_mrr_gbp": 107337.676761,
+            "goal_margin_gbp": 7337.676761,
+            "goal_verdict": "MET",
+            "limit_margin_pp": 1.5,
+            "limit_verdict": "MET",
+            "status": "COMPUTED"
+          },
+          "base_churn_limit_crossing_at_reference": {
+            "at": 4.5,
+            "evaluator_at_crossing": 4.0,
+            "evaluator_just_above": 4.000001,
+            "slope": 1.0,
+            "status": "COMPUTED"
+          },
+          "churn_response_limit_threshold_by_base_churn": {
+            "2.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "3.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "4.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            }
+          },
+          "goal_crossing_on_churn_response_axis_by_base_churn": {
+            "2.0": {
+              "goal_met_everywhere": true,
+              "min_margin_gbp": 7337.676761,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "3.0": {
+              "goal_met_everywhere": true,
+              "min_margin_gbp": 7337.676761,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "4.0": {
+              "goal_met_everywhere": true,
+              "min_margin_gbp": 7337.676761,
+              "status": "NO_CROSSING_ON_AXIS"
+            }
+          },
+          "label": "£49 with feature release"
+        },
+        "59_with_feature_release": {
+          "across_range_at_reference": {
+            "goal_first_passage_gbp_max": 117090.0,
+            "goal_first_passage_gbp_min": 117090.0,
+            "goal_invariant_to_base_churn": true,
+            "goal_missed_everywhere": false,
+            "goal_satisfied_everywhere": true,
+            "goal_verdicts_seen": [
+              "MET"
+            ],
+            "limit_satisfied_everywhere": true,
+            "limit_verdicts_seen": [
+              "MET",
+              "ON_THRESHOLD"
+            ],
+            "min_limit_margin_pp": 0.0
+          },
+          "at_olumi_point_3pct": {
+            "churn_pct": 3.0,
+            "goal_first_passage_max_mrr_gbp": 117090.0,
+            "goal_margin_gbp": 17090.0,
+            "goal_verdict": "MET",
+            "limit_margin_pp": 1.0,
+            "limit_verdict": "MET",
+            "status": "COMPUTED"
+          },
+          "base_churn_limit_crossing_at_reference": {
+            "at": 4.0,
+            "evaluator_at_crossing": 4.0,
+            "evaluator_just_above": 4.000001,
+            "slope": 1.0,
+            "status": "COMPUTED"
+          },
+          "churn_response_limit_threshold_by_base_churn": {
+            "2.0": {
+              "at": 2.5,
+              "evaluator_at_crossing": 4.0,
+              "evaluator_just_above": 4.000001,
+              "slope": 1.0,
+              "status": "COMPUTED"
+            },
+            "3.0": {
+              "at": 1.5,
+              "evaluator_at_crossing": 4.0,
+              "evaluator_just_above": 4.000001,
+              "slope": 1.0,
+              "status": "COMPUTED"
+            },
+            "4.0": {
+              "at": 0.5,
+              "evaluator_at_crossing": 4.0,
+              "evaluator_just_above": 4.000001,
+              "slope": 1.0,
+              "status": "COMPUTED"
+            }
+          },
+          "goal_crossing_on_churn_response_axis_by_base_churn": {
+            "2.0": {
+              "bisected_at": 2.349588,
+              "bracket": [
+                2.3375,
+                2.44375
+              ],
+              "met_below": true,
+              "n_crossings_on_grid": 1,
+              "status": "BRACKETED"
+            },
+            "3.0": {
+              "bisected_at": 2.349588,
+              "bracket": [
+                2.3375,
+                2.44375
+              ],
+              "met_below": true,
+              "n_crossings_on_grid": 1,
+              "status": "BRACKETED"
+            },
+            "4.0": {
+              "bisected_at": 2.349588,
+              "bracket": [
+                2.3375,
+                2.44375
+              ],
+              "met_below": true,
+              "n_crossings_on_grid": 1,
+              "status": "BRACKETED"
+            }
+          },
+          "label": "£59 with feature release"
+        },
+        "625ec80a": {
+          "label": "Improve trial-to-Pro conversion",
+          "note": "no levels: nothing about this option is claimed, before or after the range",
+          "status": "WITHHELD",
+          "withheld_reason": "OPTION_LEVELS_MISSING"
+        },
+        "d1ca58d4": {
+          "label": "Retention intervention for at-risk accounts",
+          "note": "no levels: nothing about this option is claimed, before or after the range",
+          "status": "WITHHELD",
+          "withheld_reason": "OPTION_LEVELS_MISSING"
+        },
+        "keep_current_pricing": {
+          "across_range_at_reference": {
+            "goal_first_passage_gbp_max": 98520.0,
+            "goal_first_passage_gbp_min": 98520.0,
+            "goal_invariant_to_base_churn": true,
+            "goal_missed_everywhere": true,
+            "goal_satisfied_everywhere": false,
+            "goal_verdicts_seen": [
+              "MISSED"
+            ],
+            "limit_satisfied_everywhere": true,
+            "limit_verdicts_seen": [
+              "MET",
+              "ON_THRESHOLD"
+            ],
+            "min_limit_margin_pp": 0.0
+          },
+          "at_olumi_point_3pct": {
+            "churn_pct": 3.0,
+            "goal_first_passage_max_mrr_gbp": 98520.0,
+            "goal_margin_gbp": -1480.0,
+            "goal_verdict": "MISSED",
+            "limit_margin_pp": 1.0,
+            "limit_verdict": "MET",
+            "status": "COMPUTED"
+          },
+          "base_churn_limit_crossing_at_reference": {
+            "at": 4.0,
+            "evaluator_at_crossing": 4.0,
+            "evaluator_just_above": 4.000001,
+            "slope": 1.0,
+            "status": "COMPUTED"
+          },
+          "churn_response_limit_threshold_by_base_churn": {
+            "2.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "3.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            },
+            "4.0": {
+              "slope": 0.0,
+              "status": "NO_DEPENDENCE"
+            }
+          },
+          "goal_crossing_on_churn_response_axis_by_base_churn": {
+            "2.0": {
+              "goal_met_everywhere": false,
+              "min_margin_gbp": -1480.0,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "3.0": {
+              "goal_met_everywhere": false,
+              "min_margin_gbp": -1480.0,
+              "status": "NO_CROSSING_ON_AXIS"
+            },
+            "4.0": {
+              "goal_met_everywhere": false,
+              "min_margin_gbp": -1480.0,
+              "status": "NO_CROSSING_ON_AXIS"
+            }
+          },
+          "label": "Keep current pricing"
+        }
+      },
+      "structure_note": "flows: net additions persist; churn_change_out = (option churn - status-quo churn) x stock (sim/dynamic.py rate_delta_x_stock). The base churn level cancels out of the MRR path; it enters only the churn limit.",
+      "sweep": [
+        {
+          "base_churn_pct": 2.0,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.5,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.0,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.0,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 2.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.05,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.55,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.05,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.05,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.1,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.6,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.1,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.1,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.15,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.65,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.15,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.15,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.2,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.7,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.2,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.2,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.25,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.75,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.25,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.25,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.3,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.8,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.3,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.3,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.35,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.85,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.35,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.35,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.4,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.9,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.4,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.4,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.45,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 1.95,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.45,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.45,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.5,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.0,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 2.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.5,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.5,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.55,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.05,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.55,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.55,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.6,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.1,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.6,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.6,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.65,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.15,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.65,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.65,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.7,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.2,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.7,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.7,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.75,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.25,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.75,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.75,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.8,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.3,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.8,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.8,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.85,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.35,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.85,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.85,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.9,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.4,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.9,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.9,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 2.95,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.45,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 2.95,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 2.95,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.0,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.5,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.0,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.0,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 1.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.05,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.55,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.05,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.05,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.1,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.6,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.1,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.1,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.15,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.65,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.15,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.15,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.2,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.7,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.2,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.2,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.25,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.75,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.25,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.25,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.3,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.8,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.3,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.3,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.35,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.85,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.35,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.35,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.4,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.9,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.4,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.4,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.45,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 2.95,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.45,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.45,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.5,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.0,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 1.0,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.5,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.5,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.55,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.05,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.95,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.55,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.55,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.45,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.6,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.1,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.9,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.6,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.6,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.4,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.65,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.15,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.85,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.65,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.65,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.35,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.7,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.2,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.8,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.7,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.7,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.3,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.75,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.25,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.75,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.75,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.75,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.25,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.8,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.3,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.7,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.8,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.8,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.2,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.85,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.35,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.65,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.85,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.85,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.15,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.9,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.4,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.6,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.9,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.9,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.1,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 3.95,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.45,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.55,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 3.95,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 3.95,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.05,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            }
+          }
+        },
+        {
+          "base_churn_pct": 4.0,
+          "options": {
+            "40bb45e7": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "49_with_feature_release": {
+              "churn_pct": 3.5,
+              "goal_first_passage_max_mrr_gbp": 107337.676761,
+              "goal_margin_gbp": 7337.676761,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.5,
+              "limit_verdict": "MET",
+              "status": "COMPUTED"
+            },
+            "59_with_feature_release": {
+              "churn_pct": 4.0,
+              "goal_first_passage_max_mrr_gbp": 117090.0,
+              "goal_margin_gbp": 17090.0,
+              "goal_verdict": "MET",
+              "limit_margin_pp": 0.0,
+              "limit_verdict": "ON_THRESHOLD",
+              "status": "COMPUTED"
+            },
+            "625ec80a": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "d1ca58d4": {
+              "status": "PARTIAL",
+              "withheld_reason": "OPTION_LEVELS_MISSING"
+            },
+            "keep_current_pricing": {
+              "churn_pct": 4.0,
+              "goal_first_passage_max_mrr_gbp": 98520.0,
+              "goal_margin_gbp": -1480.0,
+              "goal_verdict": "MISSED",
+              "limit_margin_pp": 0.0,
+              "limit_verdict": "ON_THRESHOLD",
+              "status": "COMPUTED"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "quantities": [
+    {
+      "category": "controllable",
+      "has_own_std_or_range": false,
+      "id": "fac_grandfathering_existing_customers",
+      "kind": "factor",
+      "label": "Grandfathering existing customers",
+      "source": null,
+      "unit": null,
+      "value": null
+    },
+    {
+      "category": "controllable",
+      "has_own_std_or_range": false,
+      "id": "fac_new_pro_customer_price",
+      "kind": "factor",
+      "label": "New Pro customer price",
+      "source": null,
+      "unit": null,
+      "value": null
+    },
+    {
+      "category": "controllable",
+      "has_own_std_or_range": false,
+      "id": "fac_retention_intervention_for_at_risk_accounts",
+      "kind": "factor",
+      "label": "Retention intervention for at-risk accounts",
+      "source": null,
+      "unit": null,
+      "value": null
+    },
+    {
+      "category": "controllable",
+      "has_own_std_or_range": false,
+      "id": "fac_trial_to_pro_conversion",
+      "kind": "factor",
+      "label": "Trial-to-Pro conversion",
+      "source": null,
+      "unit": null,
+      "value": null
+    },
+    {
+      "category": "controllable",
+      "has_own_std_or_range": false,
+      "id": "feature_release_availability",
+      "kind": "factor",
+      "label": "Feature release availability",
+      "source": "user_assumption",
+      "unit": "off/on",
+      "value": 0
+    },
+    {
+      "category": "observable",
+      "has_own_std_or_range": false,
+      "id": "feature_value_perception",
+      "kind": "factor",
+      "label": "Feature value perception",
+      "source": "cee_inference",
+      "unit": "score out of 100",
+      "value": 50
+    },
+    {
+      "category": "observable",
+      "has_own_std_or_range": false,
+      "id": "monthly_churn",
+      "kind": "factor",
+      "label": "Monthly churn",
+      "source": "cee_inference",
+      "unit": "percent per month",
+      "value": 3
+    },
+    {
+      "category": "observable",
+      "has_own_std_or_range": false,
+      "id": "monthly_net_pro_additions",
+      "kind": "factor",
+      "label": "Monthly net Pro additions",
+      "source": "cee_inference",
+      "unit": "subscribers per month",
+      "value": 40
+    },
+    {
+      "category": null,
+      "has_own_std_or_range": false,
+      "id": "mrr",
+      "kind": "goal",
+      "label": "MRR",
+      "source": "brief_extraction",
+      "unit": "GBP per month",
+      "value": 75000
+    },
+    {
+      "category": "observable",
+      "has_own_std_or_range": false,
+      "id": "non_pro_mrr",
+      "kind": "factor",
+      "label": "Non-Pro MRR",
+      "source": "cee_inference",
+      "unit": "GBP per month",
+      "value": 16200
+    },
+    {
+      "category": null,
+      "has_own_std_or_range": false,
+      "id": "price_sensitivity",
+      "kind": "risk",
+      "label": "Price sensitivity",
+      "source": null,
+      "unit": null,
+      "value": null
+    },
+    {
+      "category": "observable",
+      "has_own_std_or_range": false,
+      "id": "pro_paying_subscribers",
+      "kind": "factor",
+      "label": "Pro paying subscribers",
+      "source": "cee_inference",
+      "unit": "subscribers",
+      "value": 1200
+    },
+    {
+      "category": null,
+      "has_own_std_or_range": false,
+      "id": "pro_plan_mrr",
+      "kind": "outcome",
+      "label": "Pro plan MRR",
+      "source": null,
+      "unit": null,
+      "value": null
+    },
+    {
+      "category": "controllable",
+      "has_own_std_or_range": false,
+      "id": "pro_plan_price",
+      "kind": "factor",
+      "label": "Pro plan price",
+      "source": "brief_extraction",
+      "unit": "GBP per month",
+      "value": 49
+    },
+    {
+      "category": null,
+      "has_own_std_or_range": false,
+      "id": "risk_competitive_price_or_ai_feature_response",
+      "kind": "risk",
+      "label": "Competitive price or AI-feature response",
+      "source": null,
+      "unit": null,
+      "value": null
+    }
+  ],
+  "range": {
+    "high": 4.0,
+    "label": "HYPOTHETICAL USER-SUPPLIED range, experimental control only: not evidence, not a claimed real-world distribution, not Olumi's estimate",
+    "low": 2.0,
+    "unit": "percent per month"
+  },
+  "reference_point": {
+    "churn_response_pp_per_10gbp": 0.5,
+    "competitive_response_gbp_per_month": 0.0
+  }
+}

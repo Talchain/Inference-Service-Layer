@@ -1,0 +1,45 @@
+{
+  "brief": "olumi-programme-docs#75 5909728656; corrected scope 5911560060",
+  "code_sha256": {
+    "build_payload.py": "75c6ba69f9e74856c288da5c3c305028f37d0908f7a6b32fbf8524a331b38625",
+    "robustness_analyzer_v2.py": "e87ffcb0f58f29885ffb49e9b22ea450a2a10c7a9ae09a69a756cb677e7965a5",
+    "run.py": "44803e9a7e40c09312ea59622b89396dc5751494626ef38c49063f203204b0d8"
+  },
+  "experiment": "SCI-EVIDENCE range elicitation v1",
+  "heads": {
+    "control_checkout": "6f7f9b43da3d6e43bfa4d1061e9322aafd607fb6",
+    "evidence_checkout": "ef108360f1c50f1e4af1add589bfb318b1e2928b",
+    "isl_src_tree": "2f6500fc90733a23fb2e01f46e732a2a01075ec4",
+    "isl_src_tree_at_served_f7f19e3": "2f6500fc90733a23fb2e01f46e732a2a01075ec4",
+    "r3b_and_regions_checkout": "68e8c8874eed528422db186852d3a5a1da9a27da",
+    "r3b_pinned_evaluator_commit": "fdb51e84a673993de7cddb85d5b963741941b80a"
+  },
+  "hypothetical_range": {
+    "high": 4.0,
+    "label": "HYPOTHETICAL USER-SUPPLIED range, experimental control only: not evidence, not a claimed real-world distribution, not Olumi's estimate",
+    "low": 2.0,
+    "unit": "percent per month"
+  },
+  "inputs_sha256": {
+    "control_graph": "2d8611e45baf520dd34a080a1745b1f4f8003880f403ad4c53d1be589fbf2086",
+    "control_pinned_response": "2cb827bb3ba3df6633dfdffc6f157aa42a9f812c5262561ba86f530cd5de7e5d",
+    "evidence_adapter": "23256eac30fdd65ac0b20a4adaaf7c8425f4cbdabdb50bf9c8354e9030549093",
+    "evidence_fixture": "9134d37b300535228ff202f1788151e6148f7f6e27303ca765a9aad282e04ee2",
+    "evidence_reference_card": "b829b4c983261c8f62eb8a9ab451632a78650157a95b2fda67bb28250342a388",
+    "r3b_graph": "6b9a09e5f5da590ab42db6bd0a52d43669cbc5e8c9fe361e744a73e2cae31c5c",
+    "r3b_mapping": "235ef1db77ae8cdb816a203d49f06501c1f490d525c6219799c0a0211c96fc21",
+    "regions_adapter": "46c1199733d8b845631360e1ae854da47435c571105123c97780b65361a0301a"
+  },
+  "network": "none used",
+  "outputs_sha256": {
+    "classification.json": "f660c55b10ab97465797ded36b4c4f9c545e42236fa097a6c3ccc35562513ebc",
+    "coaching.md": "974d7350341381c755033fefd1c0279a9aa87d1ef789f8c7543e9da8947524eb",
+    "payload.json": "2c0914d56fcb905c3ae8e9f8cdec377419b52a76c332e4c119516ee49d7f37f5",
+    "results/cards.json": "8ff32aa717ef286351baca758ae540803b1795f835e216e429cbb2fec589f87c",
+    "results/control.json": "105c6407e110afe0400689e1fe3bb5131fe487caad493369181a832c6aa4a441",
+    "results/r3b.json": "e96a03022b88134c8f785d8713ab46c29efd8462ecd3f0f9389385e18178ad29"
+  },
+  "provider_runs": "NOT_RUN",
+  "python": "3.11.15",
+  "verdict": "KEEP"
+}
