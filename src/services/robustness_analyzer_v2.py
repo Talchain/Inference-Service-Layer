@@ -1419,21 +1419,6 @@ def resolve_factor_central_value(
 # =============================================================================
 
 
-def _has_accumulation(graph: GraphV2) -> bool:
-    return any(
-        node.nonlinear_identity is not None
-        and node.nonlinear_identity.operation == "accumulation"
-        for node in graph.nodes
-    )
-
-
-def _informative_mean(values: Sequence[float]) -> float:
-    """No imputation: preserve arithmetic on full populations, exclude refused draws."""
-    samples = np.asarray(values)
-    finite = samples[np.isfinite(samples)]
-    return float(np.mean(finite)) if finite.size else math.nan
-
-
 class FactorSampler:
     """
     Samples factor node values with parameter uncertainty.
@@ -1703,7 +1688,19 @@ IDENTITY_NON_FINITE = "identity_non_finite"
 
 
 class AccumulationDrawRefusedError(ValueError):
-    """This draw cannot inform an accumulation (never evaluate an invalid logarithm)."""
+    """An accumulation cannot be evaluated; never substitute a numeric draw."""
+
+    def __init__(self, message: str, node_id: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.node_id = node_id
+
+
+class AccumulationOptionsRefusedError(ValueError):
+    """Restart the analysis without these whole options, before any consumer runs."""
+
+    def __init__(self, option_ids: Set[str]) -> None:
+        super().__init__("accumulation_draw_refused")
+        self.option_ids = option_ids
 
 
 def _checked_identity_operation(operation: str) -> str:
@@ -2324,7 +2321,10 @@ def identity_blocking_critiques(
     Empty when every such identity is evaluated. The route turns a non-empty list into the
     blocked 422; ``analyze`` refuses on it too, so no caller can obtain approximated numbers.
     """
-    plans = resolve_identity_plans(request.graph, factor_centres(request))
+    try:
+        plans = resolve_identity_plans(request.graph, factor_centres(request))
+    except IdentityNotEvaluatedError as refusal:
+        return refusal.critiques
     withheld = [plan for plan in plans.values() if not plan.evaluated]
     if not withheld:
         return []
@@ -2350,6 +2350,11 @@ def identity_blocking_critiques(
     critiques: List[CritiqueV2] = []
     for plan in withheld:
         if not reaches_a_decision_node(plan.node_id):
+            continue
+        if plan.operation == "accumulation" and plan.withheld_reason in (
+            IDENTITY_RATE_OUT_OF_RANGE, IDENTITY_NON_FINITE,
+        ):
+            critiques.append(accumulation_refusal_critique(request.graph, plan.node_id))
             continue
         detail = ""
         if plan.withheld_reason == IDENTITY_SCALE_OUT_OF_RANGE:
@@ -2463,6 +2468,32 @@ _StatusQuoKey = Tuple[
 
 class IdentityNotEvaluatedError(ValueError):
     """A declared identity the decision depends on cannot be computed exactly (R3)."""
+
+    def __init__(self, message: str, critiques: Optional[List[CritiqueV2]] = None) -> None:
+        super().__init__(message)
+        self.critiques = critiques or []
+
+
+def accumulation_refusal_critique(graph: GraphV2, node_id: str) -> CritiqueV2:
+    """Use the existing identity blocker for a refused status-quo accumulation."""
+    nodes = {node.id: node for node in graph.nodes}
+    identity = nodes[node_id].nonlinear_identity
+    assert identity is not None and identity.operation == "accumulation"
+    rate_id = identity.factor_ids[1]
+    rate_label = nodes[rate_id].label or rate_id
+    return IDENTITY_NOT_EVALUATED_CRITIQUE.build(
+        affected_node_ids=[node_id, *identity.factor_ids],
+        node_id=node_id,
+        operation="accumulation",
+        operands=", ".join(identity.factor_ids),
+        addends="",
+        reason="accumulation_draw_refused",
+        detail=(f": the churn/rate '{rate_label}' must be finite and in [0, 1); "
+                "starting stock and inflow must be non-negative and the horizon stock finite"),
+    ).model_copy(update={"identity": CritiqueIdentityV2(
+        node_id=node_id, operation="accumulation", participants=list(identity.factor_ids),
+        withheld_reason="accumulation_draw_refused",
+    )})
 
 
 class SCMEvaluatorV2:
@@ -2722,10 +2753,8 @@ class SCMEvaluatorV2:
                     node_values[node_id] = self._identity_value(
                         self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
                     )
-                except AccumulationDrawRefusedError:
-                    # Existing per-draw protocol: excluded from winners and informative
-                    # denominators; non-finite samples are sanitized at the wire boundary.
-                    node_values[node_id] = math.nan
+                except AccumulationDrawRefusedError as refusal:
+                    raise AccumulationDrawRefusedError(str(refusal), node_id) from refusal
             else:
                 # Get node object (used for observed_state and intercept)
                 node = self._nodes_by_id.get(node_id)
@@ -2765,9 +2794,7 @@ class SCMEvaluatorV2:
                 # must not draw from the epsilon stream: see _in_model_frame)
                 if noise and self._epsilon_rng and node and node.epsilon_std > 0:
                     node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
-                    # Consume the same noise draw, but never turn a refusal into 1.0.
-                    if math.isfinite(node_values[node_id]):
-                        node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
+                    node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
 
         return node_values
 
@@ -2797,7 +2824,12 @@ class SCMEvaluatorV2:
         cached = self._status_quo_cache
         if cached is not None and cached[0] == key:
             return cached[1]
-        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        try:
+            status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        except AccumulationDrawRefusedError as refusal:
+            assert refusal.node_id is not None
+            critique = accumulation_refusal_critique(self.graph, refusal.node_id)
+            raise IdentityNotEvaluatedError(critique.message, [critique]) from refusal
         self._status_quo_cache = (key, status_quo)
         return status_quo
 
@@ -2844,7 +2876,12 @@ class SCMEvaluatorV2:
         # Today at the centre: every sampled factor at the centre its draws read
         # (``factor_centres``). An identity node reads itself as the reference here, so its
         # own scale never enters (term == term_sq): no scale is needed to compute the scales.
-        today = self._propagate(means, {}, None, factor_centres, noise=False)
+        try:
+            today = self._propagate(means, {}, None, factor_centres, noise=False)
+        except AccumulationDrawRefusedError as refusal:
+            assert refusal.node_id is not None
+            critique = accumulation_refusal_critique(self.graph, refusal.node_id)
+            raise IdentityNotEvaluatedError(critique.message, [critique]) from refusal
         scales: Dict[str, float] = {}
         for node_id, plan in products.items():
             assert plan.target_level is not None  # filtered above
@@ -2979,7 +3016,7 @@ class SCMEvaluatorV2:
         ]
         if not unchanged and not set_levels:
             return interventions
-        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         framed = dict(interventions)
         for node_id in unchanged:
             framed[node_id] = status_quo[node_id]
@@ -3361,6 +3398,66 @@ class RobustnessAnalyzerV2:
         )
 
     def analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
+        """Remove whole refused options before any statistics or probe consumes draws.
+
+        A refusal may arrive late in the MC. Discard that attempt and restart with
+        the same seed and the surviving options, including their RNG/tie behavior.
+        This makes their figures identical to a request without the refused options.
+        """
+        original_options = request.options
+        failed_ids: Set[str] = set()
+        seed, _ = compute_effective_seed(request)
+        while True:
+            try:
+                response = self._analyze(request)
+                break
+            except AccumulationOptionsRefusedError as refusal:
+                failed_ids.update(refusal.option_ids)
+                survivors = [option for option in original_options if option.id not in failed_ids]
+                request = request.model_copy(update={"options": survivors, "seed": seed})
+                if not survivors:
+                    response = RobustnessResponseV2(
+                        request_id=request.request_id or f"robustness-{uuid.uuid4().hex[:12]}",
+                        results=[], recommended_option_id="", recommendation_confidence=0.0,
+                        robustness=RobustnessResult(
+                            is_robust=False, confidence=0.0, recommendation_stability=0.0,
+                            interpretation="All accumulation options were refused; analysis is withheld.",
+                        ),
+                        metadata=ResponseMetadataV2(
+                            isl_version=__version__, n_samples_used=request.n_samples,
+                            seed_used=seed, execution_time_ms=0,
+                            config_fingerprint=generate_config_fingerprint(),
+                        ),
+                        objective_ranking=ObjectiveRanking(
+                            direction=request.goal_direction or "maximise", attested=False,
+                            status="withheld", withheld_reason="accumulation_draw_refused",
+                        ),
+                        inference_warnings=[InferenceWarning(
+                            code="OBJECTIVE_RANKING_WITHHELD", field="objective_ranking",
+                            severity="warning", detail={"reason": "accumulation_draw_refused",
+                            "message": "Every accumulation option was refused; ranking is withheld."},
+                        )],
+                    )
+                    if request._capture_draws:
+                        response._mc_draws = {"option_outcomes": {}, "status_quo": [],
+                                             "objective": ObjectivePlan(sense="withheld", attested=False)}
+                    break
+        if failed_ids:
+            by_id = {result.option_id: result for result in response.results}
+            for option_id in failed_ids:
+                by_id[option_id] = OptionResult(
+                    option_id=option_id,
+                    outcome_distribution=OutcomeDistribution(
+                        mean=None, std=None, median=None, ci_lower=None, ci_upper=None, samples=[],
+                    ),
+                    win_probability=None,
+                )
+            response.results = [by_id[option.id] for option in original_options]
+            if response._mc_draws is not None:
+                response._mc_draws["accumulation_refused_option_ids"] = sorted(failed_ids)
+        return response
+
+    def _analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
         """
         Perform complete robustness analysis.
 
@@ -3445,7 +3542,7 @@ class RobustnessAnalyzerV2:
         # Every other caller still refuses a declared identity rather than approximating it.
         identity_blockers = identity_blocking_critiques(request)
         if identity_blockers:
-            raise IdentityNotEvaluatedError(identity_blockers[0].message)
+            raise IdentityNotEvaluatedError(identity_blockers[0].message, identity_blockers)
 
         # Setup - use separate RNG streams for edge and factor sampling
         # to prevent fragile determinism coupling.
@@ -3873,30 +3970,6 @@ class RobustnessAnalyzerV2:
             event_risk_information_outcomes if event_risk_plans else option_outcomes
         )
         status_quo_outcomes = status_quo_node_values.get(request.goal_node_id, [])
-        # Wins, ranking confidence and robustness all read the PRE-noise population.
-        informative_win_masks = {
-            oid: [math.isfinite(value) and winner_per_sample[index] is not None
-                  for index, value in enumerate(values)]
-            for oid, values in option_outcomes.items()
-        } if _has_accumulation(request.graph) else None
-        informative_win_counts = {
-            oid: sum(mask) for oid, mask in informative_win_masks.items()
-        } if informative_win_masks is not None else None
-        accumulation_ranking_empty = (
-            informative_win_counts is not None
-            and not any(informative_win_counts.values())
-            and not objective_ranking_withheld
-        )
-        if accumulation_ranking_empty:
-            objective_ranking_withheld = True
-            objective_warning = InferenceWarning(
-                code="OBJECTIVE_RANKING_WITHHELD",
-                field="objective_ranking",
-                severity="warning",
-                detail={"reason": "no_informative_accumulation_draws",
-                        "message": "No accumulation option has an informative draw; ranking is withheld."},
-            )
-            inference_warnings.append(objective_warning)
 
         # SCIENCE ROBUSTNESS (EXPERIMENT): the decision-flip worker asks, in-process and privately, for the SAME
         # pre-noise CRN population win_probability is read from (before `_apply_auto_scaled_noise` reassigns it).
@@ -3948,11 +4021,7 @@ class RobustnessAnalyzerV2:
         information_evaluator._epsilon_rng = None
 
         # Compute tie rate
-        tie_denominator = (
-            sum(winner is not None for winner in winner_per_sample)
-            if informative_win_counts is not None else request.n_samples
-        )
-        tie_rate = tie_count / tie_denominator if tie_denominator else 0.0
+        tie_rate = tie_count / request.n_samples
 
         # Apply auto-scaled noise to outcome/risk nodes (V08 scientific accuracy)
         # Uses separate RNG stream (seed + 2) for determinism
@@ -4137,7 +4206,6 @@ class RobustnessAnalyzerV2:
             goal_level_anchor=anchored_levels.get(request.goal_node_id),
             range_series=intervention_range_series or None,
             goal_chance_quantities=goal_chance_draws,
-            informative_win_counts=informative_win_counts,
         )
         # TEMPORAL step 1: name each option whose joint was held back because a limit row was
         # scored from its stated range beside other limits (B5: an absence always has a name).
@@ -4226,9 +4294,16 @@ class RobustnessAnalyzerV2:
         # Compute sensitivity if requested
         sensitivity = []
         if "sensitivity" in request.analysis_types:
-            sensitivity = self._compute_sensitivity(
-                request, option_outcomes, sampler, rng_edge, evaluator
-            )
+            try:
+                sensitivity = self._compute_sensitivity(
+                    request, option_outcomes, sampler, rng_edge, evaluator
+                )
+            except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                inference_warnings.append(self._optional_phase_unavailable_warning(
+                    "NUMERICAL_INSTABILITY", "robustness.edge_sensitivity",
+                    "accumulation_draw_refused", _elapsed_ms(),
+                    "Edge sensitivity was omitted because a churn/rate accumulation probe was refused.",
+                ))
 
         # B3-S1 (D-23.4) suppression RECORD (not PREDICT): each compute-gate below
         # that skips its block BECAUSE of active correlation appends to this list at
@@ -4273,14 +4348,22 @@ class RobustnessAnalyzerV2:
                 # vanished silently, unnamed).
                 suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
-                factor_sensitivity = self._compute_factor_sensitivity(
-                    request,
-                    option_outcomes,
-                    rng_factor,
-                    evaluator,
-                    critiques=critiques,
-                    structural_influence_out=structural_influence,
-                )
+                try:
+                    factor_sensitivity = self._compute_factor_sensitivity(
+                        request,
+                        option_outcomes,
+                        rng_factor,
+                        evaluator,
+                        critiques=critiques,
+                        structural_influence_out=structural_influence,
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    structural_influence.clear()
+                    inference_warnings.append(self._optional_phase_unavailable_warning(
+                        "NUMERICAL_INSTABILITY", "factor_sensitivity",
+                        "accumulation_draw_refused", _elapsed_ms(),
+                        "Factor sensitivity and stability were omitted because a churn/rate accumulation probe was refused.",
+                    ))
 
         # Compute conditional winners (factor-partitioned win probabilities).
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — a single-factor
@@ -4324,8 +4407,7 @@ class RobustnessAnalyzerV2:
             n_defaulted_roots=len(defaulted_root_node_ids),
             defaulted_root_node_ids=defaulted_root_node_ids,
             critiques=critiques,
-            informative_win_counts=informative_win_counts,
-            informative_win_masks=informative_win_masks,
+            inference_warnings=inference_warnings,
         )
 
         # Compute E-value analogue per edge if requested. OPTIONAL phase —
@@ -4369,7 +4451,7 @@ class RobustnessAnalyzerV2:
                     edge_e_values = self._compute_edge_e_values(
                         request, evaluator, budget_ms=min(self.E_VALUE_BUDGET_MS, remaining_ms)
                     )
-                except AccumulationDrawRefusedError:
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
                     e_value_refused = True
                 if edge_e_values is None:
                     # Internal E-value budget tripped mid-sweep — disclose on the
@@ -4440,9 +4522,11 @@ class RobustnessAnalyzerV2:
                                 seed,
                                 budget_ms=min(self.FLIP_STABILITY_BUDGET_MS, remaining_ms),
                             )
-                        except AccumulationDrawRefusedError:
+                        except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
                             bands_attached = False
                             stability_refused = True
+                            for row in edge_e_values:
+                                row.pop("stability", None)
                         if not bands_attached:
                             # Internal band budget tripped — the #226 gap
                             # (log-only) now rides the wire.
@@ -4497,7 +4581,7 @@ class RobustnessAnalyzerV2:
                         seed,
                         budget_ms=min(self.FACTOR_FLIP_BUDGET_MS, remaining_ms),
                     )
-                except AccumulationDrawRefusedError:
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
                     factor_flip_refused = True
                 if factor_flip_values is None:
                     elapsed_ms = _elapsed_ms()
@@ -4507,34 +4591,16 @@ class RobustnessAnalyzerV2:
                             "factor_flip_values",
                             "accumulation_draw_refused" if factor_flip_refused else "factor_flip_budget_exceeded",
                             elapsed_ms,
-                            (
-                                "Factor-flip analysis has no informative accumulation probe and was omitted."
-                                if factor_flip_refused else
-                                "Factor-flip analysis exceeded its time budget and was omitted (all-or-nothing). Base analysis is unaffected."
-                            ),
+                            "Factor-flip accumulation probe was refused and omitted."
+                            if factor_flip_refused else
+                            "Factor-flip analysis exceeded its time budget and was "
+                            "omitted (all-or-nothing). Base analysis is unaffected.",
                         )
                     )
 
         # Find recommended option (needed before EVPI to fix decision policy)
-        ranking_scores = {
-            oid: wins / informative_win_counts[oid]
-            for oid, wins in option_wins.items()
-            if informative_win_counts[oid] > 0
-        } if informative_win_counts is not None else option_wins
-        if informative_win_counts is not None and all(
-            count == request.n_samples for count in informative_win_counts.values()
-        ):
-            ranking_scores = option_wins
-        ranking_scores = ranking_scores or option_wins
-        recommended_option_id = max(ranking_scores, key=lambda oid: ranking_scores[oid])
-        recommendation_denominator = (
-            informative_win_counts[recommended_option_id]
-            if informative_win_counts is not None else request.n_samples
-        )
-        recommendation_confidence = (
-            option_wins[recommended_option_id] / recommendation_denominator
-            if recommendation_denominator else 0.0
-        )
+        recommended_option_id = max(option_wins, key=lambda k: option_wins[k])
+        recommendation_confidence = option_wins[recommended_option_id] / request.n_samples
 
         # Compute the per-factor win-probability sensitivity if requested. OPTIONAL
         # phase — gated at entry AND (Codex F7) governed by an internal wall-clock
@@ -4626,19 +4692,23 @@ class RobustnessAnalyzerV2:
                 # remaining) measured against its own monotonic t0 == the
                 # OVERALL_REQUEST_BUDGET_MS deadline (identical maths to the E-value
                 # sweep). On overrun _compute_evpi returns None (all-or-nothing).
-                p_win_sensitivity = self._compute_evpi(
-                    request,
-                    sampler,
-                    factor_sampler,
-                    # Realised, not p-conditional: these arms hold the policy FIXED and count goal
-                    # attainment / wins, which must never threshold a conditional mean (Q4).
-                    evaluator,
-                    seed,
-                    recommended_option_id,
-                    budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
-                    constraint_plans=constraint_plans,
-                    objective=objective_plan,
-                )
+                evpi_refused = False
+                try:
+                    p_win_sensitivity = self._compute_evpi(
+                        request,
+                        sampler,
+                        factor_sampler,
+                        # Realised, not p-conditional: these arms hold the policy FIXED and count goal
+                        # attainment / wins, which must never threshold a conditional mean (Q4).
+                        evaluator,
+                        seed,
+                        recommended_option_id,
+                        budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
+                        constraint_plans=constraint_plans,
+                        objective=objective_plan,
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    evpi_refused = True
                 if p_win_sensitivity is None:
                     # Reachable ONLY as a deadline trip here: the has_uncertainties()
                     # guard guarantees parameter_uncertainties is non-empty, so
@@ -4649,8 +4719,10 @@ class RobustnessAnalyzerV2:
                         self._optional_phase_unavailable_warning(
                             "EVPI_UNAVAILABLE",
                             "p_win_sensitivity",
-                            "evpi_budget_exceeded",
+                            "accumulation_draw_refused" if evpi_refused else "evpi_budget_exceeded",
                             elapsed_ms,
+                            "Win-probability sensitivity was omitted because a churn/rate accumulation probe was refused."
+                            if evpi_refused else
                             "Win-probability sensitivity (p_win_sensitivity) "
                             "exceeded its time budget and was omitted "
                             "(all-or-nothing). Base analysis is unaffected.",
@@ -5069,9 +5141,7 @@ class RobustnessAnalyzerV2:
                 attested=objective_plan.attested,
                 status="withheld" if objective_ranking_withheld else "computed",
                 withheld_reason=(
-                    "no_informative_accumulation_draws"
-                    if accumulation_ranking_empty
-                    else "target_not_resolvable_in_sample_frame"
+                    "target_not_resolvable_in_sample_frame"
                     if objective_ranking_withheld
                     else None
                 ),
@@ -5327,6 +5397,10 @@ class RobustnessAnalyzerV2:
         capture_tie_rng: Optional[SeededRNG] = (
             SeededRNG(compute_effective_seed(request)[0] + 5) if request._capture_draws else None
         )
+        refused_option_ids: Set[str] = set()
+        check_accumulation_status_quo = any(
+            plan.operation == "accumulation" for plan in evaluator._evaluated_identities.values()
+        )
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
@@ -5334,6 +5408,9 @@ class RobustnessAnalyzerV2:
             # Sample factor values (parameter uncertainty)
             factor_values = factor_sampler.sample_factor_values()
             factor_values_per_sample.append(factor_values)
+            # Check every status-quo draw, even after every option has failed.
+            if check_accumulation_status_quo:
+                evaluator._status_quo(edge_config, None, factor_values)
 
             # The reference draw: the SAME edge strengths and factor values as
             # every option below (common random numbers), with no interventions.
@@ -5353,43 +5430,54 @@ class RobustnessAnalyzerV2:
             # Evaluate each option
             sample_outcomes = {}
             for option in request.options:
-                if constraint_target_nodes:
-                    # Use evaluate_multi to get both goal and constraint node values
-                    all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
-                    node_values = evaluator.evaluate_multi(
-                        edge_strengths=edge_config,
-                        interventions=option.interventions,
-                        target_nodes=all_target_nodes,
-                        factor_values=factor_values,
-                    )
-                    outcome = node_values.get(request.goal_node_id, 0.0)
-                    # Store constraint node values
-                    assert constraint_node_values is not None
-                    for node_id in constraint_target_nodes:
-                        constraint_node_values[option.id][node_id].append(
-                            node_values.get(node_id, 0.0)
+                if option.id in refused_option_ids:
+                    continue
+                try:
+                    if constraint_target_nodes:
+                        # Use evaluate_multi to get both goal and constraint node values
+                        all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
+                        node_values = evaluator.evaluate_multi(
+                            edge_strengths=edge_config,
+                            interventions=option.interventions,
+                            target_nodes=all_target_nodes,
+                            factor_values=factor_values,
                         )
-                else:
-                    # Standard evaluation for goal node only
-                    outcome = evaluator.evaluate(
-                        edge_strengths=edge_config,
-                        interventions=option.interventions,
-                        goal_node=request.goal_node_id,
-                        factor_values=factor_values,
-                    )
-
-                option_outcomes[option.id].append(outcome)
-                sample_outcomes[option.id] = outcome
-                if separate_information:
-                    assert information_evaluator is not None and information_outcomes is not None
-                    information_outcomes[option.id].append(
-                        information_evaluator.evaluate(
+                        outcome = node_values.get(request.goal_node_id, 0.0)
+                        # Store constraint node values
+                        assert constraint_node_values is not None
+                        for node_id in constraint_target_nodes:
+                            constraint_node_values[option.id][node_id].append(
+                                node_values.get(node_id, 0.0)
+                            )
+                    else:
+                        # Standard evaluation for goal node only
+                        outcome = evaluator.evaluate(
                             edge_strengths=edge_config,
                             interventions=option.interventions,
                             goal_node=request.goal_node_id,
                             factor_values=factor_values,
                         )
-                    )
+
+                    option_outcomes[option.id].append(outcome)
+                    sample_outcomes[option.id] = outcome
+                    if separate_information:
+                        assert information_evaluator is not None and information_outcomes is not None
+                        information_outcomes[option.id].append(
+                            information_evaluator.evaluate(
+                                edge_strengths=edge_config,
+                                interventions=option.interventions,
+                                goal_node=request.goal_node_id,
+                                factor_values=factor_values,
+                            )
+                        )
+                except AccumulationDrawRefusedError:
+                    refused_option_ids.add(option.id)
+                    option_outcomes.pop(option.id, None)
+                    if constraint_node_values is not None:
+                        constraint_node_values.pop(option.id, None)
+                    if information_outcomes is not None:
+                        information_outcomes.pop(option.id, None)
+                    sample_outcomes.pop(option.id, None)
 
             # Track winner with fair tie-breaking (split ties equally).
             #
@@ -5475,6 +5563,8 @@ class RobustnessAnalyzerV2:
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
 
+        if refused_option_ids:
+            raise AccumulationOptionsRefusedError(refused_option_ids)
         return (
             option_outcomes,
             option_wins,
@@ -7599,9 +7689,7 @@ class RobustnessAnalyzerV2:
                     assert pairs_draw_for_draw, "the range series must pair with the Monte Carlo"
                     resolved[index] = list(sampled)
                     continue
-                resolved[index] = [
-                    set_level if math.isfinite(sample) else math.nan for sample in samples
-                ]
+                resolved[index] = [set_level] * len(samples)
                 continue
             if plan.level_threshold is None:
                 resolved[index] = samples
@@ -7646,7 +7734,6 @@ class RobustnessAnalyzerV2:
         goal_level_anchor: Optional[float] = None,
         range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
         goal_chance_quantities: Optional[Sequence[GoalChanceQuantity]] = None,
-        informative_win_counts: Optional[Dict[str, int]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
 
@@ -7691,7 +7778,6 @@ class RobustnessAnalyzerV2:
         """
         expected_regret = expected_regret or {}
         level_domains = level_domains or {}
-        accumulation_population = _has_accumulation(request.graph)
         goal_identity = (
             resolve_identity_plans(request.graph, factor_centres(request)).get(request.goal_node_id)
             if any(
@@ -7732,10 +7818,8 @@ class RobustnessAnalyzerV2:
             else:
                 reported_array = samples_array
                 reported_samples = samples
-            informative_reported = reported_array[np.isfinite(reported_array)]
-            ci_lower, ci_upper = (
-                self._compute_confidence_interval(informative_reported, request.confidence_level)
-                if informative_reported.size else (math.nan, math.nan)
+            ci_lower, ci_upper = self._compute_confidence_interval(
+                reported_array, request.confidence_level
             )
 
             # Compute probability_of_goal from the resolved PLAN (ROADMAP 2.258 /
@@ -7818,9 +7902,19 @@ class RobustnessAnalyzerV2:
                 # here, because its user-reachability has not been established
                 # and widening scope again is what this file's scope rule bans.
                 #
-                # Accumulation win shares also exclude that option's refused draws.
-                # Legacy graphs retain their historical marginal win denominator.
-                # Goal chance always uses the compared quantity's informative population.
+                # ⚠ AND THE DENOMINATOR IS *NOT* THE SAME AS `win_probability`'S.
+                # `win_probability` deliberately keeps the FULL `n_samples`
+                # denominator (documented at the winners loop: "win_probabilities
+                # then sum to the informative fraction, which is the honest
+                # report") — a MARGINAL probability. `probability_of_goal`
+                # divides by `n_informative` — a probability CONDITIONAL on the
+                # draw being informative. Both are defensible and the choice here
+                # is deliberate, because this field's siblings on the same card
+                # (mean/std/percentiles/cvar_10) are all conditional. But the two
+                # probabilities a user sees side by side are conditioned
+                # DIFFERENTLY, and on a degraded option they will not reconcile
+                # by arithmetic. Do not "align" one to the other without reading
+                # both rules.
                 #
                 # MASK THE COMPARED QUANTITY, NOT `samples_array`. In level frame
                 # the compared value is `baseline + (sample - status_quo)`, so a
@@ -7924,7 +8018,7 @@ class RobustnessAnalyzerV2:
                     # and the value is byte-identical to (j).
                     coverage_is_partial = n_informative < int(informative.size)
                     is_categorical_extremum = candidate == 0.0 or candidate == 1.0
-                    if coverage_is_partial and is_categorical_extremum and not accumulation_population:
+                    if coverage_is_partial and is_categorical_extremum:
                         probability_of_goal = None
                     else:
                         probability_of_goal = candidate
@@ -7956,28 +8050,15 @@ class RobustnessAnalyzerV2:
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
             sampled_ranges: Optional[List[SampledInterventionRange]] = None
-            if request.goal_constraints and constraint_node_values and (
-                not accumulation_population or np.isfinite(samples_array).any()
-            ):
-                informative_constraint_values = constraint_node_values
-                if accumulation_population:
-                    # A refused option draw cannot satisfy even an independent limit.
-                    informative_constraint_values = {
-                        option.id: {
-                            node_id: [value if math.isfinite(samples[index]) else math.nan
-                                      for index, value in enumerate(values)]
-                            for node_id, values in constraint_node_values[option.id].items()
-                        }
-                    }
+            if request.goal_constraints and constraint_node_values:
                 analysis_dict = self._compute_constraint_analysis(
-                    informative_constraint_values,
+                    constraint_node_values,
                     request.goal_constraints,
                     option.id,
                     constraint_plans,
                     status_quo_node_values,
                     level_domains=level_domains,
                     range_series=(range_series or {}).get(option.id),
-                    condition_on_informative=accumulation_population,
                 )
                 if analysis_dict:
                     # Convert dict to ConstraintAnalysis model
@@ -8023,9 +8104,9 @@ class RobustnessAnalyzerV2:
             option_result = OptionResult(
                 option_id=option.id,
                 outcome_distribution=OutcomeDistribution(
-                    mean=float(np.mean(informative_reported)) if informative_reported.size else math.nan,
-                    std=float(np.std(informative_reported)) if informative_reported.size else math.nan,
-                    median=float(np.median(informative_reported)) if informative_reported.size else math.nan,
+                    mean=float(np.mean(reported_array)),
+                    std=float(np.std(reported_array)),
+                    median=float(np.median(reported_array)),
                     ci_lower=ci_lower,
                     ci_upper=ci_upper,
                     # Task 2: Store raw samples so the V2 API layer can compute
@@ -8033,14 +8114,7 @@ class RobustnessAnalyzerV2:
                     # B1a: the REPORTED samples (levels, for an anchored goal).
                     samples=reported_samples,
                 ),
-                win_probability=(
-                    wins[option.id] / max(1, (
-                        informative_win_counts[option.id]
-                        if informative_win_counts is not None
-                        else int(np.count_nonzero(np.isfinite(samples_array)))
-                    ))
-                    if accumulation_population else wins[option.id] / request.n_samples
-                ),
+                win_probability=wins[option.id] / request.n_samples,
                 probability_of_goal=probability_of_goal,
                 probability_of_goal_precision=goal_precision,
                 probability_of_goal_drivers=goal_drivers,
@@ -8088,9 +8162,7 @@ class RobustnessAnalyzerV2:
 
         # Compute baseline mean outcome for reference option
         ref_option = request.options[0]
-        baseline_mean = _informative_mean(baseline_outcomes[ref_option.id])
-        if not math.isfinite(baseline_mean):
-            return []
+        baseline_mean = float(np.mean(baseline_outcomes[ref_option.id]))
 
         # R3-9: a definition is neither a sensitivity target (no edge-level output lists
         # it) nor drawn in the background of another edge's samples.
@@ -8103,31 +8175,29 @@ class RobustnessAnalyzerV2:
             existence_sens = self._compute_existence_sensitivity(
                 request, edge, baseline_mean, rng, evaluator, fixed=fixed
             )
-            if math.isfinite(existence_sens):
-                sensitivities.append(
-                    {
-                        "edge_from": edge.from_,
-                        "edge_to": edge.to,
-                        "sensitivity_type": "existence",
-                        "elasticity": existence_sens,
-                        "interpretation": self._interpret_existence_sensitivity(edge, existence_sens),
-                    }
-                )
+            sensitivities.append(
+                {
+                    "edge_from": edge.from_,
+                    "edge_to": edge.to,
+                    "sensitivity_type": "existence",
+                    "elasticity": existence_sens,
+                    "interpretation": self._interpret_existence_sensitivity(edge, existence_sens),
+                }
+            )
 
             # Magnitude sensitivity
             magnitude_sens = self._compute_magnitude_sensitivity(
                 request, edge, baseline_mean, rng, evaluator, fixed=fixed
             )
-            if math.isfinite(magnitude_sens):
-                sensitivities.append(
-                    {
-                        "edge_from": edge.from_,
-                        "edge_to": edge.to,
-                        "sensitivity_type": "magnitude",
-                        "elasticity": magnitude_sens,
-                        "interpretation": self._interpret_magnitude_sensitivity(edge, magnitude_sens),
-                    }
-                )
+            sensitivities.append(
+                {
+                    "edge_from": edge.from_,
+                    "edge_to": edge.to,
+                    "sensitivity_type": "magnitude",
+                    "elasticity": magnitude_sens,
+                    "interpretation": self._interpret_magnitude_sensitivity(edge, magnitude_sens),
+                }
+            )
 
         # Rank by absolute elasticity
         sensitivities.sort(key=lambda x: abs(float(x["elasticity"])), reverse=True)
@@ -8194,11 +8264,9 @@ class RobustnessAnalyzerV2:
             outcomes_off.append(outcome)
 
         # Compute elasticity
-        mean_on = _informative_mean(outcomes_on)
-        mean_off = _informative_mean(outcomes_off)
+        mean_on = float(np.mean(outcomes_on))
+        mean_off = float(np.mean(outcomes_off))
         outcome_diff = mean_on - mean_off
-        if not math.isfinite(outcome_diff):
-            return math.nan
 
         # Use epsilon-stabilised denominator to handle near-zero baselines
         baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
@@ -8253,11 +8321,9 @@ class RobustnessAnalyzerV2:
             outcomes_low.append(outcome)
 
         # Compute elasticity (change per 2*std shift)
-        mean_high = _informative_mean(outcomes_high)
-        mean_low = _informative_mean(outcomes_low)
+        mean_high = float(np.mean(outcomes_high))
+        mean_low = float(np.mean(outcomes_low))
         outcome_diff = mean_high - mean_low
-        if not math.isfinite(outcome_diff):
-            return math.nan
 
         # Use epsilon-stabilised denominator to handle near-zero baselines
         baseline_denom = max(abs(baseline_mean), FACTOR_SENSITIVITY_BASELINE_EPSILON)
@@ -8665,9 +8731,7 @@ class RobustnessAnalyzerV2:
 
         sensitivities: List[Dict[str, Any]] = []
         ref_option = request.options[0]
-        baseline_mean = _informative_mean(baseline_outcomes[ref_option.id])
-        if not math.isfinite(baseline_mean):
-            return []
+        baseline_mean = float(np.mean(baseline_outcomes[ref_option.id]))
 
         # Intervention factor IDs for INTERVENTION_OVERRIDE detection. D-U ruling
         # (union-across-options): a factor ANY option intervenes on is a lever — not
@@ -9117,7 +9181,7 @@ class RobustnessAnalyzerV2:
             return None
 
         option_labels = {opt.id: (opt.label or opt.id) for opt in request.options}
-        option_means = {opt_id: _informative_mean(vals) for opt_id, vals in option_outcomes.items()}
+        option_means = {opt_id: float(np.mean(vals)) for opt_id, vals in option_outcomes.items()}
 
         results: List[ConditionalWinner] = []
 
@@ -9144,15 +9208,11 @@ class RobustnessAnalyzerV2:
 
             # Compute bucket winners
             low_bucket = self._compute_bucket_result(
-                low_mask, winner_per_sample, option_labels, option_means,
-                option_outcomes=option_outcomes if _has_accumulation(request.graph) else None,
+                low_mask, winner_per_sample, option_labels, option_means
             )
             high_bucket = self._compute_bucket_result(
-                high_mask, winner_per_sample, option_labels, option_means,
-                option_outcomes=option_outcomes if _has_accumulation(request.graph) else None,
+                high_mask, winner_per_sample, option_labels, option_means
             )
-            if low_bucket is None or high_bucket is None:
-                continue
 
             winner_flips = low_bucket.winner_id != high_bucket.winner_id
 
@@ -9188,13 +9248,10 @@ class RobustnessAnalyzerV2:
         winner_per_sample: List[Optional[str]],
         option_labels: Dict[str, str],
         option_means: Dict[str, float],
-        option_outcomes: Optional[Dict[str, List[float]]] = None,
-    ) -> Optional[BucketResult]:
+    ) -> BucketResult:
         """Compute win probabilities within a bucket of MC samples."""
         indices = np.where(mask)[0]
-        bucket_size = sum(winner_per_sample[idx] is not None for idx in indices)
-        if not bucket_size:
-            return None
+        bucket_size = len(indices)
 
         # Count wins per option in this bucket. 2.477(c): a draw where no option
         # was finite has no winner (None) and is skipped — never counted as a
@@ -9206,31 +9263,21 @@ class RobustnessAnalyzerV2:
                 continue
             win_counts[winner] = win_counts.get(winner, 0) + 1
 
-        denominators = {
-            oid: sum(math.isfinite(values[idx]) and winner_per_sample[idx] is not None
-                     for idx in indices)
-            for oid, values in option_outcomes.items()
-        } if option_outcomes is not None else {oid: bucket_size for oid in win_counts}
-        scores = {oid: count / denominators[oid] for oid, count in win_counts.items()
-                  if denominators[oid]}
-        if not scores:
-            return None
-
         # Determine bucket winner (ties broken by higher mean outcome)
         sorted_options = sorted(
-            scores.items(),
+            win_counts.items(),
             key=lambda x: (x[1], option_means.get(x[0], 0.0)),
             reverse=True,
         )
 
         winner_id = sorted_options[0][0]
-        winner_prob = sorted_options[0][1]
+        winner_prob = sorted_options[0][1] / bucket_size
 
         runner_up_id = None
         runner_up_prob = None
         if len(sorted_options) > 1:
             runner_up_id = sorted_options[1][0]
-            runner_up_prob = sorted_options[1][1]
+            runner_up_prob = sorted_options[1][1] / bucket_size
 
         return BucketResult(
             n_samples=bucket_size,
@@ -9358,10 +9405,7 @@ class RobustnessAnalyzerV2:
             for nid in node_ids:
                 vals = bootstrap_elasticities[nid]
                 run_elasticities[nid] = vals[run_idx] if run_idx < len(vals) else 0.0
-            if not _has_accumulation(request.graph) or all(
-                math.isfinite(value) for value in run_elasticities.values()
-            ):
-                elasticity_matrix.append(run_elasticities)
+            elasticity_matrix.append(run_elasticities)
 
         # Compute per-bootstrap importance ranks (by |elasticity|, descending)
         per_run_ranks: Dict[str, List[int]] = {nid: [] for nid in node_ids}
@@ -9372,10 +9416,7 @@ class RobustnessAnalyzerV2:
 
         result: Dict[str, Dict[str, Any]] = {}
         for nid in node_ids:
-            elasticities = np.array(
-                [run[nid] for run in elasticity_matrix]
-                if _has_accumulation(request.graph) else bootstrap_elasticities[nid]
-            )
+            elasticities = np.array(bootstrap_elasticities[nid])
             e_std = float(np.std(elasticities, ddof=1)) if len(elasticities) > 1 else 0.0
 
             # Use primary (deterministic) elasticity for the negligible check,
@@ -9401,7 +9442,7 @@ class RobustnessAnalyzerV2:
             # Every run that could serialize before had a finite e_std by
             # construction, so this branch is never taken on those and their bytes
             # are unchanged.
-            if not elasticities.size or not math.isfinite(e_std) or not math.isfinite(primary_e):
+            if not math.isfinite(e_std) or not math.isfinite(primary_e):
                 self.logger.warning(
                     "factor_stability_non_finite_population",
                     extra={"node_id": nid},
@@ -9943,31 +9984,13 @@ class RobustnessAnalyzerV2:
         n_defaulted_roots: int = 0,
         defaulted_root_node_ids: Optional[List[str]] = None,
         critiques: Optional[List[CritiqueV2]] = None,
-        informative_win_counts: Optional[Dict[str, int]] = None,
-        informative_win_masks: Optional[Dict[str, List[bool]]] = None,
+        inference_warnings: Optional[List[InferenceWarning]] = None,
     ) -> RobustnessResult:
         """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
-        n_samples = (
-            sum(winner is not None for winner in winner_per_sample)
-            if _has_accumulation(request.graph) else request.n_samples
-        )
-        ranking_scores = {
-            oid: wins / informative_win_counts[oid]
-            for oid, wins in option_wins.items()
-            if informative_win_counts[oid] > 0
-        } if informative_win_counts is not None else option_wins
-        if informative_win_counts is not None and all(
-            count == request.n_samples for count in informative_win_counts.values()
-        ):
-            ranking_scores = option_wins
-        ranking_scores = ranking_scores or option_wins
-        most_frequent_winner = max(ranking_scores, key=lambda oid: ranking_scores[oid])
-        denominator = (
-            informative_win_counts[most_frequent_winner]
-            if informative_win_counts is not None else n_samples
-        )
-        recommendation_stability = option_wins[most_frequent_winner] / max(1, denominator)
+        n_samples = request.n_samples
+        most_frequent_winner = max(option_wins, key=lambda k: option_wins[k])
+        recommendation_stability = option_wins[most_frequent_winner] / n_samples
 
         # Trust downgrade: penalise stability when root nodes defaulted to 0.0,
         # since the model is running with missing inputs.
@@ -10011,18 +10034,29 @@ class RobustnessAnalyzerV2:
         robust_edges = sorted(robust_edge_ids)
 
         # Compute alternative winners for fragile edges (includes marginal calculation)
-        fragile_edges_enhanced = self._compute_alternative_winners(
-            fragile_edge_info,
-            edge_configs_per_sample,
-            winner_per_sample,
-            most_frequent_winner,
-            request,
-            evaluator,
-            global_seed,
-            edge_max_elasticity=edge_max_elasticity,
-            critiques=critiques,
-            informative_win_masks=informative_win_masks,
-        )
+        try:
+            fragile_edges_enhanced = self._compute_alternative_winners(
+                fragile_edge_info,
+                edge_configs_per_sample,
+                winner_per_sample,
+                most_frequent_winner,
+                request,
+                evaluator,
+                global_seed,
+                edge_max_elasticity=edge_max_elasticity,
+                critiques=critiques,
+            )
+        except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+            # Existing no-marginal path: preserve weak-edge counts, omit the probe.
+            fragile_edges_enhanced = self._compute_alternative_winners(
+                fragile_edge_info, edge_configs_per_sample, winner_per_sample, most_frequent_winner,
+            )
+            if inference_warnings is not None:
+                inference_warnings.append(self._optional_phase_unavailable_warning(
+                    "NUMERICAL_INSTABILITY", "robustness.fragile_edges[].marginal_switch_probability",
+                    "accumulation_draw_refused", 0.0,
+                    "Marginal-switch probes were omitted because a churn/rate accumulation was refused.",
+                ))
 
         # Overall robustness
         # Per Decision Model Schema v2.6: is_robust = recommendation_stability >= 0.7
@@ -10103,7 +10137,8 @@ class RobustnessAnalyzerV2:
                 interventions=option.interventions,
                 goal_node=request.goal_node_id,
             )
-        baseline_winner = self._argmax_option(baseline_outcomes)
+        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
+        baseline_winner = sorted_baseline[0][0]
 
         results: List[Dict[str, Any]] = []
         for edge in request.graph.edges:
@@ -10142,10 +10177,8 @@ class RobustnessAnalyzerV2:
                         interventions=option.interventions,
                         goal_node=request.goal_node_id,
                     )
-                if not math.isfinite(test_outcomes[baseline_winner]):
-                    raise AccumulationDrawRefusedError("E-value probe refuses its baseline option")
-                test_winner = self._argmax_option(test_outcomes)
-                if test_winner == baseline_winner:
+                sorted_test = sorted(test_outcomes.items(), key=lambda x: (-x[1], x[0]))
+                if sorted_test[0][0] == baseline_winner:
                     continue  # This direction cannot flip — skip
 
                 # ROADMAP 2.228-F3: retain the argmax on the FLIPPED side, which
@@ -10159,7 +10192,7 @@ class RobustnessAnalyzerV2:
                 # IS the argmax at flip_mean. If no bisection step ever flipped, the
                 # endpoint is still the boundary probed just above, whose argmax is
                 # what we seed here. Zero extra evaluations either way.
-                alternative_winner = test_winner
+                alternative_winner = sorted_test[0][0]
 
                 # Binary search for the flip point
                 for _ in range(self.E_VALUE_BISECT_STEPS):
@@ -10183,12 +10216,10 @@ class RobustnessAnalyzerV2:
                             interventions=option.interventions,
                             goal_node=request.goal_node_id,
                         )
-                    if not math.isfinite(test_outcomes[baseline_winner]):
-                        raise AccumulationDrawRefusedError("E-value probe refuses its baseline option")
-                    test_winner = self._argmax_option(test_outcomes)
-                    if test_winner != baseline_winner:
+                    sorted_test = sorted(test_outcomes.items(), key=lambda x: (-x[1], x[0]))
+                    if sorted_test[0][0] != baseline_winner:
                         # Flip happened — narrow toward current_mean
-                        alternative_winner = test_winner
+                        alternative_winner = sorted_test[0][0]
                         if direction == "increase":
                             hi = mid
                         else:
@@ -10386,18 +10417,12 @@ class RobustnessAnalyzerV2:
                         },
                     )
                     return False  # all-or-nothing: attach nothing
-                try:
-                    flip_mean = self._flip_mean_under_background(request, evaluator, edge, background)
-                except AccumulationDrawRefusedError:
-                    # Refused backgrounds establish neither a flip nor stability.
-                    continue
+                flip_mean = self._flip_mean_under_background(request, evaluator, edge, background)
                 seed_flip_means.append(round(flip_mean, 6) if flip_mean is not None else None)
 
-            if not seed_flip_means:
-                raise AccumulationDrawRefusedError("edge stability has no informative background")
             flipped = [v for v in seed_flip_means if v is not None]
             band: Dict[str, Any] = {
-                "n_seeds": len(seed_flip_means),
+                "n_seeds": n_seeds,
                 "n_seeds_flipped": len(flipped),
                 "seed_flip_means": seed_flip_means,
             }
@@ -10450,9 +10475,8 @@ class RobustnessAnalyzerV2:
                     interventions=option.interventions,
                     goal_node=request.goal_node_id,
                 )
-            if baseline_winner is not None and not math.isfinite(outcomes[baseline_winner]):
-                raise AccumulationDrawRefusedError("edge flip probe refuses its baseline option")
-            return self._argmax_option(outcomes)
+            # Deterministic tie-breaking (sort by option_id) — same as base
+            return sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))[0][0]
 
         def winner_at(mean_value: float) -> str:
             # In-place: mutate the single edge_key, evaluate, restore in finally.
@@ -10470,7 +10494,6 @@ class RobustnessAnalyzerV2:
             finally:
                 baseline_config[edge_key] = original
 
-        baseline_winner: Optional[str] = None
         baseline_winner = winner_under(baseline_config)
 
         for direction in ("increase", "decrease"):
@@ -10580,11 +10603,8 @@ class RobustnessAnalyzerV2:
 
     @staticmethod
     def _argmax_option(outcomes: Dict[str, float]) -> str:
-        """Highest informative outcome, then lowest id; never a refused winner."""
-        finite = [(oid, value) for oid, value in outcomes.items() if math.isfinite(value)]
-        if not finite:
-            raise AccumulationDrawRefusedError("flip comparison has no informative option")
-        return sorted(finite, key=lambda x: (-x[1], x[0]))[0][0]
+        """Analyzer-wide deterministic argmax: highest outcome, then lowest id."""
+        return sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))[0][0]
 
     @classmethod
     def _affine_coefficients(
@@ -10592,16 +10612,8 @@ class RobustnessAnalyzerV2:
     ) -> Tuple[Dict[str, float], Dict[str, float]]:
         """(intercepts A_o, slopes T_o) from goals measured at the domain ends."""
         span = cls.FACTOR_VALUE_MAX - cls.FACTOR_VALUE_MIN
-        finite_min = {oid for oid, value in at_min.items() if math.isfinite(value)}
-        finite_max = {oid for oid, value in at_max.items() if math.isfinite(value)}
-        # A participant disappearing at one endpoint cannot establish an affine
-        # no-flip proof. Permanently refused participants contribute no coefficient.
-        if not finite_min or finite_min != finite_max:
-            raise AccumulationDrawRefusedError("factor flip endpoints do not have an informative cohort")
-        slopes = {oid: (at_max[oid] - at_min[oid]) / span for oid in at_min if oid in finite_min}
-        intercepts = {oid: at_min[oid] - slopes[oid] * cls.FACTOR_VALUE_MIN for oid in slopes}
-        if not all(math.isfinite(value) for value in (*slopes.values(), *intercepts.values())):
-            raise AccumulationDrawRefusedError("factor flip coefficients are non-finite")
+        slopes = {oid: (at_max[oid] - at_min[oid]) / span for oid in at_min}
+        intercepts = {oid: at_min[oid] - slopes[oid] * cls.FACTOR_VALUE_MIN for oid in at_min}
         return intercepts, slopes
 
     def _evaluated_argmax_probe(
@@ -10669,8 +10681,6 @@ class RobustnessAnalyzerV2:
         breaking a tie (mirroring _compute_edge_e_values, which tries 'increase'
         first).
         """
-        if baseline_winner not in intercepts:
-            raise AccumulationDrawRefusedError("factor flip baseline has no informative coefficient")
         crossings: List[float] = []
         for oid in intercepts:
             if oid == baseline_winner:
@@ -10764,11 +10774,9 @@ class RobustnessAnalyzerV2:
         baseline_config = {
             (e.from_, e.to): e.strength.mean * e.exists_probability for e in request.graph.edges
         }
-        baseline_outcomes = self._option_goals(request, evaluator, baseline_config)
-        baseline_winner = self._argmax_option(baseline_outcomes)
-        baseline_informative_ids = {
-            oid for oid, value in baseline_outcomes.items() if math.isfinite(value)
-        }
+        baseline_winner = self._argmax_option(
+            self._option_goals(request, evaluator, baseline_config)
+        )
 
         uncertainty_by_id = {u.node_id: u for u in (request.parameter_uncertainties or [])}
         uncertainty_ids = set(uncertainty_by_id)
@@ -10799,8 +10807,6 @@ class RobustnessAnalyzerV2:
                 request, evaluator, baseline_config, {node.id: self.FACTOR_VALUE_MAX}
             )
             intercepts, slopes = self._affine_coefficients(at_min, at_max)
-            if not baseline_informative_ids.issubset(slopes):
-                raise AccumulationDrawRefusedError("factor flip probe refuses a baseline participant")
             screened.append(
                 {
                     "node": node,
@@ -10930,10 +10936,7 @@ class RobustnessAnalyzerV2:
             at_max = self._option_goals(
                 request, evaluator, background, {node.id: self.FACTOR_VALUE_MAX}
             )
-            try:
-                intercepts, slopes = self._affine_coefficients(at_min, at_max)
-            except AccumulationDrawRefusedError:
-                continue
+            intercepts, slopes = self._affine_coefficients(at_min, at_max)
             # The winner THIS background starts from — derived from the affine
             # family, not re-evaluated, and not assumed to equal the
             # expected-value baseline winner (a sampled background may well be
@@ -10950,11 +10953,9 @@ class RobustnessAnalyzerV2:
             )
             seed_flip_values.append(round(confirmed[0], 6) if confirmed is not None else None)
 
-        if not seed_flip_values:
-            raise AccumulationDrawRefusedError("factor stability has no informative background")
         flipped = [v for v in seed_flip_values if v is not None]
         band: Dict[str, Any] = {
-            "n_seeds": len(seed_flip_values),
+            "n_seeds": len(backgrounds),
             "n_seeds_flipped": len(flipped),
             "seed_flip_values": seed_flip_values,
         }
@@ -11284,7 +11285,7 @@ class RobustnessAnalyzerV2:
         # Baseline max_a E[U_a]: the best current option's expected outcome on the
         # pre-noise CRN population (np.mean — the engine's mean convention).
         option_means = {
-            oid: _informative_mean(vals) for oid, vals in pre_noise_option_outcomes.items() if vals
+            oid: float(np.mean(vals)) for oid, vals in pre_noise_option_outcomes.items() if vals
         }
         finite_option_means = {oid: m for oid, m in option_means.items() if math.isfinite(m)}
         if not finite_option_means:
@@ -11308,7 +11309,7 @@ class RobustnessAnalyzerV2:
                     )
                     for i in range(n_samples)
                 ]
-                do_eu = _informative_mean(do_outcomes)
+                do_eu = float(np.mean(do_outcomes))
                 # Skip a non-finite grid point (pathological graph) rather than let
                 # inf/nan reach the wire; strict '>' keeps the FIRST (request-order)
                 # value on ties → deterministic argmax.
@@ -11705,12 +11706,6 @@ class RobustnessAnalyzerV2:
                 option_outcomes[option.id].append(outcome)
 
         if request.goal_constraints and constraint_node_values is not None:
-            if _has_accumulation(request.graph):
-                for oid, node_series in constraint_node_values.items():
-                    for values in node_series.values():
-                        for index, sample in enumerate(option_outcomes[oid]):
-                            if not math.isfinite(sample):
-                                values[index] = math.nan
             # P(joint_goal) for the fixed recommended option.
             #
             # ROADMAP 2.798: unresolvable constraints mean there is no joint
@@ -11729,7 +11724,6 @@ class RobustnessAnalyzerV2:
             probabilities = self._compute_constraint_probabilities(
                 resolved_values,
                 request.goal_constraints,
-                condition_on_informative=_has_accumulation(request.graph),
             )
             # 2.477(k): no informative draw => no honest joint probability. This
             # already returns None on other refusals above; same treatment.
@@ -11761,7 +11755,6 @@ class RobustnessAnalyzerV2:
             if plan.needs_status_quo_reference and not goal_reference_series:
                 return None
             win_count = 0.0
-            informative_count = 0
             for i in range(n_samples):
                 finite_i = {
                     oid: option_outcomes[oid][i]
@@ -11775,10 +11768,6 @@ class RobustnessAnalyzerV2:
                 )
                 if recommended_option_id in winners:
                     win_count += 1.0 / len(winners)
-                if recommended_option_id in finite_i and winners:
-                    informative_count += 1
-            if _has_accumulation(request.graph):
-                return win_count / informative_count if informative_count else None
             return win_count / n_samples
 
     def _compute_alternative_winners(
@@ -11792,7 +11781,6 @@ class RobustnessAnalyzerV2:
         global_seed: Optional[int] = None,
         edge_max_elasticity: Optional[Dict[str, float]] = None,
         critiques: Optional[List[CritiqueV2]] = None,
-        informative_win_masks: Optional[Dict[str, List[bool]]] = None,
     ) -> List[FragileEdgeEnhanced]:
         """
         Compute alternative winners for fragile edges.
@@ -11875,7 +11863,7 @@ class RobustnessAnalyzerV2:
             )
 
         # --- the once-per-request baseline (see change 1 above) ----------------
-        marginal_baseline: Optional[Tuple[Dict[Tuple[str, str], float], Optional[str]]] = None
+        marginal_baseline: Optional[Tuple[Dict[Tuple[str, str], float], str]] = None
         if can_compute_marginal and priced_edge_ids:
             assert request is not None
             assert evaluator is not None
@@ -11955,21 +11943,10 @@ class RobustnessAnalyzerV2:
                 # Every weak-edge draw was uninformative — no attribution to make.
                 continue
 
-            weak_denominators = {
-                oid: sum(mask[index] and winner_per_sample[index] is not None
-                         for index in weak_sample_indices)
-                for oid, mask in informative_win_masks.items()
-            } if informative_win_masks is not None else {
-                oid: sum(weak_winner_counts.values()) for oid in weak_winner_counts
-            }
-            weak_scores = {
-                oid: count / weak_denominators[oid]
-                for oid, count in weak_winner_counts.items() if weak_denominators[oid]
-            }
-            if not weak_scores:
-                continue
             # Find most frequent winner in weak-edge samples
-            weak_winner = max(weak_scores, key=lambda oid: weak_scores[oid])
+            weak_winner = max(weak_winner_counts, key=lambda k: weak_winner_counts[k])
+            weak_winner_count = weak_winner_counts[weak_winner]
+            total_weak_samples = len(weak_sample_indices)
 
             # Determine alternative winner and switch probability
             # The alternative is the best option OTHER than the overall winner
@@ -11977,18 +11954,18 @@ class RobustnessAnalyzerV2:
             if weak_winner != overall_winner:
                 # Clear case: a different option wins when edge is weak
                 alternative_winner_id = weak_winner
-                switch_probability = weak_scores[weak_winner]
+                switch_probability = weak_winner_count / total_weak_samples
             else:
                 # Same option wins most often, but we want to show the risk
                 # Find the best alternative (second most frequent) and its probability
                 alternatives = {
-                    opt: score for opt, score in weak_scores.items() if opt != overall_winner
+                    opt: count for opt, count in weak_winner_counts.items() if opt != overall_winner
                 }
                 if alternatives:
                     # There's at least one alternative winner in weak scenarios
                     best_alt = max(alternatives, key=lambda k: alternatives[k])
                     alternative_winner_id = best_alt
-                    switch_probability = alternatives[best_alt]
+                    switch_probability = alternatives[best_alt] / total_weak_samples
                 else:
                     # Only the overall winner appeared in weak scenarios - truly stable
                     alternative_winner_id = None
@@ -12011,7 +11988,7 @@ class RobustnessAnalyzerV2:
         self,
         request: RobustnessRequestV2,
         evaluator: SCMEvaluatorV2,
-    ) -> Tuple[Dict[Tuple[str, str], float], Optional[str]]:
+    ) -> Tuple[Dict[Tuple[str, str], float], str]:
         """The expected-value config and its winner — shared by every edge probe.
 
         ROADMAP 2.356. Extracted verbatim from
@@ -12043,11 +12020,8 @@ class RobustnessAnalyzerV2:
                 goal_node=request.goal_node_id,
             )
         # Deterministic tie-breaking for baseline winner
-        sorted_baseline = sorted(
-            ((oid, value) for oid, value in baseline_outcomes.items() if math.isfinite(value)),
-            key=lambda x: (-x[1], x[0]),
-        )
-        return baseline_config, sorted_baseline[0][0] if sorted_baseline else None
+        sorted_baseline = sorted(baseline_outcomes.items(), key=lambda x: (-x[1], x[0]))
+        return baseline_config, sorted_baseline[0][0]
 
     def _compute_marginal_switch_probability(
         self,
@@ -12056,8 +12030,8 @@ class RobustnessAnalyzerV2:
         evaluator: SCMEvaluatorV2,
         global_seed: int,
         k_samples: int = MARGINAL_K_SAMPLES,
-        baseline: Optional[Tuple[Dict[Tuple[str, str], float], Optional[str]]] = None,
-    ) -> Optional[float]:
+        baseline: Optional[Tuple[Dict[Tuple[str, str], float], str]] = None,
+    ) -> float:
         """Compute probability of decision flip when ONLY this edge varies.
 
         Samples this edge K times from its uncertainty distribution while holding
@@ -12108,11 +12082,8 @@ class RobustnessAnalyzerV2:
             if baseline is not None
             else self._compute_marginal_baseline(request, evaluator)
         )
-        if marginal_baseline_winner is None:
-            return None
 
         flip_count = 0
-        informative_count = 0
 
         for _ in range(k_samples):
             # Sample existence (Bernoulli)
@@ -12139,21 +12110,13 @@ class RobustnessAnalyzerV2:
                 )
 
             # Determine winner with deterministic tie-breaking (sort by option_id)
-            if not math.isfinite(outcomes[marginal_baseline_winner]):
-                continue
-            sorted_options = sorted(
-                ((oid, value) for oid, value in outcomes.items() if math.isfinite(value)),
-                key=lambda x: (-x[1], x[0]),
-            )
-            if not sorted_options:
-                continue
-            informative_count += 1
+            sorted_options = sorted(outcomes.items(), key=lambda x: (-x[1], x[0]))
             sample_winner = sorted_options[0][0]
 
             if sample_winner != marginal_baseline_winner:
                 flip_count += 1
 
-        return flip_count / informative_count if informative_count else None
+        return flip_count / k_samples
 
     # =========================================================================
     # Multi-Constraint Goal Analysis (Phase 2)
@@ -12188,7 +12151,6 @@ class RobustnessAnalyzerV2:
         constraints: List[GoalConstraint],
         *,
         joint_emitted: bool = True,
-        condition_on_informative: bool = False,
     ) -> Optional[Tuple[Dict[str, float], float, List[List[bool]], List[bool]]]:
         """
         Compute per-constraint and joint probabilities for an option, or REFUSE.
@@ -12331,7 +12293,7 @@ class RobustnessAnalyzerV2:
         # figure is emitted unchanged. Both directions are pinned by the
         # discriminating pair, and a gate that widened to either would RED.
         coverage_is_partial = n_informative < n_samples
-        if coverage_is_partial and not condition_on_informative:
+        if coverage_is_partial:
             # B5: a joint that will be WITHHELD (a sibling constraint is unscored)
             # is not an emitted figure, so it cannot refuse the block.
             emitted = [
@@ -12552,7 +12514,6 @@ class RobustnessAnalyzerV2:
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
         level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
         range_series: Optional[Dict[str, List[float]]] = None,
-        condition_on_informative: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -12674,8 +12635,7 @@ class RobustnessAnalyzerV2:
 
         # T3: Per-constraint and joint probability
         probabilities = self._compute_constraint_probabilities(
-            resolved_values, scored, joint_emitted=joint_emitted,
-            condition_on_informative=condition_on_informative,
+            resolved_values, scored, joint_emitted=joint_emitted
         )
 
         # 2.477(k) THE SECOND REFUSAL POINT. `None` means no draw was

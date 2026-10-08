@@ -84,6 +84,7 @@ from src.services.robustness_analyzer_v2 import (
     compute_weighted_cost,
     get_max_cost_units,
     identity_blocking_critiques,
+    IdentityNotEvaluatedError,
     resolve_factor_central_value,
 )
 from src.utils.business_metrics import track_robustness_analysis
@@ -379,6 +380,15 @@ async def _admit_and_run(
                 "Retry-After": str(overload.retry_after),
                 "X-Request-Id": request_id,
             },
+        )
+    except IdentityNotEvaluatedError as refusal:
+        blocked = ISLV2Error422(
+            analysis_status="blocked", status_reason=str(refusal),
+            critiques=refusal.critiques, request_id=request_id,
+        )
+        return None, JSONResponse(
+            status_code=422, content=blocked.model_dump(),
+            headers={"X-Request-Id": request_id},
         )
     except AnalysisDeadlineExceeded as deadline:
         body = _deadline_error_response(deadline, request_id)
@@ -885,7 +895,8 @@ async def _analyze_robustness_v2_enhanced(
         # is a blocker (withheld, never approximated).
         # Honour structural blockers before recursive identity resolution (a cycle
         # cannot have a horizon anchor and already carries a typed blocked critique).
-        identity_blockers = [] if validation.has_blockers else identity_blocking_critiques(request)
+        has_cycle = any(c.code == "GRAPH_CYCLE_DETECTED" for c in validation.critiques)
+        identity_blockers = [] if has_cycle else identity_blocking_critiques(request)
         builder.add_critiques(identity_blockers)
 
         # Build diagnostics if requested
@@ -1002,7 +1013,11 @@ async def _analyze_robustness_v2_enhanced(
 
             # P2-ISL-5: Validate and clean MC samples with proper critiques
             n_total = request.n_samples
-            if dist.samples is not None and len(dist.samples) > 0:
+            if result.win_probability is None and dist.samples == []:
+                # Whole accumulation option refused: the existing failed-option path.
+                finite_samples = np.array([], dtype=float)
+                n_valid = 0
+            elif dist.samples is not None and len(dist.samples) > 0:
                 # Use numerical stability utility for validation + critique emission
                 samples_array = np.array(dist.samples)
                 _imputed, sample_critiques = validate_mc_samples(samples_array)
@@ -1208,7 +1223,8 @@ async def _analyze_robustness_v2_enhanced(
             # unchanged.
             outcome_mean: Optional[float]
             outcome_std: Optional[float]
-            if math.isfinite(dist.mean) and math.isfinite(dist.std):
+            if (dist.mean is not None and dist.std is not None
+                    and math.isfinite(dist.mean) and math.isfinite(dist.std)):
                 outcome_mean, outcome_std = dist.mean, dist.std
             elif finite_samples is not None and finite_samples.size > 0:
                 outcome_mean, outcome_std = overflow_safe_mean_std(finite_samples)
@@ -1274,7 +1290,8 @@ async def _analyze_robustness_v2_enhanced(
                     ),
                     status=status,
                     status_reason=(
-                        "Numerical issues in sampling" if status != "computed" else None
+                        "accumulation_draw_refused" if result.win_probability is None
+                        else "Numerical issues in sampling" if status != "computed" else None
                     ),
                 )
             )

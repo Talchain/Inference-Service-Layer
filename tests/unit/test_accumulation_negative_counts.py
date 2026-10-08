@@ -77,7 +77,7 @@ def test_zero_stock_and_inflow_evaluate():
 @pytest.mark.parametrize(
     "node_id,figure", [(STOCK, -5.0), (INFLOW, -3.0)], ids=["stock", "inflow"]
 )
-def test_negative_option_withholds_only_its_draws(node_id, figure):
+def test_negative_option_withholds_the_whole_option(node_id, figure):
     request = accumulation_request()
     node = next(node for node in request["graph"]["nodes"] if node["id"] == node_id)
     request["options"].append(

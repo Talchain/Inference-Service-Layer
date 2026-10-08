@@ -2135,11 +2135,11 @@ class RobustnessRequestV2(BaseModel):
 class OutcomeDistribution(BaseModel):
     """Distribution of outcomes from Monte Carlo sampling."""
 
-    mean: float = Field(..., description="Mean outcome value")
-    std: float = Field(..., description="Standard deviation")
-    median: float = Field(..., description="Median outcome value")
-    ci_lower: float = Field(..., description="Lower bound of confidence interval")
-    ci_upper: float = Field(..., description="Upper bound of confidence interval")
+    mean: Optional[float] = Field(..., description="Mean outcome value")
+    std: Optional[float] = Field(..., description="Standard deviation")
+    median: Optional[float] = Field(..., description="Median outcome value")
+    ci_lower: Optional[float] = Field(..., description="Lower bound of confidence interval")
+    ci_upper: Optional[float] = Field(..., description="Upper bound of confidence interval")
     samples: Optional[List[float]] = Field(None, description="Raw samples if requested")
 
     model_config = {
@@ -2239,7 +2239,7 @@ class OptionResult(BaseModel):
 
     option_id: str = Field(..., description="Option identifier")
     outcome_distribution: OutcomeDistribution = Field(..., description="Distribution of outcomes")
-    win_probability: float = Field(..., ge=0, le=1, description="P(this option is best)")
+    win_probability: Optional[float] = Field(..., ge=0, le=1, description="P(this option is best)")
     probability_of_goal: Optional[float] = Field(
         None,
         ge=0,

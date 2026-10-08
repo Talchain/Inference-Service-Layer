@@ -154,9 +154,7 @@ def downstream_nonlinearity(request: Any, from_id: str, to_id: str) -> Optional[
     return None
 
 
-def p_best(
-    values: np.ndarray, sense: str, n_samples: int, *, condition_on_informative: bool = False,
-) -> np.ndarray:
+def p_best(values: np.ndarray, sense: str, n_samples: int) -> np.ndarray:
     """P(best) per option for (options × draws) values: ISL's winner rule for maximise / minimise, vectorised.
 
     A draw credits only its finite options; the best value wins and an exact tie splits the draw; a draw with no finite
@@ -174,25 +172,18 @@ def p_best(
     winners = finite & (v == best) & finite.any(axis=0)
     counts = winners.sum(axis=0)
     share = np.where(counts > 0, 1.0 / np.maximum(counts, 1), 0.0)
-    credits = (winners * share).sum(axis=1)
-    if condition_on_informative:
-        informative = finite.sum(axis=1)
-        out = np.divide(
-            credits, informative, out=np.full(credits.shape, np.nan), where=informative > 0,
-        )
-    else:
-        out = credits / n_samples
+    out: np.ndarray = (winners * share).sum(axis=1) / n_samples
     return out
 
 
 def _leader(p: np.ndarray, option_ids: Sequence[str]) -> str:
     # ISL's recommendation rule: max(option_wins, key=...) → the FIRST option holding the maximum.
-    return option_ids[int(np.argmax(np.where(np.isfinite(p), p, -np.inf)))]
+    return option_ids[int(np.argmax(p))]
 
 
 def affine_threshold(
     x0: np.ndarray, x1: np.ndarray, current: float, option_ids: Sequence[str], lead: str, sense: str,
-    n_samples: int, step: float = GRID_STEP, *, condition_on_informative: bool = False,
+    n_samples: int, step: float = GRID_STEP,
 ) -> Dict[str, Any]:
     """Nearest mean between ``current`` and 0 where the recommendation stops being ``lead``, on a ``step`` grid.
 
@@ -204,10 +195,7 @@ def affine_threshold(
     for k in range(1, n + 1):
         x = current - current * k / n
         t = (current - x) / current
-        who = _leader(p_best(
-            x0 + t * (x1 - x0), sense, n_samples,
-            condition_on_informative=condition_on_informative,
-        ), option_ids)
+        who = _leader(p_best(x0 + t * (x1 - x0), sense, n_samples), option_ids)
         if who != lead:
             found = {"exists": True, "hold": hold, "flip": x, "to_option_id": who}
             break
@@ -219,10 +207,7 @@ def affine_threshold(
     # below judge it exactly as they judge any other, and no new absence reason is needed on the wire.
     t_max = (current - found["hold"]) / current if found["exists"] else 1.0
     try:
-        nearer = first_leader_change(
-            x0, x1, option_ids, lead, sense, t_max,
-            condition_on_informative=condition_on_informative,
-        )
+        nearer = first_leader_change(x0, x1, option_ids, lead, sense, t_max)
     except TieBudgetExceeded:
         # Too many EXACT ties to replay: the recommendation along this link is decided by float tie-breaks throughout,
         # so nothing (neither "no change" nor a bracket) is certified. The block withholds it as `leader_unstable`.
@@ -238,7 +223,6 @@ def affine_threshold(
 
 def first_leader_change(
     x0: np.ndarray, x1: np.ndarray, option_ids: Sequence[str], lead: str, sense: str, t_max: float,
-    *, condition_on_informative: bool = False,
 ) -> Optional[Tuple[float, str, float]]:
     """The first change of recommendation in (0, ``t_max``], EXACTLY: ``(t, new_leader, half_width)``, or None.
 
@@ -293,27 +277,15 @@ def first_leader_change(
     times = t_ev[last]  # the distinct change times; an interval's state is the one after its LAST change there
     states = (totals[None, :] + np.cumsum(d_ev, axis=0))[last]
     budget = [MAX_TIED_INTERVALS]
-    informative = fin.sum(axis=1)
-
-    def scores(state: np.ndarray) -> np.ndarray:
-        if not condition_on_informative or (
-            np.all(informative > 0) and np.all(informative == informative[0])
-        ):
-            return state
-        return np.divide(
-            state, informative, out=np.full(state.shape, -np.inf, dtype=float),
-            where=informative > 0,
-        )
 
     def analyser_leader(t: float) -> int:
         v = np.where(fin, v0 + t * slope, -np.inf)
         w = (v == v.max(axis=0)[None]) & fin
         share = np.where(w, 1.0 / np.maximum(w.sum(axis=0), 1)[None], 0.0)
         tally = np.add.accumulate(share, axis=1)[:, -1]  # one addition at a time, in draw order: option_wins' own sum
-        return int(np.argmax(scores(tally)))
+        return int(np.argmax(tally))
 
     def leader(state: np.ndarray, t_inside: float) -> int:
-        state = scores(state)
         if int((state == state.max()).sum()) > 1:
             if budget[0] <= 0:
                 raise TieBudgetExceeded()
@@ -327,9 +299,8 @@ def first_leader_change(
     w0 = leader(totals, first_bound / 2)
     if w0 != lead_i:  # the draws already disagree just past the current mean
         return (0.0, option_ids[w0], first_bound / 2) if first_bound > 0 else None
-    scored_states = scores(states)
-    tied = (scored_states == scored_states.max(axis=1, keepdims=True)).sum(axis=1) > 1
-    plain = np.nonzero(~tied & (np.argmax(scored_states, axis=1) != lead_i))[0]  # untied changes: no replay needed
+    tied = (states == states.max(axis=1, keepdims=True)).sum(axis=1) > 1
+    plain = np.nonzero(~tied & (np.argmax(states, axis=1) != lead_i))[0]  # untied changes: no replay needed
     stop = int(plain[0]) if plain.size else int(times.size)
     hit: Optional[Tuple[int, int]] = None
     for j in np.nonzero(tied[:stop])[0]:  # tied intervals before the first untied change, in time order
@@ -340,7 +311,7 @@ def first_leader_change(
     if hit is None:
         if not plain.size:
             return None
-        hit = (stop, int(np.argmax(scored_states[stop])))
+        hit = (stop, int(np.argmax(states[stop])))
     i, to_i = hit
     t_star = float(times[i])
     prev = float(times[i - 1]) if i > 0 else 0.0
@@ -360,14 +331,12 @@ def _child_seed(master: int, i: int) -> int:
 def compute_decision_flip_block(dreq: Any) -> Any:
     """The on-demand block: per link quoted / absent / no_change, under the K-replicate licence."""
     from src.models.robustness_v2 import DecisionFlipBlockV2, DecisionFlipLinkV2, RobustnessRequestV2
-    from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2, compute_effective_seed
+    from src.services.robustness_analyzer_v2 import (
+        AccumulationDrawRefusedError, IdentityNotEvaluatedError,
+        RobustnessAnalyzerV2, compute_effective_seed,
+    )
 
     base = dreq.request.model_copy(update=STRIPPED, deep=True)
-    condition_on_informative = any(
-        node.nonlinear_identity is not None
-        and node.nonlinear_identity.operation == "accumulation"
-        for node in base.graph.nodes
-    )
     edges = {(e.from_, e.to): e for e in base.graph.edges}
     for ref in dreq.links:
         if (ref.from_id, ref.to_id) not in edges:
@@ -383,20 +352,29 @@ def compute_decision_flip_block(dreq: Any) -> Any:
                     e.strength.mean = mean
         q = RobustnessRequestV2.model_validate(q.model_dump(by_alias=True))
         q._capture_draws = capture
-        return RobustnessAnalyzerV2().analyze(q)
+        try:
+            response = RobustnessAnalyzerV2().analyze(q)
+        except IdentityNotEvaluatedError as exc:
+            if not capture or not any(
+                c.identity is not None and c.identity.withheld_reason == "accumulation_draw_refused"
+                for c in getattr(exc, "critiques", [])
+            ):
+                raise
+            raise AccumulationDrawRefusedError(str(exc)) from exc
+        if capture and any(
+            oid in option_ids for oid in response._mc_draws.get("accumulation_refused_option_ids", [])
+        ):
+            raise AccumulationDrawRefusedError("decision-flip probe refuses an accumulation option")
+        return response
 
     def matrix(resp: Any) -> np.ndarray:
         oo = resp._mc_draws["option_outcomes"]
         return np.array([oo[o] for o in option_ids], dtype=float)
 
-    def win_shares(resp: Any, values: np.ndarray) -> np.ndarray:
-        shares = {o.option_id: o.win_probability for o in resp.results}
-        out = np.array([np.nan if shares[o] is None else shares[o] for o in option_ids])
-        if condition_on_informative:
-            out[~np.any(np.isfinite(values), axis=1)] = np.nan
-        return out
-
     head = run(master, capture=False)
+    # A failed option never participates in a flip's comparison arrays.
+    option_ids = [o.option_id for o in head.results if o.win_probability is not None]
+    base = base.model_copy(update={"options": [o for o in base.options if o.id in option_ids]})
     # A WITHHELD ranking has no leader (review 5963778665 P1). The analyser's `recommended_option_id` is then max() over
     # an all-zero tally, i.e. the FIRST option by array order: reversing the options names the other one. Export null
     # and let every link be the honest `ranking_not_supported` absence, without spending the replicates.
@@ -406,8 +384,13 @@ def compute_decision_flip_block(dreq: Any) -> Any:
     sense: str = "maximise"
     seeds = [_child_seed(master, i) for i in range(dreq.replicates)]
     replicate_base: Dict[int, Any] = {}
+    replicate_refused = False
     for s in seeds if leader is not None else []:
-        r = run(s)
+        try:
+            r = run(s)
+        except AccumulationDrawRefusedError:
+            replicate_refused = True
+            break
         replicate_base[s] = r
         sense = str(r._mc_draws["objective"].sense) if r._mc_draws["objective"] is not None else "maximise"
     unstable = any(r.recommended_option_id != leader for r in replicate_base.values())
@@ -419,6 +402,8 @@ def compute_decision_flip_block(dreq: Any) -> Any:
         why = None
         if leader is None or sense not in ("maximise", "minimise"):
             why = "ranking_not_supported"
+        elif replicate_refused:
+            why = "accumulation_draw_refused"
         elif unstable:
             why = "leader_unstable"
         elif current == 0:
@@ -432,24 +417,26 @@ def compute_decision_flip_block(dreq: Any) -> Any:
 
         assert leader is not None  # a null leader is the `ranking_not_supported` absence above
         per_seed: List[Dict[str, Any]] = []
+        probe_refused = False
         for s in seeds:
             x0 = matrix(replicate_base[s])
             # The capture must reproduce the analyser's own win shares before the line is trusted.
-            if not np.allclose(
-                p_best(x0, sense, base.n_samples, condition_on_informative=condition_on_informative),
-                win_shares(replicate_base[s], x0),
-                atol=CHECK_TOL, rtol=0, equal_nan=True,
-            ):
+            wp = {o.option_id: o.win_probability for o in replicate_base[s].results}
+            if not np.allclose(p_best(x0, sense, base.n_samples), [wp[o] for o in option_ids], atol=CHECK_TOL, rtol=0):
                 raise RuntimeError("DECISION_FLIP_CAPTURE_MISMATCH")
-            x1 = matrix(run(s, link, 0.0))
-            res = affine_threshold(
-                x0, x1, current, option_ids, leader, sense, base.n_samples,
-                condition_on_informative=condition_on_informative,
-            )
+            try:
+                x1 = matrix(run(s, link, 0.0))
+            except AccumulationDrawRefusedError:
+                probe_refused = True
+                break
+            res = affine_threshold(x0, x1, current, option_ids, leader, sense, base.n_samples)
             res["seed"] = s
             res["x1"] = x1
             per_seed.append(res)
 
+        if probe_refused:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="accumulation_draw_refused", **common))
+            continue
         if any(r.get("uncertified") for r in per_seed):
             # 0.75.0's vocabulary is closed (R9): the existing `leader_unstable`, in its pre-search shape.
             links_out.append(DecisionFlipLinkV2(status="absent", reason="leader_unstable", **common))
@@ -479,17 +466,19 @@ def compute_decision_flip_block(dreq: Any) -> Any:
         x1 = near["x1"]
         ok = True
         for x, expect in ((near["flip"], near["to_option_id"]), (near["hold"], leader)):
-            real = run(near["seed"], link, x)  # capture mode: the SAME draws the prediction was read from
+            try:
+                real = run(near["seed"], link, x)  # capture mode: the SAME draws the prediction was read from
+            except AccumulationDrawRefusedError:
+                probe_refused = True
+                break
             t = (current - x) / current
-            predicted = p_best(
-                x0 + t * (x1 - x0), sense, base.n_samples,
-                condition_on_informative=condition_on_informative,
-            )
-            actual = win_shares(real, matrix(real))
-            if real.recommended_option_id != expect or not np.allclose(
-                predicted, actual, atol=CHECK_TOL, rtol=0, equal_nan=True,
-            ):
+            predicted = p_best(x0 + t * (x1 - x0), sense, base.n_samples)
+            actual = np.array([{o.option_id: o.win_probability for o in real.results}[o] for o in option_ids])
+            if real.recommended_option_id != expect or not np.allclose(predicted, actual, atol=CHECK_TOL, rtol=0):
                 ok = False
+        if probe_refused:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="accumulation_draw_refused", **common))
+            continue
         if not ok:
             links_out.append(DecisionFlipLinkV2(status="absent", reason="affine_check_failed", replicate_thresholds=ths,
                                                 replicate_range=spread, **common))

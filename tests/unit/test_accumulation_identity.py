@@ -366,7 +366,7 @@ def test_non_finite_normalised_stock_withholds_identity_without_float_leaks():
     assert_finite_floats(evaluations)
     critiques = rav2.identity_blocking_critiques(request)
     assert critiques
-    assert any(c.identity.withheld_reason == "identity_non_finite" for c in critiques)
+    assert any(c.identity.withheld_reason == "accumulation_draw_refused" for c in critiques)
     assert_finite_floats([c.model_dump() for c in critiques])
 
 

@@ -6119,11 +6119,18 @@
             "title": "Sampled Intervention Ranges"
           },
           "win_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "P(this option is best)",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Win Probability",
-            "type": "number"
+            "title": "Win Probability"
           }
         },
         "required": [
@@ -6291,24 +6298,52 @@
         },
         "properties": {
           "ci_lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Lower bound of confidence interval",
-            "title": "Ci Lower",
-            "type": "number"
+            "title": "Ci Lower"
           },
           "ci_upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Upper bound of confidence interval",
-            "title": "Ci Upper",
-            "type": "number"
+            "title": "Ci Upper"
           },
           "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Mean outcome value",
-            "title": "Mean",
-            "type": "number"
+            "title": "Mean"
           },
           "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Median outcome value",
-            "title": "Median",
-            "type": "number"
+            "title": "Median"
           },
           "samples": {
             "anyOf": [
@@ -6326,9 +6361,16 @@
             "title": "Samples"
           },
           "std": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Standard deviation",
-            "title": "Std",
-            "type": "number"
+            "title": "Std"
           }
         },
         "required": [
