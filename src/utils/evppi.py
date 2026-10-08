@@ -256,6 +256,20 @@ def factor_evppi_estimate(
     theta_arr = np.asarray(theta, dtype=float)
     option_ids = sorted(option_outcomes.keys())
     matrix = np.vstack([np.asarray(option_outcomes[o], dtype=float) for o in option_ids])
+    # Refusal is carried by non-finite draws. An option with no measured draw
+    # cannot enter the maximisation; the remaining regressions share one aligned
+    # informative population so theta/outcome pairs are never shifted or imputed.
+    measured_options = np.any(np.isfinite(matrix), axis=1)
+    if not np.all(measured_options):
+        matrix = matrix[measured_options]
+    if matrix.shape[0] == 0:
+        raise ValueError("EVPPI has no informative option draws")
+    informative = np.isfinite(theta_arr) & np.all(np.isfinite(matrix), axis=0)
+    if not np.any(informative):
+        raise ValueError("EVPPI has no aligned informative draws")
+    if not np.all(informative):
+        theta_arr = theta_arr[informative]
+        matrix = np.ascontiguousarray(matrix[:, informative])
     n_samples = theta_arr.size
 
     # baseline = max over options of the mean outcome (== the max_o E[U_o] leg of

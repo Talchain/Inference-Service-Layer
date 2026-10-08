@@ -63,10 +63,10 @@ class SBCResult:
     coverage_results: List[CICoverageResult]
     pit_histogram: List[int]  # counts per bin
     pit_n_bins: int
-    pit_chi2_statistic: float
-    pit_chi2_p_value: float
-    pit_uniform: bool  # p > 0.05
-    calibrated: bool  # all CI coverages within tolerance AND PIT uniform
+    pit_chi2_statistic: Optional[float]
+    pit_chi2_p_value: Optional[float]
+    pit_uniform: Optional[bool]  # p > 0.05; absent without informative trials
+    calibrated: Optional[bool]  # all CI coverages within tolerance AND PIT uniform
     elapsed_s: float
     ms_per_trial: float
     seed: int
@@ -87,8 +87,12 @@ class SBCResult:
             ],
             "pit_histogram": self.pit_histogram,
             "pit_n_bins": self.pit_n_bins,
-            "pit_chi2_statistic": round(self.pit_chi2_statistic, 4),
-            "pit_chi2_p_value": round(self.pit_chi2_p_value, 4),
+            "pit_chi2_statistic": (
+                round(self.pit_chi2_statistic, 4) if self.pit_chi2_statistic is not None else None
+            ),
+            "pit_chi2_p_value": (
+                round(self.pit_chi2_p_value, 4) if self.pit_chi2_p_value is not None else None
+            ),
             "pit_uniform": self.pit_uniform,
             "calibrated": self.calibrated,
             "elapsed_s": round(self.elapsed_s, 3),
@@ -339,6 +343,9 @@ def run_sbc_validation(
             continue
 
         samples_arr = np.array(posterior_samples)
+        samples_arr = samples_arr[np.isfinite(samples_arr)]
+        if samples_arr.size == 0 or not np.isfinite(ground_truth):
+            continue
 
         # Step 3b: Match the generative model for outcome/risk nodes.
         # ISL's auto-scaled noise adds N(0, σ_model) to each sample, roughly
@@ -366,8 +373,9 @@ def run_sbc_validation(
 
     # --- Build coverage results ---
     coverage_results = []
-    for level in ci_levels:
-        observed = ci_hits[level] / n_trials if n_trials > 0 else 0.0
+    n_informative_trials = len(pit_values)
+    for level in ci_levels if n_informative_trials else []:
+        observed = ci_hits[level] / n_informative_trials
         deviation = abs(observed - level)
         coverage_results.append(
             CICoverageResult(
@@ -383,20 +391,25 @@ def run_sbc_validation(
     hist, _ = np.histogram(pit_arr, bins=_PIT_N_BINS, range=(0.0, 1.0))
     pit_histogram = hist.tolist()
 
+    chi2_stat: Optional[float]
+    chi2_p: Optional[float]
     if len(pit_values) >= _PIT_N_BINS:
         expected = len(pit_values) / _PIT_N_BINS
         chi2_stat, chi2_p = stats.chisquare(hist, f_exp=[expected] * _PIT_N_BINS)
         chi2_stat = float(chi2_stat)
         chi2_p = float(chi2_p)
-    else:
+    elif pit_values:
         chi2_stat = 0.0
         chi2_p = 1.0
+    else:
+        chi2_stat = None
+        chi2_p = None
 
-    pit_uniform = chi2_p > _PIT_ALPHA
+    pit_uniform = chi2_p > _PIT_ALPHA if chi2_p is not None else None
 
     # --- Overall calibration verdict ---
     all_coverage_ok = all(not cr.flagged for cr in coverage_results)
-    calibrated = all_coverage_ok and pit_uniform
+    calibrated = all_coverage_ok and pit_uniform if n_informative_trials else None
 
     return SBCResult(
         n_trials=n_trials,

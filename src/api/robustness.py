@@ -883,7 +883,9 @@ async def _analyze_robustness_v2_enhanced(
         builder.add_critiques(validation.critiques)
         # R3: a declared identity the decision depends on that cannot be computed exactly
         # is a blocker (withheld, never approximated).
-        identity_blockers = identity_blocking_critiques(request)
+        # Honour structural blockers before recursive identity resolution (a cycle
+        # cannot have a horizon anchor and already carries a typed blocked critique).
+        identity_blockers = [] if validation.has_blockers else identity_blocking_critiques(request)
         builder.add_critiques(identity_blockers)
 
         # Build diagnostics if requested
@@ -1250,6 +1252,11 @@ async def _analyze_robustness_v2_enhanced(
                     win_probability=(
                         None
                         if v1_response.objective_ranking.status == "withheld"
+                        or (n_valid == 0 and any(
+                            node.nonlinear_identity is not None
+                            and node.nonlinear_identity.operation == "accumulation"
+                            for node in request.graph.nodes
+                        ))
                         else result.win_probability
                     ),
                     probability_of_goal=result.probability_of_goal,

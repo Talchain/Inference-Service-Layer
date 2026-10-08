@@ -187,7 +187,7 @@ def test_out_of_range_rate_draw_is_uninformative_and_wire_is_finite():
         body = v2_body(d)
         invalid = next(o for o in body["options"] if o["id"] == "invalid")
         assert invalid["status"] == "failed"
-        assert invalid["win_probability"] == 0.0
+        assert invalid.get("win_probability") is None
         assert_finite_floats(body)
 
 
@@ -426,9 +426,14 @@ def test_framed_churn_uses_user_unit_level_through_request_path():
         body = v2_body(d)  # FastAPI -> RobustnessRequestV2 -> analyzer -> V2 wire
         carrier = next(e for e in body["identity_evaluations"] if e["node_id"] == CARRIER)
         assert carrier["evaluated"] is True
-        assert carrier["today_level"] == 377.5656829185674
+        assert carrier["today_level"] == pytest.approx(377.5656829185674, rel=1e-12)
         bodies.append(body)
     # The sampled goal calculation must agree too, not just the central disclosure.
+    carrier_levels = [
+        next(e for e in body["identity_evaluations"] if e["node_id"] == CARRIER)["today_level"]
+        for body in bodies
+    ]
+    assert carrier_levels[0] == carrier_levels[1] == carrier_levels[2]
     assert bodies[0]["options"] == bodies[1]["options"] == bodies[2]["options"], [
         [(o["id"], o["outcome"]["mean"]) for o in body["options"]] for body in bodies
     ]
