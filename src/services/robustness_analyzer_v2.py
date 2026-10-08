@@ -1757,7 +1757,8 @@ def _identity_term(
             result = stock + inflow * horizon_months
         else:
             log_decay = horizon_months * math.log1p(-c)
-            result = stock * math.exp(log_decay) + inflow * (-math.expm1(log_decay) / c)
+            # Retention is the stated power; expm1 keeps the inflow numerator stable.
+            result = stock * (1.0 - c) ** horizon_months - inflow * math.expm1(log_decay) / c
         if not math.isfinite(result):
             raise AccumulationDrawRefusedError("accumulation result is not finite")
         return result

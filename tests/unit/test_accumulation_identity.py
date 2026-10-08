@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 
 from typing import Any, Dict
@@ -396,3 +397,179 @@ def test_horizon_goal_level_is_not_clamped_to_todays_stock_domain(monkeypatch):
     keep = next(o for o in body["options"] if o["id"] == "keep")
     assert keep["probability_of_goal"] == 1.0
     assert keep["outcome"]["mean"] > 0.18
+
+
+def test_framed_churn_uses_user_unit_level_through_request_path():
+    """P45 A: CEE's percent is framed by its cap, not already a monthly fraction."""
+    bodies = []
+    for unit, raw_rate, cap, rate_scale in (
+        ("%", 3.0, 100.0, 0.01),
+        ("%", 3.0, 20.0, 0.01),
+        ("fraction", 0.03, 1.0, 1.0),
+    ):
+        d = accumulation_request()
+        nodes = {n["id"]: n for n in d["graph"]["nodes"]}
+        for node_id, raw, frame in ((STOCK, 250.0, 1000.0), (INFLOW, 20.0, 100.0)):
+            nodes[node_id]["observed_state"].update(raw_value=raw, cap=frame, unit="subscribers")
+        nodes[RATE]["observed_state"].update(
+            value=raw_rate / cap,
+            baseline=raw_rate / cap,
+            raw_value=raw_rate,
+            cap=cap,
+            unit=unit,
+        )
+        nodes[RATE]["execution_frame"]["frame"] = cap
+        nodes[CARRIER]["nonlinear_identity"]["rate_scale"] = rate_scale
+        parsed = RobustnessRequestV2.model_validate(d)
+        churn = next(n for n in parsed.graph.nodes if n.id == RATE)
+        assert churn.observed_state.value * churn.execution_frame.frame * rate_scale == 0.03
+        body = v2_body(d)  # FastAPI -> RobustnessRequestV2 -> analyzer -> V2 wire
+        carrier = next(e for e in body["identity_evaluations"] if e["node_id"] == CARRIER)
+        assert carrier["evaluated"] is True
+        assert carrier["today_level"] == 377.5656829185674
+        bodies.append(body)
+    # The sampled goal calculation must agree too, not just the central disclosure.
+    assert bodies[0]["options"] == bodies[1]["options"] == bodies[2]["options"], [
+        [(o["id"], o["outcome"]["mean"]) for o in body["options"]] for body in bodies
+    ]
+    assert all(o["probability_of_goal"] == 1.0 for o in bodies[0]["options"])
+
+
+def test_accumulation_link_weights_are_unused_through_request_path():
+    """P45 B / Science 393023: compare every served field except clock/request metadata."""
+    d = accumulation_request()
+    d["analysis_types"] = ["comparison", "sensitivity", "robustness"]
+    d["goal_threshold"] = 0.225  # Split raise's draws so goal-chance drivers are exercised.
+    d["parameter_uncertainties"] = [
+        {"node_id": STOCK, "distribution": "normal", "std": 0.005},
+        {"node_id": RATE, "distribution": "normal", "std": 0.001},
+        {"node_id": INFLOW, "distribution": "normal", "std": 0.005},
+    ]
+    # A genuine belief edge has an option-varying contribution alongside the product.
+    d["graph"]["nodes"].append(
+        {
+            "id": "promotion",
+            "kind": "factor",
+            "label": "Promotion",
+            "observed_state": {"value": 0.0, "baseline": 0.0},
+        }
+    )
+    d["graph"]["edges"].append(
+        {
+            "from": "promotion",
+            "to": GOAL,
+            "exists_probability": 1.0,
+            "strength": {"mean": 0.02, "std": 0.002},
+        }
+    )
+    for option in d["options"]:
+        option["interventions"]["promotion"] = 0.1 if option["id"] == "raise" else 0.0
+    d["options"].reverse()  # Sensitivity reads the first option; make it non-vacuous.
+
+    def serialized(request):
+        body = v2_body(request)
+        for key in ("timestamp", "request_id", "processing_time_ms"):
+            body.pop(key, None)
+        return (
+            body,
+            json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(),
+        )
+
+    baseline, baseline_bytes = serialized(d)
+    assert baseline["factor_sensitivity"] and baseline["robustness"]["edge_sensitivity"]
+    assert any(o["probability_of_goal_drivers"]["drivers"] for o in baseline["options"])
+    assert all(e["evaluated"] for e in baseline["identity_evaluations"])
+    control = copy.deepcopy(d)
+    control["graph"]["edges"][-1]["strength"]["mean"] = 0.2
+    control_body, _ = serialized(control)
+    before = next(o for o in baseline["options"] if o["id"] == "raise")["outcome"]["mean"]
+    after = next(o for o in control_body["options"] if o["id"] == "raise")["outcome"]["mean"]
+    assert before != after
+    print(f"B control promotion->mrr mean 0.02->0.2: raise outcome.mean {before!r}->{after!r}")
+
+    # std must be >0.001 on the real wire; zero is exercised by mean and existence.
+    mutations = [
+        ("mean", 0.0),
+        ("mean", -1.0),
+        ("mean", 1.0),
+        ("std", 0.002),
+        ("std", 0.5),
+        ("std", 1e6),
+        ("exists_probability", 0.0),
+        ("exists_probability", 0.3),
+        ("exists_probability", 1.0),
+        ("mean", 1e6),
+    ]
+    byte_mismatches = []
+    for indices in ((0,), (1,), (2,), (0, 1, 2)):
+        for field, value in mutations:
+            changed = copy.deepcopy(d)
+            for index in indices:
+                edge = changed["graph"]["edges"][index]
+                (edge if field == "exists_probability" else edge["strength"])[field] = value
+            body, actual = serialized(changed)
+            differences = [
+                key for key in baseline.keys() | body.keys() if baseline.get(key) != body.get(key)
+            ]
+            # A numerical/output leak stops the matrix immediately. Warning-only changes
+            # are retained as strict byte failures while the other edges are also checked.
+            assert not (
+                set(differences) - {"inference_warnings"}
+            ), f"identity edges {indices}, {field}={value}: output leak in {differences}"
+            if actual != baseline_bytes:
+                byte_mismatches.append(
+                    (
+                        indices,
+                        field,
+                        value,
+                        differences,
+                        [
+                            w
+                            for w in body["inference_warnings"]
+                            if w not in baseline["inference_warnings"]
+                        ],
+                    )
+                )
+    # The ONLY permitted byte difference: EdgeV2's parse-time STRENGTH_MEAN_CLAMPED warning
+    # for an out-of-range mean on the mutated edge itself. It reports the input, not a use
+    # of the strength (no figure moved above), and fires for any edge, identity or not.
+    mutated_fields = lambda idx: {  # noqa: E731
+        f"edges[{d['graph']['edges'][i]['from']}→{d['graph']['edges'][i]['to']}].strength.mean"
+        for i in idx
+    }
+    unexpected = [
+        m for m in byte_mismatches
+        if not (m[1] == "mean" and m[2] == 1e6 and m[4]
+                and all(w["code"] == "STRENGTH_MEAN_CLAMPED" for w in m[4])
+                and {w["field"] for w in m[4]} == mutated_fields(m[0]))
+    ]
+    assert not unexpected, (
+        f"full-response byte mismatches: {unexpected!r}; "
+        f"B control raise outcome.mean {before!r}->{after!r}"
+    )
+    assert len(byte_mismatches) == 4, byte_mismatches  # (0,),(1,),(2,),(0,1,2) at mean 1e6
+
+
+def test_withheld_accumulation_message_names_operation_and_three_operands():
+    """P45 C: the rendered refusal names the declared accumulation, never another operation."""
+    from fastapi.testclient import TestClient
+    from src.api.main import app
+
+    d = accumulation_request()
+    next(n for n in d["graph"]["nodes"] if n["id"] == RATE).pop("observed_state")
+    response = TestClient(app).post(
+        "/api/v1/robustness/analyze/v2", json=d, headers={"X-ISL-Response-Version": "2"}
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["analysis_status"] == "blocked"
+    critique = next(
+        c
+        for c in body["critiques"]
+        if c["code"] == "IDENTITY_NOT_EVALUATED" and c["identity"]["node_id"] == CARRIER
+    )
+    assert critique["identity"]["withheld_reason"] == "identity_operand_missing"
+    assert critique["identity"]["operation"] == "accumulation"
+    message = critique["message"]
+    assert f"accumulation of {STOCK}, {RATE}, {INFLOW}" in message
+    assert "product" not in message and "sum" not in message
