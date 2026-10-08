@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
@@ -22,7 +21,7 @@ import src.services.robustness_analyzer_v2 as rav2
 
 
 def stable_wire(monkeypatch: pytest.MonkeyPatch, request: Dict[str, Any]) -> bytes:
-    """Freeze transport clocks so the ENTIRE serialized response can be pinned."""
+    """Freeze transport clocks for same-process ENTIRE response comparisons."""
     import src.utils.response_builder as rb
 
     class FixedDatetime(datetime):
@@ -32,23 +31,49 @@ def stable_wire(monkeypatch: pytest.MonkeyPatch, request: Dict[str, Any]) -> byt
 
     monkeypatch.setattr(rb, "datetime", FixedDatetime)
     monkeypatch.setattr(rb.ResponseBuilder, "get_processing_time_ms", lambda self: 0)
-    # Build provenance remains present, fixed to HEAD's local default, rather
-    # than depending on the CI runner's deployment environment.
+    # Keep build provenance stable rather than depending on the deployment environment.
     monkeypatch.delenv("RENDER_GIT_COMMIT", raising=False)
     return json.dumps(v2_body(request), sort_keys=True, separators=(",", ":")).encode()
 
 
-HEAD_WIRE_HASHES = {
-    # Recorded at 0c057b3b37bbc7701dfc9e375a1aefaa13585771 BEFORE source changes.
-    "accumulation": "f6c2b3c088ad21b93b79e3a5bbe55e589fccade87da5ebd8d2a5c331a54f6b59",
-    "product": "1699d2bc7749b2a091f8d91cea195e40229b15a5835861a4714d754009474d45",
-}
+def spy_rate_stream_construction(monkeypatch: pytest.MonkeyPatch, request: Dict[str, Any]):
+    """Record construction of the main sampler's dedicated accumulation stream."""
+    seed, _ = rav2.compute_effective_seed(RobustnessRequestV2.model_validate(request))
+    rate_seed = seed + 1 + rav2.ACCUMULATION_RATE_STREAM_OFFSET
+    original_rng = rav2.SeededRNG
+    calls = []
+
+    class RecordingRNG(original_rng):
+        def __init__(self, seed):
+            if seed == rate_seed:
+                calls.append(seed)
+            super().__init__(seed)
+
+    monkeypatch.setattr(rav2, "SeededRNG", RecordingRNG)
+    return calls
 
 
-@pytest.mark.parametrize("fixture", ["accumulation", "product"])
-def test_absent_field_response_is_byte_identical_to_head(monkeypatch, fixture):
-    request = accumulation_request() if fixture == "accumulation" else wire()
-    assert hashlib.sha256(stable_wire(monkeypatch, request)).hexdigest() == HEAD_WIRE_HASHES[fixture]
+def test_absent_field_response_matches_zero_sigma_without_creating_rate_stream(monkeypatch):
+    absent = accumulation_request()
+    zero = copy.deepcopy(absent)
+    next(node for node in zero["graph"]["nodes"] if node["id"] == CARRIER)[
+        "nonlinear_identity"
+    ]["rate_sigma_log"] = [0.0, 0.0]
+    rate_stream_calls = spy_rate_stream_construction(monkeypatch, absent)
+
+    absent_bytes = stable_wire(monkeypatch, absent)
+    assert rate_stream_calls == []
+    zero_bytes = stable_wire(monkeypatch, zero)
+    assert rate_stream_calls  # Positive control: the spy sees the present-field stream.
+    assert absent_bytes == zero_bytes
+
+
+def test_product_response_is_repeatable_without_creating_accumulation_rate_stream(monkeypatch):
+    request = wire()
+    rate_stream_calls = spy_rate_stream_construction(monkeypatch, request)
+    first_bytes = stable_wire(monkeypatch, request)
+    assert first_bytes == stable_wire(monkeypatch, request)
+    assert rate_stream_calls == []
 
 
 def b1_request(

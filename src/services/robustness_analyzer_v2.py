@@ -2663,6 +2663,9 @@ class SCMEvaluatorV2:
             node_id: self._evaluated_identities[node_id].factor_ids[0]
             for node_id in self._rate_operand_centres
         }
+        self._rate_operand_ids = {
+            operand for centres in self._rate_operand_centres.values() for operand in centres
+        }
         self._last_rate_centres: Dict[str, Dict[str, float]] = {}
         self._rate_status_quo_centres: Dict[str, Dict[str, float]] = {}
         for node_id, plan in self._evaluated_identities.items():
@@ -2728,6 +2731,25 @@ class SCMEvaluatorV2:
 
         return order
 
+    def _rate_probe_interventions(
+        self,
+        interventions: Dict[str, float],
+        factor_level_overrides: Optional[Mapping[str, float]],
+    ) -> Dict[str, float]:
+        """Keep chosen operand levels distinct from discarded uncertainty draws.
+
+        A diagnostic probe has the same authority as a level intervention inside
+        a spread accumulation. An option's explicit setting takes precedence.
+        Other factors retain their existing factor_values semantics.
+        """
+        if not factor_level_overrides or not self._rate_operand_ids:
+            return interventions
+        probes = {
+            node_id: value for node_id, value in factor_level_overrides.items()
+            if node_id in self._rate_operand_ids
+        }
+        return {**probes, **interventions} if probes else interventions
+
     def evaluate(
         self,
         edge_strengths: Dict[Tuple[str, str], float],
@@ -2735,6 +2757,8 @@ class SCMEvaluatorV2:
         goal_node: str,
         base_values: Optional[Dict[str, float]] = None,
         factor_values: Optional[Dict[str, float]] = None,
+        *,
+        factor_level_overrides: Optional[Mapping[str, float]] = None,
     ) -> float:
         """
         Evaluate outcome under given edge configuration and interventions.
@@ -2748,6 +2772,8 @@ class SCMEvaluatorV2:
             goal_node: Target outcome node
             base_values: Optional base values for nodes (default: 0)
             factor_values: Optional sampled factor values (overrides observed_state.value)
+            factor_level_overrides: Deliberate probes, also supplied in factor_values;
+                spread accumulation operands honour them as level interventions.
 
         Returns:
             Value at goal_node
@@ -2756,6 +2782,7 @@ class SCMEvaluatorV2:
             Root factor nodes use observed_state.value as their base value.
             If factor_values is provided, those take precedence (for sampling).
         """
+        interventions = self._rate_probe_interventions(interventions, factor_level_overrides)
         framed, status_quo = self._framed_with_reference(
             edge_strengths, interventions, base_values, factor_values
         )
@@ -2771,6 +2798,8 @@ class SCMEvaluatorV2:
         target_nodes: List[str],
         base_values: Optional[Dict[str, float]] = None,
         factor_values: Optional[Dict[str, float]] = None,
+        *,
+        factor_level_overrides: Optional[Mapping[str, float]] = None,
     ) -> Dict[str, float]:
         """
         Evaluate and return values for multiple target nodes.
@@ -2784,10 +2813,12 @@ class SCMEvaluatorV2:
             target_nodes: List of node IDs to return values for
             base_values: Optional base values for nodes (default: 0)
             factor_values: Optional sampled factor values (overrides observed_state.value)
+            factor_level_overrides: Deliberate level probes (same as evaluate).
 
         Returns:
             Dict mapping target_node_id -> computed value
         """
+        interventions = self._rate_probe_interventions(interventions, factor_level_overrides)
         framed, status_quo = self._framed_with_reference(
             edge_strengths, interventions, base_values, factor_values
         )
@@ -5905,7 +5936,7 @@ class RobustnessAnalyzerV2:
                 reason: Optional[NoLevelReason] = "no_observed_level"
             elif author is None:
                 reason = "source_not_attested"
-            elif noisy and RobustnessAnalyzerV2._reached_by(node.id, noisy, parent_map):
+            elif noisy and RobustnessAnalyzerV2._noisy_influencers(request, node.id):
                 reason = "epsilon_breaks_status_quo_reference"
             else:
                 reason = None
@@ -7437,32 +7468,35 @@ class RobustnessAnalyzerV2:
         for edge in request.graph.edges:
             parents_of[edge.to].append(edge.from_)
         spread_carriers = {
-            node.id: node.nonlinear_identity.factor_ids
-            for node in request.graph.nodes
-            if node.nonlinear_identity is not None
-            and node.nonlinear_identity.rate_sigma_log is not None
+            node_id: plan.factor_ids
+            for node_id, plan in _resolve_structural_identity_plans(request.graph).items()
+            if plan.evaluated and plan.operation == "accumulation"
+            and plan.rate_sigma_log is not None
         }
         if spread_carriers:
-            children_of: Dict[str, List[str]] = defaultdict(list)
-            for edge in request.graph.edges:
-                children_of[edge.from_].append(edge.to)
-            effective: List[str] = []
-            for source in request.graph.nodes:
-                if source.epsilon_std <= 0:
+            nodes = {node.id: node for node in request.graph.nodes}
+            # Mirror each carrier's clean walk. A raw bypass keeps its own
+            # context: freezing S0 inside one accumulation cannot freeze it
+            # on another causal path or inside another carrier's clean walk.
+            seen: Set[Tuple[str, Optional[str]]] = set()
+            pending: List[Tuple[str, Optional[str]]] = [(target_id, None)]
+            effective: Set[str] = set()
+            while pending:
+                node_id, carrier = pending.pop()
+                if (node_id, carrier) in seen:
                     continue
-                seen = {source.id}
-                pending = [source.id]
-                while pending:
-                    parent = pending.pop()
-                    for child in children_of[parent]:
-                        operands = spread_carriers.get(child)
-                        if operands is not None and (source.id in operands or parent == operands[0]):
-                            continue  # Own operand noise is replaced; S0 has no upstream noise.
-                        if child not in seen:
-                            seen.add(child)
-                            pending.append(child)
-                if target_id in seen:
-                    effective.append(source.id)
+                seen.add((node_id, carrier))
+                operands = spread_carriers.get(carrier) if carrier is not None else None
+                if operands is not None and node_id == operands[0]:
+                    continue  # Exact S0 excludes its own noise AND all upstream noise.
+                if nodes[node_id].epsilon_std > 0 and (
+                    operands is None or node_id not in operands
+                ):
+                    effective.add(node_id)
+                # Other spread carriers copy their already evaluated result,
+                # hence their own operand mask replaces the current context.
+                parent_context = node_id if node_id in spread_carriers else carrier
+                pending.extend((parent, parent_context) for parent in parents_of[node_id])
             return sorted(effective)
         influencers = {target_id}
         frontier = [target_id]
@@ -9075,6 +9109,7 @@ class RobustnessAnalyzerV2:
                 interventions=ref_option.interventions,
                 goal_node=request.goal_node_id,
                 factor_values=factor_values_high,
+                factor_level_overrides=factor_values_high,
             )
 
             factor_values_low = {uncertainty.node_id: mean_value - delta}
@@ -9083,6 +9118,7 @@ class RobustnessAnalyzerV2:
                 interventions=ref_option.interventions,
                 goal_node=request.goal_node_id,
                 factor_values=factor_values_low,
+                factor_level_overrides=factor_values_low,
             )
 
             outcome_diff = outcome_high - outcome_low
@@ -9825,6 +9861,7 @@ class RobustnessAnalyzerV2:
                     interventions=ref_option.interventions,
                     goal_node=request.goal_node_id,
                     factor_values=factor_values_high,
+                    factor_level_overrides=factor_values_high,
                 )
 
                 factor_values_low = {uncertainty.node_id: mean_value - delta}
@@ -9833,6 +9870,7 @@ class RobustnessAnalyzerV2:
                     interventions=ref_option.interventions,
                     goal_node=request.goal_node_id,
                     factor_values=factor_values_low,
+                    factor_level_overrides=factor_values_low,
                 )
 
                 outcome_diff = outcome_high - outcome_low
@@ -10860,6 +10898,7 @@ class RobustnessAnalyzerV2:
                 interventions=option.interventions,
                 goal_node=request.goal_node_id,
                 factor_values=factor_values,
+                factor_level_overrides=factor_values,
             )
             for option in request.options
         }
@@ -11055,6 +11094,11 @@ class RobustnessAnalyzerV2:
         ]
         if not eligible:
             return []
+        nonlinear_rate_ids = {
+            plan.factor_ids[1]
+            for plan in evaluator._evaluated_identities.values()
+            if plan.operation == "accumulation" and plan.rate_sigma_log is not None
+        }
 
         # --- Candidate screen (§2.1): 2 * O evaluations per factor, and NOTHING
         # more for a factor that fails it. This is the whole point of the rule —
@@ -11063,6 +11107,20 @@ class RobustnessAnalyzerV2:
         for node in eligible:
             if _tripped(len(screened)):
                 return None
+            if node.id in nonlinear_rate_ids:
+                # Honouring this deliberate churn level makes the horizon
+                # response nonlinear. The affine screen cannot attest a flip,
+                # and its endpoint can be a strictly refused 100% churn.
+                # Withhold this row without silencing valid stock/inflow probes.
+                screened.append({
+                    "node": node,
+                    "spread": 0.0,
+                    "withheld_reason": "nonlinear_response",
+                    "current_value": resolve_factor_central_value(
+                        node, uncertainty_by_id.get(node.id)
+                    ).value,
+                })
+                continue
             at_min = self._option_goals(
                 request, evaluator, baseline_config, {node.id: self.FACTOR_VALUE_MIN}
             )
@@ -11113,6 +11171,11 @@ class RobustnessAnalyzerV2:
                 "alternative_winner_id": None,
                 "baseline_winner_id": baseline_winner,
             }
+
+            if entry.get("withheld_reason") is not None:
+                row["flip_reason"] = entry["withheld_reason"]
+                rows.append(row)
+                continue
 
             if entry["spread"] <= self.FACTOR_FLIP_SLOPE_EPSILON:
                 # Provably inert: every option transmits this factor identically,
