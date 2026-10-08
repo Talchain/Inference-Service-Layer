@@ -1683,6 +1683,18 @@ IDENTITY_INCONSISTENT = "identity_inconsistent"
 # carry the stated level honestly, so it is withheld, never evaluated with an absurd k.
 IDENTITY_SCALE_OUT_OF_RANGE = "identity_scale_out_of_range"
 IDENTITY_SCALE_RANGE = (0.5, 2.0)
+IDENTITY_RATE_OUT_OF_RANGE = "identity_rate_out_of_range"
+IDENTITY_NON_FINITE = "identity_non_finite"
+
+
+class AccumulationDrawRefusedError(ValueError):
+    """This draw cannot inform an accumulation (never evaluate an invalid logarithm)."""
+
+
+def _checked_identity_operation(operation: str) -> str:
+    if operation not in ("product", "sum", "accumulation"):
+        raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {operation}")
+    return operation
 
 
 @dataclass(frozen=True)
@@ -1707,6 +1719,10 @@ class IdentityPlan:
     mismatch_share: Optional[float] = None
     # A product with a stated level: the evaluator's ONE central scale k (else None).
     scale: Optional[float] = None
+    horizon_months: Optional[int] = None
+    rate_scale: Optional[float] = None
+    # P45: this identity composes a month-T stock, so today's stated level cannot anchor it.
+    accumulation_derived: bool = False
 
     @property
     def evaluated(self) -> bool:
@@ -1717,10 +1733,124 @@ class IdentityPlan:
         return self.factor_ids + self.addends
 
 
-def _identity_term(operation: str, values: Sequence[float]) -> float:
+def _identity_term(
+    operation: str,
+    values: Sequence[float],
+    *,
+    horizon_months: Optional[int] = None,
+    rate_scale: Optional[float] = None,
+) -> float:
     if operation == "product":
         return float(math.prod(values))
-    return float(math.fsum(values))
+    elif operation == "sum":
+        return float(math.fsum(values))
+    elif operation == "accumulation":
+        if len(values) != 3 or horizon_months is None or rate_scale is None:
+            raise ValueError(
+                "accumulation requires three positional operands, horizon and rate scale"
+            )
+        stock, rate, inflow = values
+        c = rate * rate_scale
+        if not all(math.isfinite(v) for v in (*values, c)) or not 0.0 <= c < 1.0:
+            raise AccumulationDrawRefusedError("accumulation rate must be finite and in [0, 1)")
+        if abs(c) < 1e-9:
+            result = stock + inflow * horizon_months
+        else:
+            log_decay = horizon_months * math.log1p(-c)
+            result = stock * math.exp(log_decay) + inflow * (-math.expm1(log_decay) / c)
+        if not math.isfinite(result):
+            raise AccumulationDrawRefusedError("accumulation result is not finite")
+        return result
+    else:
+        raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {operation}")
+
+
+def _accumulation_horizon_levels(
+    graph: GraphV2,
+) -> Tuple[Dict[str, float], Set[str], Dict[str, str]]:
+    """Resolve month-T levels before a consuming PRODUCT reconciles or reads its operands.
+
+    Only declared identities composing accumulation are changed. Legacy PRODUCT/SUM graphs
+    keep their existing level reads and arithmetic. A stale stated stock/goal is never S_T.
+    """
+    nodes = {node.id: node for node in graph.nodes}
+    horizon_ids = {
+        node.id
+        for node in graph.nodes
+        if node.nonlinear_identity is not None
+        and _checked_identity_operation(node.nonlinear_identity.operation) == "accumulation"
+    }
+    while True:
+        added = {
+            node.id
+            for node in graph.nodes
+            if node.nonlinear_identity is not None
+            and any(
+                i in horizon_ids
+                for i in (
+                    *node.nonlinear_identity.factor_ids,
+                    *(node.nonlinear_identity.addends or ()),
+                )
+            )
+        } - horizon_ids
+        if not added:
+            break
+        horizon_ids.update(added)
+    levels: Dict[str, float] = {}
+    invalid: Dict[str, str] = {}
+    visiting: Set[str] = set()
+
+    def resolve(node_id: str) -> Optional[float]:
+        if node_id not in horizon_ids:
+            return status_quo_level(nodes[node_id])
+        if node_id in levels:
+            return levels[node_id]
+        if node_id in visiting:
+            raise ValueError("cyclic accumulation identity")
+        node = nodes[node_id]
+        identity = node.nonlinear_identity
+        assert identity is not None
+        if node.execution_frame is None:
+            return None
+        visiting.add(node_id)
+        try:
+            user: Dict[str, float] = {}
+            for participant in (*identity.factor_ids, *(identity.addends or ())):
+                value = resolve(participant)
+                frame = nodes[participant].execution_frame
+                if value is None or frame is None:
+                    return None
+                user[participant] = value * frame.frame
+            try:
+                term = _identity_term(
+                    identity.operation,
+                    [user[i] for i in identity.factor_ids],
+                    horizon_months=identity.horizon_months,
+                    rate_scale=identity.rate_scale,
+                )
+            except AccumulationDrawRefusedError:
+                assert identity.rate_scale is not None
+                c = user[identity.factor_ids[1]] * identity.rate_scale
+                invalid[node_id] = (
+                    IDENTITY_RATE_OUT_OF_RANGE
+                    if not math.isfinite(c) or not 0.0 <= c < 1.0
+                    else IDENTITY_NON_FINITE
+                )
+                return None
+            normalised = (
+                term + math.fsum(user[i] for i in identity.addends or ())
+            ) / node.execution_frame.frame
+            if not math.isfinite(normalised):
+                invalid[node_id] = IDENTITY_NON_FINITE
+                return None
+            levels[node_id] = normalised
+            return levels[node_id]
+        finally:
+            visiting.remove(node_id)
+
+    for node_id in sorted(horizon_ids):
+        resolve(node_id)
+    return levels, horizon_ids, invalid
 
 
 def resolve_identity_plans(
@@ -1754,6 +1884,7 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
        ``identity_scale_out_of_range``.
     """
     nodes = {node.id: node for node in graph.nodes}
+    horizon_levels, horizon_ids, invalid_rates = _accumulation_horizon_levels(graph)
     plans: Dict[str, IdentityPlan] = {}
     for node in graph.nodes:
         identity = node.nonlinear_identity
@@ -1769,21 +1900,28 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
                 frames[node_id] = frame.frame
         levels: Dict[str, float] = {}
         for node_id in participants:
-            level = status_quo_level(nodes[node_id])
+            level = (
+                horizon_levels.get(node_id)
+                if node_id in horizon_ids
+                else status_quo_level(nodes[node_id])
+            )
             if level is not None:
                 levels[node_id] = level
-        target_level = status_quo_level(node)
+        target_level = None if node.id in horizon_ids else status_quo_level(node)
 
         def plan(reason: Optional[str], **reconciliation: Optional[float]) -> IdentityPlan:
             return IdentityPlan(
                 node_id=node.id,
-                operation=identity.operation,
+                operation=_checked_identity_operation(identity.operation),
                 factor_ids=factor_ids,
                 addends=addends,
                 frames=MappingProxyType(dict(frames)),
                 levels=MappingProxyType(dict(levels)),
                 target_level=target_level,
                 withheld_reason=reason,
+                horizon_months=identity.horizon_months,
+                rate_scale=identity.rate_scale,
+                accumulation_derived=node.id in horizon_ids,
                 **reconciliation,
             )
 
@@ -1793,13 +1931,24 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
         if len(levels) != len(participants):
             plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
             continue
-        if (
-            identity.operation == "product"
-            and target_level is not None
-            and (any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0)
-        ):
-            plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
+        if node.id in invalid_rates:
+            plans[node.id] = plan(invalid_rates[node.id])
             continue
+        if identity.operation == "product":
+            if target_level is not None and (
+                any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0
+            ):
+                plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
+                continue
+        elif identity.operation == "sum":
+            pass
+        elif identity.operation == "accumulation":
+            # A stated stock is S_0, not S_T: neither the product zero guard nor the
+            # 5% reconciliation applies. Invalid central rates cannot supply an anchor.
+            plans[node.id] = plan(None)
+            continue
+        else:
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {identity.operation}")
         if target_level is None:
             plans[node.id] = plan(None)
             continue
@@ -1810,12 +1959,16 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
         stated = target_level * frames[node.id]
         if identity.operation == "product":
             share = abs(stated - reconstructed) / abs(stated)
-        else:
+        elif identity.operation == "sum":
             # AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated 0 is an ordinary
             # level. Scaled absolute check: |o - sum| <= tau x max(|o|, sum|parts|); both
             # sides 0 is consistent exactly (R3-2: a tally of £0 today).
             scale = max(abs(stated), math.fsum(abs(part) for part in parts))
             share = 0.0 if scale == 0.0 else abs(stated - reconstructed) / scale
+        elif identity.operation == "accumulation":
+            raise AssertionError("accumulation cannot enter today's reconciliation")
+        else:
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {identity.operation}")
         plans[node.id] = plan(
             IDENTITY_INCONSISTENT if share > IDENTITY_RECONCILIATION_TOLERANCE else None,
             reconstructed=reconstructed,
@@ -1852,6 +2005,7 @@ class IdentityLevelAnchor:
     level: float
     frame: float
     estimated_operands: Tuple[str, ...]
+    horizon_months: Optional[int] = None
 
     @property
     def author(self) -> Literal["user", "olumi"]:
@@ -1876,15 +2030,40 @@ def _anchor_of(plan: IdentityPlan, graph: GraphV2) -> Optional[IdentityLevelAnch
         return None
     nodes = {node.id: node for node in graph.nodes}
     level = _identity_term(
-        plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
+        plan.operation,
+        [plan.levels[i] * plan.frames[i] for i in plan.factor_ids],
+        horizon_months=plan.horizon_months,
+        rate_scale=plan.rate_scale,
     ) + math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
+    contributors: List[str] = []
+    horizons: Set[int] = set()
+
+    def contribute(node_id: str) -> None:
+        identity = nodes[node_id].nonlinear_identity
+        if plan.accumulation_derived and identity is not None:
+            if identity.operation == "accumulation":
+                assert identity.horizon_months is not None
+                horizons.add(identity.horizon_months)
+            for participant in (*identity.factor_ids, *(identity.addends or ())):
+                contribute(participant)
+        elif node_id not in contributors:
+            contributors.append(node_id)
+
+    if plan.operation == "accumulation":
+        assert plan.horizon_months is not None
+        horizons.add(plan.horizon_months)
+    for participant in plan.participants:
+        contribute(participant)
     return IdentityLevelAnchor(
         level=level,
         frame=plan.frames[plan.node_id],
         estimated_operands=tuple(
-            i for i in plan.participants if baseline_owner(nodes[i].observed_state) != "user"
+            i for i in contributors if baseline_owner(nodes[i].observed_state) != "user"
         ),
+        horizon_months=next(iter(horizons)) if len(horizons) == 1 else None,
     )
+
+
 def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[str, float]:
     """R3-5: ``_compute_structural_influence``'s own normalisation, over ``node_ids`` only.
 
@@ -1914,7 +2093,13 @@ def zero_gated_factor_ids(
         return {}
     gated_edges: Dict[Tuple[str, str], List[str]] = {}
     for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items():
-        if not (plan.evaluated and plan.operation == "product"):
+        if plan.operation == "product":
+            pass
+        elif plan.operation in ("sum", "accumulation"):
+            continue  # Only a PRODUCT has the other-zero-operand gate.
+        else:
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
+        if not plan.evaluated:
             continue
         for i in plan.factor_ids:
             zeros = [j for j in plan.factor_ids if j != i and plan.levels[j] == 0.0]
@@ -2004,7 +2189,9 @@ def anchored_blind_factor_ids(
             continue  # the goal itself, or disconnected: not this question
         if f in anchored or goal_node_id not in reached(f, avoid=anchored):
             # name only the anchors on a path to the goal (PR Review #213's provenance rule)
-            blind[f] = sorted(a for a in anchored & every if goal_node_id in reached(a, avoid=set()))
+            blind[f] = sorted(
+                a for a in anchored & every if goal_node_id in reached(a, avoid=set())
+            )
     return blind
 
 
@@ -2037,8 +2224,35 @@ def identity_partials(
             if plan.operation == "product":
                 others = math.prod(user[j] for j in plan.factor_ids if j != i)
                 partials[(i, node_id)] = scale * others * plan.frames[i] / frame
-            else:
+            elif plan.operation == "sum":
                 partials[(i, node_id)] = plan.frames[i] / frame
+            elif plan.operation == "accumulation":
+                assert plan.horizon_months is not None and plan.rate_scale is not None
+                stock_id, rate_id, inflow_id = plan.factor_ids
+                c = user[rate_id] * plan.rate_scale
+                # The analytic derivative of the geometric inflow sum, expressed as
+                # a finite polynomial to stay stable as c approaches zero.
+                horizon = plan.horizon_months
+                decay = (1.0 - c) ** horizon
+                if i == stock_id:
+                    derivative = decay
+                elif i == rate_id:
+                    derivative = (
+                        -horizon * user[stock_id] * (1.0 - c) ** (horizon - 1)
+                        - user[inflow_id]
+                        * math.fsum(k * (1.0 - c) ** (k - 1) for k in range(1, horizon))
+                    ) * plan.rate_scale
+                elif i == inflow_id:
+                    derivative = (
+                        float(horizon)
+                        if abs(c) < 1e-9
+                        else -math.expm1(horizon * math.log1p(-c)) / c
+                    )
+                else:
+                    raise AssertionError("unknown accumulation participant")
+                partials[(i, node_id)] = derivative * plan.frames[i] / frame
+            else:
+                raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
         for i in plan.addends:
             partials[(i, node_id)] = plan.frames[i] / frame
     return partials
@@ -2064,9 +2278,7 @@ def definitional_strengths(
     }
 
 
-def definitional_edges(
-    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
-) -> set:
+def definitional_edges(graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None) -> set:
     """R3-9: the operand and addend edges of every EVALUATED identity, as ``(from, to)``.
 
     They are definitions, not beliefs: the evaluator never reads their sampled strengths,
@@ -2192,6 +2404,11 @@ def identity_evaluations(
             IdentityEvaluation(
                 node_id=plan.node_id,
                 operation=identity.operation,
+                horizon_months=(
+                    plan.horizon_months
+                    if plan.evaluated and plan.operation == "accumulation"
+                    else None
+                ),
                 factor_ids=list(plan.factor_ids),
                 addends=list(plan.addends),
                 stated_in_brief=identity.stated_in_brief,
@@ -2200,7 +2417,9 @@ def identity_evaluations(
                 level_source=(
                     None
                     if not plan.evaluated
-                    else "stated_level" if plan.target_level is not None else "identity_inputs"
+                    else "stated_level"
+                    if plan.target_level is not None
+                    else "identity_inputs"
                 ),
                 reconciliation=reconciliation,
                 level_author=None if anchor is None else anchor.author,
@@ -2312,6 +2531,14 @@ class SCMEvaluatorV2:
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
+        for node_id, plan in self._evaluated_identities.items():
+            if plan.accumulation_derived:
+                anchor = _anchor_of(plan, graph)
+                assert anchor is not None
+                level = anchor.level / anchor.frame
+                self._status_quo_levels[node_id] = level
+                if node_id in self._todays_levels:
+                    self._todays_levels[node_id] = level
         self._identity_scales: Dict[str, float] = {}
         self._identity_scales = self._central_identity_scales(dict(factor_centres or {}))
         # AIQ 5868227452: a product whose k leaves [0.5, 2] is withheld (step 5).
@@ -2471,9 +2698,14 @@ class SCMEvaluatorV2:
                     self._event_risks[node_id], node_values, factor_values, self._occurrence_mode
                 )
             elif node_id in self._evaluated_identities:
-                node_values[node_id] = self._identity_value(
-                    self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
-                )
+                try:
+                    node_values[node_id] = self._identity_value(
+                        self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
+                    )
+                except AccumulationDrawRefusedError:
+                    # Existing per-draw protocol: excluded from winners and informative
+                    # denominators; non-finite samples are sanitized at the wire boundary.
+                    node_values[node_id] = math.nan
             else:
                 # Get node object (used for observed_state and intercept)
                 node = self._nodes_by_id.get(node_id)
@@ -2572,11 +2804,15 @@ class SCMEvaluatorV2:
         is kept. With the addend declared (R3-1) ``k = (75,000 - 1,000) / 73,500`` exactly.
         Computed once per graph, so no draw divides by its own sampled status-quo term. A
         graph with no evaluated product never propagates here."""
-        products = {
-            node_id: plan
-            for node_id, plan in self._evaluated_identities.items()
-            if plan.operation == "product" and plan.target_level is not None
-        }
+        products: Dict[str, IdentityPlan] = {}
+        for node_id, plan in self._evaluated_identities.items():
+            if plan.operation == "product":
+                if plan.target_level is not None:
+                    products[node_id] = plan
+            elif plan.operation in ("sum", "accumulation"):
+                continue  # No stated-product scale applies to either operation.
+            else:
+                raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
         if not products:
             return {}
         means = {
@@ -2634,13 +2870,28 @@ class SCMEvaluatorV2:
         def level(participant: str, at: Dict[str, float]) -> float:
             if not self._parents.get(participant):
                 return at[participant]
+            participant_plan = self._evaluated_identities.get(participant)
+            if participant_plan is not None and participant_plan.accumulation_derived:
+                return at[participant]  # This is already the month-T level, never S_0.
             held = plan.levels[participant]
             return held + (at[participant] - reference[participant])
 
         def user(participant: str, at: Dict[str, float]) -> float:
             return level(participant, at) * plan.frames[participant]
 
-        term = _identity_term(plan.operation, [user(i, values) for i in plan.factor_ids])
+        term = _identity_term(
+            plan.operation,
+            [user(i, values) for i in plan.factor_ids],
+            horizon_months=plan.horizon_months,
+            rate_scale=plan.rate_scale,
+        )
+        if plan.operation == "accumulation":
+            result = term / frame  # Exactly S_T, with no addends or belief sum.
+            if not math.isfinite(result):
+                raise AccumulationDrawRefusedError("accumulation normalised result is not finite")
+            return result
+        elif plan.operation not in ("product", "sum"):
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
         term_sq = _identity_term(plan.operation, [user(i, reference) for i in plan.factor_ids])
         addend = math.fsum(user(i, values) for i in plan.addends)
         addend_sq = math.fsum(user(i, reference) for i in plan.addends)
@@ -5213,6 +5464,21 @@ class RobustnessAnalyzerV2:
         """
         noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
         unit_domains = unit_level_domains(request)
+        horizon_plans = (
+            {
+                node_id: plan
+                for node_id, plan in resolve_identity_plans(
+                    request.graph, factor_centres(request)
+                ).items()
+                if plan.evaluated and plan.accumulation_derived
+            }
+            if any(
+                n.nonlinear_identity is not None
+                and n.nonlinear_identity.operation == "accumulation"
+                for n in request.graph.nodes
+            )
+            else {}
+        )
         frames: List[NodeLevelFrame] = []
         for node in request.graph.nodes:
             if not parent_map.get(node.id):
@@ -5221,6 +5487,12 @@ class RobustnessAnalyzerV2:
             observed_source = observed.source if observed is not None else None
             level = status_quo_level(node)
             author = level_anchor_source(node)
+            horizon_plan = horizon_plans.get(node.id)
+            if horizon_plan is not None:
+                horizon_anchor = _anchor_of(horizon_plan, request.graph)
+                assert horizon_anchor is not None
+                level = horizon_anchor.level / horizon_anchor.frame
+                author = "user_stated" if horizon_anchor.author == "user" else "olumi_estimate"
             if level is None:
                 reason: Optional[NoLevelReason] = "no_observed_level"
             elif author is None:
@@ -5231,7 +5503,13 @@ class RobustnessAnalyzerV2:
                 reason = None
             if reason is None:
                 assert level is not None and author is not None
-                low, high = anchored_level_domain(level, unit_domains.get(node.id))
+                # P45: a stock at T (and its composed goal) is the explicit closed form.
+                # Today's unit domain/cap must not trim the horizon result.
+                low, high = (
+                    (None, None)
+                    if horizon_plan is not None
+                    else anchored_level_domain(level, unit_domains.get(node.id))
+                )
                 frames.append(
                     NodeLevelFrame(
                         node_id=node.id,
@@ -6178,7 +6456,12 @@ class RobustnessAnalyzerV2:
                 "goal_baseline": plan.goal_baseline,
                 "estimated_operand_ids": estimated,
                 "message": (
-                    f"{goal_label} has no level stated for today, so the chance of reaching the "
+                    f"{goal_label} is evaluated at month {anchor.horizon_months}; the chance of "
+                    f"reaching the goal is measured from the status quo's own month-"
+                    f"{anchor.horizon_months} level: {anchor.level:,.2f} in its own units; "
+                    f"{'the user' if anchor.author == 'user' else 'Olumi'} supplies its inputs."
+                    if anchor.horizon_months is not None
+                    else f"{goal_label} has no level stated for today, so the chance of reaching the "
                     f"goal is measured from the level its inputs give today: "
                     f"{anchor.level:,.2f} in its own units; {whose}."
                 ),
@@ -6316,6 +6599,21 @@ class RobustnessAnalyzerV2:
                 f"{noun} '{target_id}' is not present in the graph.",
             )
 
+        horizon_plan = (
+            resolve_identity_plans(request.graph, factor_centres(request)).get(target_id)
+            if any(
+                n.nonlinear_identity is not None
+                and n.nonlinear_identity.operation == "accumulation"
+                for n in request.graph.nodes
+            )
+            else None
+        )
+        horizon_target = (
+            horizon_plan is not None
+            and horizon_plan.evaluated
+            and horizon_plan.accumulation_derived
+        )
+
         # --- domain guard (Tier 2) — ONE implementation, two callers ----------
         # See NORMALISED_DOMAIN_LIMIT. NOTE this is Tier 2 (magnitude). Tier 1 —
         # attesting the domain properly via observed_state.value ~= raw_value / cap
@@ -6333,6 +6631,8 @@ class RobustnessAnalyzerV2:
         def domain_refusal(
             operands: Dict[str, float], field: str
         ) -> Optional[Tuple[Optional["GoalThresholdPlan"], Any]]:
+            if horizon_target:
+                return None  # Explicit framed S_T may exceed a normalisation cap.
             limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
             out_of_domain = {
                 name: value for name, value in operands.items() if abs(value) > limit
@@ -6561,7 +6861,13 @@ class RobustnessAnalyzerV2:
         # of today. A stated level wins (condition 3: the anchor reads only a plan with no
         # stated level); a withheld or absent identity leaves the refusal below as it was
         # (condition 1).
-        anchor = identity_level_anchor(request, target_id) if baseline is None else None
+        anchor = (
+            _anchor_of(horizon_plan, request.graph)
+            if horizon_target and horizon_plan is not None
+            else identity_level_anchor(request, target_id)
+            if baseline is None
+            else None
+        )
         if anchor is not None:
             baseline = anchor.level / anchor.frame
         if baseline is None:
@@ -7254,6 +7560,20 @@ class RobustnessAnalyzerV2:
         """
         expected_regret = expected_regret or {}
         level_domains = level_domains or {}
+        goal_identity = (
+            resolve_identity_plans(request.graph, factor_centres(request)).get(request.goal_node_id)
+            if any(
+                n.nonlinear_identity is not None
+                and n.nonlinear_identity.operation == "accumulation"
+                for n in request.graph.nodes
+            )
+            else None
+        )
+        horizon_goal = (
+            goal_identity is not None
+            and goal_identity.evaluated
+            and goal_identity.accumulation_derived
+        )
         results = []
         # B1a: the per-draw status-quo reference the anchored band reads. The analyzer
         # records it for an anchored goal (``status_quo_reference_nodes``), so its absence
@@ -7303,7 +7623,9 @@ class RobustnessAnalyzerV2:
                 # met when strict, met when not. A held option's compared level (the goal baseline, paired) and the
                 # threshold arrive by different arithmetic, so an exact comparison let one ulp decide 0% vs 100%.
                 def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
-                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
+                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(
+                        1.0, abs(threshold)
+                    )
                     past = values < threshold if minimise else values > threshold
                     return np.asarray(past & ~on if strict else past | on, dtype=bool)
 
@@ -7320,7 +7642,11 @@ class RobustnessAnalyzerV2:
                     effect = samples_array - np.array(status_quo_outcomes)
                     compared = goal_threshold_plan.goal_baseline + effect
                     goal_domain = level_domains.get(request.goal_node_id)
-                    if goal_domain is not None and not goal_threshold_plan.change_frame:
+                    if (
+                        goal_domain is not None
+                        and not goal_threshold_plan.change_frame
+                        and not horizon_goal
+                    ):
                         # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
                     # A plan with no delta threshold is a level plan: both are set at one site.
@@ -10577,7 +10903,6 @@ class RobustnessAnalyzerV2:
             if decision_evpi_bound is not None and evppi > decision_evpi_bound:
                 clamped_high = True
                 evppi = decision_evpi_bound
-
 
             # Clamp-vs-round ordering (hunter F-2): round(.,6) can nudge a clamped
             # value UP past the raw decision_evpi bound by <=5e-7, breaking the

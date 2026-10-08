@@ -1197,7 +1197,7 @@
             "type": "string"
           },
           "operation": {
-            "description": "'product' | 'sum'",
+            "description": "'product' | 'sum' | 'accumulation'",
             "title": "Operation",
             "type": "string"
           },
@@ -1234,7 +1234,7 @@
             "title": "Stated"
           },
           "withheld_reason": {
-            "description": "identity_frame_missing | identity_operand_missing | identity_zero_level | identity_inconsistent | identity_scale_out_of_range",
+            "description": "identity_frame_missing | identity_operand_missing | identity_zero_level | identity_inconsistent | identity_scale_out_of_range | identity_rate_out_of_range | identity_non_finite",
             "title": "Withheld Reason",
             "type": "string"
           }
@@ -4926,6 +4926,20 @@
             "title": "Factor Ids",
             "type": "array"
           },
+          "horizon_months": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluated accumulation only: the integer horizon actually evaluated",
+            "title": "Horizon Months"
+          },
           "level_author": {
             "anyOf": [
               {
@@ -4965,7 +4979,8 @@
           "operation": {
             "enum": [
               "product",
-              "sum"
+              "sum",
+              "accumulation"
             ],
             "title": "Operation",
             "type": "string"
@@ -4993,7 +5008,7 @@
                 "type": "null"
               }
             ],
-            "description": "identity_inputs only: the level its inputs give today, in USER units",
+            "description": "identity_inputs only: the input-derived level in USER units; at the declared horizon for accumulation",
             "title": "Today Level"
           },
           "withheld_reason": {
@@ -5004,7 +5019,9 @@
                   "identity_operand_missing",
                   "identity_zero_level",
                   "identity_inconsistent",
-                  "identity_scale_out_of_range"
+                  "identity_scale_out_of_range",
+                  "identity_rate_out_of_range",
+                  "identity_non_finite"
                 ],
                 "type": "string"
               },
@@ -5578,7 +5595,65 @@
       },
       "NonlinearIdentityV2": {
         "additionalProperties": false,
-        "description": "R3 slice 1: the node is EXACTLY the product or the sum of named parents (an accounting\nidentity such as MRR = price x paying subscribers), not a guessed straight-line effect.\n\nCEE declares it and is its only minter; PLoT forwards it verbatim. ISL never infers an\nidentity from the graph's shape (AIQ 5859633012). Strict: an unknown operation or key is\nREFUSED (422), never dropped, because a dropped declaration is silently \"declared, not used\".",
+        "allOf": [
+          {
+            "else": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "horizon_months"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "rate_scale"
+                    ]
+                  }
+                ]
+              }
+            },
+            "if": {
+              "properties": {
+                "operation": {
+                  "const": "accumulation"
+                }
+              },
+              "required": [
+                "operation"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "addends"
+                ]
+              },
+              "properties": {
+                "factor_ids": {
+                  "maxItems": 3,
+                  "minItems": 3,
+                  "uniqueItems": true
+                },
+                "horizon_months": {
+                  "maximum": 120.0,
+                  "minimum": 1.0,
+                  "type": "integer"
+                },
+                "rate_scale": {
+                  "exclusiveMinimum": 0.0,
+                  "maximum": 1.0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "horizon_months",
+                "rate_scale"
+              ]
+            }
+          }
+        ],
+        "description": "R3/P45: an exact declared accounting identity over named parents. Product and sum use\nnamed operands; accumulation uses positional stock today, monthly churn and monthly inflow\nto derive stock at a stated horizon. Its carrier is the derived stock node, not the goal.\n\nCEE declares it and is its only minter; PLoT forwards it verbatim. ISL never infers an\nidentity from the graph's shape (AIQ 5859633012). Strict: an unknown operation or key is\nREFUSED (422), never dropped, because a dropped declaration is silently \"declared, not used\".",
         "properties": {
           "addends": {
             "anyOf": [
@@ -5597,7 +5672,7 @@
             "title": "Addends"
           },
           "factor_ids": {
-            "description": "The parents the node is the product/sum of",
+            "description": "Named product/sum parents; accumulation has exactly three distinct positional parents: [stock_today, monthly_churn_rate, monthly_inflow]",
             "items": {
               "type": "string"
             },
@@ -5605,14 +5680,43 @@
             "title": "Factor Ids",
             "type": "array"
           },
+          "horizon_months": {
+            "anyOf": [
+              {
+                "maximum": 120.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accumulation only: required integer horizon in months (1 through 120)",
+            "title": "Horizon Months"
+          },
           "operation": {
-            "description": "product | sum of factor_ids",
+            "description": "product | sum | accumulation over factor_ids",
             "enum": [
               "product",
-              "sum"
+              "sum",
+              "accumulation"
             ],
             "title": "Operation",
             "type": "string"
+          },
+          "rate_scale": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accumulation only: required multiplier converting the churn parent's user value to a monthly fraction (0.01 for percent, 1 for a fraction); ISL does not parse units",
+            "title": "Rate Scale"
           },
           "stated_in_brief": {
             "description": "True when the brief itself states it",

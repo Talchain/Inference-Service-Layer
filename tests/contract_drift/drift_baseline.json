@@ -632,7 +632,7 @@
     {
       "isl_model": "ISLResponseV2",
       "prop": "identity_evaluations",
-      "reason": "ISL superset — ISLResponseV2.identity_evaluations is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5859633012 and 5860087988 (AI Quality rulings, R3 slice 1: a declared identity is evaluated in user units or withheld; only evaluated=true licenses a claim, R3-4). Additive and optional (absent when the graph declares no identity). Remove when the schemas pin adopts it."
+      "reason": "ISL superset — ISLResponseV2.identity_evaluations is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5859633012 and 5860087988 (AI Quality rulings, R3 slice 1: a declared identity is evaluated in user units or withheld; only evaluated=true licenses a claim, R3-4). DECISION REF: P45 accumulation contract 8 Oct — evaluated accumulation adds horizon_months to this shared wire carrier. Additive and optional (absent when the graph declares no identity). Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "ISLResponseV2",

@@ -144,14 +144,15 @@ class CritiqueIdentityV2(BaseModel):
     """
 
     node_id: str = Field(..., description="The node declared as the identity")
-    operation: str = Field(..., description="'product' | 'sum'")
+    operation: str = Field(..., description="'product' | 'sum' | 'accumulation'")
     participants: List[str] = Field(
         ..., description="factor_ids then addends, in declaration order"
     )
     withheld_reason: str = Field(
         ...,
         description="identity_frame_missing | identity_operand_missing | "
-        "identity_zero_level | identity_inconsistent | identity_scale_out_of_range",
+        "identity_zero_level | identity_inconsistent | identity_scale_out_of_range | "
+        "identity_rate_out_of_range | identity_non_finite",
     )
     reconstructed: Optional[float] = Field(
         None, description="What the identity's inputs give today, user units"

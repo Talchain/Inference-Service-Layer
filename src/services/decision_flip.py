@@ -89,10 +89,11 @@ def decision_flip_threshold(
 # `exists · (mean + std · z)`. So each draw's goal value, for every option and for the status-quo reading, is AFFINE
 # in the link's mean: two Monte Carlo runs (mean = current, mean = 0) give it for every mean in between.
 #
-# WHERE IT IS NOT. A node with epsilon_std > 0 is clamped to [0, 1] after its noise, and an evaluated PRODUCT identity
-# multiplies its operands. Either DOWNSTREAM of the link makes a draw's value piecewise or quadratic in the mean, and a
-# crossing can then hide where the straight line says "no change". Such a link never takes this path: it is an honest
-# absence (`downstream_nonlinearity`). Every quoted point is then re-run for real and must reproduce the predicted win
+# WHERE IT IS NOT. A node with epsilon_std > 0 is clamped to [0, 1] after its noise, an evaluated PRODUCT identity
+# multiplies its operands, and an accumulation compounds churn across its horizon. Any of these DOWNSTREAM of the link
+# can make a draw's value non-affine in the mean, and a crossing can then hide where the straight line says "no change".
+# Such a link never takes this path: it is an honest absence (`downstream_nonlinearity`). Every quoted point is then
+# re-run for real and must reproduce the predicted win
 # shares (`affine_check_failed` otherwise).
 
 import hashlib  # noqa: E402
@@ -143,8 +144,13 @@ def downstream_nonlinearity(request: Any, from_id: str, to_id: str) -> Optional[
         if node is not None and (getattr(node, "epsilon_std", 0.0) or 0.0) > 0:
             return f"clamp:{nid}"
     for nid, plan in sorted(_resolve_structural_identity_plans(request.graph).items()):
-        if nid in cone and plan.evaluated and plan.operation != "sum":
+        if nid not in cone or not plan.evaluated:
+            continue
+        if plan.operation == "sum":
+            continue
+        if plan.operation in ("product", "accumulation"):
             return f"identity:{nid}"
+        raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
     return None
 
 

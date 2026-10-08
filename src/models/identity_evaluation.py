@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+    model_validator,
+)
 
 IdentityWithheldReason = Literal[
     "identity_frame_missing",
@@ -23,6 +29,8 @@ IdentityWithheldReason = Literal[
     "identity_zero_level",
     "identity_inconsistent",
     "identity_scale_out_of_range",
+    "identity_rate_out_of_range",
+    "identity_non_finite",
 ]
 
 
@@ -39,7 +47,7 @@ class IdentityEvaluation(BaseModel):
     """One declared identity and what ISL did with it."""
 
     node_id: str
-    operation: Literal["product", "sum"]
+    operation: Literal["product", "sum", "accumulation"]
     factor_ids: List[str]
     addends: List[str] = Field(default_factory=list)
     stated_in_brief: bool
@@ -66,7 +74,17 @@ class IdentityEvaluation(BaseModel):
     today_level: Optional[float] = Field(
         None,
         allow_inf_nan=False,
-        description="identity_inputs only: the level its inputs give today, in USER units",
+        description=(
+            "identity_inputs only: the input-derived level in USER units; at the declared "
+            "horizon for accumulation"
+        ),
+    )
+    horizon_months: Optional[int] = Field(
+        None,
+        ge=1,
+        le=120,
+        strict=True,
+        description="Evaluated accumulation only: the integer horizon actually evaluated",
     )
 
     model_config = {"extra": "forbid"}
@@ -82,4 +100,22 @@ class IdentityEvaluation(BaseModel):
             raise ValueError("level_author is stated for identity_inputs, and only there")
         if self.today_level is not None and not from_inputs:
             raise ValueError("today_level is stated for identity_inputs only")
+        if self.operation == "accumulation":
+            if self.evaluated != (self.horizon_months is not None):
+                raise ValueError("horizon_months is stated for an evaluated accumulation only")
+        elif self.operation in ("product", "sum"):
+            if self.horizon_months is not None:
+                raise ValueError("horizon_months is stated for an evaluated accumulation only")
+        else:
+            raise ValueError(f"unsupported identity evaluation operation: {self.operation!r}")
         return self
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_horizon(  # type: ignore[no-untyped-def]
+        self, handler: SerializerFunctionWrapHandler
+    ):
+        """Keep legacy evaluation serialization unchanged, including the worker boundary."""
+        data = handler(self)
+        if self.horizon_months is None:
+            data.pop("horizon_months", None)
+        return data
