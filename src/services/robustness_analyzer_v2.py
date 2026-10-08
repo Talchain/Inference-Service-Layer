@@ -2162,6 +2162,116 @@ def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[
     return {node_id: raw[node_id] / max_influence for node_id in node_ids}
 
 
+def accumulation_stock_cuts(
+    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
+) -> Set[Tuple[str, str]]:
+    """Exact S0 boundaries, independent of whether the rates have log spread.
+
+    The stock partial remains valid for a deliberate stock-level probe. An upstream
+    influence path cannot carry that partial through the frozen stock operand.
+    """
+    if not any(
+        node.nonlinear_identity is not None
+        and node.nonlinear_identity.operation == "accumulation"
+        for node in graph.nodes
+    ):
+        return set()
+    return {
+        (plan.factor_ids[0], node_id)
+        for node_id, plan in resolve_identity_plans(graph, factor_centres).items()
+        if plan.evaluated and plan.operation == "accumulation"
+    }
+
+
+def _reaching_past_accumulation_stock(
+    graph: GraphV2,
+    parents: Mapping[str, List[str]],
+    target: str,
+    stock_cuts: Set[Tuple[str, str]],
+    stock_probe: Optional[str] = None,
+    via_node: Optional[str] = None,
+    via_edge: Optional[Tuple[str, str]] = None,
+) -> Set[str]:
+    """Carrier-specific reverse reachability, including stock-to-rate detours.
+
+    A spread carrier copies its independently evaluated result; other identities
+    continue in the current clean walk. A stock probe can reach its own boundary,
+    but that never grants an upstream factor a route through the frozen stock.
+    """
+    stock_of = {carrier: stock for stock, carrier in stock_cuts}
+    spread_carriers = {
+        node.id for node in graph.nodes
+        if node.id in stock_of and node.nonlinear_identity is not None
+        and node.nonlinear_identity.rate_sigma_log is not None
+    }
+    reached: Set[str] = set()
+    contexts: Dict[Tuple[str, bool], List[FrozenSet[str]]] = defaultdict(list)
+    pending: List[Tuple[str, FrozenSet[str], bool]] = [
+        (target, frozenset(), via_node is None and via_edge is None)
+    ]
+    while pending:
+        node_id, frozen_stock, passed = pending.pop()
+        passed = passed or node_id == via_node
+        if node_id in frozen_stock:
+            if node_id == stock_probe and passed:
+                reached.add(node_id)
+            continue
+        # A less restrictive context already explores every route this one can.
+        context_key = (node_id, passed)
+        if any(previous <= frozen_stock for previous in contexts[context_key]):
+            continue
+        contexts[context_key].append(frozen_stock)
+        if passed:
+            reached.add(node_id)
+        if node_id in stock_of:
+            own_stock = frozenset({stock_of[node_id]})
+            frozen_stock = (
+                own_stock if node_id in spread_carriers else frozen_stock | own_stock
+            )
+        pending.extend(
+            (parent, frozen_stock, passed or (parent, node_id) == via_edge)
+            for parent in parents.get(node_id, ())
+        )
+    return reached
+
+
+def accumulation_stock_cut_quantities(
+    graph: GraphV2,
+    goal_node_id: str,
+    factor_centres: Optional[Mapping[str, float]] = None,
+) -> Set[str]:
+    """Sampled factors/links whose every goal route crosses an exact S0 boundary.
+
+    Freeze stock within its carrier's walk, keeping raw bypasses and other carriers'
+    rate/inflow routes. Unlike deliberate stock probes, a sampled stock draw also
+    stops at this boundary. Disconnected quantities retain their existing handling.
+    """
+    cuts = accumulation_stock_cuts(graph, factor_centres)
+    if not cuts:
+        return set()
+    parents: Dict[str, List[str]] = defaultdict(list)
+    for edge in graph.edges:
+        parents[edge.to].append(edge.from_)
+
+    def reaching(adjacency: Mapping[str, List[str]]) -> Set[str]:
+        seen, pending = {goal_node_id}, [goal_node_id]
+        while pending:
+            for parent in adjacency.get(pending.pop(), ()):
+                if parent not in seen:
+                    seen.add(parent)
+                    pending.append(parent)
+        return seen
+
+    every = reaching(parents)
+    free = _reaching_past_accumulation_stock(graph, parents, goal_node_id, cuts)
+    return (every - free) | {
+        f"{edge.from_}->{edge.to}"
+        for edge in graph.edges
+        if edge.to in every
+        and ((edge.from_, edge.to) in cuts or edge.to not in free)
+    }
+
+
 def zero_gated_factor_ids(
     graph: GraphV2,
     factor_ids: List[str],
@@ -2194,15 +2304,25 @@ def zero_gated_factor_ids(
                 gated_edges[(i, node_id)] = zeros
     if not gated_edges:
         return {}
+    stock_cuts = accumulation_stock_cuts(graph, centres)
     every: Dict[str, List[str]] = {}
     ungated: Dict[str, List[str]] = {}
+    every_parents: Dict[str, List[str]] = defaultdict(list)
+    ungated_parents: Dict[str, List[str]] = defaultdict(list)
     for edge in graph.edges:
         every.setdefault(str(edge.from_), []).append(str(edge.to))
+        every_parents[edge.to].append(edge.from_)
         if (str(edge.from_), str(edge.to)) not in gated_edges:
             ungated.setdefault(str(edge.from_), []).append(str(edge.to))
+            ungated_parents[edge.to].append(edge.from_)
 
     def reaches(start: str, adjacency: Dict[str, List[str]], target: Optional[str] = None) -> bool:
         goal = goal_node_id if target is None else target
+        if stock_cuts:
+            parents = every_parents if adjacency is every else ungated_parents
+            return start in _reaching_past_accumulation_stock(
+                graph, parents, goal, stock_cuts, stock_probe=start
+            )
         seen, stack = {start}, [start]
         while stack:
             node_id = stack.pop()
@@ -2217,6 +2337,14 @@ def zero_gated_factor_ids(
     def reaches_node(start: str, target: str) -> bool:
         return reaches(start, every, target)
 
+    def gate_on_path(start: str, operand: str, product: str) -> bool:
+        if stock_cuts:
+            return start in _reaching_past_accumulation_stock(
+                graph, every_parents, goal_node_id, stock_cuts,
+                stock_probe=start, via_edge=(operand, product),
+            )
+        return (operand == start or reaches_node(start, operand)) and reaches(product, every)
+
     gated: Dict[str, List[str]] = {}
     for f in factor_ids:
         if f == goal_node_id or not reaches(f, every) or reaches(f, ungated):
@@ -2226,7 +2354,7 @@ def zero_gated_factor_ids(
                 z
                 for (i, product), zeros in gated_edges.items()
                 # only a gated edge on a factor-to-goal path gates it (PR Review #213 5882196850)
-                if (i == f or reaches_node(f, i)) and reaches(product, every)
+                if gate_on_path(f, i, product)
                 for z in zeros
             }
         )
@@ -2255,9 +2383,37 @@ def anchored_blind_factor_ids(
     }
     if not anchored:
         return {}
+    stock_cuts = accumulation_stock_cuts(graph, centres)
     children: Dict[str, List[str]] = {}
+    parents: Dict[str, List[str]] = defaultdict(list)
     for edge in graph.edges:
         children.setdefault(str(edge.from_), []).append(str(edge.to))
+        parents[edge.to].append(edge.from_)
+
+    if stock_cuts:
+        def reaches_past_stock(start: str, target: str, avoid: Set[str]) -> bool:
+            if target in avoid:
+                return False
+            allowed_parents = {
+                node_id: [parent for parent in incoming if parent not in avoid]
+                for node_id, incoming in parents.items()
+            }
+            return start in _reaching_past_accumulation_stock(
+                graph, allowed_parents, target, stock_cuts, stock_probe=start
+            )
+
+        return {
+            f: sorted(
+                anchor for anchor in anchored
+                if f in _reaching_past_accumulation_stock(
+                    graph, parents, goal_node_id, stock_cuts,
+                    stock_probe=f, via_node=anchor,
+                )
+            )
+            for f in factor_ids
+            if f != goal_node_id and reaches_past_stock(f, goal_node_id, set())
+            and (f in anchored or not reaches_past_stock(f, goal_node_id, anchored))
+        }
 
     def reached(start: str, *, avoid: Set[str]) -> Set[str]:
         seen, stack = {start}, [start]
@@ -8083,6 +8239,14 @@ class RobustnessAnalyzerV2:
             and goal_identity.accumulation_derived
         )
         spread_goal = horizon_goal and _rate_spread_horizon(request.graph, request.goal_node_id)
+        if goal_chance_quantities is not None:
+            stock_cut_quantities = accumulation_stock_cut_quantities(
+                request.graph, request.goal_node_id, factor_centres(request)
+            )
+            goal_chance_quantities = [
+                quantity for quantity in goal_chance_quantities
+                if quantity.quantity_id not in stock_cut_quantities
+            ]
         results = []
         # B1a: the per-draw status-quo reference the anchored band reads. The analyzer
         # records it for an anchored goal (``status_quo_reference_nodes``), so its absence
@@ -8464,6 +8628,9 @@ class RobustnessAnalyzerV2:
         # R3-9: a definition is neither a sensitivity target (no edge-level output lists
         # it) nor drawn in the background of another edge's samples.
         fixed = definitional_strengths(request.graph, factor_centres(request))
+        stock_cut_quantities = accumulation_stock_cut_quantities(
+            request.graph, request.goal_node_id, factor_centres(request)
+        )
 
         for edge in request.graph.edges:
             if (edge.from_, edge.to) in fixed:
@@ -8472,6 +8639,11 @@ class RobustnessAnalyzerV2:
             existence_sens = self._compute_existence_sensitivity(
                 request, edge, baseline_mean, rng, evaluator, fixed=fixed
             )
+            cut_off = f"{edge.from_}->{edge.to}" in stock_cut_quantities
+            # Keep the probe draws/stream order for every other sensitivity row,
+            # but independent background noise cannot give a frozen path influence.
+            if cut_off:
+                existence_sens = 0.0
             sensitivities.append(
                 {
                     "edge_from": edge.from_,
@@ -8486,6 +8658,8 @@ class RobustnessAnalyzerV2:
             magnitude_sens = self._compute_magnitude_sensitivity(
                 request, edge, baseline_mean, rng, evaluator, fixed=fixed
             )
+            if cut_off:
+                magnitude_sens = 0.0
             sensitivities.append(
                 {
                     "edge_from": edge.from_,
@@ -9947,6 +10121,13 @@ class RobustnessAnalyzerV2:
         # R3-5: an evaluated identity's operand/addend edge carries the identity's partial
         # at the centre, not its guessed slope (``identity_partials``; empty otherwise).
         partials = identity_partials(graph, factor_centres)
+        stock_cuts = accumulation_stock_cuts(graph, factor_centres)
+        stock_of = {carrier: stock for stock, carrier in stock_cuts}
+        spread_carriers = {
+            node.id for node in graph.nodes
+            if node.id in stock_of and node.nonlinear_identity is not None
+            and node.nonlinear_identity.rate_sigma_log is not None
+        }
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
         for edge in graph.edges:
             from_node = edge.from_
@@ -9969,6 +10150,8 @@ class RobustnessAnalyzerV2:
             start: str,
             end: str,
             visited: set,
+            origin: str,
+            carrier_path: Set[str],
         ) -> List[float]:
             """
             Find all paths from start to end and return list of path strengths.
@@ -9981,6 +10164,12 @@ class RobustnessAnalyzerV2:
                 return []
             calls_left -= 1
 
+            stock = stock_of.get(start)
+            if stock is not None and stock != origin and stock in carrier_path:
+                return []
+            carrier_path = (
+                {start} if start in spread_carriers else carrier_path | {start}
+            )
             if start == end:
                 return [1.0]  # Base case: path of strength 1
 
@@ -9994,7 +10183,9 @@ class RobustnessAnalyzerV2:
             path_strengths = []
 
             for next_node, edge_strength in adjacency[start]:
-                sub_paths = find_all_paths_strengths(next_node, end, visited.copy())
+                sub_paths = find_all_paths_strengths(
+                    next_node, end, visited.copy(), origin, carrier_path
+                )
                 for sub_strength in sub_paths:
                     path_strengths.append(edge_strength * sub_strength)
 
@@ -10007,7 +10198,7 @@ class RobustnessAnalyzerV2:
         truncated_factors: List[str] = []
         for node_id in factor_node_ids:
             budget_hit = False
-            path_strengths = find_all_paths_strengths(node_id, goal_node_id, set())
+            path_strengths = find_all_paths_strengths(node_id, goal_node_id, set(), node_id, set())
             # EXPECTED NET effect (AIQ ruling #72 5875853496): signed path products — each already
             # ∏(mean × exists_probability) — summed, THEN the magnitude, so offsetting channels
             # cancel. Gross reach (Σ|path|) would call a factor a major driver when moving it barely
@@ -10118,6 +10309,13 @@ class RobustnessAnalyzerV2:
 
         # Build adjacency exactly like _compute_structural_influence (signed coeff,
         # list-valued to preserve parallel edges), skipping bidirected/confounding edges.
+        stock_cuts = accumulation_stock_cuts(graph, factor_centres(request))
+        stock_of = {carrier: stock for stock, carrier in stock_cuts}
+        spread_carriers = {
+            node.id for node in graph.nodes
+            if node.id in stock_of and node.nonlinear_identity is not None
+            and node.nonlinear_identity.rate_sigma_log is not None
+        }
         adjacency: Dict[str, List[Tuple[str, float]]] = {}
         for edge in graph.edges:
             if getattr(edge, "edge_type", None) == "bidirected":
@@ -10146,7 +10344,10 @@ class RobustnessAnalyzerV2:
         all_paths: List[Tuple[List[str], float]] = []
         truncated = False
 
-        def walk(node: str, effect_so_far: float, path_so_far: List[str], visited: set) -> None:
+        def walk(
+            node: str, effect_so_far: float, path_so_far: List[str], visited: set,
+            carrier_path: Set[str],
+        ) -> None:
             nonlocal truncated, deadline_hit, walk_calls
             if truncated or deadline_hit:
                 return
@@ -10157,6 +10358,10 @@ class RobustnessAnalyzerV2:
             if walk_calls % self.PATH_DEADLINE_CHECK_INTERVAL == 0 and deadline.exceeded():
                 deadline_hit = True
                 return
+            stock = stock_of.get(node)
+            if stock is not None and stock != path_so_far[0] and stock in carrier_path:
+                return
+            carrier_path = {node} if node in spread_carriers else carrier_path | {node}
             if node == goal:
                 all_paths.append((path_so_far, effect_so_far))
                 if len(all_paths) > MAX_DECOMPOSITION_PATHS:
@@ -10174,7 +10379,7 @@ class RobustnessAnalyzerV2:
                 # any kind; the goal is never non-inference.
                 if next_node != goal and node_kind.get(next_node) in NON_INFERENCE_KINDS:
                     continue
-                walk(next_node, effect_so_far * coeff, path_so_far + [next_node], visited)
+                walk(next_node, effect_so_far * coeff, path_so_far + [next_node], visited, carrier_path)
 
         # F7: bail before enumerating if the budget is already spent at phase entry.
         if deadline.exceeded():
@@ -10194,7 +10399,7 @@ class RobustnessAnalyzerV2:
                 # Skip the trivial zero-length path (an intervention target that is the
                 # goal contributes no pathway structure).
                 continue
-            walk(entry, 1.0, [entry], set())
+            walk(entry, 1.0, [entry], set(), set())
 
         if deadline_hit:
             # Wall-clock deadline tripped mid-enumeration — discard the whole phase
