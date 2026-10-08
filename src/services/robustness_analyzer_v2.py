@@ -1785,7 +1785,7 @@ def _identity_term(
 def _accumulation_horizon_levels(
     graph: GraphV2,
 ) -> Tuple[Dict[str, float], Set[str], Dict[str, str]]:
-    """Resolve month-T levels before a consuming PRODUCT reconciles or reads its operands.
+    """Resolve month-T levels before a consuming identity evaluates its operands.
 
     Only declared identities composing accumulation are changed. Legacy PRODUCT/SUM graphs
     keep their existing level reads and arithmetic. A stale stated stock/goal is never S_T.
@@ -1951,9 +1951,33 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
         if node.id in invalid_rates:
             plans[node.id] = plan(invalid_rates[node.id])
             continue
+        # P45: evaluation keeps S_T, but a product's stated level is TODAY. Its
+        # accumulation operand contributes S_0 in the starting stock's own frame,
+        # never the carrier's stale observed level or its month-T evaluation.
+        reconciliation_target = target_level
+        reconciliation_user = {i: levels[i] * frames[i] for i in participants}
+        zero_operands = {i for i in factor_ids if levels[i] == 0.0}
         if identity.operation == "product":
-            if target_level is not None and (
-                any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0
+            reconciliation_target = status_quo_level(node)
+            for operand_id in factor_ids:
+                operand_identity = nodes[operand_id].nonlinear_identity
+                if operand_identity is None or operand_identity.operation != "accumulation":
+                    continue
+                stock = nodes[operand_identity.factor_ids[0]]
+                stock_level = status_quo_level(stock)
+                stock_frame = stock.execution_frame
+                if stock_level is None or stock_frame is None:
+                    reconciliation_user.pop(operand_id)
+                    continue
+                reconciliation_user[operand_id] = stock_level * stock_frame.frame
+                zero_operands.discard(operand_id)
+                if stock_level == 0.0:
+                    zero_operands.add(operand_id)
+            if reconciliation_target is not None and len(reconciliation_user) != len(participants):
+                plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
+                continue
+            if reconciliation_target is not None and (
+                zero_operands or reconciliation_target == 0.0
             ):
                 plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
                 continue
@@ -1966,14 +1990,14 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
             continue
         else:
             raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {identity.operation}")
-        if target_level is None:
+        if reconciliation_target is None:
             plans[node.id] = plan(None)
             continue
-        parts = [levels[i] * frames[i] for i in participants]
+        parts = [reconciliation_user[i] for i in participants]
         reconstructed = _identity_term(
-            identity.operation, [levels[i] * frames[i] for i in factor_ids]
-        ) + math.fsum(levels[i] * frames[i] for i in addends)
-        stated = target_level * frames[node.id]
+            identity.operation, [reconciliation_user[i] for i in factor_ids]
+        ) + math.fsum(reconciliation_user[i] for i in addends)
+        stated = reconciliation_target * frames[node.id]
         if identity.operation == "product":
             share = abs(stated - reconstructed) / abs(stated)
         elif identity.operation == "sum":

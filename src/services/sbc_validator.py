@@ -36,7 +36,7 @@ from src.models.robustness_v2 import (
     RobustnessRequestV2,
     StrengthDistribution,
 )
-from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2
+from src.services.robustness_analyzer_v2 import AccumulationDrawRefusedError, RobustnessAnalyzerV2
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +232,10 @@ def _compute_ground_truth(
     response = analyzer.analyze(request)
     for opt_result in response.results:
         if opt_result.option_id == ref_option_id:
-            return opt_result.outcome_distribution.mean
+            mean = opt_result.outcome_distribution.mean
+            if mean is None:
+                raise AccumulationDrawRefusedError(f"Option {ref_option_id!r} ground-truth outcome is unavailable")
+            return mean
     raise ValueError(f"Option {ref_option_id!r} not found in frozen-graph response")
 
 

@@ -1170,7 +1170,7 @@ async def _analyze_robustness_v2_enhanced(
                         and pre_noise_regret is not None
                         and math.isfinite(pre_noise_regret)
                     ):
-                        cvar_val = cvar_from_samples(finite_cleaned)
+                        cvar_val = cvar_from_samples(finite_cleaned.tolist())
                         if math.isfinite(cvar_val) and math.isfinite(p05_val):
                             downside = DownsideV2(
                                 cvar_10=cvar_val,

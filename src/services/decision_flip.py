@@ -361,10 +361,12 @@ def compute_decision_flip_block(dreq: Any) -> Any:
             ):
                 raise
             raise AccumulationDrawRefusedError(str(exc)) from exc
-        if capture and any(
-            oid in option_ids for oid in response._mc_draws.get("accumulation_refused_option_ids", [])
-        ):
-            raise AccumulationDrawRefusedError("decision-flip probe refuses an accumulation option")
+        if capture:
+            draws = response._mc_draws
+            if draws is None:
+                raise RuntimeError("DECISION_FLIP_CAPTURE_UNAVAILABLE")
+            if any(oid in option_ids for oid in draws.get("accumulation_refused_option_ids", [])):
+                raise AccumulationDrawRefusedError("decision-flip probe refuses an accumulation option")
         return response
 
     def matrix(resp: Any) -> np.ndarray:

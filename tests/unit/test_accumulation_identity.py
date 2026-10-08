@@ -205,6 +205,47 @@ def test_baseline_is_status_quos_own_horizon_stock():
     assert keep["probability_of_goal"] == 1.0
 
 
+def test_product_reconciles_at_starting_stock_and_evaluates_at_horizon():
+    d = accumulation_request()
+    # The carrier's stale value and frame are not the starting-stock authority.
+    carrier = next(n for n in d["graph"]["nodes"] if n["id"] == CARRIER)
+    carrier["observed_state"].update(value=0.999, baseline=0.999)
+    carrier["execution_frame"]["frame"] = 2000.0
+    plan = rav2.resolve_identity_plans(RobustnessRequestV2.model_validate(d).graph)[GOAL]
+    assert plan.evaluated and plan.withheld_reason is None
+    assert plan.reconstructed == plan.stated == 12250.0
+    assert plan.mismatch_share == 0.0
+    assert plan.target_level is None  # Today's reconciliation never anchors month-T draws.
+    ev, edges, roots = evaluator(d)
+    expected = 49.0 * term(250.0, 0.03, 20.0) / 100000.0
+    assert ev.evaluate(edges, {}, GOAL, factor_values=roots) == expected
+    threshold, _ = rav2.RobustnessAnalyzerV2._resolve_goal_threshold_in_sample_frame(
+        RobustnessRequestV2.model_validate(d)
+    )
+    assert threshold is not None and threshold.goal_baseline == expected
+
+
+def test_product_with_accumulation_still_refuses_inconsistent_today():
+    d = accumulation_request()
+    goal = next(n for n in d["graph"]["nodes"] if n["id"] == GOAL)
+    goal["observed_state"].update(value=0.2, baseline=0.2)
+    plan = rav2.resolve_identity_plans(RobustnessRequestV2.model_validate(d).graph)[GOAL]
+    assert not plan.evaluated and plan.withheld_reason == rav2.IDENTITY_INCONSISTENT
+    assert plan.reconstructed == 12250.0 and plan.stated == 20000.0
+    assert plan.mismatch_share == (20000.0 - 12250.0) / 20000.0
+
+
+@pytest.mark.parametrize("zero_node", [STOCK, GOAL])
+def test_product_today_zero_guard_uses_starting_stock(zero_node):
+    d = accumulation_request()
+    node = next(n for n in d["graph"]["nodes"] if n["id"] == zero_node)
+    node["observed_state"].update(value=0.0, baseline=0.0)
+    plan = rav2.resolve_identity_plans(RobustnessRequestV2.model_validate(d).graph)[GOAL]
+    assert not plan.evaluated and plan.withheld_reason == rav2.IDENTITY_ZERO_LEVEL
+    # Positive inflow means S_T remains positive, so an S_T zero check would miss S_0=0.
+    assert plan.levels[CARRIER] > 0.0
+
+
 def test_partials_2037_match_central_finite_difference():
     graph = RobustnessRequestV2.model_validate(accumulation_request()).graph
     partials = rav2.identity_partials(graph)

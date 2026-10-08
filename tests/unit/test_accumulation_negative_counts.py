@@ -63,6 +63,9 @@ def test_zero_stock_and_inflow_evaluate():
     for node in request["graph"]["nodes"]:
         if node["id"] in (STOCK, INFLOW):
             node["observed_state"].update(value=0.0, baseline=0.0)
+        if node["id"] == GOAL:
+            # No contradictory nonzero TODAY claim on this zero-stock product.
+            node.pop("observed_state")
 
     response = post(request)
 

@@ -186,6 +186,23 @@ def test_unknown_link_is_refused():
             {"request": d1(), "links": [{"from_id": "nope", "to_id": "quarterly_revenue"}], "replicates": 2}))
 
 
+def test_missing_capture_diagnostics_is_an_explicit_refusal(monkeypatch):
+    analyze = RobustnessAnalyzerV2.analyze
+
+    def missing_capture(self, request):
+        response = analyze(self, request)
+        if request._capture_draws:
+            response._mc_draws = None
+        return response
+
+    monkeypatch.setattr(RobustnessAnalyzerV2, "analyze", missing_capture)
+    request = DecisionFlipRequestV2.model_validate(
+        {"request": d1(n=100), "links": [{"from_id": L1[0], "to_id": L1[1]}], "replicates": 2}
+    )
+    with pytest.raises(RuntimeError, match="DECISION_FLIP_CAPTURE_UNAVAILABLE"):
+        df.compute_decision_flip_block(request)
+
+
 def test_the_exact_rerun_withholds_a_link_the_straight_line_got_wrong(monkeypatch):
     # Force the affine path THROUGH clamped cones (the static guard bypassed): the real re-run at the quoted point must
     # catch the bent line and withhold the link, never quote it.
