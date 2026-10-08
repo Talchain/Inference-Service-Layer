@@ -1768,6 +1768,10 @@ def _identity_term(
         c = rate * rate_scale
         if not all(math.isfinite(v) for v in (*values, c)) or not 0.0 <= c < 1.0:
             raise AccumulationDrawRefusedError("accumulation rate must be finite and in [0, 1)")
+        if stock < 0 or inflow < 0:
+            raise AccumulationDrawRefusedError(
+                "accumulation starting stock and inflow must be non-negative"
+            )
         if abs(c) < 1e-9:
             result = stock + inflow * horizon_months
         else:

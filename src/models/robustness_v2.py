@@ -826,7 +826,7 @@ class GraphV2(BaseModel):
         identity's node (an identity is over named parents). Anything else is malformed: 422."""
         if "nodes" not in info.data:
             return v
-        node_ids = {node.id for node in info.data["nodes"]}
+        nodes = {node.id: node for node in info.data["nodes"]}
         parents: Dict[str, set] = {}
         for edge in v:
             parents.setdefault(edge.to, set()).add(edge.from_)
@@ -835,7 +835,7 @@ class GraphV2(BaseModel):
             if identity is None:
                 continue
             for participant in [*identity.factor_ids, *(identity.addends or [])]:
-                if participant not in node_ids:
+                if participant not in nodes:
                     raise ValueError(
                         f"nonlinear_identity on {node.id} names a non-existent node: {participant}"
                     )
@@ -844,6 +844,24 @@ class GraphV2(BaseModel):
                         f"nonlinear_identity on {node.id} names {participant}, "
                         "which is not its parent"
                     )
+            if identity.operation == "accumulation":
+                for participant, description in (
+                    (identity.factor_ids[0], "starting count"),
+                    (identity.factor_ids[2], "monthly inflow"),
+                ):
+                    operand = nodes[participant]
+                    observed = operand.observed_state
+                    if observed is None or operand.execution_frame is None:
+                        continue
+                    # Same reading of today as the evaluator: baseline, else value;
+                    # the execution frame converts that level to the user's units.
+                    level = observed.baseline if observed.baseline is not None else observed.value
+                    figure = level * operand.execution_frame.frame
+                    if figure < 0:
+                        raise ValueError(
+                            f"‘{operand.label}’ is {figure:g}; a {description} can't be negative, "
+                            f"so the month-{identity.horizon_months} figure can't be computed."
+                        )
         return v
 
     @field_validator("edges")
