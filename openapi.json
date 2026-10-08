@@ -5609,6 +5609,11 @@
                     "required": [
                       "rate_scale"
                     ]
+                  },
+                  {
+                    "required": [
+                      "rate_sigma_log"
+                    ]
                   }
                 ]
               }
@@ -5644,6 +5649,15 @@
                   "exclusiveMinimum": 0.0,
                   "maximum": 1.0,
                   "type": "number"
+                },
+                "rate_sigma_log": {
+                  "items": {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
                 }
               },
               "required": [
@@ -5717,6 +5731,30 @@
             ],
             "description": "Accumulation only: required multiplier converting the churn parent's user value to a monthly fraction (0.01 for percent, 1 for a fraction); ISL does not parse units",
             "title": "Rate Scale"
+          },
+          "rate_sigma_log": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accumulation only: optional lognormal spreads [monthly_churn, monthly_inflow]; exactly two finite nonnegative numbers. Omission preserves existing sampling.",
+            "title": "Rate Sigma Log"
           },
           "stated_in_brief": {
             "description": "True when the brief itself states it",

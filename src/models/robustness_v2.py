@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import math
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import (
     BaseModel,
@@ -523,6 +523,18 @@ class NonlinearIdentityV2(BaseModel):
             "to a monthly fraction (0.01 for percent, 1 for a fraction); ISL does not parse units"
         ),
     )
+    rate_sigma_log: Optional[
+        Tuple[
+            Annotated[float, Field(ge=0.0, strict=True, allow_inf_nan=False)],
+            Annotated[float, Field(ge=0.0, strict=True, allow_inf_nan=False)],
+        ]
+    ] = Field(
+        None,
+        description=(
+            "Accumulation only: optional lognormal spreads [monthly_churn, monthly_inflow]; "
+            "exactly two finite nonnegative numbers. Omission preserves existing sampling."
+        ),
+    )
 
     model_config = {
         "extra": "forbid",
@@ -539,6 +551,12 @@ class NonlinearIdentityV2(BaseModel):
                             "factor_ids": {"minItems": 3, "maxItems": 3, "uniqueItems": True},
                             "horizon_months": {"type": "integer", "minimum": 1, "maximum": 120},
                             "rate_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                            "rate_sigma_log": {
+                                "type": "array",
+                                "minItems": 2,
+                                "maxItems": 2,
+                                "items": {"type": "number", "minimum": 0},
+                            },
                         },
                         "not": {"required": ["addends"]},
                     },
@@ -547,6 +565,7 @@ class NonlinearIdentityV2(BaseModel):
                             "anyOf": [
                                 {"required": ["horizon_months"]},
                                 {"required": ["rate_scale"]},
+                                {"required": ["rate_sigma_log"]},
                             ]
                         }
                     },
@@ -554,6 +573,13 @@ class NonlinearIdentityV2(BaseModel):
             ]
         },
     }
+
+    @field_validator("rate_sigma_log", mode="before")
+    @classmethod
+    def _rate_spread_not_null(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("rate_sigma_log must contain two numbers when supplied")
+        return value
 
     @model_validator(mode="after")
     def _distinct_participants(self) -> "NonlinearIdentityV2":
@@ -565,7 +591,7 @@ class NonlinearIdentityV2(BaseModel):
             if self.horizon_months is None or self.rate_scale is None:
                 raise ValueError("accumulation requires horizon_months and rate_scale")
         elif self.operation in ("product", "sum"):
-            forbidden = self.model_fields_set & {"horizon_months", "rate_scale"}
+            forbidden = self.model_fields_set & {"horizon_months", "rate_scale", "rate_sigma_log"}
             if forbidden:
                 raise ValueError(
                     f"{self.operation} must not contain accumulation fields: {sorted(forbidden)}"
@@ -592,6 +618,8 @@ class NonlinearIdentityV2(BaseModel):
         addends key, including null. No return annotation so JSON schema retains the fields.
         """
         data = handler(self)
+        if self.rate_sigma_log is None:
+            data.pop("rate_sigma_log", None)
         if self.operation == "accumulation":
             data.pop("addends", None)
         elif self.operation in ("product", "sum"):

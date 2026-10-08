@@ -1419,6 +1419,34 @@ def resolve_factor_central_value(
 # =============================================================================
 
 
+ACCUMULATION_RATE_STREAM_OFFSET = 10_007
+
+
+def accumulation_rate_z_key(node_id: str, index: int) -> str:
+    """Private draw metadata: the carrier's independent churn/inflow standard normal."""
+    # A dot is outside NodeV2's id alphabet, so metadata cannot overwrite a factor.
+    return f"__accumulation_rate_z__.{node_id}:{index}"
+
+
+def _rate_spread_horizon(graph: GraphV2, node_id: str) -> bool:
+    """Whether this identity composes a carrier with a nonzero declared rate spread."""
+    nodes = {node.id: node for node in graph.nodes}
+    seen: Set[str] = set()
+
+    def visit(participant: str) -> bool:
+        if participant in seen:
+            return False
+        seen.add(participant)
+        identity = nodes[participant].nonlinear_identity
+        if identity is None:
+            return False
+        if identity.rate_sigma_log is not None and any(identity.rate_sigma_log):
+            return True
+        return any(visit(i) for i in (*identity.factor_ids, *(identity.addends or ())))
+
+    return visit(node_id)
+
+
 class FactorSampler:
     """
     Samples factor node values with parameter uncertainty.
@@ -1472,6 +1500,15 @@ class FactorSampler:
         self._occurrence_rng: Optional[SeededRNG] = (
             SeededRNG(rng.seed + OCCURRENCE_STREAM_OFFSET) if self._event_risks else None
         )
+        self._rate_carriers = sorted(
+            n.id for n in nodes
+            if n.nonlinear_identity is not None
+            and n.nonlinear_identity.rate_sigma_log is not None
+        )
+        self._rate_rng: Optional[SeededRNG] = (
+            SeededRNG(rng.seed + ACCUMULATION_RATE_STREAM_OFFSET)
+            if self._rate_carriers else None
+        )
 
     def sample_factor_values(self) -> Dict[str, float]:
         """
@@ -1522,6 +1559,13 @@ class FactorSampler:
                 z, p = draw_occurrence_state(plan, self._occurrence_rng)
                 factor_values[plan.node_id] = z
                 factor_values[occurrence_p_key(plan.node_id)] = p
+
+        # One pair per carrier and draw, shared across options and every replay. Never
+        # consume the factor, edge, occurrence or epsilon streams for rate spread.
+        if self._rate_rng is not None:
+            for node_id in self._rate_carriers:
+                for index in range(2):
+                    factor_values[accumulation_rate_z_key(node_id, index)] = self._rate_rng.normal(0, 1)
 
         return factor_values
 
@@ -1733,6 +1777,7 @@ class IdentityPlan:
     scale: Optional[float] = None
     horizon_months: Optional[int] = None
     rate_scale: Optional[float] = None
+    rate_sigma_log: Optional[Tuple[float, float]] = None
     # P45: this identity composes a month-T stock, so today's stated level cannot anchor it.
     accumulation_derived: bool = False
 
@@ -1938,6 +1983,7 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
                 withheld_reason=reason,
                 horizon_months=identity.horizon_months,
                 rate_scale=identity.rate_scale,
+                rate_sigma_log=identity.rate_sigma_log,
                 accumulation_derived=node.id in horizon_ids,
                 **reconciliation,
             )
@@ -2606,6 +2652,19 @@ class SCMEvaluatorV2:
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
+        # Each carrier has its OWN clean causal walk: another carrier's operands
+        # remain ordinary upstream inputs. The original walk still serves other paths.
+        self._rate_operand_centres: Dict[str, Mapping[str, float]] = {
+            node_id: plan.levels
+            for node_id, plan in self._evaluated_identities.items()
+            if plan.operation == "accumulation" and plan.rate_sigma_log is not None
+        }
+        self._rate_stock_ids = {
+            node_id: self._evaluated_identities[node_id].factor_ids[0]
+            for node_id in self._rate_operand_centres
+        }
+        self._last_rate_centres: Dict[str, Dict[str, float]] = {}
+        self._rate_status_quo_centres: Dict[str, Dict[str, float]] = {}
         for node_id, plan in self._evaluated_identities.items():
             if plan.accumulation_derived:
                 anchor = _anchor_of(plan, graph)
@@ -2701,7 +2760,8 @@ class SCMEvaluatorV2:
             edge_strengths, interventions, base_values, factor_values
         )
         return self._propagate(
-            edge_strengths, framed, base_values, factor_values, status_quo=status_quo
+            edge_strengths, framed, base_values, factor_values, status_quo=status_quo,
+            rate_interventions=interventions,
         ).get(goal_node, 0.0)
 
     def evaluate_multi(
@@ -2732,7 +2792,8 @@ class SCMEvaluatorV2:
             edge_strengths, interventions, base_values, factor_values
         )
         node_values = self._propagate(
-            edge_strengths, framed, base_values, factor_values, status_quo=status_quo
+            edge_strengths, framed, base_values, factor_values, status_quo=status_quo,
+            rate_interventions=interventions,
         )
 
         # Return only the requested target nodes
@@ -2747,6 +2808,7 @@ class SCMEvaluatorV2:
         *,
         noise: bool = True,
         status_quo: Optional[Dict[str, float]] = None,
+        rate_interventions: Optional[Dict[str, float]] = None,
     ) -> Dict[str, float]:
         """The structural equations in topological order: the ONE loop behind
         ``evaluate`` and ``evaluate_multi`` (it used to be written out in both).
@@ -2760,11 +2822,25 @@ class SCMEvaluatorV2:
             factor_values = {}
 
         node_values: Dict[str, float] = {}
+        centres_by_carrier: Dict[str, Dict[str, float]] = {
+            carrier: {} for carrier in self._rate_operand_centres
+        }
 
         for node_id in self._node_order:
             if node_id in interventions:
                 # Interventional value overrides structural equations
                 node_values[node_id] = interventions[node_id]
+                for carrier, centres in centres_by_carrier.items():
+                    centre_reference = self._rate_status_quo_centres.get(carrier) if status_quo is not None else None
+                    setting = (rate_interventions or interventions)[node_id]
+                    if centre_reference is not None and node_id in self._todays_levels and is_todays_level(
+                        setting, self._todays_levels[node_id]
+                    ):
+                        centres[node_id] = centre_reference[node_id]
+                    elif centre_reference is not None and node_id in self._status_quo_levels:
+                        centres[node_id] = centre_reference[node_id] + setting - self._status_quo_levels[node_id]
+                    else:
+                        centres[node_id] = setting
             elif node_id in self._event_risks:
                 # event_risk.v1: occurs (1/0) on a Monte Carlo draw (its z rides in factor_values),
                 # else its expected occurrence. Never the linear sum, never epsilon noise: the
@@ -2772,11 +2848,32 @@ class SCMEvaluatorV2:
                 node_values[node_id] = occurrence_value(
                     self._event_risks[node_id], node_values, factor_values, self._occurrence_mode
                 )
+                for centres in centres_by_carrier.values():
+                    centres[node_id] = occurrence_value(
+                        self._event_risks[node_id], centres, factor_values, self._occurrence_mode
+                    )
             elif node_id in self._evaluated_identities:
                 try:
-                    node_values[node_id] = self._identity_value(
-                        self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
-                    )
+                    plan = self._evaluated_identities[node_id]
+                    if node_id in centres_by_carrier:
+                        own_centres = centres_by_carrier[node_id]
+                        own_reference = self._rate_status_quo_centres.get(node_id) if status_quo is not None else None
+                        node_values[node_id] = self._identity_value(
+                            plan, edge_strengths, own_centres, own_reference,
+                            rate_factor_values=factor_values,
+                        )
+                    else:
+                        node_values[node_id] = self._identity_value(plan, edge_strengths, node_values, status_quo)
+                    for carrier, centres in centres_by_carrier.items():
+                        if plan.rate_sigma_log is not None:
+                            # Accumulations do not nest. Other carriers' horizon results
+                            # are already evaluated with their own replaced noise.
+                            centres[node_id] = node_values[node_id]
+                        else:
+                            centre_reference = self._rate_status_quo_centres.get(carrier) if status_quo is not None else None
+                            centres[node_id] = self._identity_value(
+                                plan, edge_strengths, centres, centre_reference
+                            )
                 except AccumulationDrawRefusedError as refusal:
                     raise AccumulationDrawRefusedError(str(refusal), node_id) from refusal
             else:
@@ -2813,13 +2910,29 @@ class SCMEvaluatorV2:
                 intercept = getattr(node, "intercept", 0.0) if node else 0.0
 
                 node_values[node_id] = base + intercept + parents_contribution
+                for carrier, centres in centres_by_carrier.items():
+                    own_operands = self._rate_operand_centres[carrier]
+                    centre_base = own_operands.get(node_id, base)
+                    centres[node_id] = centre_base + intercept + sum(
+                        centres.get(parent, 0.0) * edge_strengths.get((parent, node_id), 0.0)
+                        for parent in self._parents[node_id]
+                    )
+                    if node_id == self._rate_stock_ids[carrier] or (
+                        node_id in own_operands and not self._parents[node_id]
+                    ):
+                        centres[node_id] = own_operands[node_id]
 
                 # Per-node epsilon noise (skipped for the status-quo reading, which
                 # must not draw from the epsilon stream: see _in_model_frame)
                 if noise and self._epsilon_rng and node and node.epsilon_std > 0:
-                    node_values[node_id] += self._epsilon_rng.normal(0, node.epsilon_std)
+                    epsilon = self._epsilon_rng.normal(0, node.epsilon_std)
+                    node_values[node_id] += epsilon
                     node_values[node_id] = max(0.0, min(1.0, node_values[node_id]))
+                    for carrier, centres in centres_by_carrier.items():
+                        if node_id not in self._rate_operand_centres[carrier]:
+                            centres[node_id] = max(0.0, min(1.0, centres[node_id] + epsilon))
 
+        self._last_rate_centres = centres_by_carrier
         return node_values
 
     def _status_quo(
@@ -2855,6 +2968,7 @@ class SCMEvaluatorV2:
             critique = accumulation_refusal_critique(self.graph, refusal.node_id)
             raise IdentityNotEvaluatedError(critique.message, [critique]) from refusal
         self._status_quo_cache = (key, status_quo)
+        self._rate_status_quo_centres = self._last_rate_centres
         return status_quo
 
     def _framed_with_reference(
@@ -2926,6 +3040,8 @@ class SCMEvaluatorV2:
         edge_strengths: Dict[Tuple[str, str], float],
         values: Dict[str, float],
         status_quo: Optional[Dict[str, float]],
+        *,
+        rate_factor_values: Optional[Dict[str, float]] = None,
     ) -> float:
         """R3 / R3-8: an identity node on this draw, in its own normalised frame.
 
@@ -2962,9 +3078,23 @@ class SCMEvaluatorV2:
         def user(participant: str, at: Dict[str, float]) -> float:
             return level(participant, at) * plan.frames[participant]
 
+        operands = [user(i, values) for i in plan.factor_ids]
+        if plan.rate_sigma_log is not None:
+            # S0 is exact. Rates are centred on the causal walk with their own
+            # parameter/epsilon noise removed, retaining sampled upstream effects.
+            stock = plan.factor_ids[0]
+            operands[0] = plan.levels[stock] * plan.frames[stock]
+            if status_quo is not None:
+                operands[0] += (values[stock] - reference[stock]) * plan.frames[stock]
+            for index, sigma in enumerate(plan.rate_sigma_log):
+                z = (rate_factor_values or {}).get(accumulation_rate_z_key(node_id, index), 0.0)
+                try:
+                    operands[index + 1] *= math.exp(sigma * z)
+                except OverflowError as exc:
+                    raise AccumulationDrawRefusedError("accumulation rate draw is not finite") from exc
         term = _identity_term(
             plan.operation,
-            [user(i, values) for i in plan.factor_ids],
+            operands,
             horizon_months=plan.horizon_months,
             rate_scale=plan.rate_scale,
         )
@@ -3202,6 +3332,8 @@ class GoalThresholdPlan:
     # Proposal (3): set only when ``goal_baseline`` came from an evaluated identity's operands
     # (the target states no level); None whenever a stated base anchors the plan.
     level_from_identity: Optional[IdentityLevelAnchor] = None
+    # Spread-enabled stock-at-horizon is a random LEVEL, including for Keep.
+    per_draw_baseline: bool = False
 
     @property
     def needs_status_quo_reference(self) -> bool:
@@ -3291,6 +3423,7 @@ class ObjectivePlan:
     target_delta: Optional[float] = None
     target_level: Optional[float] = None
     goal_baseline: Optional[float] = None
+    per_draw_baseline: bool = False
 
     @property
     def needs_status_quo_reference(self) -> bool:
@@ -4198,7 +4331,11 @@ class RobustnessAnalyzerV2:
         # again by later analyses.
         goal_chance_draws = (
             goal_chance_quantities(
-                strip_occurrence_state(factor_values_per_sample, event_risk_plans),
+                [
+                    {key: value for key, value in draw.items()
+                     if not key.startswith("__accumulation_rate_z__.")}
+                    for draw in strip_occurrence_state(factor_values_per_sample, event_risk_plans)
+                ],
                 edge_configs_per_sample,
                 sampler.absent_edges_per_sample[
                     absent_record_start : absent_record_start + request.n_samples
@@ -5421,6 +5558,39 @@ class RobustnessAnalyzerV2:
         capture_tie_rng: Optional[SeededRNG] = (
             SeededRNG(compute_effective_seed(request)[0] + 5) if request._capture_draws else None
         )
+        legacy_evaluator: Optional[SCMEvaluatorV2] = None
+        legacy_sq_evaluator: Optional[SCMEvaluatorV2] = None
+        legacy_objective = objective or ObjectivePlan(sense="maximise", attested=False)
+        rate_tie_rng: Optional[SeededRNG] = None
+        if factor_sampler._rate_carriers and capture_tie_rng is None:
+            # Legacy top ties consume the EDGE stream. Spread may change those ties,
+            # so retain exactly the absent-field tie clock and choose new ties elsewhere.
+            legacy_nodes = [
+                node.model_copy(update={"nonlinear_identity": node.nonlinear_identity.model_copy(
+                    update={"rate_sigma_log": None}
+                )}) if node.nonlinear_identity is not None and node.nonlinear_identity.rate_sigma_log is not None
+                else node
+                for node in request.graph.nodes
+            ]
+            legacy_request = request.model_copy(update={
+                "graph": request.graph.model_copy(update={"nodes": legacy_nodes})
+            })
+            try:
+                legacy_evaluator = SCMEvaluatorV2(
+                    legacy_request.graph, factor_centres=factor_centres(legacy_request),
+                    epsilon_rng=SeededRNG(evaluator._epsilon_rng.seed) if evaluator._epsilon_rng else None,
+                    occurrence_mode=evaluator._occurrence_mode,
+                )
+                threshold, _warning = self._resolve_goal_threshold_in_sample_frame(legacy_request)
+                legacy_objective, _warning = self._resolve_objective_plan(legacy_request, threshold)
+                if legacy_objective.needs_status_quo_reference:
+                    legacy_sq_evaluator = SCMEvaluatorV2(
+                        legacy_request.graph, factor_centres=factor_centres(legacy_request)
+                    )
+            except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                legacy_evaluator = None
+                legacy_sq_evaluator = None
+            rate_tie_rng = SeededRNG(compute_effective_seed(request)[0] + 10_009)
         refused_option_ids: Set[str] = set()
         check_accumulation_status_quo = any(
             plan.operation == "accumulation" for plan in evaluator._evaluated_identities.values()
@@ -5432,6 +5602,32 @@ class RobustnessAnalyzerV2:
             # Sample factor values (parameter uncertainty)
             factor_values = factor_sampler.sample_factor_values()
             factor_values_per_sample.append(factor_values)
+            legacy_winners: List[str] = []
+            legacy_choice: Optional[str] = None
+            if legacy_evaluator is not None:
+                try:
+                    legacy_outcomes = {
+                        option.id: legacy_evaluator.evaluate(
+                            edge_config, option.interventions, request.goal_node_id,
+                            factor_values=factor_values,
+                        ) for option in request.options
+                    }
+                    legacy_reference = (
+                        legacy_sq_evaluator.evaluate(
+                            edge_config, reference_interventions, request.goal_node_id,
+                            factor_values=factor_values,
+                        ) if legacy_sq_evaluator is not None else None
+                    )
+                    legacy_winners = self._winners_for_draw(
+                        {key: value for key, value in legacy_outcomes.items() if math.isfinite(value)},
+                        legacy_objective, legacy_reference,
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    # No completed absent-field analysis exists for an invalid legacy
+                    # draw. Its refusal must not reject the new noise-replacement path.
+                    legacy_winners = []
+                if len(legacy_winners) > 1:
+                    legacy_choice = str(sampler.rng.choice(legacy_winners))
             # Check every status-quo draw, even after every option has failed.
             if check_accumulation_status_quo:
                 evaluator._status_quo(edge_config, None, factor_values)
@@ -5581,8 +5777,11 @@ class RobustnessAnalyzerV2:
                 # desynchronises every later edge draw. The decision-flip capture needs exact common random numbers
                 # across probes, so it alone breaks ties from its own stream. win_probability never reads this
                 # choice (ties split the credit above); an ordinary analysis is byte-identical.
-                tie_rng = capture_tie_rng if capture_tie_rng is not None else sampler.rng
-                winner_per_sample.append(str(tie_rng.choice(winners)))
+                tie_rng = capture_tie_rng or rate_tie_rng or sampler.rng
+                winner_per_sample.append(
+                    legacy_choice if legacy_choice is not None and winners == legacy_winners
+                    else str(tie_rng.choice(winners))
+                )
 
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
@@ -6363,7 +6562,10 @@ class RobustnessAnalyzerV2:
             # is present in both terms and cancels.
             if status_quo_reference is None or not math.isfinite(status_quo_reference):
                 return []
-            baseline = objective.goal_baseline or 0.0
+            baseline = (
+                status_quo_reference if objective.per_draw_baseline
+                else objective.goal_baseline or 0.0
+            )
             distances = {
                 opt_id: abs((baseline + (val - status_quo_reference)) - objective.target_level)
                 for opt_id, val in finite_outcomes.items()
@@ -6489,6 +6691,7 @@ class RobustnessAnalyzerV2:
                 target_delta=goal_threshold_plan.delta_threshold,
                 target_level=goal_threshold_plan.level_threshold,
                 goal_baseline=goal_threshold_plan.goal_baseline,
+                per_draw_baseline=goal_threshold_plan.per_draw_baseline,
             ),
             None,
         )
@@ -7220,6 +7423,7 @@ class RobustnessAnalyzerV2:
                     else "scored"
                 ),
                 level_from_identity=anchor,
+                per_draw_baseline=horizon_target and _rate_spread_horizon(request.graph, target_id),
             ),
             None,
         )
@@ -7232,6 +7436,34 @@ class RobustnessAnalyzerV2:
         parents_of: Dict[str, List[str]] = defaultdict(list)
         for edge in request.graph.edges:
             parents_of[edge.to].append(edge.from_)
+        spread_carriers = {
+            node.id: node.nonlinear_identity.factor_ids
+            for node in request.graph.nodes
+            if node.nonlinear_identity is not None
+            and node.nonlinear_identity.rate_sigma_log is not None
+        }
+        if spread_carriers:
+            children_of: Dict[str, List[str]] = defaultdict(list)
+            for edge in request.graph.edges:
+                children_of[edge.from_].append(edge.to)
+            effective: List[str] = []
+            for source in request.graph.nodes:
+                if source.epsilon_std <= 0:
+                    continue
+                seen = {source.id}
+                pending = [source.id]
+                while pending:
+                    parent = pending.pop()
+                    for child in children_of[parent]:
+                        operands = spread_carriers.get(child)
+                        if operands is not None and (source.id in operands or parent == operands[0]):
+                            continue  # Own operand noise is replaced; S0 has no upstream noise.
+                        if child not in seen:
+                            seen.add(child)
+                            pending.append(child)
+                if target_id in seen:
+                    effective.append(source.id)
+            return sorted(effective)
         influencers = {target_id}
         frontier = [target_id]
         while frontier:
@@ -7737,7 +7969,7 @@ class RobustnessAnalyzerV2:
             # produce a plausible number from misaligned draws — a fabrication of
             # exactly the kind this change exists to make impossible.
             resolved[index] = [
-                baseline + (sample - reference_sample)
+                (reference_sample if plan.per_draw_baseline else baseline) + (sample - reference_sample)
                 for sample, reference_sample in zip(samples, reference, strict=True)
             ]
 
@@ -7816,6 +8048,7 @@ class RobustnessAnalyzerV2:
             and goal_identity.evaluated
             and goal_identity.accumulation_derived
         )
+        spread_goal = horizon_goal and _rate_spread_horizon(request.graph, request.goal_node_id)
         results = []
         # B1a: the per-draw status-quo reference the anchored band reads. The analyzer
         # records it for an anchored goal (``status_quo_reference_nodes``), so its absence
@@ -7837,7 +8070,8 @@ class RobustnessAnalyzerV2:
             # ``samples_array``.
             if status_quo_goal is not None:
                 assert goal_level_anchor is not None
-                reported_array = goal_level_anchor + (samples_array - status_quo_goal)
+                baseline_array = status_quo_goal if spread_goal else goal_level_anchor
+                reported_array = baseline_array + (samples_array - status_quo_goal)
                 reported_samples = reported_array.tolist()
             else:
                 reported_array = samples_array
@@ -7882,7 +8116,12 @@ class RobustnessAnalyzerV2:
                     # current values, the sampled strengths and the goal's intercept
                     # all cancel instead of being mistaken for progress.
                     effect = samples_array - np.array(status_quo_outcomes)
-                    compared = goal_threshold_plan.goal_baseline + effect
+                    assert goal_threshold_plan.goal_baseline is not None
+                    baseline_array = (
+                        np.array(status_quo_outcomes) if goal_threshold_plan.per_draw_baseline
+                        else goal_threshold_plan.goal_baseline
+                    )
+                    compared = baseline_array + effect
                     goal_domain = level_domains.get(request.goal_node_id)
                     if (
                         goal_domain is not None
