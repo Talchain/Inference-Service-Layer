@@ -479,7 +479,7 @@ _OBSERVED_STATE_MENTION_MANIFEST = {
     "_resolve_threshold_in_sample_frame",
     "_resolve_change_threshold",  # R1 S2: today's level (baseline) + whose base (source)
     # --- presence / provenance checks (never a central value) -------------
-    "analyze",  # ROOT_NODE_DEFAULT_VALUE eligibility
+    "_analyze",  # ROOT_NODE_DEFAULT_VALUE: does a root carry an observed value? Presence only.
     "_compute_factor_flip_values",  # flip-row eligibility: does it carry data?
     "_compute_conditional_winners",  # reads observed_state.unit, not .value
     "_analyze_robustness_v2_legacy",  # counts nodes with a value, for logging

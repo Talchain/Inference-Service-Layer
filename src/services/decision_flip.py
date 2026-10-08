@@ -89,10 +89,11 @@ def decision_flip_threshold(
 # `exists · (mean + std · z)`. So each draw's goal value, for every option and for the status-quo reading, is AFFINE
 # in the link's mean: two Monte Carlo runs (mean = current, mean = 0) give it for every mean in between.
 #
-# WHERE IT IS NOT. A node with epsilon_std > 0 is clamped to [0, 1] after its noise, and an evaluated PRODUCT identity
-# multiplies its operands. Either DOWNSTREAM of the link makes a draw's value piecewise or quadratic in the mean, and a
-# crossing can then hide where the straight line says "no change". Such a link never takes this path: it is an honest
-# absence (`downstream_nonlinearity`). Every quoted point is then re-run for real and must reproduce the predicted win
+# WHERE IT IS NOT. A node with epsilon_std > 0 is clamped to [0, 1] after its noise, an evaluated PRODUCT identity
+# multiplies its operands, and an accumulation compounds churn across its horizon. Any of these DOWNSTREAM of the link
+# can make a draw's value non-affine in the mean, and a crossing can then hide where the straight line says "no change".
+# Such a link never takes this path: it is an honest absence (`downstream_nonlinearity`). Every quoted point is then
+# re-run for real and must reproduce the predicted win
 # shares (`affine_check_failed` otherwise).
 
 import hashlib  # noqa: E402
@@ -143,8 +144,13 @@ def downstream_nonlinearity(request: Any, from_id: str, to_id: str) -> Optional[
         if node is not None and (getattr(node, "epsilon_std", 0.0) or 0.0) > 0:
             return f"clamp:{nid}"
     for nid, plan in sorted(_resolve_structural_identity_plans(request.graph).items()):
-        if nid in cone and plan.evaluated and plan.operation != "sum":
+        if nid not in cone or not plan.evaluated:
+            continue
+        if plan.operation == "sum":
+            continue
+        if plan.operation in ("product", "accumulation"):
             return f"identity:{nid}"
+        raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
     return None
 
 
@@ -325,7 +331,10 @@ def _child_seed(master: int, i: int) -> int:
 def compute_decision_flip_block(dreq: Any) -> Any:
     """The on-demand block: per link quoted / absent / no_change, under the K-replicate licence."""
     from src.models.robustness_v2 import DecisionFlipBlockV2, DecisionFlipLinkV2, RobustnessRequestV2
-    from src.services.robustness_analyzer_v2 import RobustnessAnalyzerV2, compute_effective_seed
+    from src.services.robustness_analyzer_v2 import (
+        AccumulationDrawRefusedError, IdentityNotEvaluatedError,
+        RobustnessAnalyzerV2, compute_effective_seed,
+    )
 
     base = dreq.request.model_copy(update=STRIPPED, deep=True)
     edges = {(e.from_, e.to): e for e in base.graph.edges}
@@ -343,13 +352,31 @@ def compute_decision_flip_block(dreq: Any) -> Any:
                     e.strength.mean = mean
         q = RobustnessRequestV2.model_validate(q.model_dump(by_alias=True))
         q._capture_draws = capture
-        return RobustnessAnalyzerV2().analyze(q)
+        try:
+            response = RobustnessAnalyzerV2().analyze(q)
+        except IdentityNotEvaluatedError as exc:
+            if not capture or not any(
+                c.identity is not None and c.identity.withheld_reason == "accumulation_draw_refused"
+                for c in getattr(exc, "critiques", [])
+            ):
+                raise
+            raise AccumulationDrawRefusedError(str(exc)) from exc
+        if capture:
+            draws = response._mc_draws
+            if draws is None:
+                raise RuntimeError("DECISION_FLIP_CAPTURE_UNAVAILABLE")
+            if any(oid in option_ids for oid in draws.get("accumulation_refused_option_ids", [])):
+                raise AccumulationDrawRefusedError("decision-flip probe refuses an accumulation option")
+        return response
 
     def matrix(resp: Any) -> np.ndarray:
         oo = resp._mc_draws["option_outcomes"]
         return np.array([oo[o] for o in option_ids], dtype=float)
 
     head = run(master, capture=False)
+    # A failed option never participates in a flip's comparison arrays.
+    option_ids = [o.option_id for o in head.results if o.win_probability is not None]
+    base = base.model_copy(update={"options": [o for o in base.options if o.id in option_ids]})
     # A WITHHELD ranking has no leader (review 5963778665 P1). The analyser's `recommended_option_id` is then max() over
     # an all-zero tally, i.e. the FIRST option by array order: reversing the options names the other one. Export null
     # and let every link be the honest `ranking_not_supported` absence, without spending the replicates.
@@ -359,8 +386,13 @@ def compute_decision_flip_block(dreq: Any) -> Any:
     sense: str = "maximise"
     seeds = [_child_seed(master, i) for i in range(dreq.replicates)]
     replicate_base: Dict[int, Any] = {}
+    replicate_refused = False
     for s in seeds if leader is not None else []:
-        r = run(s)
+        try:
+            r = run(s)
+        except AccumulationDrawRefusedError:
+            replicate_refused = True
+            break
         replicate_base[s] = r
         sense = str(r._mc_draws["objective"].sense) if r._mc_draws["objective"] is not None else "maximise"
     unstable = any(r.recommended_option_id != leader for r in replicate_base.values())
@@ -372,6 +404,8 @@ def compute_decision_flip_block(dreq: Any) -> Any:
         why = None
         if leader is None or sense not in ("maximise", "minimise"):
             why = "ranking_not_supported"
+        elif replicate_refused:
+            why = "accumulation_draw_refused"
         elif unstable:
             why = "leader_unstable"
         elif current == 0:
@@ -385,18 +419,26 @@ def compute_decision_flip_block(dreq: Any) -> Any:
 
         assert leader is not None  # a null leader is the `ranking_not_supported` absence above
         per_seed: List[Dict[str, Any]] = []
+        probe_refused = False
         for s in seeds:
             x0 = matrix(replicate_base[s])
             # The capture must reproduce the analyser's own win shares before the line is trusted.
             wp = {o.option_id: o.win_probability for o in replicate_base[s].results}
             if not np.allclose(p_best(x0, sense, base.n_samples), [wp[o] for o in option_ids], atol=CHECK_TOL, rtol=0):
                 raise RuntimeError("DECISION_FLIP_CAPTURE_MISMATCH")
-            x1 = matrix(run(s, link, 0.0))
+            try:
+                x1 = matrix(run(s, link, 0.0))
+            except AccumulationDrawRefusedError:
+                probe_refused = True
+                break
             res = affine_threshold(x0, x1, current, option_ids, leader, sense, base.n_samples)
             res["seed"] = s
             res["x1"] = x1
             per_seed.append(res)
 
+        if probe_refused:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="accumulation_draw_refused", **common))
+            continue
         if any(r.get("uncertified") for r in per_seed):
             # 0.75.0's vocabulary is closed (R9): the existing `leader_unstable`, in its pre-search shape.
             links_out.append(DecisionFlipLinkV2(status="absent", reason="leader_unstable", **common))
@@ -426,12 +468,19 @@ def compute_decision_flip_block(dreq: Any) -> Any:
         x1 = near["x1"]
         ok = True
         for x, expect in ((near["flip"], near["to_option_id"]), (near["hold"], leader)):
-            real = run(near["seed"], link, x)  # capture mode: the SAME draws the prediction was read from
+            try:
+                real = run(near["seed"], link, x)  # capture mode: the SAME draws the prediction was read from
+            except AccumulationDrawRefusedError:
+                probe_refused = True
+                break
             t = (current - x) / current
             predicted = p_best(x0 + t * (x1 - x0), sense, base.n_samples)
             actual = np.array([{o.option_id: o.win_probability for o in real.results}[o] for o in option_ids])
             if real.recommended_option_id != expect or not np.allclose(predicted, actual, atol=CHECK_TOL, rtol=0):
                 ok = False
+        if probe_refused:
+            links_out.append(DecisionFlipLinkV2(status="absent", reason="accumulation_draw_refused", **common))
+            continue
         if not ok:
             links_out.append(DecisionFlipLinkV2(status="absent", reason="affine_check_failed", replicate_thresholds=ths,
                                                 replicate_range=spread, **common))

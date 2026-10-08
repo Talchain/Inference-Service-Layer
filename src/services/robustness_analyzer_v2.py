@@ -1683,6 +1683,30 @@ IDENTITY_INCONSISTENT = "identity_inconsistent"
 # carry the stated level honestly, so it is withheld, never evaluated with an absurd k.
 IDENTITY_SCALE_OUT_OF_RANGE = "identity_scale_out_of_range"
 IDENTITY_SCALE_RANGE = (0.5, 2.0)
+IDENTITY_RATE_OUT_OF_RANGE = "identity_rate_out_of_range"
+IDENTITY_NON_FINITE = "identity_non_finite"
+
+
+class AccumulationDrawRefusedError(ValueError):
+    """An accumulation cannot be evaluated; never substitute a numeric draw."""
+
+    def __init__(self, message: str, node_id: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.node_id = node_id
+
+
+class AccumulationOptionsRefusedError(ValueError):
+    """Restart the analysis without these whole options, before any consumer runs."""
+
+    def __init__(self, option_ids: Set[str]) -> None:
+        super().__init__("accumulation_draw_refused")
+        self.option_ids = option_ids
+
+
+def _checked_identity_operation(operation: str) -> str:
+    if operation not in ("product", "sum", "accumulation"):
+        raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {operation}")
+    return operation
 
 
 @dataclass(frozen=True)
@@ -1707,6 +1731,10 @@ class IdentityPlan:
     mismatch_share: Optional[float] = None
     # A product with a stated level: the evaluator's ONE central scale k (else None).
     scale: Optional[float] = None
+    horizon_months: Optional[int] = None
+    rate_scale: Optional[float] = None
+    # P45: this identity composes a month-T stock, so today's stated level cannot anchor it.
+    accumulation_derived: bool = False
 
     @property
     def evaluated(self) -> bool:
@@ -1717,10 +1745,129 @@ class IdentityPlan:
         return self.factor_ids + self.addends
 
 
-def _identity_term(operation: str, values: Sequence[float]) -> float:
+def _identity_term(
+    operation: str,
+    values: Sequence[float],
+    *,
+    horizon_months: Optional[int] = None,
+    rate_scale: Optional[float] = None,
+) -> float:
     if operation == "product":
         return float(math.prod(values))
-    return float(math.fsum(values))
+    elif operation == "sum":
+        return float(math.fsum(values))
+    elif operation == "accumulation":
+        if len(values) != 3 or horizon_months is None or rate_scale is None:
+            raise ValueError(
+                "accumulation requires three positional operands, horizon and rate scale"
+            )
+        stock, rate, inflow = values
+        c = rate * rate_scale
+        if not all(math.isfinite(v) for v in (*values, c)) or not 0.0 <= c < 1.0:
+            raise AccumulationDrawRefusedError("accumulation rate must be finite and in [0, 1)")
+        if stock < 0 or inflow < 0:
+            raise AccumulationDrawRefusedError(
+                "accumulation starting stock and inflow must be non-negative"
+            )
+        if abs(c) < 1e-9:
+            result = stock + inflow * horizon_months
+        else:
+            log_decay = horizon_months * math.log1p(-c)
+            # Retention is the stated power; expm1 keeps the inflow numerator stable.
+            result = stock * (1.0 - c) ** horizon_months - inflow * math.expm1(log_decay) / c
+        if not math.isfinite(result):
+            raise AccumulationDrawRefusedError("accumulation result is not finite")
+        return result
+    else:
+        raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {operation}")
+
+
+def _accumulation_horizon_levels(
+    graph: GraphV2,
+) -> Tuple[Dict[str, float], Set[str], Dict[str, str]]:
+    """Resolve month-T levels before a consuming identity evaluates its operands.
+
+    Only declared identities composing accumulation are changed. Legacy PRODUCT/SUM graphs
+    keep their existing level reads and arithmetic. A stale stated stock/goal is never S_T.
+    """
+    nodes = {node.id: node for node in graph.nodes}
+    horizon_ids = {
+        node.id
+        for node in graph.nodes
+        if node.nonlinear_identity is not None
+        and _checked_identity_operation(node.nonlinear_identity.operation) == "accumulation"
+    }
+    while True:
+        added = {
+            node.id
+            for node in graph.nodes
+            if node.nonlinear_identity is not None
+            and any(
+                i in horizon_ids
+                for i in (
+                    *node.nonlinear_identity.factor_ids,
+                    *(node.nonlinear_identity.addends or ()),
+                )
+            )
+        } - horizon_ids
+        if not added:
+            break
+        horizon_ids.update(added)
+    levels: Dict[str, float] = {}
+    invalid: Dict[str, str] = {}
+    visiting: Set[str] = set()
+
+    def resolve(node_id: str) -> Optional[float]:
+        if node_id not in horizon_ids:
+            return status_quo_level(nodes[node_id])
+        if node_id in levels:
+            return levels[node_id]
+        if node_id in visiting:
+            raise ValueError("cyclic accumulation identity")
+        node = nodes[node_id]
+        identity = node.nonlinear_identity
+        assert identity is not None
+        if node.execution_frame is None:
+            return None
+        visiting.add(node_id)
+        try:
+            user: Dict[str, float] = {}
+            for participant in (*identity.factor_ids, *(identity.addends or ())):
+                value = resolve(participant)
+                frame = nodes[participant].execution_frame
+                if value is None or frame is None:
+                    return None
+                user[participant] = value * frame.frame
+            try:
+                term = _identity_term(
+                    identity.operation,
+                    [user[i] for i in identity.factor_ids],
+                    horizon_months=identity.horizon_months,
+                    rate_scale=identity.rate_scale,
+                )
+            except AccumulationDrawRefusedError:
+                assert identity.rate_scale is not None
+                c = user[identity.factor_ids[1]] * identity.rate_scale
+                invalid[node_id] = (
+                    IDENTITY_RATE_OUT_OF_RANGE
+                    if not math.isfinite(c) or not 0.0 <= c < 1.0
+                    else IDENTITY_NON_FINITE
+                )
+                return None
+            normalised = (
+                term + math.fsum(user[i] for i in identity.addends or ())
+            ) / node.execution_frame.frame
+            if not math.isfinite(normalised):
+                invalid[node_id] = IDENTITY_NON_FINITE
+                return None
+            levels[node_id] = normalised
+            return levels[node_id]
+        finally:
+            visiting.remove(node_id)
+
+    for node_id in sorted(horizon_ids):
+        resolve(node_id)
+    return levels, horizon_ids, invalid
 
 
 def resolve_identity_plans(
@@ -1754,6 +1901,7 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
        ``identity_scale_out_of_range``.
     """
     nodes = {node.id: node for node in graph.nodes}
+    horizon_levels, horizon_ids, invalid_rates = _accumulation_horizon_levels(graph)
     plans: Dict[str, IdentityPlan] = {}
     for node in graph.nodes:
         identity = node.nonlinear_identity
@@ -1769,21 +1917,28 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
                 frames[node_id] = frame.frame
         levels: Dict[str, float] = {}
         for node_id in participants:
-            level = status_quo_level(nodes[node_id])
+            level = (
+                horizon_levels.get(node_id)
+                if node_id in horizon_ids
+                else status_quo_level(nodes[node_id])
+            )
             if level is not None:
                 levels[node_id] = level
-        target_level = status_quo_level(node)
+        target_level = None if node.id in horizon_ids else status_quo_level(node)
 
         def plan(reason: Optional[str], **reconciliation: Optional[float]) -> IdentityPlan:
             return IdentityPlan(
                 node_id=node.id,
-                operation=identity.operation,
+                operation=_checked_identity_operation(identity.operation),
                 factor_ids=factor_ids,
                 addends=addends,
                 frames=MappingProxyType(dict(frames)),
                 levels=MappingProxyType(dict(levels)),
                 target_level=target_level,
                 withheld_reason=reason,
+                horizon_months=identity.horizon_months,
+                rate_scale=identity.rate_scale,
+                accumulation_derived=node.id in horizon_ids,
                 **reconciliation,
             )
 
@@ -1793,29 +1948,68 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
         if len(levels) != len(participants):
             plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
             continue
-        if (
-            identity.operation == "product"
-            and target_level is not None
-            and (any(levels[node_id] == 0.0 for node_id in factor_ids) or target_level == 0.0)
-        ):
-            plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
+        if node.id in invalid_rates:
+            plans[node.id] = plan(invalid_rates[node.id])
             continue
-        if target_level is None:
+        # P45: evaluation keeps S_T, but a product's stated level is TODAY. Its
+        # accumulation operand contributes S_0 in the starting stock's own frame,
+        # never the carrier's stale observed level or its month-T evaluation.
+        reconciliation_target = target_level
+        reconciliation_user = {i: levels[i] * frames[i] for i in participants}
+        zero_operands = {i for i in factor_ids if levels[i] == 0.0}
+        if identity.operation == "product":
+            reconciliation_target = status_quo_level(node)
+            for operand_id in factor_ids:
+                operand_identity = nodes[operand_id].nonlinear_identity
+                if operand_identity is None or operand_identity.operation != "accumulation":
+                    continue
+                stock = nodes[operand_identity.factor_ids[0]]
+                stock_level = status_quo_level(stock)
+                stock_frame = stock.execution_frame
+                if stock_level is None or stock_frame is None:
+                    reconciliation_user.pop(operand_id)
+                    continue
+                reconciliation_user[operand_id] = stock_level * stock_frame.frame
+                zero_operands.discard(operand_id)
+                if stock_level == 0.0:
+                    zero_operands.add(operand_id)
+            if reconciliation_target is not None and len(reconciliation_user) != len(participants):
+                plans[node.id] = plan(IDENTITY_OPERAND_MISSING)
+                continue
+            if reconciliation_target is not None and (
+                zero_operands or reconciliation_target == 0.0
+            ):
+                plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
+                continue
+        elif identity.operation == "sum":
+            pass
+        elif identity.operation == "accumulation":
+            # A stated stock is S_0, not S_T: neither the product zero guard nor the
+            # 5% reconciliation applies. Invalid central rates cannot supply an anchor.
             plans[node.id] = plan(None)
             continue
-        parts = [levels[i] * frames[i] for i in participants]
+        else:
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {identity.operation}")
+        if reconciliation_target is None:
+            plans[node.id] = plan(None)
+            continue
+        parts = [reconciliation_user[i] for i in participants]
         reconstructed = _identity_term(
-            identity.operation, [levels[i] * frames[i] for i in factor_ids]
-        ) + math.fsum(levels[i] * frames[i] for i in addends)
-        stated = target_level * frames[node.id]
+            identity.operation, [reconciliation_user[i] for i in factor_ids]
+        ) + math.fsum(reconciliation_user[i] for i in addends)
+        stated = reconciliation_target * frames[node.id]
         if identity.operation == "product":
             share = abs(stated - reconstructed) / abs(stated)
-        else:
+        elif identity.operation == "sum":
             # AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated 0 is an ordinary
             # level. Scaled absolute check: |o - sum| <= tau x max(|o|, sum|parts|); both
             # sides 0 is consistent exactly (R3-2: a tally of £0 today).
             scale = max(abs(stated), math.fsum(abs(part) for part in parts))
             share = 0.0 if scale == 0.0 else abs(stated - reconstructed) / scale
+        elif identity.operation == "accumulation":
+            raise AssertionError("accumulation cannot enter today's reconciliation")
+        else:
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {identity.operation}")
         plans[node.id] = plan(
             IDENTITY_INCONSISTENT if share > IDENTITY_RECONCILIATION_TOLERANCE else None,
             reconstructed=reconstructed,
@@ -1852,6 +2046,7 @@ class IdentityLevelAnchor:
     level: float
     frame: float
     estimated_operands: Tuple[str, ...]
+    horizon_months: Optional[int] = None
 
     @property
     def author(self) -> Literal["user", "olumi"]:
@@ -1876,15 +2071,40 @@ def _anchor_of(plan: IdentityPlan, graph: GraphV2) -> Optional[IdentityLevelAnch
         return None
     nodes = {node.id: node for node in graph.nodes}
     level = _identity_term(
-        plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
+        plan.operation,
+        [plan.levels[i] * plan.frames[i] for i in plan.factor_ids],
+        horizon_months=plan.horizon_months,
+        rate_scale=plan.rate_scale,
     ) + math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
+    contributors: List[str] = []
+    horizons: Set[int] = set()
+
+    def contribute(node_id: str) -> None:
+        identity = nodes[node_id].nonlinear_identity
+        if plan.accumulation_derived and identity is not None:
+            if identity.operation == "accumulation":
+                assert identity.horizon_months is not None
+                horizons.add(identity.horizon_months)
+            for participant in (*identity.factor_ids, *(identity.addends or ())):
+                contribute(participant)
+        elif node_id not in contributors:
+            contributors.append(node_id)
+
+    if plan.operation == "accumulation":
+        assert plan.horizon_months is not None
+        horizons.add(plan.horizon_months)
+    for participant in plan.participants:
+        contribute(participant)
     return IdentityLevelAnchor(
         level=level,
         frame=plan.frames[plan.node_id],
         estimated_operands=tuple(
-            i for i in plan.participants if baseline_owner(nodes[i].observed_state) != "user"
+            i for i in contributors if baseline_owner(nodes[i].observed_state) != "user"
         ),
+        horizon_months=next(iter(horizons)) if len(horizons) == 1 else None,
     )
+
+
 def normalised_influence(raw: Mapping[str, float], node_ids: List[str]) -> Dict[str, float]:
     """R3-5: ``_compute_structural_influence``'s own normalisation, over ``node_ids`` only.
 
@@ -1914,7 +2134,13 @@ def zero_gated_factor_ids(
         return {}
     gated_edges: Dict[Tuple[str, str], List[str]] = {}
     for node_id, plan in resolve_identity_plans(graph, factor_centres=centres).items():
-        if not (plan.evaluated and plan.operation == "product"):
+        if plan.operation == "product":
+            pass
+        elif plan.operation in ("sum", "accumulation"):
+            continue  # Only a PRODUCT has the other-zero-operand gate.
+        else:
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
+        if not plan.evaluated:
             continue
         for i in plan.factor_ids:
             zeros = [j for j in plan.factor_ids if j != i and plan.levels[j] == 0.0]
@@ -2004,7 +2230,9 @@ def anchored_blind_factor_ids(
             continue  # the goal itself, or disconnected: not this question
         if f in anchored or goal_node_id not in reached(f, avoid=anchored):
             # name only the anchors on a path to the goal (PR Review #213's provenance rule)
-            blind[f] = sorted(a for a in anchored & every if goal_node_id in reached(a, avoid=set()))
+            blind[f] = sorted(
+                a for a in anchored & every if goal_node_id in reached(a, avoid=set())
+            )
     return blind
 
 
@@ -2037,8 +2265,35 @@ def identity_partials(
             if plan.operation == "product":
                 others = math.prod(user[j] for j in plan.factor_ids if j != i)
                 partials[(i, node_id)] = scale * others * plan.frames[i] / frame
-            else:
+            elif plan.operation == "sum":
                 partials[(i, node_id)] = plan.frames[i] / frame
+            elif plan.operation == "accumulation":
+                assert plan.horizon_months is not None and plan.rate_scale is not None
+                stock_id, rate_id, inflow_id = plan.factor_ids
+                c = user[rate_id] * plan.rate_scale
+                # The analytic derivative of the geometric inflow sum, expressed as
+                # a finite polynomial to stay stable as c approaches zero.
+                horizon = plan.horizon_months
+                decay = (1.0 - c) ** horizon
+                if i == stock_id:
+                    derivative = decay
+                elif i == rate_id:
+                    derivative = (
+                        -horizon * user[stock_id] * (1.0 - c) ** (horizon - 1)
+                        - user[inflow_id]
+                        * math.fsum(k * (1.0 - c) ** (k - 1) for k in range(1, horizon))
+                    ) * plan.rate_scale
+                elif i == inflow_id:
+                    derivative = (
+                        float(horizon)
+                        if abs(c) < 1e-9
+                        else -math.expm1(horizon * math.log1p(-c)) / c
+                    )
+                else:
+                    raise AssertionError("unknown accumulation participant")
+                partials[(i, node_id)] = derivative * plan.frames[i] / frame
+            else:
+                raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
         for i in plan.addends:
             partials[(i, node_id)] = plan.frames[i] / frame
     return partials
@@ -2064,9 +2319,7 @@ def definitional_strengths(
     }
 
 
-def definitional_edges(
-    graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None
-) -> set:
+def definitional_edges(graph: GraphV2, factor_centres: Optional[Mapping[str, float]] = None) -> set:
     """R3-9: the operand and addend edges of every EVALUATED identity, as ``(from, to)``.
 
     They are definitions, not beliefs: the evaluator never reads their sampled strengths,
@@ -2092,7 +2345,10 @@ def identity_blocking_critiques(
     Empty when every such identity is evaluated. The route turns a non-empty list into the
     blocked 422; ``analyze`` refuses on it too, so no caller can obtain approximated numbers.
     """
-    plans = resolve_identity_plans(request.graph, factor_centres(request))
+    try:
+        plans = resolve_identity_plans(request.graph, factor_centres(request))
+    except IdentityNotEvaluatedError as refusal:
+        return refusal.critiques
     withheld = [plan for plan in plans.values() if not plan.evaluated]
     if not withheld:
         return []
@@ -2118,6 +2374,11 @@ def identity_blocking_critiques(
     critiques: List[CritiqueV2] = []
     for plan in withheld:
         if not reaches_a_decision_node(plan.node_id):
+            continue
+        if plan.operation == "accumulation" and plan.withheld_reason in (
+            IDENTITY_RATE_OUT_OF_RANGE, IDENTITY_NON_FINITE,
+        ):
+            critiques.append(accumulation_refusal_critique(request.graph, plan.node_id))
             continue
         detail = ""
         if plan.withheld_reason == IDENTITY_SCALE_OUT_OF_RANGE:
@@ -2192,6 +2453,11 @@ def identity_evaluations(
             IdentityEvaluation(
                 node_id=plan.node_id,
                 operation=identity.operation,
+                horizon_months=(
+                    plan.horizon_months
+                    if plan.evaluated and plan.operation == "accumulation"
+                    else None
+                ),
                 factor_ids=list(plan.factor_ids),
                 addends=list(plan.addends),
                 stated_in_brief=identity.stated_in_brief,
@@ -2200,7 +2466,9 @@ def identity_evaluations(
                 level_source=(
                     None
                     if not plan.evaluated
-                    else "stated_level" if plan.target_level is not None else "identity_inputs"
+                    else "stated_level"
+                    if plan.target_level is not None
+                    else "identity_inputs"
                 ),
                 reconciliation=reconciliation,
                 level_author=None if anchor is None else anchor.author,
@@ -2224,6 +2492,32 @@ _StatusQuoKey = Tuple[
 
 class IdentityNotEvaluatedError(ValueError):
     """A declared identity the decision depends on cannot be computed exactly (R3)."""
+
+    def __init__(self, message: str, critiques: Optional[List[CritiqueV2]] = None) -> None:
+        super().__init__(message)
+        self.critiques = critiques or []
+
+
+def accumulation_refusal_critique(graph: GraphV2, node_id: str) -> CritiqueV2:
+    """Use the existing identity blocker for a refused status-quo accumulation."""
+    nodes = {node.id: node for node in graph.nodes}
+    identity = nodes[node_id].nonlinear_identity
+    assert identity is not None and identity.operation == "accumulation"
+    rate_id = identity.factor_ids[1]
+    rate_label = nodes[rate_id].label or rate_id
+    return IDENTITY_NOT_EVALUATED_CRITIQUE.build(
+        affected_node_ids=[node_id, *identity.factor_ids],
+        node_id=node_id,
+        operation="accumulation",
+        operands=", ".join(identity.factor_ids),
+        addends="",
+        reason="accumulation_draw_refused",
+        detail=(f": the churn/rate '{rate_label}' must be finite and in [0, 1); "
+                "starting stock and inflow must be non-negative and the horizon stock finite"),
+    ).model_copy(update={"identity": CritiqueIdentityV2(
+        node_id=node_id, operation="accumulation", participants=list(identity.factor_ids),
+        withheld_reason="accumulation_draw_refused",
+    )})
 
 
 class SCMEvaluatorV2:
@@ -2312,6 +2606,14 @@ class SCMEvaluatorV2:
         self._evaluated_identities: Dict[str, IdentityPlan] = {
             node_id: plan for node_id, plan in self.identity_plans.items() if plan.evaluated
         }
+        for node_id, plan in self._evaluated_identities.items():
+            if plan.accumulation_derived:
+                anchor = _anchor_of(plan, graph)
+                assert anchor is not None
+                level = anchor.level / anchor.frame
+                self._status_quo_levels[node_id] = level
+                if node_id in self._todays_levels:
+                    self._todays_levels[node_id] = level
         self._identity_scales: Dict[str, float] = {}
         self._identity_scales = self._central_identity_scales(dict(factor_centres or {}))
         # AIQ 5868227452: a product whose k leaves [0.5, 2] is withheld (step 5).
@@ -2471,9 +2773,12 @@ class SCMEvaluatorV2:
                     self._event_risks[node_id], node_values, factor_values, self._occurrence_mode
                 )
             elif node_id in self._evaluated_identities:
-                node_values[node_id] = self._identity_value(
-                    self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
-                )
+                try:
+                    node_values[node_id] = self._identity_value(
+                        self._evaluated_identities[node_id], edge_strengths, node_values, status_quo
+                    )
+                except AccumulationDrawRefusedError as refusal:
+                    raise AccumulationDrawRefusedError(str(refusal), node_id) from refusal
             else:
                 # Get node object (used for observed_state and intercept)
                 node = self._nodes_by_id.get(node_id)
@@ -2543,7 +2848,12 @@ class SCMEvaluatorV2:
         cached = self._status_quo_cache
         if cached is not None and cached[0] == key:
             return cached[1]
-        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        try:
+            status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        except AccumulationDrawRefusedError as refusal:
+            assert refusal.node_id is not None
+            critique = accumulation_refusal_critique(self.graph, refusal.node_id)
+            raise IdentityNotEvaluatedError(critique.message, [critique]) from refusal
         self._status_quo_cache = (key, status_quo)
         return status_quo
 
@@ -2572,11 +2882,15 @@ class SCMEvaluatorV2:
         is kept. With the addend declared (R3-1) ``k = (75,000 - 1,000) / 73,500`` exactly.
         Computed once per graph, so no draw divides by its own sampled status-quo term. A
         graph with no evaluated product never propagates here."""
-        products = {
-            node_id: plan
-            for node_id, plan in self._evaluated_identities.items()
-            if plan.operation == "product" and plan.target_level is not None
-        }
+        products: Dict[str, IdentityPlan] = {}
+        for node_id, plan in self._evaluated_identities.items():
+            if plan.operation == "product":
+                if plan.target_level is not None:
+                    products[node_id] = plan
+            elif plan.operation in ("sum", "accumulation"):
+                continue  # No stated-product scale applies to either operation.
+            else:
+                raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
         if not products:
             return {}
         means = {
@@ -2586,7 +2900,12 @@ class SCMEvaluatorV2:
         # Today at the centre: every sampled factor at the centre its draws read
         # (``factor_centres``). An identity node reads itself as the reference here, so its
         # own scale never enters (term == term_sq): no scale is needed to compute the scales.
-        today = self._propagate(means, {}, None, factor_centres, noise=False)
+        try:
+            today = self._propagate(means, {}, None, factor_centres, noise=False)
+        except AccumulationDrawRefusedError as refusal:
+            assert refusal.node_id is not None
+            critique = accumulation_refusal_critique(self.graph, refusal.node_id)
+            raise IdentityNotEvaluatedError(critique.message, [critique]) from refusal
         scales: Dict[str, float] = {}
         for node_id, plan in products.items():
             assert plan.target_level is not None  # filtered above
@@ -2634,13 +2953,28 @@ class SCMEvaluatorV2:
         def level(participant: str, at: Dict[str, float]) -> float:
             if not self._parents.get(participant):
                 return at[participant]
+            participant_plan = self._evaluated_identities.get(participant)
+            if participant_plan is not None and participant_plan.accumulation_derived:
+                return at[participant]  # This is already the month-T level, never S_0.
             held = plan.levels[participant]
             return held + (at[participant] - reference[participant])
 
         def user(participant: str, at: Dict[str, float]) -> float:
             return level(participant, at) * plan.frames[participant]
 
-        term = _identity_term(plan.operation, [user(i, values) for i in plan.factor_ids])
+        term = _identity_term(
+            plan.operation,
+            [user(i, values) for i in plan.factor_ids],
+            horizon_months=plan.horizon_months,
+            rate_scale=plan.rate_scale,
+        )
+        if plan.operation == "accumulation":
+            result = term / frame  # Exactly S_T, with no addends or belief sum.
+            if not math.isfinite(result):
+                raise AccumulationDrawRefusedError("accumulation normalised result is not finite")
+            return result
+        elif plan.operation not in ("product", "sum"):
+            raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
         term_sq = _identity_term(plan.operation, [user(i, reference) for i in plan.factor_ids])
         addend = math.fsum(user(i, values) for i in plan.addends)
         addend_sq = math.fsum(user(i, reference) for i in plan.addends)
@@ -2706,7 +3040,7 @@ class SCMEvaluatorV2:
         ]
         if not unchanged and not set_levels:
             return interventions
-        status_quo = self._propagate(edge_strengths, {}, base_values, factor_values, noise=False)
+        status_quo = self._status_quo(edge_strengths, base_values, factor_values)
         framed = dict(interventions)
         for node_id in unchanged:
             framed[node_id] = status_quo[node_id]
@@ -3088,6 +3422,66 @@ class RobustnessAnalyzerV2:
         )
 
     def analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
+        """Remove whole refused options before any statistics or probe consumes draws.
+
+        A refusal may arrive late in the MC. Discard that attempt and restart with
+        the same seed and the surviving options, including their RNG/tie behavior.
+        This makes their figures identical to a request without the refused options.
+        """
+        original_options = request.options
+        failed_ids: Set[str] = set()
+        seed, _ = compute_effective_seed(request)
+        while True:
+            try:
+                response = self._analyze(request)
+                break
+            except AccumulationOptionsRefusedError as refusal:
+                failed_ids.update(refusal.option_ids)
+                survivors = [option for option in original_options if option.id not in failed_ids]
+                request = request.model_copy(update={"options": survivors, "seed": seed})
+                if not survivors:
+                    response = RobustnessResponseV2(
+                        request_id=request.request_id or f"robustness-{uuid.uuid4().hex[:12]}",
+                        results=[], recommended_option_id="", recommendation_confidence=0.0,
+                        robustness=RobustnessResult(
+                            is_robust=False, confidence=0.0, recommendation_stability=0.0,
+                            interpretation="All accumulation options were refused; analysis is withheld.",
+                        ),
+                        metadata=ResponseMetadataV2(
+                            isl_version=__version__, n_samples_used=request.n_samples,
+                            seed_used=seed, execution_time_ms=0,
+                            config_fingerprint=generate_config_fingerprint(),
+                        ),
+                        objective_ranking=ObjectiveRanking(
+                            direction=request.goal_direction or "maximise", attested=False,
+                            status="withheld", withheld_reason="accumulation_draw_refused",
+                        ),
+                        inference_warnings=[InferenceWarning(
+                            code="OBJECTIVE_RANKING_WITHHELD", field="objective_ranking",
+                            severity="warning", detail={"reason": "accumulation_draw_refused",
+                            "message": "Every accumulation option was refused; ranking is withheld."},
+                        )],
+                    )
+                    if request._capture_draws:
+                        response._mc_draws = {"option_outcomes": {}, "status_quo": [],
+                                             "objective": ObjectivePlan(sense="withheld", attested=False)}
+                    break
+        if failed_ids:
+            by_id = {result.option_id: result for result in response.results}
+            for option_id in failed_ids:
+                by_id[option_id] = OptionResult(
+                    option_id=option_id,
+                    outcome_distribution=OutcomeDistribution(
+                        mean=None, std=None, median=None, ci_lower=None, ci_upper=None, samples=[],
+                    ),
+                    win_probability=None,
+                )
+            response.results = [by_id[option.id] for option in original_options]
+            if response._mc_draws is not None:
+                response._mc_draws["accumulation_refused_option_ids"] = sorted(failed_ids)
+        return response
+
+    def _analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
         """
         Perform complete robustness analysis.
 
@@ -3114,14 +3508,6 @@ class RobustnessAnalyzerV2:
 
         # Generate request_id if not provided
         request_id = request.request_id or f"robustness-{uuid.uuid4().hex[:12]}"
-
-        # R3: a declared identity the decision depends on, and that cannot be computed
-        # exactly, withholds the analysis: never a linear approximation (AIQ 5860087988
-        # item 2). The V2 route returns it as the blocked 422 before reaching here; this
-        # refuses every other caller, so no path obtains the approximated numbers.
-        identity_blockers = identity_blocking_critiques(request)
-        if identity_blockers:
-            raise IdentityNotEvaluatedError(identity_blockers[0].message)
 
         # Safety net: remove non-inference nodes/edges before analysis
         filtered_graph = filter_inference_graph(request.graph)
@@ -3175,6 +3561,12 @@ class RobustnessAnalyzerV2:
                 "GRAPH_CYCLE_DETECTED: graph contains a cycle - "
                 "robustness analysis requires a directed acyclic graph"
             )
+
+        # A cycle must be refused before identities recursively resolve their anchors.
+        # Every other caller still refuses a declared identity rather than approximating it.
+        identity_blockers = identity_blocking_critiques(request)
+        if identity_blockers:
+            raise IdentityNotEvaluatedError(identity_blockers[0].message, identity_blockers)
 
         # Setup - use separate RNG streams for edge and factor sampling
         # to prevent fragile determinism coupling.
@@ -3926,9 +4318,16 @@ class RobustnessAnalyzerV2:
         # Compute sensitivity if requested
         sensitivity = []
         if "sensitivity" in request.analysis_types:
-            sensitivity = self._compute_sensitivity(
-                request, option_outcomes, sampler, rng_edge, evaluator
-            )
+            try:
+                sensitivity = self._compute_sensitivity(
+                    request, option_outcomes, sampler, rng_edge, evaluator
+                )
+            except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                inference_warnings.append(self._optional_phase_unavailable_warning(
+                    "NUMERICAL_INSTABILITY", "robustness.edge_sensitivity",
+                    "accumulation_draw_refused", _elapsed_ms(),
+                    "Edge sensitivity was omitted because a churn/rate accumulation probe was refused.",
+                ))
 
         # B3-S1 (D-23.4) suppression RECORD (not PREDICT): each compute-gate below
         # that skips its block BECAUSE of active correlation appends to this list at
@@ -3973,14 +4372,22 @@ class RobustnessAnalyzerV2:
                 # vanished silently, unnamed).
                 suppressed_attributions.append(SUPPRESSED_ATTR_STABILITY_THRESHOLDS)
             else:
-                factor_sensitivity = self._compute_factor_sensitivity(
-                    request,
-                    option_outcomes,
-                    rng_factor,
-                    evaluator,
-                    critiques=critiques,
-                    structural_influence_out=structural_influence,
-                )
+                try:
+                    factor_sensitivity = self._compute_factor_sensitivity(
+                        request,
+                        option_outcomes,
+                        rng_factor,
+                        evaluator,
+                        critiques=critiques,
+                        structural_influence_out=structural_influence,
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    structural_influence.clear()
+                    inference_warnings.append(self._optional_phase_unavailable_warning(
+                        "NUMERICAL_INSTABILITY", "factor_sensitivity",
+                        "accumulation_draw_refused", _elapsed_ms(),
+                        "Factor sensitivity and stability were omitted because a churn/rate accumulation probe was refused.",
+                    ))
 
         # Compute conditional winners (factor-partitioned win probabilities).
         # B3-S1 (D-23.4): SUPPRESSED under active correlation — a single-factor
@@ -4024,6 +4431,7 @@ class RobustnessAnalyzerV2:
             n_defaulted_roots=len(defaulted_root_node_ids),
             defaulted_root_node_ids=defaulted_root_node_ids,
             critiques=critiques,
+            inference_warnings=inference_warnings,
         )
 
         # Compute E-value analogue per edge if requested. OPTIONAL phase —
@@ -4062,9 +4470,13 @@ class RobustnessAnalyzerV2:
                     )
                 )
             else:
-                edge_e_values = self._compute_edge_e_values(
-                    request, evaluator, budget_ms=min(self.E_VALUE_BUDGET_MS, remaining_ms)
-                )
+                e_value_refused = False
+                try:
+                    edge_e_values = self._compute_edge_e_values(
+                        request, evaluator, budget_ms=min(self.E_VALUE_BUDGET_MS, remaining_ms)
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    e_value_refused = True
                 if edge_e_values is None:
                     # Internal E-value budget tripped mid-sweep — disclose on the
                     # wire (formerly a log-only event) and, since bands ride on
@@ -4074,10 +4486,13 @@ class RobustnessAnalyzerV2:
                         self._optional_phase_unavailable_warning(
                             "E_VALUES_UNAVAILABLE",
                             "robustness.edge_e_values",
-                            "e_value_budget_exceeded",
+                            "accumulation_draw_refused" if e_value_refused else "e_value_budget_exceeded",
                             elapsed_ms,
-                            "E-value analysis exceeded its time budget and was "
-                            "omitted. Base analysis is unaffected.",
+                            (
+                                "E-value analysis has no informative accumulation comparison and was omitted."
+                                if e_value_refused else
+                                "E-value analysis exceeded its time budget and was omitted. Base analysis is unaffected."
+                            ),
                         )
                     )
                     inference_warnings.append(
@@ -4086,8 +4501,11 @@ class RobustnessAnalyzerV2:
                             "robustness.edge_e_values[].stability",
                             "e_values_unavailable",
                             elapsed_ms,
-                            "Flip-stability bands were omitted: the E-value sweep "
-                            "they ride on exceeded its time budget.",
+                            (
+                                "Flip-stability bands were omitted because the accumulation comparison was refused."
+                                if e_value_refused else
+                                "Flip-stability bands were omitted: the E-value sweep they ride on exceeded its time budget."
+                            ),
                         )
                     )
                 else:
@@ -4119,13 +4537,20 @@ class RobustnessAnalyzerV2:
                             )
                         )
                     else:
-                        bands_attached = self._attach_flip_stability_bands(
-                            request,
-                            evaluator,
-                            edge_e_values,
-                            seed,
-                            budget_ms=min(self.FLIP_STABILITY_BUDGET_MS, remaining_ms),
-                        )
+                        stability_refused = False
+                        try:
+                            bands_attached = self._attach_flip_stability_bands(
+                                request,
+                                evaluator,
+                                edge_e_values,
+                                seed,
+                                budget_ms=min(self.FLIP_STABILITY_BUDGET_MS, remaining_ms),
+                            )
+                        except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                            bands_attached = False
+                            stability_refused = True
+                            for row in edge_e_values:
+                                row.pop("stability", None)
                         if not bands_attached:
                             # Internal band budget tripped — the #226 gap
                             # (log-only) now rides the wire.
@@ -4134,10 +4559,13 @@ class RobustnessAnalyzerV2:
                                 self._optional_phase_unavailable_warning(
                                     "STABILITY_BANDS_UNAVAILABLE",
                                     "robustness.edge_e_values[].stability",
-                                    "flip_stability_budget_exceeded",
+                                    "accumulation_draw_refused" if stability_refused else "flip_stability_budget_exceeded",
                                     elapsed_ms,
-                                    "Flip-stability bands exceeded their time "
-                                    "budget and were omitted (all-or-nothing).",
+                                    (
+                                        "Flip-stability bands have no informative accumulation background and were omitted."
+                                        if stability_refused else
+                                        "Flip-stability bands exceeded their time budget and were omitted (all-or-nothing)."
+                                    ),
                                 )
                             )
 
@@ -4169,20 +4597,26 @@ class RobustnessAnalyzerV2:
                     )
                 )
             else:
-                factor_flip_values = self._compute_factor_flip_values(
-                    request,
-                    evaluator,
-                    seed,
-                    budget_ms=min(self.FACTOR_FLIP_BUDGET_MS, remaining_ms),
-                )
+                factor_flip_refused = False
+                try:
+                    factor_flip_values = self._compute_factor_flip_values(
+                        request,
+                        evaluator,
+                        seed,
+                        budget_ms=min(self.FACTOR_FLIP_BUDGET_MS, remaining_ms),
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    factor_flip_refused = True
                 if factor_flip_values is None:
                     elapsed_ms = _elapsed_ms()
                     inference_warnings.append(
                         self._optional_phase_unavailable_warning(
                             "FACTOR_FLIPS_UNAVAILABLE",
                             "factor_flip_values",
-                            "factor_flip_budget_exceeded",
+                            "accumulation_draw_refused" if factor_flip_refused else "factor_flip_budget_exceeded",
                             elapsed_ms,
+                            "Factor-flip accumulation probe was refused and omitted."
+                            if factor_flip_refused else
                             "Factor-flip analysis exceeded its time budget and was "
                             "omitted (all-or-nothing). Base analysis is unaffected.",
                         )
@@ -4282,19 +4716,23 @@ class RobustnessAnalyzerV2:
                 # remaining) measured against its own monotonic t0 == the
                 # OVERALL_REQUEST_BUDGET_MS deadline (identical maths to the E-value
                 # sweep). On overrun _compute_evpi returns None (all-or-nothing).
-                p_win_sensitivity = self._compute_evpi(
-                    request,
-                    sampler,
-                    factor_sampler,
-                    # Realised, not p-conditional: these arms hold the policy FIXED and count goal
-                    # attainment / wins, which must never threshold a conditional mean (Q4).
-                    evaluator,
-                    seed,
-                    recommended_option_id,
-                    budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
-                    constraint_plans=constraint_plans,
-                    objective=objective_plan,
-                )
+                evpi_refused = False
+                try:
+                    p_win_sensitivity = self._compute_evpi(
+                        request,
+                        sampler,
+                        factor_sampler,
+                        # Realised, not p-conditional: these arms hold the policy FIXED and count goal
+                        # attainment / wins, which must never threshold a conditional mean (Q4).
+                        evaluator,
+                        seed,
+                        recommended_option_id,
+                        budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
+                        constraint_plans=constraint_plans,
+                        objective=objective_plan,
+                    )
+                except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+                    evpi_refused = True
                 if p_win_sensitivity is None:
                     # Reachable ONLY as a deadline trip here: the has_uncertainties()
                     # guard guarantees parameter_uncertainties is non-empty, so
@@ -4305,8 +4743,10 @@ class RobustnessAnalyzerV2:
                         self._optional_phase_unavailable_warning(
                             "EVPI_UNAVAILABLE",
                             "p_win_sensitivity",
-                            "evpi_budget_exceeded",
+                            "accumulation_draw_refused" if evpi_refused else "evpi_budget_exceeded",
                             elapsed_ms,
+                            "Win-probability sensitivity was omitted because a churn/rate accumulation probe was refused."
+                            if evpi_refused else
                             "Win-probability sensitivity (p_win_sensitivity) "
                             "exceeded its time budget and was omitted "
                             "(all-or-nothing). Base analysis is unaffected.",
@@ -4981,6 +5421,10 @@ class RobustnessAnalyzerV2:
         capture_tie_rng: Optional[SeededRNG] = (
             SeededRNG(compute_effective_seed(request)[0] + 5) if request._capture_draws else None
         )
+        refused_option_ids: Set[str] = set()
+        check_accumulation_status_quo = any(
+            plan.operation == "accumulation" for plan in evaluator._evaluated_identities.values()
+        )
         for _ in range(request.n_samples):
             # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
@@ -4988,6 +5432,9 @@ class RobustnessAnalyzerV2:
             # Sample factor values (parameter uncertainty)
             factor_values = factor_sampler.sample_factor_values()
             factor_values_per_sample.append(factor_values)
+            # Check every status-quo draw, even after every option has failed.
+            if check_accumulation_status_quo:
+                evaluator._status_quo(edge_config, None, factor_values)
 
             # The reference draw: the SAME edge strengths and factor values as
             # every option below (common random numbers), with no interventions.
@@ -5007,43 +5454,54 @@ class RobustnessAnalyzerV2:
             # Evaluate each option
             sample_outcomes = {}
             for option in request.options:
-                if constraint_target_nodes:
-                    # Use evaluate_multi to get both goal and constraint node values
-                    all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
-                    node_values = evaluator.evaluate_multi(
-                        edge_strengths=edge_config,
-                        interventions=option.interventions,
-                        target_nodes=all_target_nodes,
-                        factor_values=factor_values,
-                    )
-                    outcome = node_values.get(request.goal_node_id, 0.0)
-                    # Store constraint node values
-                    assert constraint_node_values is not None
-                    for node_id in constraint_target_nodes:
-                        constraint_node_values[option.id][node_id].append(
-                            node_values.get(node_id, 0.0)
+                if option.id in refused_option_ids:
+                    continue
+                try:
+                    if constraint_target_nodes:
+                        # Use evaluate_multi to get both goal and constraint node values
+                        all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
+                        node_values = evaluator.evaluate_multi(
+                            edge_strengths=edge_config,
+                            interventions=option.interventions,
+                            target_nodes=all_target_nodes,
+                            factor_values=factor_values,
                         )
-                else:
-                    # Standard evaluation for goal node only
-                    outcome = evaluator.evaluate(
-                        edge_strengths=edge_config,
-                        interventions=option.interventions,
-                        goal_node=request.goal_node_id,
-                        factor_values=factor_values,
-                    )
-
-                option_outcomes[option.id].append(outcome)
-                sample_outcomes[option.id] = outcome
-                if separate_information:
-                    assert information_evaluator is not None and information_outcomes is not None
-                    information_outcomes[option.id].append(
-                        information_evaluator.evaluate(
+                        outcome = node_values.get(request.goal_node_id, 0.0)
+                        # Store constraint node values
+                        assert constraint_node_values is not None
+                        for node_id in constraint_target_nodes:
+                            constraint_node_values[option.id][node_id].append(
+                                node_values.get(node_id, 0.0)
+                            )
+                    else:
+                        # Standard evaluation for goal node only
+                        outcome = evaluator.evaluate(
                             edge_strengths=edge_config,
                             interventions=option.interventions,
                             goal_node=request.goal_node_id,
                             factor_values=factor_values,
                         )
-                    )
+
+                    option_outcomes[option.id].append(outcome)
+                    sample_outcomes[option.id] = outcome
+                    if separate_information:
+                        assert information_evaluator is not None and information_outcomes is not None
+                        information_outcomes[option.id].append(
+                            information_evaluator.evaluate(
+                                edge_strengths=edge_config,
+                                interventions=option.interventions,
+                                goal_node=request.goal_node_id,
+                                factor_values=factor_values,
+                            )
+                        )
+                except AccumulationDrawRefusedError:
+                    refused_option_ids.add(option.id)
+                    option_outcomes.pop(option.id, None)
+                    if constraint_node_values is not None:
+                        constraint_node_values.pop(option.id, None)
+                    if information_outcomes is not None:
+                        information_outcomes.pop(option.id, None)
+                    sample_outcomes.pop(option.id, None)
 
             # Track winner with fair tie-breaking (split ties equally).
             #
@@ -5129,6 +5587,8 @@ class RobustnessAnalyzerV2:
             # Store edge config for alternative winner analysis
             edge_configs_per_sample.append(edge_config)
 
+        if refused_option_ids:
+            raise AccumulationOptionsRefusedError(refused_option_ids)
         return (
             option_outcomes,
             option_wins,
@@ -5213,6 +5673,21 @@ class RobustnessAnalyzerV2:
         """
         noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
         unit_domains = unit_level_domains(request)
+        horizon_plans = (
+            {
+                node_id: plan
+                for node_id, plan in resolve_identity_plans(
+                    request.graph, factor_centres(request)
+                ).items()
+                if plan.evaluated and plan.accumulation_derived
+            }
+            if any(
+                n.nonlinear_identity is not None
+                and n.nonlinear_identity.operation == "accumulation"
+                for n in request.graph.nodes
+            )
+            else {}
+        )
         frames: List[NodeLevelFrame] = []
         for node in request.graph.nodes:
             if not parent_map.get(node.id):
@@ -5221,6 +5696,12 @@ class RobustnessAnalyzerV2:
             observed_source = observed.source if observed is not None else None
             level = status_quo_level(node)
             author = level_anchor_source(node)
+            horizon_plan = horizon_plans.get(node.id)
+            if horizon_plan is not None:
+                horizon_anchor = _anchor_of(horizon_plan, request.graph)
+                assert horizon_anchor is not None
+                level = horizon_anchor.level / horizon_anchor.frame
+                author = "user_stated" if horizon_anchor.author == "user" else "olumi_estimate"
             if level is None:
                 reason: Optional[NoLevelReason] = "no_observed_level"
             elif author is None:
@@ -5231,7 +5712,13 @@ class RobustnessAnalyzerV2:
                 reason = None
             if reason is None:
                 assert level is not None and author is not None
-                low, high = anchored_level_domain(level, unit_domains.get(node.id))
+                # P45: a stock at T (and its composed goal) is the explicit closed form.
+                # Today's unit domain/cap must not trim the horizon result.
+                low, high = (
+                    (None, None)
+                    if horizon_plan is not None
+                    else anchored_level_domain(level, unit_domains.get(node.id))
+                )
                 frames.append(
                     NodeLevelFrame(
                         node_id=node.id,
@@ -6178,7 +6665,12 @@ class RobustnessAnalyzerV2:
                 "goal_baseline": plan.goal_baseline,
                 "estimated_operand_ids": estimated,
                 "message": (
-                    f"{goal_label} has no level stated for today, so the chance of reaching the "
+                    f"{goal_label} is evaluated at month {anchor.horizon_months}; the chance of "
+                    f"reaching the goal is measured from the status quo's own month-"
+                    f"{anchor.horizon_months} level: {anchor.level:,.2f} in its own units; "
+                    f"{'the user' if anchor.author == 'user' else 'Olumi'} supplies its inputs."
+                    if anchor.horizon_months is not None
+                    else f"{goal_label} has no level stated for today, so the chance of reaching the "
                     f"goal is measured from the level its inputs give today: "
                     f"{anchor.level:,.2f} in its own units; {whose}."
                 ),
@@ -6278,6 +6770,39 @@ class RobustnessAnalyzerV2:
                 ),
             )
 
+        if frame in CHANGE_FRAMES and any(
+            node.nonlinear_identity is not None
+            and node.nonlinear_identity.operation == "accumulation"
+            for node in request.graph.nodes
+        ):
+            plans = resolve_identity_plans(request.graph, factor_centres(request))
+            carriers = {
+                node_id for node_id, plan in plans.items()
+                if plan.evaluated and plan.operation == "accumulation"
+            }
+            affected = set(carriers)
+            children: Dict[str, List[str]] = defaultdict(list)
+            for edge in request.graph.edges:
+                children[edge.from_].append(edge.to)
+            pending = list(carriers)
+            while pending:
+                for child in children[pending.pop()]:
+                    if child not in affected:
+                        affected.add(child)
+                        pending.append(child)
+            if target_id in affected:
+                return refuse(
+                    "accumulation_change_frame_unsupported",
+                    frame_field,
+                    (
+                        f"Change-frame origin for accumulation-dependent node '{target_id}' "
+                        f"awaits a Science ruling (today or the status quo at the horizon). "
+                        f"{omitted_field} is omitted."
+                    ),
+                    accumulation_carrier_ids=sorted(carriers),
+                    affected_node_id=target_id,
+                )
+
         # R1 S2: a change frame, or ANY non-delta target on a node that measures a change, is
         # resolved by the change rules (which route a base-known change_abs back through the
         # level limb below, so the two cannot drift apart).
@@ -6316,6 +6841,21 @@ class RobustnessAnalyzerV2:
                 f"{noun} '{target_id}' is not present in the graph.",
             )
 
+        horizon_plan = (
+            resolve_identity_plans(request.graph, factor_centres(request)).get(target_id)
+            if any(
+                n.nonlinear_identity is not None
+                and n.nonlinear_identity.operation == "accumulation"
+                for n in request.graph.nodes
+            )
+            else None
+        )
+        horizon_target = (
+            horizon_plan is not None
+            and horizon_plan.evaluated
+            and horizon_plan.accumulation_derived
+        )
+
         # --- domain guard (Tier 2) — ONE implementation, two callers ----------
         # See NORMALISED_DOMAIN_LIMIT. NOTE this is Tier 2 (magnitude). Tier 1 —
         # attesting the domain properly via observed_state.value ~= raw_value / cap
@@ -6333,6 +6873,8 @@ class RobustnessAnalyzerV2:
         def domain_refusal(
             operands: Dict[str, float], field: str
         ) -> Optional[Tuple[Optional["GoalThresholdPlan"], Any]]:
+            if horizon_target:
+                return None  # Explicit framed S_T may exceed a normalisation cap.
             limit = RobustnessAnalyzerV2.NORMALISED_DOMAIN_LIMIT
             out_of_domain = {
                 name: value for name, value in operands.items() if abs(value) > limit
@@ -6561,7 +7103,13 @@ class RobustnessAnalyzerV2:
         # of today. A stated level wins (condition 3: the anchor reads only a plan with no
         # stated level); a withheld or absent identity leaves the refusal below as it was
         # (condition 1).
-        anchor = identity_level_anchor(request, target_id) if baseline is None else None
+        anchor = (
+            _anchor_of(horizon_plan, request.graph)
+            if horizon_target and horizon_plan is not None
+            else identity_level_anchor(request, target_id)
+            if baseline is None
+            else None
+        )
         if anchor is not None:
             baseline = anchor.level / anchor.frame
         if baseline is None:
@@ -7254,6 +7802,20 @@ class RobustnessAnalyzerV2:
         """
         expected_regret = expected_regret or {}
         level_domains = level_domains or {}
+        goal_identity = (
+            resolve_identity_plans(request.graph, factor_centres(request)).get(request.goal_node_id)
+            if any(
+                n.nonlinear_identity is not None
+                and n.nonlinear_identity.operation == "accumulation"
+                for n in request.graph.nodes
+            )
+            else None
+        )
+        horizon_goal = (
+            goal_identity is not None
+            and goal_identity.evaluated
+            and goal_identity.accumulation_derived
+        )
         results = []
         # B1a: the per-draw status-quo reference the anchored band reads. The analyzer
         # records it for an anchored goal (``status_quo_reference_nodes``), so its absence
@@ -7303,7 +7865,9 @@ class RobustnessAnalyzerV2:
                 # met when strict, met when not. A held option's compared level (the goal baseline, paired) and the
                 # threshold arrive by different arithmetic, so an exact comparison let one ulp decide 0% vs 100%.
                 def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
-                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
+                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(
+                        1.0, abs(threshold)
+                    )
                     past = values < threshold if minimise else values > threshold
                     return np.asarray(past & ~on if strict else past | on, dtype=bool)
 
@@ -7320,7 +7884,11 @@ class RobustnessAnalyzerV2:
                     effect = samples_array - np.array(status_quo_outcomes)
                     compared = goal_threshold_plan.goal_baseline + effect
                     goal_domain = level_domains.get(request.goal_node_id)
-                    if goal_domain is not None and not goal_threshold_plan.change_frame:
+                    if (
+                        goal_domain is not None
+                        and not goal_threshold_plan.change_frame
+                        and not horizon_goal
+                    ):
                         # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
                     # A plan with no delta threshold is a level plan: both are set at one site.
@@ -9440,6 +10008,7 @@ class RobustnessAnalyzerV2:
         n_defaulted_roots: int = 0,
         defaulted_root_node_ids: Optional[List[str]] = None,
         critiques: Optional[List[CritiqueV2]] = None,
+        inference_warnings: Optional[List[InferenceWarning]] = None,
     ) -> RobustnessResult:
         """Compute overall robustness assessment with alternative winner analysis."""
         # Recommendation stability: fraction of samples with same winner
@@ -9489,17 +10058,29 @@ class RobustnessAnalyzerV2:
         robust_edges = sorted(robust_edge_ids)
 
         # Compute alternative winners for fragile edges (includes marginal calculation)
-        fragile_edges_enhanced = self._compute_alternative_winners(
-            fragile_edge_info,
-            edge_configs_per_sample,
-            winner_per_sample,
-            most_frequent_winner,
-            request,
-            evaluator,
-            global_seed,
-            edge_max_elasticity=edge_max_elasticity,
-            critiques=critiques,
-        )
+        try:
+            fragile_edges_enhanced = self._compute_alternative_winners(
+                fragile_edge_info,
+                edge_configs_per_sample,
+                winner_per_sample,
+                most_frequent_winner,
+                request,
+                evaluator,
+                global_seed,
+                edge_max_elasticity=edge_max_elasticity,
+                critiques=critiques,
+            )
+        except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
+            # Existing no-marginal path: preserve weak-edge counts, omit the probe.
+            fragile_edges_enhanced = self._compute_alternative_winners(
+                fragile_edge_info, edge_configs_per_sample, winner_per_sample, most_frequent_winner,
+            )
+            if inference_warnings is not None:
+                inference_warnings.append(self._optional_phase_unavailable_warning(
+                    "NUMERICAL_INSTABILITY", "robustness.fragile_edges[].marginal_switch_probability",
+                    "accumulation_draw_refused", 0.0,
+                    "Marginal-switch probes were omitted because a churn/rate accumulation was refused.",
+                ))
 
         # Overall robustness
         # Per Decision Model Schema v2.6: is_robust = recommendation_stability >= 0.7
@@ -10577,7 +11158,6 @@ class RobustnessAnalyzerV2:
             if decision_evpi_bound is not None and evppi > decision_evpi_bound:
                 clamped_high = True
                 evppi = decision_evpi_bound
-
 
             # Clamp-vs-round ordering (hunter F-2): round(.,6) can nudge a clamped
             # value UP past the raw decision_evpi bound by <=5e-7, breaking the

@@ -12,7 +12,15 @@ import math
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    PrivateAttr,
+    SerializerFunctionWrapHandler,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 import re
 
 from src.constants import (
@@ -468,17 +476,25 @@ class EdgeV2(BaseModel):
 
 
 class NonlinearIdentityV2(BaseModel):
-    """R3 slice 1: the node is EXACTLY the product or the sum of named parents (an accounting
-    identity such as MRR = price x paying subscribers), not a guessed straight-line effect.
+    """R3/P45: an exact declared accounting identity over named parents. Product and sum use
+    named operands; accumulation uses positional stock today, monthly churn and monthly inflow
+    to derive stock at a stated horizon. Its carrier is the derived stock node, not the goal.
 
     CEE declares it and is its only minter; PLoT forwards it verbatim. ISL never infers an
     identity from the graph's shape (AIQ 5859633012). Strict: an unknown operation or key is
     REFUSED (422), never dropped, because a dropped declaration is silently "declared, not used".
     """
 
-    operation: Literal["product", "sum"] = Field(..., description="product | sum of factor_ids")
+    operation: Literal["product", "sum", "accumulation"] = Field(
+        ..., description="product | sum | accumulation over factor_ids"
+    )
     factor_ids: List[str] = Field(
-        ..., min_length=1, description="The parents the node is the product/sum of"
+        ...,
+        min_length=1,
+        description=(
+            "Named product/sum parents; accumulation has exactly three distinct positional "
+            "parents: [stock_today, monthly_churn_rate, monthly_inflow]"
+        ),
     )
     stated_in_brief: bool = Field(..., description="True when the brief itself states it")
     addends: Optional[List[str]] = Field(
@@ -489,11 +505,73 @@ class NonlinearIdentityV2(BaseModel):
             "declared addend is definitional; it is never inferred from an edge."
         ),
     )
+    horizon_months: Optional[int] = Field(
+        None,
+        ge=1,
+        le=120,
+        strict=True,
+        description="Accumulation only: required integer horizon in months (1 through 120)",
+    )
+    rate_scale: Optional[float] = Field(
+        None,
+        gt=0.0,
+        le=1.0,
+        strict=True,
+        allow_inf_nan=False,
+        description=(
+            "Accumulation only: required multiplier converting the churn parent's user value "
+            "to a monthly fraction (0.01 for percent, 1 for a fraction); ISL does not parse units"
+        ),
+    )
 
-    model_config = {"extra": "forbid"}
+    model_config = {
+        "extra": "forbid",
+        "json_schema_extra": {
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"operation": {"const": "accumulation"}},
+                        "required": ["operation"],
+                    },
+                    "then": {
+                        "required": ["horizon_months", "rate_scale"],
+                        "properties": {
+                            "factor_ids": {"minItems": 3, "maxItems": 3, "uniqueItems": True},
+                            "horizon_months": {"type": "integer", "minimum": 1, "maximum": 120},
+                            "rate_scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+                        },
+                        "not": {"required": ["addends"]},
+                    },
+                    "else": {
+                        "not": {
+                            "anyOf": [
+                                {"required": ["horizon_months"]},
+                                {"required": ["rate_scale"]},
+                            ]
+                        }
+                    },
+                }
+            ]
+        },
+    }
 
     @model_validator(mode="after")
     def _distinct_participants(self) -> "NonlinearIdentityV2":
+        if self.operation == "accumulation":
+            if len(self.factor_ids) != 3:
+                raise ValueError("accumulation.factor_ids must contain exactly three ids")
+            if "addends" in self.model_fields_set:
+                raise ValueError("accumulation must not contain addends")
+            if self.horizon_months is None or self.rate_scale is None:
+                raise ValueError("accumulation requires horizon_months and rate_scale")
+        elif self.operation in ("product", "sum"):
+            forbidden = self.model_fields_set & {"horizon_months", "rate_scale"}
+            if forbidden:
+                raise ValueError(
+                    f"{self.operation} must not contain accumulation fields: {sorted(forbidden)}"
+                )
+        else:
+            raise ValueError(f"unsupported nonlinear_identity operation: {self.operation!r}")
         if len(set(self.factor_ids)) != len(self.factor_ids):
             raise ValueError("nonlinear_identity.factor_ids must be distinct")
         addends = self.addends or []
@@ -503,6 +581,25 @@ class NonlinearIdentityV2(BaseModel):
         if overlap:
             raise ValueError(f"nonlinear_identity.addends overlap factor_ids: {overlap}")
         return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_operation_fields(  # type: ignore[no-untyped-def]
+        self, handler: SerializerFunctionWrapHandler
+    ):
+        """Preserve strict operation shapes through the worker's default JSON serialization.
+
+        Legacy identities retain their original keys, and accumulation never serializes an
+        addends key, including null. No return annotation so JSON schema retains the fields.
+        """
+        data = handler(self)
+        if self.operation == "accumulation":
+            data.pop("addends", None)
+        elif self.operation in ("product", "sum"):
+            data.pop("horizon_months", None)
+            data.pop("rate_scale", None)
+        else:
+            raise ValueError(f"unsupported nonlinear_identity operation: {self.operation!r}")
+        return data
 
 
 class ExecutionFrameV2(BaseModel):
@@ -729,7 +826,7 @@ class GraphV2(BaseModel):
         identity's node (an identity is over named parents). Anything else is malformed: 422."""
         if "nodes" not in info.data:
             return v
-        node_ids = {node.id for node in info.data["nodes"]}
+        nodes = {node.id: node for node in info.data["nodes"]}
         parents: Dict[str, set] = {}
         for edge in v:
             parents.setdefault(edge.to, set()).add(edge.from_)
@@ -738,7 +835,7 @@ class GraphV2(BaseModel):
             if identity is None:
                 continue
             for participant in [*identity.factor_ids, *(identity.addends or [])]:
-                if participant not in node_ids:
+                if participant not in nodes:
                     raise ValueError(
                         f"nonlinear_identity on {node.id} names a non-existent node: {participant}"
                     )
@@ -747,6 +844,24 @@ class GraphV2(BaseModel):
                         f"nonlinear_identity on {node.id} names {participant}, "
                         "which is not its parent"
                     )
+            if identity.operation == "accumulation":
+                for participant, description in (
+                    (identity.factor_ids[0], "starting count"),
+                    (identity.factor_ids[2], "monthly inflow"),
+                ):
+                    operand = nodes[participant]
+                    observed = operand.observed_state
+                    if observed is None or operand.execution_frame is None:
+                        continue
+                    # Same reading of today as the evaluator: baseline, else value;
+                    # the execution frame converts that level to the user's units.
+                    level = observed.baseline if observed.baseline is not None else observed.value
+                    figure = level * operand.execution_frame.frame
+                    if figure < 0:
+                        raise ValueError(
+                            f"‘{operand.label}’ is {figure:g}; a {description} can't be negative, "
+                            f"so the month-{identity.horizon_months} figure can't be computed."
+                        )
         return v
 
     @field_validator("edges")
@@ -1569,11 +1684,23 @@ class RobustnessRequestV2(BaseModel):
     @field_validator("goal_node_id")
     @classmethod
     def validate_goal_node_exists(cls, v: str, info: Any) -> str:
-        """Validate goal node exists in graph."""
+        """Validate the goal exists and accumulation is carried only by a derived stock node."""
         if "graph" in info.data:
-            node_ids = {node.id for node in info.data["graph"].nodes}
-            if v not in node_ids:
+            nodes = {node.id: node for node in info.data["graph"].nodes}
+            if v not in nodes:
                 raise ValueError(f"Goal node '{v}' not found in graph")
+            identity = nodes[v].nonlinear_identity
+            if identity is not None:
+                if identity.operation == "accumulation":
+                    raise ValueError(
+                        "accumulation must be carried by a derived stock node, not the goal"
+                    )
+                elif identity.operation in ("product", "sum"):
+                    pass
+                else:
+                    raise ValueError(
+                        f"unsupported nonlinear_identity operation: {identity.operation!r}"
+                    )
         return v
 
     @model_validator(mode="after")
@@ -2008,11 +2135,11 @@ class RobustnessRequestV2(BaseModel):
 class OutcomeDistribution(BaseModel):
     """Distribution of outcomes from Monte Carlo sampling."""
 
-    mean: float = Field(..., description="Mean outcome value")
-    std: float = Field(..., description="Standard deviation")
-    median: float = Field(..., description="Median outcome value")
-    ci_lower: float = Field(..., description="Lower bound of confidence interval")
-    ci_upper: float = Field(..., description="Upper bound of confidence interval")
+    mean: Optional[float] = Field(..., description="Mean outcome value")
+    std: Optional[float] = Field(..., description="Standard deviation")
+    median: Optional[float] = Field(..., description="Median outcome value")
+    ci_lower: Optional[float] = Field(..., description="Lower bound of confidence interval")
+    ci_upper: Optional[float] = Field(..., description="Upper bound of confidence interval")
     samples: Optional[List[float]] = Field(None, description="Raw samples if requested")
 
     model_config = {
@@ -2112,7 +2239,7 @@ class OptionResult(BaseModel):
 
     option_id: str = Field(..., description="Option identifier")
     outcome_distribution: OutcomeDistribution = Field(..., description="Distribution of outcomes")
-    win_probability: float = Field(..., ge=0, le=1, description="P(this option is best)")
+    win_probability: Optional[float] = Field(..., ge=0, le=1, description="P(this option is best)")
     probability_of_goal: Optional[float] = Field(
         None,
         ge=0,
@@ -2914,4 +3041,3 @@ class DecisionFlipBlockV2(BaseModel):
     bound_rel: float
     grid_step: float
     links: List[DecisionFlipLinkV2]
-
