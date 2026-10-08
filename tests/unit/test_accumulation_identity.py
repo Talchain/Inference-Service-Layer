@@ -370,7 +370,12 @@ def test_strict_accumulation_carrier_refusals():
     assert conditional["else"]["not"]["anyOf"] == [
         {"required": ["horizon_months"]},
         {"required": ["rate_scale"]},
+        {"required": ["rate_sigma_log"]},
     ]
+    assert conditional["then"]["properties"]["rate_sigma_log"] == {
+        "type": "array", "minItems": 2, "maxItems": 2,
+        "items": {"type": "number", "minimum": 0},
+    }
 
 
 def test_carrier_contract_survives_worker_json_round_trip():

@@ -1002,7 +1002,9 @@ class FactorFlipValueV2(BaseModel):
         "honest wire statement for the class the diagnosis proved unprobeable. "
         "'candidate_cap_exceeded' — a genuine candidate that ranked below "
         "FACTOR_FLIP_MAX_CANDIDATES by slope spread and was not evaluated; emitted "
-        "rather than dropped so the omission is never silent. Open vocabulary.",
+        "rather than dropped so the omission is never silent. "
+        "'nonlinear_response' — a spread accumulation's churn operand cannot be "
+        "evaluated by the affine factor-flip screen; its diagnostic is withheld. Open vocabulary.",
     )
     alternative_winner_id: Optional[str] = Field(
         None,

@@ -2912,7 +2912,7 @@
             "type": "string"
           },
           "flip_reason": {
-            "description": "'found' \u2014 a confirmed argmax change inside [0, 1]. 'no_effect_within_bounds' \u2014 per-option transmission slopes genuinely differ, but no crossing lies inside [0, 1]. 'structurally_invariant' \u2014 the per-option transmission slopes are identical (spread <= 1e-9), so no value of this factor can move the argmax. This is a MATHEMATICAL ATTESTATION, not a failed or timed-out probe, and it is the honest wire statement for the class the diagnosis proved unprobeable. 'candidate_cap_exceeded' \u2014 a genuine candidate that ranked below FACTOR_FLIP_MAX_CANDIDATES by slope spread and was not evaluated; emitted rather than dropped so the omission is never silent. Open vocabulary.",
+            "description": "'found' \u2014 a confirmed argmax change inside [0, 1]. 'no_effect_within_bounds' \u2014 per-option transmission slopes genuinely differ, but no crossing lies inside [0, 1]. 'structurally_invariant' \u2014 the per-option transmission slopes are identical (spread <= 1e-9), so no value of this factor can move the argmax. This is a MATHEMATICAL ATTESTATION, not a failed or timed-out probe, and it is the honest wire statement for the class the diagnosis proved unprobeable. 'candidate_cap_exceeded' \u2014 a genuine candidate that ranked below FACTOR_FLIP_MAX_CANDIDATES by slope spread and was not evaluated; emitted rather than dropped so the omission is never silent. 'nonlinear_response' \u2014 a spread accumulation's churn operand cannot be evaluated by the affine factor-flip screen; its diagnostic is withheld. Open vocabulary.",
             "title": "Flip Reason",
             "type": "string"
           },
@@ -5609,6 +5609,11 @@
                     "required": [
                       "rate_scale"
                     ]
+                  },
+                  {
+                    "required": [
+                      "rate_sigma_log"
+                    ]
                   }
                 ]
               }
@@ -5644,6 +5649,15 @@
                   "exclusiveMinimum": 0.0,
                   "maximum": 1.0,
                   "type": "number"
+                },
+                "rate_sigma_log": {
+                  "items": {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
                 }
               },
               "required": [
@@ -5717,6 +5731,30 @@
             ],
             "description": "Accumulation only: required multiplier converting the churn parent's user value to a monthly fraction (0.01 for percent, 1 for a fraction); ISL does not parse units",
             "title": "Rate Scale"
+          },
+          "rate_sigma_log": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  },
+                  {
+                    "minimum": 0.0,
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Accumulation only: optional lognormal spreads [monthly_churn, monthly_inflow]; exactly two finite nonnegative numbers. Omission preserves existing sampling.",
+            "title": "Rate Sigma Log"
           },
           "stated_in_brief": {
             "description": "True when the brief itself states it",
