@@ -1078,6 +1078,7 @@ async def _analyze_robustness_v2_enhanced(
                             threshold=c.threshold,
                             label=c.label,
                             prob_satisfied=c.prob_satisfied,
+                            prob_satisfied_precision=c.prob_satisfied_precision,
                             failure_margin_median=c.failure_margin_median,
                             near_miss_fraction=c.near_miss_fraction,
                             binding=c.binding,
@@ -1087,6 +1088,7 @@ async def _analyze_robustness_v2_enhanced(
                         for c in ca.constraints
                     ],
                     joint_probability=ca.joint_probability,
+                    joint_probability_precision=ca.joint_probability_precision,
                     conditional_probabilities=ca.conditional_probabilities,
                 )
 

@@ -134,6 +134,19 @@ _REF_ANALYSIS_FACT_STATUS = (
 
 ALLOWLIST: FrozenSet[AllowlistEntry] = frozenset(
     {
+        AllowlistEntry(
+            "GoalConstraint",
+            "operator",
+            "boundary.DraftGoalConstraintSchema.operator",
+            "PENDING-ALIGNMENT",
+            "Recovery Batch C ISL brief, 11 Oct 2026; BATCH0-CHANGE-GOAL-DECISION.md "
+            "rulings 15-17 and DL amendment at 22:35Z: explicitly add strict >/< to "
+            "the joint-goal request. ISL accepts both old comparisons unchanged. "
+            "Pinned schemas 0.61.0 still accepts only >=/<=; CEE/PLoT must adopt "
+            "the wider input vocabulary before sending strict constraints. Remove "
+            "this exception when the shared-schema pin adopts it. The companion "
+            "test pins both enum domains exactly so this cannot hide another change.",
+        ),
         # ------------------------------------------------------------------
         # THE known bite — the check's built-in RED case, silenced only here.
         # ------------------------------------------------------------------

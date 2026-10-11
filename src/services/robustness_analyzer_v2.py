@@ -3415,7 +3415,7 @@ def _lognormal_limit_probability(median: float, sigma: float, operator: str, lim
         below = 0.0
     else:
         below = 0.5 * (1.0 + math.erf(math.log(limit / median) / (sigma * math.sqrt(2.0))))
-    return below if operator == "<=" else 1.0 - below
+    return below if operator in ("<=", "<") else 1.0 - below
 
 
 def _clamped_limit_probability(
@@ -3427,8 +3427,18 @@ def _clamped_limit_probability(
 ) -> float:
     """P(clamp(X) op limit): what a truncating reader would report. Clamping moves only the
     mass beyond a bound onto that bound, so the answer changes only when the limit itself
-    lies beyond a bound."""
-    if operator == "<=":
+    lies beyond a bound, or at a bound for a strict comparison."""
+    if operator == "<":
+        if low is not None and limit <= low:
+            return 0.0
+        if high is not None and limit > high:
+            return 1.0
+    elif operator == ">":
+        if high is not None and limit >= high:
+            return 0.0
+        if low is not None and limit < low:
+            return 1.0
+    elif operator == "<=":
         if high is not None and limit >= high:
             return 1.0
         if low is not None and limit < low:
@@ -8536,6 +8546,7 @@ class RobustnessAnalyzerV2:
                             threshold=c["threshold"],
                             label=c["label"],
                             prob_satisfied=c["prob_satisfied"],
+                            prob_satisfied_precision=c["prob_satisfied_precision"],
                             failure_margin_median=c["failure_margin_median"],
                             near_miss_fraction=c["near_miss_fraction"],
                             binding=c["binding"],
@@ -8547,6 +8558,7 @@ class RobustnessAnalyzerV2:
                     constraint_analysis_result = ConstraintAnalysis(
                         constraints=constraint_results,
                         joint_probability=analysis_dict["joint_probability"],
+                        joint_probability_precision=analysis_dict["joint_probability_precision"],
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
                     sampled_ranges = [
@@ -12672,6 +12684,10 @@ class RobustnessAnalyzerV2:
             return value >= constraint.threshold
         elif constraint.operator == "<=":
             return value <= constraint.threshold
+        elif constraint.operator == ">":
+            return value > constraint.threshold
+        elif constraint.operator == "<":
+            return value < constraint.threshold
         else:
             # This should never happen due to Pydantic validation
             raise ValueError(f"Unknown operator: {constraint.operator}")
@@ -12961,11 +12977,11 @@ class RobustnessAnalyzerV2:
                 if not satisfied:
                     value = values[sample_idx]
                     # Compute margin (distance from threshold)
-                    if constraint.operator == ">=":
-                        # For >= threshold, margin is threshold - value (positive when failing)
+                    if constraint.operator in (">=", ">"):
+                        # For a lower threshold, margin is threshold - value (positive when failing)
                         margin = threshold - value
-                    else:  # <=
-                        # For <= threshold, margin is value - threshold (positive when failing)
+                    else:  # <= or <
+                        # For an upper threshold, margin is value - threshold
                         margin = value - threshold
 
                     failure_margins.append(margin)
@@ -13207,7 +13223,8 @@ class RobustnessAnalyzerV2:
             resolved_values, scored, satisfaction_matrix, informative=informative
         )
 
-        # Build constraint results
+        # Precision uses exactly the probability's shared finite-draw population.
+        n_informative = sum(informative)
         constraint_results = []
         for c_idx, constraint in enumerate(scored):
             diag = near_miss_diagnostics.get(c_idx, {})
@@ -13231,6 +13248,13 @@ class RobustnessAnalyzerV2:
                     # remove. Same reasoning, and the same wording, as the
                     # Slice 6b echo subscript above.
                     "prob_satisfied": per_constraint_probs[str(c_idx)],
+                    "prob_satisfied_precision": {
+                        "n_informative": n_informative,
+                        "standard_error": math.sqrt(
+                            per_constraint_probs[str(c_idx)]
+                            * (1.0 - per_constraint_probs[str(c_idx)]) / n_informative
+                        ),
+                    },
                     "failure_margin_median": diag.get("failure_margin_median"),
                     "near_miss_fraction": diag.get("near_miss_fraction"),
                     "binding": diag.get("binding", False),
@@ -13246,6 +13270,12 @@ class RobustnessAnalyzerV2:
             "constraints": constraint_results,
             # B5: ABSENT while any constraint is unscored — never the subset joint.
             "joint_probability": joint_probability if joint_emitted else None,
+            "joint_probability_precision": {
+                "n_informative": n_informative,
+                "standard_error": math.sqrt(
+                    joint_probability * (1.0 - joint_probability) / n_informative
+                ),
+            } if joint_emitted else None,
             "conditional_probabilities": (
                 conditional_probs if conditional_probs and not range_joint_deferred else None
             ),

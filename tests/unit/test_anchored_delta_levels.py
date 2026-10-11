@@ -1079,16 +1079,16 @@ class TestB1a5NamedMoves:
         assert on.recommended_option_id == off.recommended_option_id == P59
 
 
-class TestS2AStrictLimitIsRefusedAtTheEngine:
-    """DL gate (#70 5860001229) / AIQ S-2 (5859984425): once B1a makes today's level an exact atom, a
-    strict limit read as non-strict is a wrong pass exactly at today's level. ISL's half of S-2: the
-    comparator admits only ``>=`` / ``<=``, so a strict operator is REFUSED at validation — never
-    coerced. (Whether CEE/PLoT coerce it before it reaches ISL is Canonical's measurement.)"""
+class TestS2AStrictLimitIsPreservedAtTheEngine:
+    """Batch C supersedes the old refusal: strict limits must exclude an exact level atom.
+
+    Parsing preserves the operator; accepting it must never turn a tie into a pass.
+    """
 
     @pytest.mark.parametrize("operator", ["<", ">"])
-    def test_a_strict_operator_is_refused_not_coerced(self, operator):
+    def test_a_strict_operator_is_preserved_not_coerced(self, operator):
         d = served_wire()
         d["goal_constraints"][0]["operator"] = operator
-        with pytest.raises(Exception) as excinfo:
-            RobustnessRequestV2.model_validate(d)
-        assert "operator" in str(excinfo.value)
+        constraint = RobustnessRequestV2.model_validate(d).goal_constraints[0]
+        assert constraint.operator == operator
+        assert not RobustnessAnalyzerV2()._check_constraint_satisfied(constraint.value, constraint)

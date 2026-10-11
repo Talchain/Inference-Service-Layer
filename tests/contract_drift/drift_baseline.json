@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.61.0",
     "omission_count": 51,
-    "superset_count": 86
+    "superset_count": 88
   },
   "omissions": [
     {
@@ -385,6 +385,11 @@
       "reason": "ISL superset — ConstraintAnalysisV2.joint_probability is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
+      "isl_model": "ConstraintAnalysisV2",
+      "prop": "joint_probability_precision",
+      "reason": "ISL superset — ConstraintAnalysisV2.joint_probability_precision is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
       "isl_model": "ConstraintResultV2",
       "prop": "binding",
       "reason": "ISL superset — ConstraintResultV2.binding is not present in the paired contract schema (ISL emits ahead of contract adoption)"
@@ -413,6 +418,11 @@
       "isl_model": "ConstraintResultV2",
       "prop": "prob_satisfied",
       "reason": "ISL superset — ConstraintResultV2.prob_satisfied is not present in the paired contract schema (ISL emits ahead of contract adoption)"
+    },
+    {
+      "isl_model": "ConstraintResultV2",
+      "prop": "prob_satisfied_precision",
+      "reason": "ISL superset — ConstraintResultV2.prob_satisfied_precision is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
       "isl_model": "ConstraintResultV2",

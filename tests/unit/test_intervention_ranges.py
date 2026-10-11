@@ -215,8 +215,17 @@ RANGED = {"plan": {"d": stated()}}
 PRISTINE_NO_RANGE_DIGEST = "da2b8df040fa7dbe6cb523e51099d29dc7bb737aa69d202a4122219f7c40b394"
 
 
-def test_t0_a_request_without_ranges_is_byte_identical_to_pristine() -> None:
-    assert digest(run(build(n_samples=2_000))) == PRISTINE_NO_RANGE_DIGEST
+def test_t0_a_request_without_ranges_preserves_pristine_fields() -> None:
+    dumped = body(run(build(n_samples=2_000)))
+    # Batch C adds precision without moving any existing probability or diagnostic.
+    # Keep the original golden bytes, excluding only the two authorised additions.
+    for result in dumped["results"]:
+        analysis = result.get("constraint_analysis")
+        if analysis is not None:
+            assert analysis.pop("joint_probability_precision")["n_informative"] == 2_000
+            for constraint in analysis["constraints"]:
+                assert constraint.pop("prob_satisfied_precision")["n_informative"] == 2_000
+    assert hashlib.sha256(json.dumps(dumped, sort_keys=True).encode()).hexdigest() == PRISTINE_NO_RANGE_DIGEST
 
 
 # ---------------------------------------------------------------------------------------------------

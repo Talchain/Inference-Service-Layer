@@ -46,7 +46,7 @@ from src.models.response_v2 import (
 )
 
 # Range→distribution converter models (ROADMAP 2.720; pure Pydantic, no cycle)
-from src.models.goal_chance import GoalChanceDrivers, GoalChancePrecision
+from src.models.goal_chance import ConstraintPrecision, GoalChanceDrivers, GoalChancePrecision
 from src.models.range_fit import RangeFitDisclosure, UserStatedRange
 from src.models.identity_evaluation import IdentityEvaluation
 from src.models.structural_influence import StructuralInfluence
@@ -1203,9 +1203,9 @@ class GoalConstraint(BaseModel):
         pattern=r"^[a-z0-9_:-]+$",
         description="ID of the node this constraint applies to (must exist in graph)",
     )
-    operator: Literal[">=", "<="] = Field(
+    operator: Literal[">=", "<=", ">", "<"] = Field(
         ...,
-        description="Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold",
+        description="Exact per-draw comparison: >=, <=, > or <. Strict operators exclude ties.",
     )
     value: float = Field(
         ..., description="Threshold value for the constraint (v2.7 contract field name)"
@@ -1251,8 +1251,10 @@ class GoalConstraint(BaseModel):
             "'level' = an absolute level of the target quantity, which MUST share "
             "the domain of the graph's observed_state values; ISL recovers the "
             "target's level per draw against a status-quo reference before "
-            "comparing. When absent, or when a 'level' value cannot be converted, "
-            "the ENTIRE constraint_analysis block is OMITTED and a structured "
+            "comparing. 'change_abs' = paired change in the node's units; 'change_rel' = "
+            "paired change as a fraction of the raw starting level, requiring a valid base "
+            "and raw_range. When absent or not convertible, this constraint and the joint "
+            "are omitted (other scored marginals remain), and a structured "
             "inference warning names what was missing — ISL never guesses a frame "
             "and never emits a fabricated or clamped probability. Mirrors "
             "@talchain/schemas 0.38.0 DraftGoalConstraint.value_frame."
@@ -2196,11 +2198,15 @@ class ConstraintResult(BaseModel):
         None, description="Opaque caller-supplied identity echoed from the request constraint"
     )
     node_id: str = Field(..., description="Node ID the constraint applies to")
-    operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
+    operator: Literal[">=", "<=", ">", "<"] = Field(..., description="Comparison operator")
     threshold: float = Field(..., description="Threshold value")
     label: Optional[str] = Field(None, description="Human-readable label for coaching")
     prob_satisfied: float = Field(
         ..., ge=0, le=1, description="Probability that this constraint is satisfied"
+    )
+    prob_satisfied_precision: Optional[ConstraintPrecision] = Field(
+        None,
+        description="Monte Carlo precision of prob_satisfied over the same informative draws.",
     )
     failure_margin_median: Optional[float] = Field(
         None, description="Median distance from threshold when constraint fails"
@@ -2238,6 +2244,13 @@ class ConstraintAnalysis(BaseModel):
             "conditionals) for an option whose rows mix a limit scored from a "
             "stated range with other limits (TEMPORAL step 1), named by "
             "CONSTRAINT_JOINT_WITHHELD."
+        ),
+    )
+    joint_probability_precision: Optional[ConstraintPrecision] = Field(
+        None,
+        description=(
+            "Monte Carlo precision of same-draw joint_probability. Omitted whenever the "
+            "joint is withheld, including incomplete conjunctions. Not model uncertainty."
         ),
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
