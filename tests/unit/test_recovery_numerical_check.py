@@ -119,6 +119,20 @@ def test_relative_change_uses_user_baseline_and_nonzero_raw_origin():
     assert results["hold"].probability_of_goal == 0.0
 
 
+def test_relative_change_non_half_target_is_not_a_constant_fallback():
+    """Catch a constant 0.5 fallback passing the relative-change case: here the answer is Phi(1), not 0.5."""
+    request = linear_request("change_rel")
+    # r = 20/70 of the user's raw baseline 70 -> a raw rise of 20 -> normalised T = 20/(120-20) = 0.2.
+    request.goal_threshold = 20.0 / 70.0
+    response = RobustnessAnalyzerV2().analyze(request)
+    # P(goal) = Phi((0.5*0.5 - 0.2)/(0.1*0.5)) = Phi(1) = 0.8413447461.
+    expected = phi((0.5 * 0.5 - 0.2) / (0.1 * 0.5))
+    results = {result.option_id: result for result in response.results}
+    assert results["push"].probability_of_goal == pytest.approx(expected, abs=TOL)
+    assert results["push"].probability_of_goal != pytest.approx(0.5, abs=0.1)
+    assert results["hold"].probability_of_goal == 0.0
+
+
 @pytest.mark.parametrize("threshold, expected", [(0.4, 1.0), (0.6, 0.0)])
 def test_near_deterministic_status_quo_has_exact_attainment(threshold, expected):
     """Catch spurious progress or noise in the paired status quo at a level target."""
