@@ -419,6 +419,46 @@ def test_fraction_percent_and_scaled_raw_units_give_the_same_verdicts(op, case, 
     assert seen[1] == seen[0] and seen[2] == seen[0]
 
 
+# ISL re-scope I-2: a goal LEVEL that is non-finite on a draw stays non-finite through the domain clip
+# (GoalThresholdPlan.compared), so the draw leaves the population on BOTH routes. Before, the goal route's
+# np.clip turned +inf into the domain's ceiling and -inf into its floor and COUNTED them, while the
+# constraint route excluded them: goal 5/8 or 3/8 beside a marginal and joint of 3/6. "push" is level
+# 0.5 + effect on eight draws: three at 0.9, three at 0.1, two at +inf or -inf; domain [0, 1]; target 0.5.
+@pytest.mark.parametrize("op", [">=", "<="])
+@pytest.mark.parametrize("non_finite", [math.inf, -math.inf])
+def test_a_non_finite_goal_level_leaves_the_population_on_both_routes(non_finite, op):
+    request = linear_request("level")
+    request.goal_threshold = 0.5
+    request.goal_direction = "minimise" if op == "<=" else "maximise"
+    request.goal_constraints = [constraint("g", op, 0.5, "level")]
+    analyser = RobustnessAnalyzerV2()
+    goal_plan, warning = analyser._resolve_goal_threshold_in_sample_frame(request)
+    assert warning is None and goal_plan is not None and goal_plan.level_threshold == 0.5
+    constraint_plans, warnings = analyser._resolve_constraint_plans(request)
+    assert not warnings and constraint_plans == {0: goal_plan}  # one target, one plan
+    status_quo = [0.0] * 8
+    push = [0.4, 0.4, -0.4, -0.4, 0.4, -0.4, non_finite, non_finite]
+    results = analyser._compute_option_results(
+        outcomes={"hold": status_quo, "push": push},
+        wins={"hold": 0, "push": 0},
+        request=request,
+        goal_threshold_plan=goal_plan,
+        constraint_node_values={"hold": {"g": status_quo}, "push": {"g": push}},
+        status_quo_outcomes=status_quo,
+        constraint_plans=constraint_plans,
+        status_quo_node_values={"g": status_quo},
+        level_domains={"g": (0.0, 1.0)},
+    )
+    (option,) = [result for result in results if result.option_id == "push"]
+    ca = option.constraint_analysis
+    sent = request.goal_constraints[0].constraint_id
+    (row,) = [c for c in ca.constraints if c.constraint_id == sent]
+    assert option.probability_of_goal == row.prob_satisfied == ca.joint_probability == 3 / 6
+    assert option.probability_of_goal_precision.n_informative == 6
+    assert row.prob_satisfied_precision.n_informative == 6
+    assert ca.joint_probability_precision.n_informative == 6
+
+
 @pytest.mark.parametrize("rho", [0.0, 0.8, -0.8])
 def test_two_normals_closed_form_joint(rho):
     # Independent Z,W; X=Z, Y=rho*Z+sqrt(1-rho^2)*W.
