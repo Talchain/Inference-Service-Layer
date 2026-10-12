@@ -223,13 +223,19 @@ def exact_scale(x, c):
 
 
 def test_the_checkers_witness_keeps_its_verdict_when_units_scale_by_ten():
-    v, t = 1.0000000000000018, 1.0
+    v, t = 1.0000000000000018, 1.0  # v = 1 + 8 eps: |v - t| = 8 eps <= 8 eps * max(|v|, |t|), a tie
     assert exact_scale(v, 10) is not None and exact_scale(t, 10) is not None
     for op in OPERATORS:
         minimise, strict = CONSTRAINT_OPERATOR_SENSE[op]
         before = meets_threshold(np.array([v]), t, minimise=minimise, strict=strict).tolist()
         after = meets_threshold(np.array([v * 10]), t * 10, minimise=minimise, strict=strict).tolist()
-        assert before == after, op
+        assert before == after == [op not in STRICT], op
+        # The checker's production witness: the joint probability, through the constraint analysis.
+        joints = [
+            analyze_draws({"x": [draw]}, [constraint("x", op, limit)])["joint_probability"]
+            for draw, limit in ((v, t), (v * 10, t * 10))
+        ]
+        assert joints == [0.0 if op in STRICT else 1.0] * 2, op
 
 
 @pytest.mark.parametrize("factor", [10.0, 100.0, 1000.0, 0.5, 2.0, 1024.0, 3.0, 1e6])
