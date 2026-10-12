@@ -68,10 +68,12 @@ def test_discrete_ties_follow_the_operator(op, expected):
 
 
 # AIE 6115686431 (C numerical decision): ONE helper decides every single-goal, marginal and joint
-# draw. A draw within eight binary64 spacings of its threshold, 8 * max(ulp(value), ulp(threshold)),
-# is a numerical tie: met by >= and <=, not by > and <. Beyond that budget the literal sign decides.
-# The budget is an operational allowance for the paired/conversion arithmetic, not a measurement
-# resolution, and no relative tolerance or unit floor applies.
+# draw. A draw within eight binary64 epsilons of its threshold, RELATIVE to the compared operands,
+# 8 * eps * max(|value|, |threshold|), is a numerical tie: met by >= and <=, not by > and <. Beyond
+# that budget the literal sign decides. The budget is an operational allowance for the
+# paired/conversion arithmetic, not a measurement resolution; no semantic tolerance or unit floor
+# applies, so at zero only zero is a tie (independent delta check r2: a spacing count, including
+# the subnormal steps it admitted at zero, changed verdicts under an exact change of units).
 OPERATORS = (">", ">=", "<", "<=")
 STRICT = (">", "<")
 TIE_CASES = ("tie", "step_up", "step_down")
@@ -86,11 +88,15 @@ def down(x):
     return float(np.nextafter(x, -math.inf))
 
 
-def held_verdict(op, case):
+def held_verdict(op, case, tie=None):
     """The chance for a draw that sits on `tie`, against a target placed by `case`.
 
     'above'/'below' place the target a genuine offset above/below the draw, not a rounding error.
+    At a tie of exactly zero the one-step targets are subnormal and outside the relative budget,
+    so they take their literal side: step_up is above the draw, step_down below it.
     """
+    if tie == 0.0 and case in ("step_up", "step_down"):
+        case = "above" if case == "step_up" else "below"
     if case in TIE_CASES:
         return 0.0 if op in STRICT else 1.0
     draw_is_past = (case == "below") == (op in (">", ">="))
@@ -106,14 +112,24 @@ def test_an_exact_tie_meets_only_the_non_strict_operators(op, threshold):
     assert met.tolist() == [op not in STRICT]
 
 
-# Contrast 2: one representable (nextafter) step either side of the threshold is a numerical tie.
-# At zero that step is the smallest subnormal, the only kind of value inside the budget there.
-@pytest.mark.parametrize("threshold", SIGNED_THRESHOLDS)
+# Contrast 2: one representable (nextafter) step either side of a nonzero threshold is a numerical
+# tie. At zero that step is the smallest subnormal, outside the relative budget: see Contrast 2b.
+@pytest.mark.parametrize("threshold", [t for t in SIGNED_THRESHOLDS if t != 0.0])
 @pytest.mark.parametrize("op,expected", [(">", 0.2), (">=", 0.8), ("<", 0.2), ("<=", 0.8)])
 def test_one_representable_step_either_side_is_a_numerical_tie(op, expected, threshold):
     # Five equiprobable draws: one clearly past each side, three numerical ties.
     draws = [threshold - 1, down(threshold), threshold, up(threshold), threshold + 1]
     result = analyze_draws({"x": draws}, [constraint("x", op, threshold)])
+    assert result["constraints"][0]["prob_satisfied"] == pytest.approx(expected, abs=1e-15)
+    assert result["joint_probability"] == pytest.approx(expected, abs=1e-15)
+
+
+# Contrast 2b: at a threshold of exactly zero only zero is a tie; one subnormal step takes its
+# literal side (a fixed subnormal allowance cannot survive an exact change of units).
+@pytest.mark.parametrize("op,expected", [(">", 0.4), (">=", 0.6), ("<", 0.4), ("<=", 0.6)])
+def test_at_zero_only_zero_is_a_numerical_tie(op, expected):
+    draws = [-1.0, down(0.0), 0.0, up(0.0), 1.0]
+    result = analyze_draws({"x": draws}, [constraint("x", op, 0.0)])
     assert result["constraints"][0]["prob_satisfied"] == pytest.approx(expected, abs=1e-15)
     assert result["joint_probability"] == pytest.approx(expected, abs=1e-15)
 
@@ -184,6 +200,65 @@ def test_a_threshold_at_the_largest_finite_value_keeps_a_finite_tie_budget(op, d
     assert meets_threshold(np.array([value]), BIG, minimise=minimise, strict=strict).tolist() == [expected]
 
 
+
+# Independent delta check r2 (12 Oct) BLOCKING: counting spacings is unit-dependent — ulp(10t)/ulp(t) is not
+# 10 — so draw 1.0000000000000018 against 1 with ">" gave 0 while the same pair times ten (both products exact)
+# gave 1. The budget is eight binary64 epsilons RELATIVE to the compared operands, so an exact rescaling of
+# both sides can never move a draw across it.
+def exact_scale(x, c):
+    """x * c when that product is exactly representable, else None."""
+    from fractions import Fraction
+    y = x * c
+    return y if math.isfinite(y) and Fraction(y) == Fraction(x) * Fraction(c) else None
+
+
+def test_the_checkers_witness_keeps_its_verdict_when_units_scale_by_ten():
+    v, t = 1.0000000000000018, 1.0
+    assert exact_scale(v, 10) is not None and exact_scale(t, 10) is not None
+    for op in OPERATORS:
+        minimise, strict = CONSTRAINT_OPERATOR_SENSE[op]
+        before = meets_threshold(np.array([v]), t, minimise=minimise, strict=strict).tolist()
+        after = meets_threshold(np.array([v * 10]), t * 10, minimise=minimise, strict=strict).tolist()
+        assert before == after, op
+
+
+@pytest.mark.parametrize("factor", [10.0, 100.0, 1000.0, 0.5, 2.0, 1024.0, 3.0, 1e6])
+def test_every_exact_rescaling_keeps_every_verdict(factor):
+    checked = 0
+    for t in [1.0, 0.3, -0.3, 0.8, 2.5e6, -2.5e6, 7.0, 1e-200, 1e200]:
+        candidates = [t]
+        for direction in (math.inf, -math.inf):
+            v = t
+            for _ in range(24):
+                v = float(np.nextafter(v, direction))
+                candidates.append(v)
+        st = exact_scale(t, factor)
+        if st is None:
+            continue
+        for v in candidates:
+            sv = exact_scale(v, factor)
+            if sv is None:
+                continue
+            for op in OPERATORS:
+                minimise, strict = CONSTRAINT_OPERATOR_SENSE[op]
+                before = meets_threshold(np.array([v]), t, minimise=minimise, strict=strict).tolist()
+                after = meets_threshold(np.array([sv]), st, minimise=minimise, strict=strict).tolist()
+                assert before == after, (t, v, factor, op)
+                checked += 1
+    assert checked > 0  # an empty sweep proves nothing
+
+
+# r2 NON-BLOCKING: a draw on the threshold that fails a strict operator sits AT it — its failure margin is
+# zero, never negative.
+@pytest.mark.parametrize("op,draw", [(">", "up"), (">", "tie"), ("<", "down"), ("<", "tie")])
+def test_a_tie_that_fails_a_strict_operator_has_a_zero_margin(op, draw):
+    t = 0.3
+    value = {"up": up(t), "down": down(t), "tie": t}[draw]
+    row = analyze_draws({"x": [value]}, [constraint("x", op, t)])["constraints"][0]
+    assert row["prob_satisfied"] == 0.0
+    assert row["failure_margin_median"] == 0.0
+
+
 def goal_and_constraint_request(frame, op, threshold, **kwargs):
     """One request asking the same target both ways: as the single goal and as a one-limit joint."""
     request = linear_request(frame, **kwargs)
@@ -221,7 +296,7 @@ def test_single_goal_and_one_constraint_joint_agree_at_and_near_a_tie(op, case, 
         "below": tie - 1e-12,
     }[case]
     chances = chances_asked_both_ways(goal_and_constraint_request(frame, op, threshold))
-    assert chances["hold"] == held_verdict(op, case)
+    assert chances["hold"] == held_verdict(op, case, tie)
 
 
 # Contrast 4: one physical target stated in fraction (raw units x0.01), percent (x1) and scaled
@@ -261,7 +336,7 @@ def test_fraction_percent_and_scaled_raw_units_give_the_same_verdicts(op, case, 
         }[case]
         request = goal_and_constraint_request(frame, op, threshold, raw_unit_scale=k)
         chances = chances_asked_both_ways(request)
-        assert chances["hold"] == held_verdict(op, case), k
+        assert chances["hold"] == held_verdict(op, case, today), k
         seen.append(chances)
     assert seen[1] == seen[0] and seen[2] == seen[0]
 

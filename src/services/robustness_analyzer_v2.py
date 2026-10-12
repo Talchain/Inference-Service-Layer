@@ -593,21 +593,10 @@ def get_max_cost_units() -> int:
 
 
 # AIE 6115686431 (C numerical decision; supersedes the 1e-9 · max(1, |t|) band of AIQ 5880886200):
-# the numerical-tie budget, in binary64 spacings at the compared operands. An explicit operational
+# the numerical-tie budget, in binary64 epsilons relative to the compared operands. An explicit operational
 # allowance for the existing paired/conversion arithmetic — not a measurement resolution, not a
 # model-uncertainty estimate, and not a bound on every possible cancellation error.
 GOAL_THRESHOLD_TIE_SPACINGS = 8
-
-
-
-def _finite_spacing(x: "np.ndarray | float") -> np.ndarray:
-    """ulp(|x|), finite at every finite magnitude. ``np.spacing`` of float64 max is inf (its next step up
-    overflows), which once made the tie budget unbounded (independent delta check, 12 Oct): there the step
-    toward zero is used. A non-finite ``x`` keeps NaN, so a non-finite draw is still never a tie."""
-    a = np.abs(np.asarray(x, dtype=float))
-    with np.errstate(over="ignore"):
-        step = np.spacing(a)
-    return np.where(np.isinf(step) & np.isfinite(a), a - np.nextafter(a, 0.0), step)
 
 
 def meets_threshold(
@@ -617,16 +606,26 @@ def meets_threshold(
 
     AIE 6115686431: ``values`` and ``threshold`` must already be in the same frame; this helper
     cannot repair a frame mismatch. A draw is a numerical TIE when
-    ``|v − t| <= 8 · max(ulp(v), ulp(t))`` (absolute binary64 spacings): not met by ``>``/``<``,
-    met by ``>=``/``<=``. Beyond that budget the literal sign comparison decides, so a genuine
-    offset (1e-12 at 0.3, 2.5e-6 at 2,500,000) is never a tie, and at zero only zero/subnormal
-    values fall inside. No relative tolerance, no unit floor. A non-finite draw is never a tie
-    (its spacing is NaN); the informative mask excludes it downstream.
+    ``|v − t| <= 8 · eps · max(|v|, |t|)`` (eight binary64 epsilons RELATIVE to the compared
+    operands): not met by ``>``/``<``, met by ``>=``/``<=``. Beyond that budget the literal sign
+    comparison decides, so a genuine offset (1e-12 at 0.3, 2.5e-6 at 2,500,000) is never a tie.
+    Relative, not a count of spacings: ulp(10·t) is not 10·ulp(t), so a spacing count let an exact
+    change of units move a draw across the budget (independent delta check r2, 12 Oct). Scaling both
+    operands exactly scales both sides of this inequality exactly, so no exact rescaling changes a
+    verdict. No semantic tolerance and no unit floor: at zero only zero is a tie. A non-finite draw is
+    never a tie; the informative mask excludes it downstream.
     """
     values = np.asarray(values, dtype=float)
-    spacing = np.maximum(_finite_spacing(values), _finite_spacing(threshold))
-    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_SPACINGS * spacing
-    past = values < threshold if minimise else values > threshold
+    t = float(threshold)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        # Both operands are first scaled by the same power of two to the larger one's binade (exact), so
+        # the difference and the budget are computed exactly at every magnitude — no overflow near
+        # float64 max, no underflow among subnormals — and the test is the real-number inequality.
+        _, exponent = np.frexp(np.maximum(np.abs(values), abs(t)))
+        v, u = np.ldexp(values, -exponent), np.ldexp(t, -exponent)
+        budget = GOAL_THRESHOLD_TIE_SPACINGS * np.finfo(float).eps * np.maximum(np.abs(v), np.abs(u))
+        on = np.isfinite(values) & math.isfinite(t) & (np.abs(v - u) <= budget)
+    past = values < t if minimise else values > t
     return np.asarray(past & ~on if strict else past | on, dtype=bool)
 
 
@@ -13023,6 +13022,9 @@ class RobustnessAnalyzerV2:
                     else:  # <= or <
                         # For an upper threshold, margin is value - threshold
                         margin = value - threshold
+                    # A numerical tie that fails a strict operator sits AT the threshold (meets_threshold):
+                    # its distance is zero, never negative (independent delta check r2, 12 Oct).
+                    margin = max(margin, 0.0)
 
                     failure_margins.append(margin)
 
