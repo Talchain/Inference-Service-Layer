@@ -618,6 +618,20 @@ def meets_threshold(
     """
     values = np.asarray(values, dtype=float)
     t = float(threshold)
+    on = numerical_tie(values, t)
+    past = values < t if minimise else values > t
+    return np.asarray(past & ~on if strict else past | on, dtype=bool)
+
+
+def numerical_tie(values: "Sequence[float] | np.ndarray", threshold: float) -> np.ndarray:
+    """Per draw: is it a numerical TIE with ``threshold`` (``meets_threshold``'s budget)?
+
+    The one statement of the tie budget. ``meets_threshold`` decides every verdict from it, and
+    the near-miss diagnostics read it so that a tie failing a strict operator, which sits AT the
+    threshold, reports a zero margin (ISL re-scope I-3). False for any non-finite operand.
+    """
+    values = np.asarray(values, dtype=float)
+    t = float(threshold)
     with np.errstate(over="ignore", under="ignore", invalid="ignore"):
         # Both operands are first scaled by the same power of two, into the larger one's binade [0.5, 1),
         # so the difference and the budget are computed exactly at every magnitude — no overflow near
@@ -629,9 +643,9 @@ def meets_threshold(
         _, exponent = np.frexp(np.maximum(np.abs(values), abs(t)))
         v, u = np.ldexp(values, -exponent), np.ldexp(t, -exponent)
         budget = GOAL_THRESHOLD_TIE_EPSILONS * np.finfo(float).eps * np.maximum(np.abs(v), np.abs(u))
-        on = np.isfinite(values) & math.isfinite(t) & (np.abs(v - u) <= budget)
-    past = values < t if minimise else values > t
-    return np.asarray(past & ~on if strict else past | on, dtype=bool)
+        return np.asarray(
+            np.isfinite(values) & math.isfinite(t) & (np.abs(v - u) <= budget), dtype=bool
+        )
 
 
 # A goal constraint's operator as (minimise, strict) for ``meets_threshold``.
@@ -12992,6 +13006,7 @@ class RobustnessAnalyzerV2:
         near_miss_fraction_threshold: float = 0.1,
         *,
         informative: List[bool],
+        ties: Dict[int, List[bool]],
     ) -> Dict[int, Dict[str, Any]]:
         """
         Compute near-miss diagnostics for each constraint.
@@ -13020,6 +13035,10 @@ class RobustnessAnalyzerV2:
                 constraint's value is a real number. REQUIRED and keyword-only:
                 a fail-open default would let a future caller silently restore
                 the raw denominator with no test red anywhere.
+            ties: per constraint, per draw, whether the COMPARED draw is a
+                numerical tie with the compared threshold (``numerical_tie``).
+                ISL re-scope I-3: a tie that fails (a strict operator) sits AT
+                the threshold, so its margin is exactly zero. REQUIRED.
 
         Returns:
             Dict[constraint_idx, {failure_margin_median, near_miss_fraction, binding}]
@@ -13047,15 +13066,18 @@ class RobustnessAnalyzerV2:
                     continue
                 if not satisfied:
                     value = values[sample_idx]
-                    # Compute margin (distance from threshold)
-                    if constraint.operator in (">=", ">"):
+                    if ties[c_idx][sample_idx]:
+                        # ISL re-scope I-3: a numerical tie that fails a strict operator sits AT the
+                        # threshold (meets_threshold), on whichever side the draw lies: zero margin.
+                        margin = 0.0
+                    elif constraint.operator in (">=", ">"):
                         # For a lower threshold, margin is threshold - value (positive when failing)
                         margin = threshold - value
                     else:  # <= or <
                         # For an upper threshold, margin is value - threshold
                         margin = value - threshold
-                    # A numerical tie that fails a strict operator sits AT the threshold (meets_threshold):
-                    # its distance is zero, never negative (independent delta check r2, 12 Oct).
+                    # Never negative (independent delta check r2, 12 Oct): a literal failure is on the
+                    # failing side, and the stated-frame mapping must not round it across.
                     margin = max(margin, 0.0)
 
                     failure_margins.append(margin)
@@ -13289,7 +13311,14 @@ class RobustnessAnalyzerV2:
         # T5: Near-miss diagnostics — on the SAME draws (in the limit's stated frame), the SAME
         # verdicts and the SAME informative population as the probabilities.
         near_miss_diagnostics = self._compute_near_miss_diagnostics(
-            stated_values, scored, satisfaction_matrix, informative=informative
+            stated_values,
+            scored,
+            satisfaction_matrix,
+            informative=informative,
+            ties={
+                index: numerical_tie(series, compared_thresholds[index]).tolist()
+                for index, series in resolved_values.items()
+            },
         )
 
         # Precision uses exactly the probability's shared finite-draw population.

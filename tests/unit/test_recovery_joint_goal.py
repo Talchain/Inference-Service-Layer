@@ -301,15 +301,34 @@ def test_the_tie_budget_is_the_exact_real_number_inequality_at_every_magnitude()
     assert checked > 10_000  # an empty sweep proves nothing
 
 
-# r2 NON-BLOCKING: a draw on the threshold that fails a strict operator sits AT it — its failure margin is
-# zero, never negative.
-@pytest.mark.parametrize("op,draw", [(">", "up"), (">", "tie"), ("<", "down"), ("<", "tie")])
+# r2 NON-BLOCKING / ISL re-scope I-3: a draw that is a numerical tie and fails a strict operator sits AT
+# the threshold, on whichever side of it the draw lies: its failure margin is exactly zero (one step on
+# the failing side is not a one-ulp shortfall), and no margin is ever negative.
+@pytest.mark.parametrize(
+    "op,draw", [(">", "up"), (">", "tie"), (">", "down"), ("<", "down"), ("<", "tie"), ("<", "up")]
+)
 def test_a_tie_that_fails_a_strict_operator_has_a_zero_margin(op, draw):
     t = 0.3
     value = {"up": up(t), "down": down(t), "tie": t}[draw]
     row = analyze_draws({"x": [value]}, [constraint("x", op, t)])["constraints"][0]
     assert row["prob_satisfied"] == 0.0
     assert row["failure_margin_median"] == 0.0
+
+
+# I-3 through a change frame: a change_rel limit on a LEVEL node is compared as the level (I-2), so
+# "hold", at today's level b, ties a target one representable step from b. Its distance in the
+# STATED frame (±r) is not a shortfall: the margin is zero on both sides.
+@pytest.mark.parametrize("op", STRICT)
+@pytest.mark.parametrize("side", [math.inf, -math.inf])
+def test_a_change_stated_tie_that_fails_a_strict_operator_has_a_zero_margin(op, side):
+    b, span, base_raw = 0.5, 100.0, 70.0  # linear_request("change_rel"): raw range [20, 120], today 70
+    r = (float(np.nextafter(b, side)) - b) * span / base_raw
+    request = goal_and_constraint_request("change_rel", op, r)
+    sent = request.goal_constraints[0].constraint_id
+    (hold,) = [option for option in RobustnessAnalyzerV2().analyze(request).results if option.option_id == "hold"]
+    (row,) = [c for c in hold.constraint_analysis.constraints if c.constraint_id == sent]
+    assert hold.probability_of_goal == row.prob_satisfied == 0.0
+    assert row.failure_margin_median == 0.0
 
 
 def goal_and_constraint_request(frame, op, threshold, **kwargs):
