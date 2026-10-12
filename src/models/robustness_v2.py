@@ -1206,9 +1206,9 @@ class GoalConstraint(BaseModel):
     operator: Literal[">=", "<=", ">", "<"] = Field(
         ...,
         description=(
-            "Per-draw comparison: >=, <=, > or <, with the same tie band as probability_of_goal "
-            "(|value - threshold| <= 1e-9 * max(1, |threshold|) is ON the threshold). "
-            "Strict operators exclude ties."
+            "Per-draw comparison: >=, <=, > or <, with the same numerical-tie budget as "
+            "probability_of_goal (|value - threshold| <= 8 * max(ulp(value), ulp(threshold)), "
+            "binary64 spacings, is ON the threshold). Strict operators exclude ties."
         ),
     )
     value: float = Field(

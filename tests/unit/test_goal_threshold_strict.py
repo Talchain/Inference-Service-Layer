@@ -58,8 +58,9 @@ class TestAnAtomOnTheThresholdIsNotPastIt:
 
 class TestATieAtTheThresholdIsOnIt:
     """AIQ 5880886200: a held option's compared level (the goal baseline, paired) and the threshold arrive by different
-    arithmetic, so an exact comparison lets one ulp decide 0% vs 100% for that option. A draw within a relative 1e-9 of
-    the threshold is ON it: not met when strict, met when not. Both sides of the atom, both directions."""
+    arithmetic, so a literal comparison lets one ulp decide 0% vs 100% for that option. A draw within eight binary64
+    spacings of the threshold (AIE 6115686431) is ON it: not met when strict, met when not. Both sides of the atom,
+    both directions."""
 
     def held_at(self, level: float) -> RobustnessRequestV2:
         return build_request(

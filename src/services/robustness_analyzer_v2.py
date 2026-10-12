@@ -592,8 +592,11 @@ def get_max_cost_units() -> int:
     return DEFAULT_MAX_COST_UNITS
 
 
-# AIQ 5880886200 (ISL #209): the relative band within which a goal draw is ON its threshold (|v − t| ≤ tol·max(1, |t|)).
-GOAL_THRESHOLD_TIE_TOLERANCE = 1e-9
+# AIE 6115686431 (C numerical decision; supersedes the 1e-9 · max(1, |t|) band of AIQ 5880886200):
+# the numerical-tie budget, in binary64 spacings at the compared operands. An explicit operational
+# allowance for the existing paired/conversion arithmetic — not a measurement resolution, not a
+# model-uncertainty estimate, and not a bound on every possible cancellation error.
+GOAL_THRESHOLD_TIE_SPACINGS = 8
 
 
 def meets_threshold(
@@ -601,13 +604,17 @@ def meets_threshold(
 ) -> np.ndarray:
     """The ONE per-draw goal comparison: ``probability_of_goal`` and every goal constraint use it.
 
-    AIQ 5880886200: a draw within a relative GOAL_THRESHOLD_TIE_TOLERANCE of the threshold is ON
-    it — not met when strict, met when not. A compared level and its threshold arrive by
-    different arithmetic, so an exact comparison let one ulp decide 0% vs 100%; a constraint
-    compared exactly could then disagree with the single-goal chance for the same target
-    (independent check C, follow-up 1).
+    AIE 6115686431: ``values`` and ``threshold`` must already be in the same frame; this helper
+    cannot repair a frame mismatch. A draw is a numerical TIE when
+    ``|v − t| <= 8 · max(ulp(v), ulp(t))`` (absolute binary64 spacings): not met by ``>``/``<``,
+    met by ``>=``/``<=``. Beyond that budget the literal sign comparison decides, so a genuine
+    offset (1e-12 at 0.3, 2.5e-6 at 2,500,000) is never a tie, and at zero only zero/subnormal
+    values fall inside. No relative tolerance, no unit floor. A non-finite draw is never a tie
+    (its spacing is NaN); the informative mask excludes it downstream.
     """
-    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
+    values = np.asarray(values, dtype=float)
+    spacing = np.maximum(np.spacing(np.abs(values)), np.spacing(abs(threshold)))
+    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_SPACINGS * spacing
     past = values < threshold if minimise else values > threshold
     return np.asarray(past & ~on if strict else past | on, dtype=bool)
 
@@ -8328,7 +8335,7 @@ class RobustnessAnalyzerV2:
                 strict = request.goal_threshold_strict is True
                 minimise = request.goal_direction == "minimise"
 
-                # AIQ 5880886200: the shared tie band (``meets_threshold``) decides a draw ON the threshold.
+                # AIE 6115686431: the shared tie budget (``meets_threshold``) decides a draw ON the threshold.
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
                     compared = samples_array

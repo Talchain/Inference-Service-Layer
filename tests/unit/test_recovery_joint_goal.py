@@ -15,10 +15,12 @@ from fastapi.testclient import TestClient
 from src.models.response_v2 import ConstraintAnalysisV2
 from src.models.robustness_v2 import ConstraintAnalysis, GoalConstraint, NodeV2, ObservedState
 from src.services.robustness_analyzer_v2 import (
+    CONSTRAINT_OPERATOR_SENSE,
     GoalThresholdPlan,
     RobustnessAnalyzerV2,
     _clamped_limit_probability,
     _lognormal_limit_probability,
+    meets_threshold,
 )
 from tests.unit.test_goal_node_propagation import _edge
 from tests.unit.test_recovery_numerical_check import TOL, linear_request, phi
@@ -54,7 +56,7 @@ def assert_precision(analysis, n):
 
 
 @pytest.mark.parametrize("op,expected", [(">", 0.25), (">=", 0.75), ("<", 0.25), ("<=", 0.75)])
-def test_discrete_ties_are_compared_exactly(op, expected):
+def test_discrete_ties_follow_the_operator(op, expected):
     # Exactly four equiprobable states: -1, 0, 0, 1. Second condition always holds.
     result = analyze_draws(
         {"x": [-1, 0, 0, 1], "y": [1] * 4}, [constraint("x", op), constraint("y")]
@@ -65,43 +67,165 @@ def test_discrete_ties_are_compared_exactly(op, expected):
     assert_precision(result, 4)
 
 
-# Follow-up 1 (independent check C): a draw ON the threshold is decided by the single-goal
-# tie band (|v - t| <= 1e-9 * max(1, |t|)), so one rounding step cannot flip a constraint's
-# chance between 0 and 1. On the band: met by >= and <=, not met by > and <.
-@pytest.mark.parametrize("threshold", [0.3, 2.5e6])
+# AIE 6115686431 (C numerical decision): ONE helper decides every single-goal, marginal and joint
+# draw. A draw within eight binary64 spacings of its threshold, 8 * max(ulp(value), ulp(threshold)),
+# is a numerical tie: met by >= and <=, not by > and <. Beyond that budget the literal sign decides.
+# The budget is an operational allowance for the paired/conversion arithmetic, not a measurement
+# resolution, and no relative tolerance or unit floor applies.
+OPERATORS = (">", ">=", "<", "<=")
+STRICT = (">", "<")
+TIE_CASES = ("tie", "step_up", "step_down")
+SIGNED_THRESHOLDS = [0.0, 0.3, -0.3, 2.5e6, -2.5e6]
+
+
+def up(x):
+    return float(np.nextafter(x, math.inf))
+
+
+def down(x):
+    return float(np.nextafter(x, -math.inf))
+
+
+def held_verdict(op, case):
+    """The chance for a draw that sits on `tie`, against a target placed by `case`.
+
+    'above'/'below' place the target a genuine offset above/below the draw, not a rounding error.
+    """
+    if case in TIE_CASES:
+        return 0.0 if op in STRICT else 1.0
+    draw_is_past = (case == "below") == (op in (">", ">="))
+    return 1.0 if draw_is_past else 0.0
+
+
+# Contrast 1: an exact tie, all four operators, at zero, negative and large thresholds.
+@pytest.mark.parametrize("threshold", SIGNED_THRESHOLDS)
+@pytest.mark.parametrize("op", OPERATORS)
+def test_an_exact_tie_meets_only_the_non_strict_operators(op, threshold):
+    minimise, strict = CONSTRAINT_OPERATOR_SENSE[op]
+    met = meets_threshold(np.array([threshold]), threshold, minimise=minimise, strict=strict)
+    assert met.tolist() == [op not in STRICT]
+
+
+# Contrast 2: one representable (nextafter) step either side of the threshold is a numerical tie.
+# At zero that step is the smallest subnormal, the only kind of value inside the budget there.
+@pytest.mark.parametrize("threshold", SIGNED_THRESHOLDS)
 @pytest.mark.parametrize("op,expected", [(">", 0.2), (">=", 0.8), ("<", 0.2), ("<=", 0.8)])
-def test_constraint_draws_within_rounding_of_the_threshold_are_on_it(op, expected, threshold):
-    eps = 1e-12 * max(1.0, threshold)
-    # Five equiprobable draws: one clearly past each side, three on the threshold.
-    draws = [threshold - 1, threshold - eps, threshold, threshold + eps, threshold + 1]
+def test_one_representable_step_either_side_is_a_numerical_tie(op, expected, threshold):
+    # Five equiprobable draws: one clearly past each side, three numerical ties.
+    draws = [threshold - 1, down(threshold), threshold, up(threshold), threshold + 1]
     result = analyze_draws({"x": draws}, [constraint("x", op, threshold)])
     assert result["constraints"][0]["prob_satisfied"] == pytest.approx(expected, abs=1e-15)
     assert result["joint_probability"] == pytest.approx(expected, abs=1e-15)
 
 
-@pytest.mark.parametrize("frame,tie", [("level", 0.5), ("change_abs", 0.0), ("change_rel", 0.0)])
-@pytest.mark.parametrize("offset", [0.0, 1e-12, -1e-12])
-@pytest.mark.parametrize("op", [">", ">=", "<", "<="])
-def test_single_goal_and_one_constraint_joint_agree_at_and_near_a_tie(op, offset, frame, tie):
-    # Same request, same draws, same target and operator, asked both ways. "hold" sits
-    # exactly on `tie` in every draw (its paired effect is 0), so the target is a tie
-    # (offset 0) or within 1e-12 of one.
-    request = linear_request(frame)
+# Contrast 3: genuine offsets lie outside the budget, so the literal sign decides. 1e-12 at 0.3
+# and 2.5e-6 at 2,500,000 (both inside the superseded 1e-9 * max(1, |t|) band), mirrored below
+# zero, and small ordinary values at zero: none of them is a tie.
+@pytest.mark.parametrize(
+    "threshold,offset",
+    [(0.3, 1e-12), (-0.3, 1e-12), (2.5e6, 2.5e-6), (-2.5e6, 2.5e-6), (0.0, 1e-12), (0.0, 1e-300)],
+)
+@pytest.mark.parametrize("op,expected", [(">", 0.4), (">=", 0.6), ("<", 0.4), ("<=", 0.6)])
+def test_genuine_offsets_near_the_threshold_take_their_literal_side(op, expected, threshold, offset):
+    # Five equiprobable draws: one tie, two genuinely on each side.
+    draws = [threshold - 1, threshold - offset, threshold, threshold + offset, threshold + 1]
+    result = analyze_draws({"x": draws}, [constraint("x", op, threshold)])
+    assert result["constraints"][0]["prob_satisfied"] == pytest.approx(expected, abs=1e-15)
+    assert result["joint_probability"] == pytest.approx(expected, abs=1e-15)
+
+
+# Contrast 5 (control): a non-finite draw is never a numerical tie, and the informative
+# finite population (the precision denominator) is unchanged by the tie budget.
+@pytest.mark.parametrize("op,expected", [(">", 0.25), (">=", 0.75), ("<", 0.25), ("<=", 0.75)])
+def test_non_finite_draws_stay_outside_the_population_beside_numerical_ties(op, expected):
+    t = 0.3
+    draws = [t - 1, down(t), up(t), t + 1, float("nan"), float("inf"), float("-inf")]
+    result = analyze_draws({"x": draws}, [constraint("x", op, t)])
+    assert result["constraints"][0]["prob_satisfied"] == pytest.approx(expected, abs=1e-15)
+    assert result["joint_probability"] == pytest.approx(expected, abs=1e-15)
+    assert_precision(result, 4)
+
+
+def goal_and_constraint_request(frame, op, threshold, **kwargs):
+    """One request asking the same target both ways: as the single goal and as a one-limit joint."""
+    request = linear_request(frame, **kwargs)
     request.n_samples = 200
-    threshold = tie + offset
     request.goal_threshold = threshold
     request.goal_direction = "minimise" if op in ("<", "<=") else "maximise"
-    request.goal_threshold_strict = op in (">", "<")
+    request.goal_threshold_strict = op in STRICT
     request.goal_constraints = [constraint("g", op, threshold, frame)]
-    response = RobustnessAnalyzerV2().analyze(request)
-    on_the_threshold = 0.0 if op in (">", "<") else 1.0
-    for option in response.results:
+    return request
+
+
+def chances_asked_both_ways(request):
+    chances = {}
+    for option in RobustnessAnalyzerV2().analyze(request).results:
         ca = option.constraint_analysis
         assert option.probability_of_goal is not None
-        if option.option_id == "hold":
-            assert option.probability_of_goal == on_the_threshold
         assert ca.constraints[0].prob_satisfied == option.probability_of_goal
         assert ca.joint_probability == option.probability_of_goal
+        chances[option.option_id] = option.probability_of_goal
+    return chances
+
+
+# Contrasts 1-3 through both routes. "hold" sits exactly on `tie` in every draw (its paired
+# effect is 0). The target is that tie, one nextafter step from it, or a genuine 1e-12 above
+# or below it; single goal, marginal and joint give the same verdict.
+@pytest.mark.parametrize("frame,tie", [("level", 0.5), ("change_abs", 0.0), ("change_rel", 0.0)])
+@pytest.mark.parametrize("case", [*TIE_CASES, "above", "below"])
+@pytest.mark.parametrize("op", OPERATORS)
+def test_single_goal_and_one_constraint_joint_agree_at_and_near_a_tie(op, case, frame, tie):
+    threshold = {
+        "tie": tie,
+        "step_up": up(tie),
+        "step_down": down(tie),
+        "above": tie + 1e-12,
+        "below": tie - 1e-12,
+    }[case]
+    chances = chances_asked_both_ways(goal_and_constraint_request(frame, op, threshold))
+    assert chances["hold"] == held_verdict(op, case)
+
+
+# Contrast 4: one physical target stated in fraction (raw units x0.01), percent (x1) and scaled
+# raw units (x25,000: today's level 1,750,000) reaches the engine through the existing frame
+# conversion with the same verdicts and chances. "hold" stays at today's level; the target is
+# today (the caller's conversion lands on it exactly at all three scales), one nextafter step
+# from it (round-off), or a genuine 1e-9 of today's raw level away.
+RAW_SCALES = (0.01, 1.0, 25_000.0)
+
+
+def stated_target(frame, k, relative_offset):
+    """The wire value a caller sends for today's raw level moved by `relative_offset` of it."""
+    raw_min, raw_max = 20.0 * k, 120.0 * k
+    span = raw_max - raw_min
+    raw_today = 70.0 * k
+    raw_change = relative_offset * raw_today
+    if frame == "level":
+        return (raw_today + raw_change - raw_min) / span
+    if frame == "change_abs":
+        return raw_change / span
+    return raw_change / raw_today
+
+
+@pytest.mark.parametrize("frame", ["level", "change_abs", "change_rel"])
+@pytest.mark.parametrize("case", [*TIE_CASES, "above", "below"])
+@pytest.mark.parametrize("op", OPERATORS)
+def test_fraction_percent_and_scaled_raw_units_give_the_same_verdicts(op, case, frame):
+    seen = []
+    for k in RAW_SCALES:
+        today = stated_target(frame, k, 0.0)
+        threshold = {
+            "tie": today,
+            "step_up": up(today),
+            "step_down": down(today),
+            "above": stated_target(frame, k, 1e-9),
+            "below": stated_target(frame, k, -1e-9),
+        }[case]
+        request = goal_and_constraint_request(frame, op, threshold, raw_unit_scale=k)
+        chances = chances_asked_both_ways(request)
+        assert chances["hold"] == held_verdict(op, case), k
+        seen.append(chances)
+    assert seen[1] == seen[0] and seen[2] == seen[0]
 
 
 @pytest.mark.parametrize("rho", [0.0, 0.8, -0.8])
