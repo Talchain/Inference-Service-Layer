@@ -65,6 +65,45 @@ def test_discrete_ties_are_compared_exactly(op, expected):
     assert_precision(result, 4)
 
 
+# Follow-up 1 (independent check C): a draw ON the threshold is decided by the single-goal
+# tie band (|v - t| <= 1e-9 * max(1, |t|)), so one rounding step cannot flip a constraint's
+# chance between 0 and 1. On the band: met by >= and <=, not met by > and <.
+@pytest.mark.parametrize("threshold", [0.3, 2.5e6])
+@pytest.mark.parametrize("op,expected", [(">", 0.2), (">=", 0.8), ("<", 0.2), ("<=", 0.8)])
+def test_constraint_draws_within_rounding_of_the_threshold_are_on_it(op, expected, threshold):
+    eps = 1e-12 * max(1.0, threshold)
+    # Five equiprobable draws: one clearly past each side, three on the threshold.
+    draws = [threshold - 1, threshold - eps, threshold, threshold + eps, threshold + 1]
+    result = analyze_draws({"x": draws}, [constraint("x", op, threshold)])
+    assert result["constraints"][0]["prob_satisfied"] == pytest.approx(expected, abs=1e-15)
+    assert result["joint_probability"] == pytest.approx(expected, abs=1e-15)
+
+
+@pytest.mark.parametrize("frame,tie", [("level", 0.5), ("change_abs", 0.0), ("change_rel", 0.0)])
+@pytest.mark.parametrize("offset", [0.0, 1e-12, -1e-12])
+@pytest.mark.parametrize("op", [">", ">=", "<", "<="])
+def test_single_goal_and_one_constraint_joint_agree_at_and_near_a_tie(op, offset, frame, tie):
+    # Same request, same draws, same target and operator, asked both ways. "hold" sits
+    # exactly on `tie` in every draw (its paired effect is 0), so the target is a tie
+    # (offset 0) or within 1e-12 of one.
+    request = linear_request(frame)
+    request.n_samples = 200
+    threshold = tie + offset
+    request.goal_threshold = threshold
+    request.goal_direction = "minimise" if op in ("<", "<=") else "maximise"
+    request.goal_threshold_strict = op in (">", "<")
+    request.goal_constraints = [constraint("g", op, threshold, frame)]
+    response = RobustnessAnalyzerV2().analyze(request)
+    on_the_threshold = 0.0 if op in (">", "<") else 1.0
+    for option in response.results:
+        ca = option.constraint_analysis
+        assert option.probability_of_goal is not None
+        if option.option_id == "hold":
+            assert option.probability_of_goal == on_the_threshold
+        assert ca.constraints[0].prob_satisfied == option.probability_of_goal
+        assert ca.joint_probability == option.probability_of_goal
+
+
 @pytest.mark.parametrize("rho", [0.0, 0.8, -0.8])
 def test_two_normals_closed_form_joint(rho):
     # Independent Z,W; X=Z, Y=rho*Z+sqrt(1-rho^2)*W.

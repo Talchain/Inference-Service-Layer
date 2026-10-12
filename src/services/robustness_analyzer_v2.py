@@ -596,6 +596,31 @@ def get_max_cost_units() -> int:
 GOAL_THRESHOLD_TIE_TOLERANCE = 1e-9
 
 
+def meets_threshold(
+    values: np.ndarray, threshold: float, *, minimise: bool, strict: bool
+) -> np.ndarray:
+    """The ONE per-draw goal comparison: ``probability_of_goal`` and every goal constraint use it.
+
+    AIQ 5880886200: a draw within a relative GOAL_THRESHOLD_TIE_TOLERANCE of the threshold is ON
+    it — not met when strict, met when not. A compared level and its threshold arrive by
+    different arithmetic, so an exact comparison let one ulp decide 0% vs 100%; a constraint
+    compared exactly could then disagree with the single-goal chance for the same target
+    (independent check C, follow-up 1).
+    """
+    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(1.0, abs(threshold))
+    past = values < threshold if minimise else values > threshold
+    return np.asarray(past & ~on if strict else past | on, dtype=bool)
+
+
+# A goal constraint's operator as (minimise, strict) for ``meets_threshold``.
+CONSTRAINT_OPERATOR_SENSE: Dict[str, Tuple[bool, bool]] = {
+    ">=": (False, False),
+    ">": (False, True),
+    "<=": (True, False),
+    "<": (True, True),
+}
+
+
 @dataclass(frozen=True)
 class WeightedCost:
     """Result of compute_weighted_cost: the total plus a per-term breakdown.
@@ -8303,20 +8328,14 @@ class RobustnessAnalyzerV2:
                 strict = request.goal_threshold_strict is True
                 minimise = request.goal_direction == "minimise"
 
-                # AIQ 5880886200: a draw within a relative GOAL_THRESHOLD_TIE_TOLERANCE of the threshold is ON it — not
-                # met when strict, met when not. A held option's compared level (the goal baseline, paired) and the
-                # threshold arrive by different arithmetic, so an exact comparison let one ulp decide 0% vs 100%.
-                def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
-                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(
-                        1.0, abs(threshold)
-                    )
-                    past = values < threshold if minimise else values > threshold
-                    return np.asarray(past & ~on if strict else past | on, dtype=bool)
-
+                # AIQ 5880886200: the shared tie band (``meets_threshold``) decides a draw ON the threshold.
                 if goal_threshold_plan.delta_threshold is not None:
                     # Caller attested the threshold is already in the samples' frame.
                     compared = samples_array
-                    meets = meets_threshold(compared, goal_threshold_plan.delta_threshold)
+                    meets = meets_threshold(
+                        compared, goal_threshold_plan.delta_threshold,
+                        minimise=minimise, strict=strict,
+                    )
                 else:
                     # Level frame: recover the goal's LEVEL per draw by adding the
                     # option's causal effect to the level the goal is actually at.
@@ -8340,7 +8359,10 @@ class RobustnessAnalyzerV2:
                         compared = np.clip(compared, goal_domain[0], goal_domain[1])
                     # A plan with no delta threshold is a level plan: both are set at one site.
                     assert goal_threshold_plan.level_threshold is not None
-                    meets = meets_threshold(compared, goal_threshold_plan.level_threshold)
+                    meets = meets_threshold(
+                        compared, goal_threshold_plan.level_threshold,
+                        minimise=minimise, strict=strict,
+                    )
 
                 # 2.477(j) — FINITENESS GATE. This comparison used to run over the
                 # RAW array, and `+inf >= anything` is True. So the one shape that
@@ -12680,17 +12702,18 @@ class RobustnessAnalyzerV2:
         Returns:
             True if value satisfies constraint, False otherwise
         """
-        if constraint.operator == ">=":
-            return value >= constraint.threshold
-        elif constraint.operator == "<=":
-            return value <= constraint.threshold
-        elif constraint.operator == ">":
-            return value > constraint.threshold
-        elif constraint.operator == "<":
-            return value < constraint.threshold
-        else:
+        return bool(self._constraint_met_per_draw([value], constraint)[0])
+
+    @staticmethod
+    def _constraint_met_per_draw(values: Sequence[float], constraint: GoalConstraint) -> np.ndarray:
+        """Per-draw verdicts for one constraint, through the single-goal tie rule (``meets_threshold``)."""
+        if constraint.operator not in CONSTRAINT_OPERATOR_SENSE:
             # This should never happen due to Pydantic validation
             raise ValueError(f"Unknown operator: {constraint.operator}")
+        minimise, strict = CONSTRAINT_OPERATOR_SENSE[constraint.operator]
+        return meets_threshold(
+            np.asarray(values, dtype=float), constraint.threshold, minimise=minimise, strict=strict
+        )
 
     def _compute_constraint_probabilities(
         self,
@@ -12783,14 +12806,13 @@ class RobustnessAnalyzerV2:
         # this matrix, so dropping rows here would silently MISALIGN margins with
         # their samples. The mask travels alongside instead, and every count
         # applies it.
-        satisfaction_matrix: List[List[bool]] = []
-        for sample_idx in range(n_samples):
-            sample_satisfactions = []
-            for c_idx, constraint in enumerate(constraints):
-                value = resolved_values[c_idx][sample_idx]
-                satisfied = self._check_constraint_satisfied(value, constraint)
-                sample_satisfactions.append(satisfied)
-            satisfaction_matrix.append(sample_satisfactions)
+        met_by_constraint = [
+            self._constraint_met_per_draw(resolved_values[c_idx], constraint).tolist()
+            for c_idx, constraint in enumerate(constraints)
+        ]
+        satisfaction_matrix: List[List[bool]] = [
+            [met[sample_idx] for met in met_by_constraint] for sample_idx in range(n_samples)
+        ]
 
         # Per-constraint probabilities, over the informative draws only.
         per_constraint_probs = {}
