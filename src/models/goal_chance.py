@@ -10,6 +10,25 @@ from typing import Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class ConstraintPrecision(BaseModel):
+    """Monte Carlo error of a joint event or marginal, not model uncertainty."""
+
+    n_informative: int = Field(
+        ..., ge=1, description="Number of same-draw, finite observations used in this estimate"
+    )
+    standard_error: float = Field(
+        ...,
+        ge=0,
+        le=0.5,
+        description=(
+            "Plug-in Monte Carlo standard error sqrt(p * (1 - p) / n_informative), "
+            "in probability units. Simulation precision only, not uncertainty in the model "
+            "or its starting value. Zero at observed p=0 or p=1 does not prove certainty; "
+            "consumers must also consider n_informative."
+        ),
+    )
+
+
 class GoalChancePrecision(BaseModel):
     """How precisely the simulation estimated ``probability_of_goal``.
 

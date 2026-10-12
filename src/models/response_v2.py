@@ -31,7 +31,7 @@ from src.config.stability_thresholds import GRAPH_STRUCTURAL_METHOD_VERSION
 from src.constants import GRID_DO_EVPC_METHOD, RESPONSE_SCHEMA_VERSION_V2
 
 # Range→distribution disclosure model (ROADMAP 2.720; pure Pydantic, no cycle)
-from src.models.goal_chance import GoalChanceDrivers, GoalChancePrecision
+from src.models.goal_chance import ConstraintPrecision, GoalChanceDrivers, GoalChancePrecision
 from src.models.range_fit import RangeFitDisclosure
 from src.models.identity_evaluation import IdentityEvaluation
 from src.models.structural_influence import StructuralInfluence
@@ -620,7 +620,7 @@ class ConstraintResultV2(BaseModel):
         ),
     )
     node_id: str = Field(..., description="Node ID the constraint applies to")
-    operator: Literal[">=", "<="] = Field(..., description="Comparison operator")
+    operator: Literal[">=", "<=", ">", "<"] = Field(..., description="Comparison operator")
     threshold: float = Field(..., description="Threshold value")
     label: Optional[str] = Field(None, description="Human-readable label for coaching")
     prob_satisfied: float = Field(
@@ -628,6 +628,10 @@ class ConstraintResultV2(BaseModel):
         ge=0,
         le=1,
         description="Probability that this constraint is satisfied (count / n_samples)",
+    )
+    prob_satisfied_precision: Optional[ConstraintPrecision] = Field(
+        None,
+        description="Monte Carlo precision of prob_satisfied over the same informative draws.",
     )
     failure_margin_median: Optional[float] = Field(
         None,
@@ -699,6 +703,13 @@ class ConstraintAnalysisV2(BaseModel):
             "conditionals) for an option whose rows mix a limit scored from a "
             "stated range with other limits (TEMPORAL step 1), named by "
             "CONSTRAINT_JOINT_WITHHELD."
+        ),
+    )
+    joint_probability_precision: Optional[ConstraintPrecision] = Field(
+        None,
+        description=(
+            "Monte Carlo precision of same-draw joint_probability. Omitted whenever the "
+            "joint is withheld, including incomplete conjunctions. Not model uncertainty."
         ),
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(

@@ -592,8 +592,69 @@ def get_max_cost_units() -> int:
     return DEFAULT_MAX_COST_UNITS
 
 
-# AIQ 5880886200 (ISL #209): the relative band within which a goal draw is ON its threshold (|v − t| ≤ tol·max(1, |t|)).
-GOAL_THRESHOLD_TIE_TOLERANCE = 1e-9
+# AIE 6115686431 (C numerical decision; supersedes the 1e-9 · max(1, |t|) band of AIQ 5880886200):
+# the numerical-tie budget, in binary64 epsilons relative to the compared operands. An explicit operational
+# allowance for the existing paired/conversion arithmetic — not a measurement resolution, not a
+# model-uncertainty estimate, and not a bound on every possible cancellation error. A count of EPSILONS, not
+# of spacings (ulps): ulp(10t) is not 10 ulp(t), so a spacing count is unit-dependent (ISL re-scope I-1).
+GOAL_THRESHOLD_TIE_EPSILONS = 8
+
+
+def meets_threshold(
+    values: np.ndarray, threshold: float, *, minimise: bool, strict: bool
+) -> np.ndarray:
+    """The ONE per-draw goal comparison: ``probability_of_goal`` and every goal constraint use it.
+
+    AIE 6115686431: ``values`` and ``threshold`` must already be in the same frame; this helper
+    cannot repair a frame mismatch. A draw is a numerical TIE when
+    ``|v − t| <= 8 · eps · max(|v|, |t|)`` (eight binary64 epsilons RELATIVE to the compared
+    operands): not met by ``>``/``<``, met by ``>=``/``<=``. Beyond that budget the literal sign
+    comparison decides, so a genuine offset (1e-12 at 0.3, 2.5e-6 at 2,500,000) is never a tie.
+    Relative, not a count of spacings: ulp(10·t) is not 10·ulp(t), so a spacing count let an exact
+    change of units move a draw across the budget (independent delta check r2, 12 Oct). Scaling both
+    operands exactly scales both sides of this inequality exactly, so no exact rescaling changes a
+    verdict. No semantic tolerance and no unit floor: at zero only zero is a tie. A non-finite draw is
+    never a tie; the informative mask excludes it downstream.
+    """
+    values = np.asarray(values, dtype=float)
+    t = float(threshold)
+    on = numerical_tie(values, t)
+    past = values < t if minimise else values > t
+    return np.asarray(past & ~on if strict else past | on, dtype=bool)
+
+
+def numerical_tie(values: "Sequence[float] | np.ndarray", threshold: float) -> np.ndarray:
+    """Per draw: is it a numerical TIE with ``threshold`` (``meets_threshold``'s budget)?
+
+    The one statement of the tie budget. ``meets_threshold`` decides every verdict from it, and
+    the near-miss diagnostics read it so that a tie failing a strict operator, which sits AT the
+    threshold, reports a zero margin (ISL re-scope I-3). False for any non-finite operand.
+    """
+    values = np.asarray(values, dtype=float)
+    t = float(threshold)
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        # Both operands are first scaled by the same power of two, into the larger one's binade [0.5, 1),
+        # so the difference and the budget are computed exactly at every magnitude — no overflow near
+        # float64 max, no underflow among subnormals — and the test is the real-number inequality
+        # (I-1 review, pinned against exact rationals). The larger operand always scales exactly; the
+        # smaller can lose bits only when it is far below the larger one, never within reach of a tie:
+        # a tie needs both within a factor of two (Sterbenz: v − u then exact), and the budget
+        # 2^-49 · max(|v|, |u|) is a normal number >= 2^-50 (or 0 when both operands are 0).
+        _, exponent = np.frexp(np.maximum(np.abs(values), abs(t)))
+        v, u = np.ldexp(values, -exponent), np.ldexp(t, -exponent)
+        budget = GOAL_THRESHOLD_TIE_EPSILONS * np.finfo(float).eps * np.maximum(np.abs(v), np.abs(u))
+        return np.asarray(
+            np.isfinite(values) & math.isfinite(t) & (np.abs(v - u) <= budget), dtype=bool
+        )
+
+
+# A goal constraint's operator as (minimise, strict) for ``meets_threshold``.
+CONSTRAINT_OPERATOR_SENSE: Dict[str, Tuple[bool, bool]] = {
+    ">=": (False, False),
+    ">": (False, True),
+    "<=": (True, False),
+    "<": (True, True),
+}
 
 
 @dataclass(frozen=True)
@@ -3415,7 +3476,7 @@ def _lognormal_limit_probability(median: float, sigma: float, operator: str, lim
         below = 0.0
     else:
         below = 0.5 * (1.0 + math.erf(math.log(limit / median) / (sigma * math.sqrt(2.0))))
-    return below if operator == "<=" else 1.0 - below
+    return below if operator in ("<=", "<") else 1.0 - below
 
 
 def _clamped_limit_probability(
@@ -3427,8 +3488,18 @@ def _clamped_limit_probability(
 ) -> float:
     """P(clamp(X) op limit): what a truncating reader would report. Clamping moves only the
     mass beyond a bound onto that bound, so the answer changes only when the limit itself
-    lies beyond a bound."""
-    if operator == "<=":
+    lies beyond a bound, or at a bound for a strict comparison."""
+    if operator == "<":
+        if low is not None and limit <= low:
+            return 0.0
+        if high is not None and limit > high:
+            return 1.0
+    elif operator == ">":
+        if high is not None and limit >= high:
+            return 0.0
+        if low is not None and limit < low:
+            return 1.0
+    elif operator == "<=":
         if high is not None and limit >= high:
             return 1.0
         if low is not None and limit < low:
@@ -3526,6 +3597,78 @@ class GoalThresholdPlan:
     def needs_status_quo_reference(self) -> bool:
         """True iff computing this plan requires the per-draw status-quo series."""
         return self.level_threshold is not None
+
+    def compared(
+        self,
+        samples: "Sequence[float] | np.ndarray",
+        status_quo: "Sequence[float] | np.ndarray | None",
+        *,
+        option_id: str,
+        domain: Optional[Tuple[float, float]],
+        range_draws: Optional[Sequence[float]],
+    ) -> Tuple[np.ndarray, float]:
+        """THE compared draws and threshold for one option under this plan: the ONE builder.
+
+        Every argument that changes the compared array is REQUIRED (independent check r1, 12 Oct:
+        the EVPI joint omitted the level domains and compared unclamped levels beside a clamped
+        goal, marginal and joint, 0.999 against 0). The baseline mode (``per_draw_baseline``) and
+        the clamp exemption (``change_frame``) ride on the plan itself; ``domain`` is the node's
+        entry in the analysis's ``level_domains`` (None when it has none: a horizon stock never
+        does), and ``range_draws`` its stated-range draws for this option, or None.
+
+        ISL re-scope I-2 (DL, 12 Oct): ``probability_of_goal`` (Channel A), every goal
+        constraint's marginal and joint (Channel B) and the EVPI joint all take their verdicts
+        from ``meets_threshold`` on exactly this pair. A target asked as the single goal and as a
+        constraint (same node, frame and threshold) resolves to an equal plan, so both are decided
+        on identical arithmetic. Before this, a change-stated limit was mapped into its STATED
+        frame, ``(level − today) × scale`` against the stated value, while the goal compared the
+        level against the converted level: equal in exact arithmetic, not near a tie in binary64.
+
+        * an option that SETS the target: what it sets, on every draw (the level, or for a change
+          plan the change), or its stated range's draws (a level limit only);
+        * a ``delta`` plan: the raw samples (the caller's attestation, or a root's identity),
+          never clipped;
+        * a ``level`` plan: ``baseline + (sample − status quo)`` on the same draw (the status-quo
+          draw itself as the baseline for a random stock at the horizon). A change-stated target
+          on a LEVEL node with today's level is therefore compared as the level ``b + change``;
+          any other change target (a change node, today = 0) as the paired change;
+        * clipped to ``domain`` (the node's level domain) unless the plan compares a change. A
+          non-finite draw stays non-finite, so it leaves the population rather than being
+          clipped into it.
+
+        Returns ``(compared, threshold)``, where ``threshold`` is the plan's own level or delta
+        threshold, never the value as stated.
+        """
+        values = np.asarray(samples, dtype=float)
+        set_value = dict(self.pinned_levels).get(option_id)
+        if set_value is not None:
+            if range_draws is not None:
+                # TEMPORAL step 1: the option sets the target to a stated RANGE, so its level is
+                # that draw of the range. The plan-time refusal admits it only for a 'level' limit
+                # on a root, whose series is already in the limit's frame.
+                assert not self.change_frame, "a ranged pin is scored only for a level limit"
+                assert len(range_draws) == values.size, "the range series must pair with the Monte Carlo"
+                compared = np.asarray(range_draws, dtype=float)
+            else:
+                compared = np.full(values.shape, set_value, dtype=float)
+        elif self.level_threshold is None:
+            assert self.delta_threshold is not None, "a plan carries a level or a delta threshold"
+            return values, self.delta_threshold
+        else:
+            # level_threshold and goal_baseline are set together at one site; the status-quo
+            # draw must pair with the option's draw (common random numbers) or the difference
+            # is a fabrication from misaligned draws.
+            assert self.goal_baseline is not None, "a level plan carries the baseline it converts against"
+            assert status_quo is not None, "a level plan needs the per-draw status-quo reference"
+            reference = np.asarray(status_quo, dtype=float)
+            assert reference.shape == values.shape, "the status-quo reference must pair draw for draw"
+            baseline = reference if self.per_draw_baseline else self.goal_baseline
+            compared = baseline + (values - reference)
+        if domain is not None and not self.change_frame:
+            compared = np.where(np.isfinite(compared), np.clip(compared, domain[0], domain[1]), compared)
+        threshold = self.level_threshold if self.level_threshold is not None else self.delta_threshold
+        assert threshold is not None, "a plan carries a level or a delta threshold"
+        return compared, threshold
 
 
 @dataclass(frozen=True)
@@ -5054,6 +5197,8 @@ class RobustnessAnalyzerV2:
                         budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
                         constraint_plans=constraint_plans,
                         objective=objective_plan,
+                        # The SAME level domains the goal, marginal and joint are clamped to.
+                        level_domains=level_domains,
                     )
                 except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
                     evpi_refused = True
@@ -6183,12 +6328,16 @@ class RobustnessAnalyzerV2:
             for option in request.options:
                 if not level_index or option.id not in constraint_node_values:
                     continue
-                resolved = self._resolve_constraint_series(
+                # Report-only: the UNCLAMPED levels (no domain), because this disclosure reports
+                # what lies outside the domain; never a verdict. No stated range, as before.
+                resolved, _ = self._resolve_constraint_series(
                     constraint_node_values,
                     constraints,
                     constraint_plans,
                     status_quo_node_values,
                     option.id,
+                    range_series=None,
+                    level_domains=None,
                 )
                 for node_id, index in level_index.items():
                     level_series.setdefault(node_id, {})[option.id] = resolved[index]
@@ -8090,23 +8239,26 @@ class RobustnessAnalyzerV2:
         constraint_plans: Dict[int, "GoalThresholdPlan"],
         status_quo_node_values: Dict[str, List[float]],
         option_id: str,
-        range_series: Optional[Dict[str, List[float]]] = None,
-    ) -> Dict[int, List[float]]:
-        """Put every constraint's samples into the frame ITS threshold is stated in.
+        *,
+        range_series: Optional[Dict[str, List[float]]],
+        level_domains: Optional[Dict[str, Tuple[float, float]]],
+    ) -> Tuple[Dict[int, List[float]], Dict[int, float]]:
+        """Each constraint's COMPARED draws and threshold, from the ONE builder.
 
-        This is the whole fix in four lines of arithmetic, and it is deliberately
-        the SAME arithmetic Channel A applies to ``probability_of_goal``::
+        ISL re-scope I-2: every series comes from ``GoalThresholdPlan.compared``, the builder
+        ``probability_of_goal`` reads, so a limit and the single goal asked about the same
+        target are compared on identical arithmetic, in the plan's frame::
 
             level_i = baseline + (option_sample_i - status_quo_sample_i)
 
-        Everything downstream — satisfaction, joint probability, conditionals,
-        failure margins, near-miss fractions — then operates on a series that is
-        commensurable with the threshold by construction. That is why no
-        comparison site needs a frame check of its own: there is nothing left for
-        one to catch.
-
-        A 'delta' plan passes its samples through untouched, on the caller's
-        attestation that they are already in the samples' own frame.
+        for a level plan (a change-stated limit on a LEVEL node included: it is compared as
+        the level ``b + change``, as the goal is), the raw samples for a 'delta' plan (the
+        caller's attestation), and what an option sets for an option that sets the target.
+        Returned with each limit's COMPARED threshold (the plan's, not the value as stated).
+        Both ``range_series`` and ``level_domains`` are REQUIRED: every verdict-bearing caller
+        passes the analysis's own (the goal route clips with the same ``level_domains``); only
+        the report-only out-of-domain disclosures pass ``level_domains=None``, by name, to read
+        the unclamped levels.
 
         Keyed by constraint INDEX, not node_id: two constraints may target the
         same node with different frames, and collapsing them by node would let one
@@ -8114,56 +8266,18 @@ class RobustnessAnalyzerV2:
         """
         option_values = constraint_node_values[option_id]
         resolved: Dict[int, List[float]] = {}
-
+        thresholds: Dict[int, float] = {}
         for index, constraint in enumerate(constraints):
-            plan = constraint_plans[index]
-            samples = option_values[constraint.node_id]
-
-            # An option that sets the target is compared at exactly the level it sets
-            # (on a non-root target its samples are that level in the model's frame).
-            set_level = dict(plan.pinned_levels).get(option_id)
-            if set_level is not None:
-                sampled = (range_series or {}).get(constraint.node_id)
-                if sampled is not None:
-                    # TEMPORAL step 1: the option sets the target to a stated RANGE, so its
-                    # level is that draw of the range, not one number on every draw. The
-                    # plan-time refusal admits only a 'level' limit on a root whose point lies
-                    # in the range's P40–P60 without moving the verdict, and the series is
-                    # already in the limit's frame.
-                    assert not plan.change_frame, "a ranged pin is scored only for a level limit"
-                    pairs_draw_for_draw = len(sampled) == len(samples)
-                    assert pairs_draw_for_draw, "the range series must pair with the Monte Carlo"
-                    resolved[index] = list(sampled)
-                    continue
-                resolved[index] = [set_level] * len(samples)
-                continue
-            if plan.level_threshold is None:
-                resolved[index] = samples
-                continue
-
-            reference = status_quo_node_values[constraint.node_id]
-            baseline = plan.goal_baseline
-            # GoalThresholdPlan sets level_threshold and goal_baseline together
-            # at one site, so a level plan always carries a baseline. Asserted
-            # rather than silenced: if that invariant is ever broken, this must
-            # fail loudly here rather than propagate a None into the arithmetic
-            # and surface as a TypeError halfway through a Monte Carlo.
-            assert baseline is not None, (
-                "a level plan must carry the baseline it converts against "
-                f"(constraint index {index}, node {constraint.node_id})"
+            compared, threshold = constraint_plans[index].compared(
+                option_values[constraint.node_id],
+                status_quo_node_values.get(constraint.node_id),
+                option_id=option_id,
+                domain=(level_domains or {}).get(constraint.node_id),
+                range_draws=(range_series or {}).get(constraint.node_id),
             )
-            # strict=True is load-bearing, not lint hygiene: the whole conversion
-            # rests on the option sample and the reference sample coming from the
-            # SAME Monte Carlo draw. A length mismatch means that pairing has
-            # broken, and a silent zip() would truncate to the shorter series and
-            # produce a plausible number from misaligned draws — a fabrication of
-            # exactly the kind this change exists to make impossible.
-            resolved[index] = [
-                (reference_sample if plan.per_draw_baseline else baseline) + (sample - reference_sample)
-                for sample, reference_sample in zip(samples, reference, strict=True)
-            ]
-
-        return resolved
+            resolved[index] = compared.tolist()
+            thresholds[index] = threshold
+        return resolved, thresholds
 
     def _compute_option_results(
         self,
@@ -8176,9 +8290,10 @@ class RobustnessAnalyzerV2:
         status_quo_outcomes: Optional[List[float]] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
-        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
+        *,
+        level_domains: Dict[str, Tuple[float, float]],
         goal_level_anchor: Optional[float] = None,
-        range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
+        range_series: Optional[Dict[str, Dict[str, List[float]]]],
         goal_chance_quantities: Optional[Sequence[GoalChanceQuantity]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
@@ -8239,6 +8354,11 @@ class RobustnessAnalyzerV2:
             and goal_identity.accumulation_derived
         )
         spread_goal = horizon_goal and _rate_spread_horizon(request.graph, request.goal_node_id)
+        if horizon_goal and request.goal_node_id in level_domains:
+            # P45: a stock at the horizon is the explicit closed form; today's domain never trims it.
+            # ``_node_level_frames`` gives it none; a direct caller's is dropped HERE, once, so the
+            # goal and every limit on it read the SAME domains (ISL re-scope, independent check r1).
+            level_domains = {k: v for k, v in level_domains.items() if k != request.goal_node_id}
         if goal_chance_quantities is not None:
             stock_cut_quantities = accumulation_stock_cut_quantities(
                 request.graph, request.goal_node_id, factor_centres(request)
@@ -8293,44 +8413,26 @@ class RobustnessAnalyzerV2:
                 strict = request.goal_threshold_strict is True
                 minimise = request.goal_direction == "minimise"
 
-                # AIQ 5880886200: a draw within a relative GOAL_THRESHOLD_TIE_TOLERANCE of the threshold is ON it — not
-                # met when strict, met when not. A held option's compared level (the goal baseline, paired) and the
-                # threshold arrive by different arithmetic, so an exact comparison let one ulp decide 0% vs 100%.
-                def meets_threshold(values: np.ndarray, threshold: float) -> np.ndarray:
-                    on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_TOLERANCE * max(
-                        1.0, abs(threshold)
-                    )
-                    past = values < threshold if minimise else values > threshold
-                    return np.asarray(past & ~on if strict else past | on, dtype=bool)
-
-                if goal_threshold_plan.delta_threshold is not None:
-                    # Caller attested the threshold is already in the samples' frame.
-                    compared = samples_array
-                    meets = meets_threshold(compared, goal_threshold_plan.delta_threshold)
-                else:
-                    # Level frame: recover the goal's LEVEL per draw by adding the
-                    # option's causal effect to the level the goal is actually at.
-                    # Paired element-wise with the status-quo draw, so the factors'
-                    # current values, the sampled strengths and the goal's intercept
-                    # all cancel instead of being mistaken for progress.
-                    effect = samples_array - np.array(status_quo_outcomes)
-                    assert goal_threshold_plan.goal_baseline is not None
-                    baseline_array = (
-                        np.array(status_quo_outcomes) if goal_threshold_plan.per_draw_baseline
-                        else goal_threshold_plan.goal_baseline
-                    )
-                    compared = baseline_array + effect
-                    goal_domain = level_domains.get(request.goal_node_id)
-                    if (
-                        goal_domain is not None
-                        and not goal_threshold_plan.change_frame
-                        and not horizon_goal
-                    ):
-                        # B1a: a reported LEVEL, clamped to the goal's domain (NaN stays NaN).
-                        compared = np.clip(compared, goal_domain[0], goal_domain[1])
-                    # A plan with no delta threshold is a level plan: both are set at one site.
-                    assert goal_threshold_plan.level_threshold is not None
-                    meets = meets_threshold(compared, goal_threshold_plan.level_threshold)
+                # AIE 6115686431: the shared tie budget (``meets_threshold``) decides a draw ON the threshold.
+                # ISL re-scope I-2: on the compared draws and threshold from the ONE builder
+                # (``GoalThresholdPlan.compared``), which every goal constraint on this target reads too.
+                # A delta plan compares the raw samples (the caller's attestation); a level plan the
+                # goal's LEVEL per draw, the option's causal effect added to the level the goal is at,
+                # paired with the status-quo draw so the factors' current values, the sampled
+                # strengths and the goal's intercept cancel instead of being mistaken for progress;
+                # B1a: a reported level is clamped to the goal's domain, read exactly as every other
+                # route reads it, ``level_domains.get(node)`` (a horizon stock has none: see above).
+                compared, compared_threshold = goal_threshold_plan.compared(
+                    samples_array,
+                    status_quo_outcomes,
+                    option_id=option.id,
+                    domain=level_domains.get(request.goal_node_id),
+                    # Channel A refuses a goal an option sets, so no option's stated range applies.
+                    range_draws=None,
+                )
+                meets = meets_threshold(
+                    compared, compared_threshold, minimise=minimise, strict=strict
+                )
 
                 # 2.477(j) — FINITENESS GATE. This comparison used to run over the
                 # RAW array, and `+inf >= anything` is True. So the one shape that
@@ -8536,6 +8638,7 @@ class RobustnessAnalyzerV2:
                             threshold=c["threshold"],
                             label=c["label"],
                             prob_satisfied=c["prob_satisfied"],
+                            prob_satisfied_precision=c["prob_satisfied_precision"],
                             failure_margin_median=c["failure_margin_median"],
                             near_miss_fraction=c["near_miss_fraction"],
                             binding=c["binding"],
@@ -8547,6 +8650,7 @@ class RobustnessAnalyzerV2:
                     constraint_analysis_result = ConstraintAnalysis(
                         constraints=constraint_results,
                         joint_probability=analysis_dict["joint_probability"],
+                        joint_probability_precision=analysis_dict["joint_probability_precision"],
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
                     sampled_ranges = [
@@ -11902,6 +12006,8 @@ class RobustnessAnalyzerV2:
         budget_ms: Optional[float] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         objective: Optional["ObjectivePlan"] = None,
+        *,
+        level_domains: Dict[str, Tuple[float, float]],
     ) -> Optional[List[Dict[str, Any]]]:
         """Compute Expected Value of Perfect Information (EVPI) per factor.
 
@@ -11992,6 +12098,7 @@ class RobustnessAnalyzerV2:
             deadline=deadline,
             constraint_plans=constraint_plans,
             objective=objective,
+            level_domains=level_domains,
         )
         if baseline_metric is None:
             # Deadline tripped inside the baseline sample loop.
@@ -12046,6 +12153,7 @@ class RobustnessAnalyzerV2:
                 deadline=deadline,
                 constraint_plans=constraint_plans,
                 objective=objective,
+                level_domains=level_domains,
             )
             if perfect_metric is None:
                 # Deadline tripped inside this factor's MC pass — discard the whole
@@ -12135,6 +12243,8 @@ class RobustnessAnalyzerV2:
         deadline: Optional["PhaseDeadline"] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         objective: Optional["ObjectivePlan"] = None,
+        *,
+        level_domains: Dict[str, Tuple[float, float]],
     ) -> Optional[float]:
         """Compute the EVPI metric for a fixed decision policy over n_samples.
 
@@ -12245,16 +12355,24 @@ class RobustnessAnalyzerV2:
             # all-or-nothing signal and analyze() discloses it.
             if constraint_plans is None:
                 return None
-            resolved_values = self._resolve_constraint_series(
+            # ISL re-scope I-2: compared on the ONE builder's draws and threshold, as the wire
+            # block's joint is. Before, this compared a change-stated limit's LEVELS against its
+            # STATED change, a frame mismatch on every draw; and (independent check r1) its levels
+            # UNCLAMPED beside the wire block's clamped ones. Now the analysis's own level_domains.
+            # No stated range: this phase is skipped when any limit is scored from one.
+            resolved_values, compared_thresholds = self._resolve_constraint_series(
                 constraint_node_values,
                 request.goal_constraints,
                 constraint_plans,
                 status_quo_node_values,
                 recommended_option_id,
+                range_series=None,
+                level_domains=level_domains,
             )
             probabilities = self._compute_constraint_probabilities(
                 resolved_values,
                 request.goal_constraints,
+                thresholds=compared_thresholds,
             )
             # 2.477(k): no informative draw => no honest joint probability. This
             # already returns None on other refusals above; same treatment.
@@ -12668,19 +12786,32 @@ class RobustnessAnalyzerV2:
         Returns:
             True if value satisfies constraint, False otherwise
         """
-        if constraint.operator == ">=":
-            return value >= constraint.threshold
-        elif constraint.operator == "<=":
-            return value <= constraint.threshold
-        else:
+        return bool(self._constraint_met_per_draw([value], constraint, constraint.threshold)[0])
+
+    @staticmethod
+    def _constraint_met_per_draw(
+        values: Sequence[float], constraint: GoalConstraint, threshold: float
+    ) -> np.ndarray:
+        """Per-draw verdicts for one constraint, through the single-goal tie rule (``meets_threshold``).
+
+        ``values`` and ``threshold`` are the COMPARED pair (``GoalThresholdPlan.compared``); the
+        constraint supplies only its operator. Required, not defaulted to the stated value: for a
+        change-stated limit the stated value is not in the compared frame (ISL re-scope I-2).
+        """
+        if constraint.operator not in CONSTRAINT_OPERATOR_SENSE:
             # This should never happen due to Pydantic validation
             raise ValueError(f"Unknown operator: {constraint.operator}")
+        minimise, strict = CONSTRAINT_OPERATOR_SENSE[constraint.operator]
+        return meets_threshold(
+            np.asarray(values, dtype=float), threshold, minimise=minimise, strict=strict
+        )
 
     def _compute_constraint_probabilities(
         self,
         resolved_values: Dict[int, List[float]],
         constraints: List[GoalConstraint],
         *,
+        thresholds: Dict[int, float],
         joint_emitted: bool = True,
     ) -> Optional[Tuple[Dict[str, float], float, List[List[bool]], List[bool]]]:
         """
@@ -12698,9 +12829,12 @@ class RobustnessAnalyzerV2:
         a structural zero cannot be reintroduced by a caller here.
 
         Args:
-            resolved_values: Dict[constraint_index, List[sample_values]] in the
-                frame that constraint's threshold is stated in.
+            resolved_values: Dict[constraint_index, List[sample_values]], the
+                COMPARED draws from ``GoalThresholdPlan.compared``.
             constraints: List of GoalConstraint objects
+            thresholds: Dict[constraint_index, compared threshold], the plan's own
+                threshold in the same frame (ISL re-scope I-2). REQUIRED: the
+                stated value is not in that frame for a change-stated limit.
 
         Returns:
             Tuple of:
@@ -12767,14 +12901,15 @@ class RobustnessAnalyzerV2:
         # this matrix, so dropping rows here would silently MISALIGN margins with
         # their samples. The mask travels alongside instead, and every count
         # applies it.
-        satisfaction_matrix: List[List[bool]] = []
-        for sample_idx in range(n_samples):
-            sample_satisfactions = []
-            for c_idx, constraint in enumerate(constraints):
-                value = resolved_values[c_idx][sample_idx]
-                satisfied = self._check_constraint_satisfied(value, constraint)
-                sample_satisfactions.append(satisfied)
-            satisfaction_matrix.append(sample_satisfactions)
+        met_by_constraint = [
+            self._constraint_met_per_draw(
+                resolved_values[c_idx], constraint, thresholds[c_idx]
+            ).tolist()
+            for c_idx, constraint in enumerate(constraints)
+        ]
+        satisfaction_matrix: List[List[bool]] = [
+            [met[sample_idx] for met in met_by_constraint] for sample_idx in range(n_samples)
+        ]
 
         # Per-constraint probabilities, over the informative draws only.
         per_constraint_probs = {}
@@ -12905,6 +13040,7 @@ class RobustnessAnalyzerV2:
         near_miss_fraction_threshold: float = 0.1,
         *,
         informative: List[bool],
+        ties: Dict[int, List[bool]],
     ) -> Dict[int, Dict[str, Any]]:
         """
         Compute near-miss diagnostics for each constraint.
@@ -12933,6 +13069,10 @@ class RobustnessAnalyzerV2:
                 constraint's value is a real number. REQUIRED and keyword-only:
                 a fail-open default would let a future caller silently restore
                 the raw denominator with no test red anywhere.
+            ties: per constraint, per draw, whether the COMPARED draw is a
+                numerical tie with the compared threshold (``numerical_tie``).
+                ISL re-scope I-3: a tie that fails (a strict operator) sits AT
+                the threshold, so its margin is exactly zero. REQUIRED.
 
         Returns:
             Dict[constraint_idx, {failure_margin_median, near_miss_fraction, binding}]
@@ -12960,13 +13100,19 @@ class RobustnessAnalyzerV2:
                     continue
                 if not satisfied:
                     value = values[sample_idx]
-                    # Compute margin (distance from threshold)
-                    if constraint.operator == ">=":
-                        # For >= threshold, margin is threshold - value (positive when failing)
+                    if ties[c_idx][sample_idx]:
+                        # ISL re-scope I-3: a numerical tie that fails a strict operator sits AT the
+                        # threshold (meets_threshold), on whichever side the draw lies: zero margin.
+                        margin = 0.0
+                    elif constraint.operator in (">=", ">"):
+                        # For a lower threshold, margin is threshold - value (positive when failing)
                         margin = threshold - value
-                    else:  # <=
-                        # For <= threshold, margin is value - threshold (positive when failing)
+                    else:  # <= or <
+                        # For an upper threshold, margin is value - threshold
                         margin = value - threshold
+                    # Never negative (independent delta check r2, 12 Oct): a literal failure is on the
+                    # failing side, and the stated-frame mapping must not round it across.
+                    margin = max(margin, 0.0)
 
                     failure_margins.append(margin)
 
@@ -13043,8 +13189,9 @@ class RobustnessAnalyzerV2:
         option_id: str,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
-        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
-        range_series: Optional[Dict[str, List[float]]] = None,
+        *,
+        level_domains: Optional[Dict[str, Tuple[float, float]]],
+        range_series: Optional[Dict[str, List[float]]],
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -13112,61 +13259,57 @@ class RobustnessAnalyzerV2:
         if range_joint_deferred:
             joint_emitted = False
 
-        # Put every scored constraint's samples into the frame ITS threshold is
-        # stated in, once, before any comparison sees them.
-        resolved_values = self._resolve_constraint_series(
+        # ISL re-scope I-2: every scored limit's COMPARED draws and threshold, from the ONE builder
+        # the single goal reads (``GoalThresholdPlan.compared``), so a limit and the goal asked about
+        # the same target are decided on identical arithmetic, once, before any comparison sees them.
+        # B1a (AIQ 5855046894 (2)): a LEVEL on an ANCHORED node is CLAMPED to the node's domain (a
+        # change is not; a base-anchored change_abs/change_rel is compared, and clipped, as the level
+        # b + change, exactly like its level twin), so every verdict in the block (probability,
+        # joint, conditionals) is about levels the quantity can take. Keyed by position in `scored`
+        # (B5): pairing the series with the full `constraints` list read a refused limit's domain
+        # onto another limit's draws (served journey C, KeyError: 1, DL #72 5862819400). When every
+        # limit is scored, `scored` IS `constraints`.
+        resolved_values, compared_thresholds = self._resolve_constraint_series(
             constraint_node_values,
             scored,
             scored_plans,
             status_quo_node_values or {},
             option_id,
             range_series=range_series,
+            level_domains=level_domains,
         )
-        # B1a (AIQ 5855046894 (2)): a 'level' limit on an ANCHORED node reads its level
-        # CLAMPED to the node's domain, so every figure in the block (probability, joint,
-        # conditionals, margins) is about levels the quantity can take. The request's own
-        # level_domain disclosure below still reads the UNCLAMPED levels, and the node's
+        # The request's own level_domain disclosure reads the UNCLAMPED levels, and the node's
         # out-of-domain share rides node_levels. Nothing here reaches a win share.
-        unclamped_values = resolved_values
-        if level_domains:
-            resolved_values = {
-                index: (
-                    [
-                        min(
-                            max(level, level_domains[constraint.node_id][0]),
-                            level_domains[constraint.node_id][1],
-                        )
-                        if math.isfinite(level)
-                        else level
-                        for level in resolved_values[index]
-                    ]
-                    if constraint.node_id in level_domains
-                    and constraint.value_frame != "delta"
-                    and not scored_plans[index].change_frame
-                    else resolved_values[index]
-                )
-                # The series are keyed by position in `scored` (B5): pairing them with the
-                # full `constraints` list read a refused limit's domain onto another limit's
-                # draws and then a key that does not exist (served journey C, KeyError: 1,
-                # DL #72 5862819400). When every limit is scored, `scored` IS `constraints`.
-                for index, constraint in enumerate(scored)
-            }
+        unclamped_values = (
+            self._resolve_constraint_series(
+                constraint_node_values,
+                scored,
+                scored_plans,
+                status_quo_node_values or {},
+                option_id,
+                range_series=range_series,
+                level_domains=None,  # report-only: the unclamped levels
+            )[0]
+            if level_domains
+            else resolved_values
+        )
 
-        # R1 S2: every comparison below reads the limit's STATED value (``constraint.threshold``),
-        # so a limit stated as a change is compared in ITS frame: (level − origin) × scale, AFTER the
-        # clip above (a base-anchored change_abs is clipped as a level, exactly like its level twin).
-        # Identity for every level/delta plan (origin 0, scale 1).
-        for index in list(resolved_values):
+        # R1 S2: the near-miss DIAGNOSTICS (failure margins, near-miss fractions) stay in the
+        # limit's STATED frame, (compared − origin) × scale against the stated value, so their
+        # meaning on the wire is unchanged. They never decide a verdict. Identity for every
+        # level/delta plan (origin 0, scale 1).
+        stated_values: Dict[int, List[float]] = {}
+        for index, series in resolved_values.items():
             plan = scored_plans[index]
-            if plan.stated_origin != 0.0 or plan.stated_scale != 1.0:
-                resolved_values[index] = [
-                    (value - plan.stated_origin) * plan.stated_scale
-                    for value in resolved_values[index]
-                ]
+            stated_values[index] = (
+                [(value - plan.stated_origin) * plan.stated_scale for value in series]
+                if plan.stated_origin != 0.0 or plan.stated_scale != 1.0
+                else series
+            )
 
-        # T3: Per-constraint and joint probability
+        # T3: Per-constraint and joint probability, on the compared pair.
         probabilities = self._compute_constraint_probabilities(
-            resolved_values, scored, joint_emitted=joint_emitted
+            resolved_values, scored, thresholds=compared_thresholds, joint_emitted=joint_emitted
         )
 
         # 2.477(k) THE SECOND REFUSAL POINT. `None` means no draw was
@@ -13201,13 +13344,21 @@ class RobustnessAnalyzerV2:
             for i, row in scored_conditionals.items()
         }
 
-        # T5: Near-miss diagnostics — on the SAME resolved series and the SAME
-        # informative population as the probabilities.
+        # T5: Near-miss diagnostics — on the SAME draws (in the limit's stated frame), the SAME
+        # verdicts and the SAME informative population as the probabilities.
         near_miss_diagnostics = self._compute_near_miss_diagnostics(
-            resolved_values, scored, satisfaction_matrix, informative=informative
+            stated_values,
+            scored,
+            satisfaction_matrix,
+            informative=informative,
+            ties={
+                index: numerical_tie(series, compared_thresholds[index]).tolist()
+                for index, series in resolved_values.items()
+            },
         )
 
-        # Build constraint results
+        # Precision uses exactly the probability's shared finite-draw population.
+        n_informative = sum(informative)
         constraint_results = []
         for c_idx, constraint in enumerate(scored):
             diag = near_miss_diagnostics.get(c_idx, {})
@@ -13231,6 +13382,13 @@ class RobustnessAnalyzerV2:
                     # remove. Same reasoning, and the same wording, as the
                     # Slice 6b echo subscript above.
                     "prob_satisfied": per_constraint_probs[str(c_idx)],
+                    "prob_satisfied_precision": {
+                        "n_informative": n_informative,
+                        "standard_error": math.sqrt(
+                            per_constraint_probs[str(c_idx)]
+                            * (1.0 - per_constraint_probs[str(c_idx)]) / n_informative
+                        ),
+                    },
                     "failure_margin_median": diag.get("failure_margin_median"),
                     "near_miss_fraction": diag.get("near_miss_fraction"),
                     "binding": diag.get("binding", False),
@@ -13246,6 +13404,12 @@ class RobustnessAnalyzerV2:
             "constraints": constraint_results,
             # B5: ABSENT while any constraint is unscored — never the subset joint.
             "joint_probability": joint_probability if joint_emitted else None,
+            "joint_probability_precision": {
+                "n_informative": n_informative,
+                "standard_error": math.sqrt(
+                    joint_probability * (1.0 - joint_probability) / n_informative
+                ),
+            } if joint_emitted else None,
             "conditional_probabilities": (
                 conditional_probs if conditional_probs and not range_joint_deferred else None
             ),

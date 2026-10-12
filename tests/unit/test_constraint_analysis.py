@@ -155,15 +155,17 @@ class TestGoalConstraintModel:
         gc = GoalConstraint(value_frame="delta", node_id="revenue", operator=">=", value=100.0)
         assert gc.label is None
 
-    def test_invalid_operator_rejected(self):
-        """Test that invalid operators are rejected."""
-        with pytest.raises(ValueError):
-            GoalConstraint(value_frame="delta", node_id="revenue", operator=">", value=100.0)
+    @pytest.mark.parametrize("operator", [">", "<"])
+    def test_strict_operator_accepted(self, operator):
+        """Batch C: strict comparisons survive request parsing verbatim."""
+        gc = GoalConstraint(value_frame="delta", node_id="revenue", operator=operator, value=100.0)
+        assert gc.operator == operator
 
-    def test_invalid_operator_less_than(self):
-        """Test that < operator is rejected."""
+    @pytest.mark.parametrize("operator", ["==", "!=", "gt", "lt"])
+    def test_invalid_operator_rejected(self, operator):
+        """Only the four ordered comparisons belong to the joint-goal contract."""
         with pytest.raises(ValueError):
-            GoalConstraint(value_frame="delta", node_id="revenue", operator="<", value=100.0)
+            GoalConstraint(value_frame="delta", node_id="revenue", operator=operator, value=100.0)
 
     def test_nan_threshold_rejected(self):
         """Test that NaN value is rejected."""

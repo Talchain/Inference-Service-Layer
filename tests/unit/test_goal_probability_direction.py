@@ -61,6 +61,8 @@ def probability_for(direction, frame, compared):
         request=request,
         goal_threshold_plan=plan,
         status_quo_outcomes=[0.25] * len(samples) if frame == "level" else None,
+        level_domains={},
+        range_series=None,
     )
     return results[0].probability_of_goal
 

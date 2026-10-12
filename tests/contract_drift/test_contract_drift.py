@@ -695,3 +695,13 @@ def test_value_frame_is_not_carried_as_a_superset_exception() -> None:
         "scripts/contract_schema/refresh_drift_baseline.py --refresh-baseline; "
         "do not hand-edit."
     )
+
+
+def test_batch_c_operator_adoption_is_exact_and_accepts_legacy_requests() -> None:
+    """Bound the temporary reader-first exception to the authorised four operators."""
+    module, export = PAIRINGS[GoalConstraint]
+    contract_enum = contract_properties(load_artifact(), module, export)["operator"].enum
+    isl_enum = pydantic_properties(GoalConstraint)["operator"].enum
+    assert contract_enum == frozenset({">=", "<="}), "Shared pin changed; retire the exception"
+    assert isl_enum == frozenset({">=", "<=", ">", "<"})
+    assert contract_enum <= isl_enum

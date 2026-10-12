@@ -444,6 +444,17 @@
             ],
             "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset. Also ABSENT (with the conditionals) for an option whose rows mix a limit scored from a stated range with other limits (TEMPORAL step 1), named by CONSTRAINT_JOINT_WITHHELD.",
             "title": "Joint Probability"
+          },
+          "joint_probability_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monte Carlo precision of same-draw joint_probability. Omitted whenever the joint is withheld, including incomplete conjunctions. Not model uncertainty."
           }
         },
         "required": [
@@ -494,12 +505,47 @@
             ],
             "description": "P(all constraints satisfied simultaneously). ABSENT while any requested constraint is unscored (B5): each refused constraint is named by a CONSTRAINT_NOT_CONVERTIBLE / CONSTRAINT_FRAME_UNSPECIFIED warning and has no row in `constraints`; the scored ones keep theirs. Never computed over the scored subset. Also ABSENT (with the conditionals) for an option whose rows mix a limit scored from a stated range with other limits (TEMPORAL step 1), named by CONSTRAINT_JOINT_WITHHELD.",
             "title": "Joint Probability"
+          },
+          "joint_probability_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monte Carlo precision of same-draw joint_probability. Omitted whenever the joint is withheld, including incomplete conjunctions. Not model uncertainty."
           }
         },
         "required": [
           "constraints"
         ],
         "title": "ConstraintAnalysisV2",
+        "type": "object"
+      },
+      "ConstraintPrecision": {
+        "description": "Monte Carlo error of a joint event or marginal, not model uncertainty.",
+        "properties": {
+          "n_informative": {
+            "description": "Number of same-draw, finite observations used in this estimate",
+            "minimum": 1.0,
+            "title": "N Informative",
+            "type": "integer"
+          },
+          "standard_error": {
+            "description": "Plug-in Monte Carlo standard error sqrt(p * (1 - p) / n_informative), in probability units. Simulation precision only, not uncertainty in the model or its starting value. Zero at observed p=0 or p=1 does not prove certainty; consumers must also consider n_informative.",
+            "maximum": 0.5,
+            "minimum": 0.0,
+            "title": "Standard Error",
+            "type": "number"
+          }
+        },
+        "required": [
+          "n_informative",
+          "standard_error"
+        ],
+        "title": "ConstraintPrecision",
         "type": "object"
       },
       "ConstraintResult": {
@@ -600,7 +646,9 @@
             "description": "Comparison operator",
             "enum": [
               ">=",
-              "<="
+              "<=",
+              ">",
+              "<"
             ],
             "title": "Operator",
             "type": "string"
@@ -611,6 +659,17 @@
             "minimum": 0.0,
             "title": "Prob Satisfied",
             "type": "number"
+          },
+          "prob_satisfied_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monte Carlo precision of prob_satisfied over the same informative draws."
           },
           "threshold": {
             "description": "Threshold value",
@@ -725,7 +784,9 @@
             "description": "Comparison operator",
             "enum": [
               ">=",
-              "<="
+              "<=",
+              ">",
+              "<"
             ],
             "title": "Operator",
             "type": "string"
@@ -736,6 +797,17 @@
             "minimum": 0.0,
             "title": "Prob Satisfied",
             "type": "number"
+          },
+          "prob_satisfied_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monte Carlo precision of prob_satisfied over the same informative draws."
           },
           "threshold": {
             "description": "Threshold value",
@@ -4164,10 +4236,12 @@
             "type": "string"
           },
           "operator": {
-            "description": "Comparison operator: '>=' for minimum threshold, '<=' for maximum threshold",
+            "description": "Per-draw comparison: >=, <=, > or <, with the same numerical-tie budget as probability_of_goal (|value - threshold| <= 8 * eps * max(|value|, |threshold|), eight binary64 epsilons relative to the compared operands, is ON the threshold). Strict operators exclude ties.",
             "enum": [
               ">=",
-              "<="
+              "<=",
+              ">",
+              "<"
             ],
             "title": "Operator",
             "type": "string"
@@ -4192,7 +4266,7 @@
                 "type": "null"
               }
             ],
-            "description": "Declares which frame this constraint's `value` is expressed in. 'delta' = already in the target node's SAMPLE frame (change from the model's origin); compared as-is, on the caller's attestation. 'level' = an absolute level of the target quantity, which MUST share the domain of the graph's observed_state values; ISL recovers the target's level per draw against a status-quo reference before comparing. When absent, or when a 'level' value cannot be converted, the ENTIRE constraint_analysis block is OMITTED and a structured inference warning names what was missing \u2014 ISL never guesses a frame and never emits a fabricated or clamped probability. Mirrors @talchain/schemas 0.38.0 DraftGoalConstraint.value_frame.",
+            "description": "Declares which frame this constraint's `value` is expressed in. 'delta' = already in the target node's SAMPLE frame (change from the model's origin); compared as-is, on the caller's attestation. 'level' = an absolute level of the target quantity, which MUST share the domain of the graph's observed_state values; ISL recovers the target's level per draw against a status-quo reference before comparing. 'change_abs' = paired change in the node's units; 'change_rel' = paired change as a fraction of the raw starting level, requiring a valid base and raw_range. When absent or not convertible, this constraint and the joint are omitted (other scored marginals remain), and a structured inference warning names what was missing \u2014 ISL never guesses a frame and never emits a fabricated or clamped probability. Mirrors @talchain/schemas 0.38.0 DraftGoalConstraint.value_frame.",
             "title": "Value Frame"
           }
         },
