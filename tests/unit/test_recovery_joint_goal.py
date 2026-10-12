@@ -6,6 +6,7 @@ P(X>0,Y>0)=1/4+asin(rho)/(2*pi). No marginal multiplication in the engine.
 
 import itertools
 import math
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -246,6 +247,49 @@ def test_every_exact_rescaling_keeps_every_verdict(factor):
                 assert before == after, (t, v, factor, op)
                 checked += 1
     assert checked > 0  # an empty sweep proves nothing
+
+
+# ISL re-scope I-1: the budget is computed EXACTLY. The tie test is the real-number inequality
+# |v − t| <= 8 · eps · max(|v|, |t|), checked against exact rationals at every binade from the smallest
+# subnormal to float64 max, both signs, k = 0..40 representable steps either side, and far draws. That
+# exactness is what makes every exact rescaling verdict-preserving; a spacing count (dbddcd5e) fails it.
+EIGHT_EPS = 8 * Fraction(float(np.finfo(float).eps))
+SUBNORMAL = 5e-324
+NORMAL_MIN = float(np.finfo(float).tiny)
+
+
+def exact_tie(v, t):
+    V, T = Fraction(v), Fraction(t)
+    return abs(V - T) <= EIGHT_EPS * max(abs(V), abs(T))
+
+
+def oracle_thresholds():
+    fixed = [0.0, -0.0, SUBNORMAL, -SUBNORMAL, NORMAL_MIN, -NORMAL_MIN, 1e-310, 0.3, -0.3, 0.8, 1.0,
+             1.0000000000000018, 7.0, 10.0, 2.5e6, -2.5e6, 1e-200, 1e200, BIG, -BIG, down(BIG)]
+    grid = [math.ldexp(m, e) for e in range(-1074, 1024, 61) for m in (0.5, 0.71, -0.999)]
+    return fixed + [t for t in grid if t != 0.0 and math.isfinite(t)]
+
+
+def test_the_tie_budget_is_the_exact_real_number_inequality_at_every_magnitude():
+    checked = 0
+    for t in oracle_thresholds():
+        near = [t]
+        for direction in (math.inf, -math.inf):
+            v = t
+            for _ in range(40):
+                v = float(np.nextafter(v, direction))
+                near.append(v)
+        far = [0.0, SUBNORMAL, -SUBNORMAL, BIG, -BIG, -t, t / 2, t * 2]
+        draws = np.array([x for x in near + far if math.isfinite(x)])
+        for minimise in (False, True):
+            inclusive = meets_threshold(draws, t, minimise=minimise, strict=False).tolist()
+            exclusive = meets_threshold(draws, t, minimise=minimise, strict=True).tolist()
+            for x, met_inclusive, met_strict in zip(draws.tolist(), inclusive, exclusive, strict=True):
+                tie = exact_tie(x, t)
+                literal = x < t if minimise else x > t
+                assert (met_inclusive, met_strict) == (literal or tie, literal and not tie), (x, t, minimise)
+                checked += 1
+    assert checked > 10_000  # an empty sweep proves nothing
 
 
 # r2 NON-BLOCKING: a draw on the threshold that fails a strict operator sits AT it — its failure margin is

@@ -595,8 +595,9 @@ def get_max_cost_units() -> int:
 # AIE 6115686431 (C numerical decision; supersedes the 1e-9 · max(1, |t|) band of AIQ 5880886200):
 # the numerical-tie budget, in binary64 epsilons relative to the compared operands. An explicit operational
 # allowance for the existing paired/conversion arithmetic — not a measurement resolution, not a
-# model-uncertainty estimate, and not a bound on every possible cancellation error.
-GOAL_THRESHOLD_TIE_SPACINGS = 8
+# model-uncertainty estimate, and not a bound on every possible cancellation error. A count of EPSILONS, not
+# of spacings (ulps): ulp(10t) is not 10 ulp(t), so a spacing count is unit-dependent (ISL re-scope I-1).
+GOAL_THRESHOLD_TIE_EPSILONS = 8
 
 
 def meets_threshold(
@@ -618,12 +619,16 @@ def meets_threshold(
     values = np.asarray(values, dtype=float)
     t = float(threshold)
     with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        # Both operands are first scaled by the same power of two to the larger one's binade (exact), so
-        # the difference and the budget are computed exactly at every magnitude — no overflow near
-        # float64 max, no underflow among subnormals — and the test is the real-number inequality.
+        # Both operands are first scaled by the same power of two, into the larger one's binade [0.5, 1),
+        # so the difference and the budget are computed exactly at every magnitude — no overflow near
+        # float64 max, no underflow among subnormals — and the test is the real-number inequality
+        # (I-1 review, pinned against exact rationals). The larger operand always scales exactly; the
+        # smaller can lose bits only when it is far below the larger one, never within reach of a tie:
+        # a tie needs both within a factor of two (Sterbenz: v − u then exact), and the budget
+        # 2^-49 · max(|v|, |u|) is a normal number >= 2^-50 (or 0 when both operands are 0).
         _, exponent = np.frexp(np.maximum(np.abs(values), abs(t)))
         v, u = np.ldexp(values, -exponent), np.ldexp(t, -exponent)
-        budget = GOAL_THRESHOLD_TIE_SPACINGS * np.finfo(float).eps * np.maximum(np.abs(v), np.abs(u))
+        budget = GOAL_THRESHOLD_TIE_EPSILONS * np.finfo(float).eps * np.maximum(np.abs(v), np.abs(u))
         on = np.isfinite(values) & math.isfinite(t) & (np.abs(v - u) <= budget)
     past = values < t if minimise else values > t
     return np.asarray(past & ~on if strict else past | on, dtype=bool)

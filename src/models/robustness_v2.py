@@ -1207,8 +1207,9 @@ class GoalConstraint(BaseModel):
         ...,
         description=(
             "Per-draw comparison: >=, <=, > or <, with the same numerical-tie budget as "
-            "probability_of_goal (|value - threshold| <= 8 * max(ulp(value), ulp(threshold)), "
-            "binary64 spacings, is ON the threshold). Strict operators exclude ties."
+            "probability_of_goal (|value - threshold| <= 8 * eps * max(|value|, |threshold|), "
+            "eight binary64 epsilons relative to the compared operands, is ON the threshold). "
+            "Strict operators exclude ties."
         ),
     )
     value: float = Field(
