@@ -14,7 +14,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.models.response_v2 import ConstraintAnalysisV2
-from src.models.robustness_v2 import ConstraintAnalysis, GoalConstraint, NodeV2, ObservedState
+from src.models.robustness_v2 import (
+    ConstraintAnalysis,
+    GoalConstraint,
+    NodeV2,
+    ObservedState,
+    ParameterUncertainty,
+)
 from src.services.robustness_analyzer_v2 import (
     CONSTRAINT_OPERATOR_SENSE,
     GoalThresholdPlan,
@@ -89,14 +95,17 @@ def down(x):
     return float(np.nextafter(x, -math.inf))
 
 
-def held_verdict(op, case, tie=None):
-    """The chance for a draw that sits on `tie`, against a target placed by `case`.
+def held_verdict(op, case, compared_at_zero=False):
+    """The chance for a draw that sits on the tie, against a target placed by `case`.
 
     'above'/'below' place the target a genuine offset above/below the draw, not a rounding error.
-    At a tie of exactly zero the one-step targets are subnormal and outside the relative budget,
-    so they take their literal side: step_up is above the draw, step_down below it.
+    `compared_at_zero`: the draw and target are COMPARED at zero (a change node: the paired change
+    0 against the stated change). There the one-step targets are subnormal and outside the
+    relative budget, so they take their literal side: step_up is above the draw, step_down below
+    it. A change stated on a LEVEL node (change_rel here) is compared as the level b + change
+    (ISL re-scope I-2), where a subnormal change rounds into b: an exact tie again.
     """
-    if tie == 0.0 and case in ("step_up", "step_down"):
+    if compared_at_zero and case in ("step_up", "step_down"):
         case = "above" if case == "step_up" else "below"
     if case in TIE_CASES:
         return 0.0 if op in STRICT else 1.0
@@ -340,7 +349,7 @@ def test_single_goal_and_one_constraint_joint_agree_at_and_near_a_tie(op, case, 
         "below": tie - 1e-12,
     }[case]
     chances = chances_asked_both_ways(goal_and_constraint_request(frame, op, threshold))
-    assert chances["hold"] == held_verdict(op, case, tie)
+    assert chances["hold"] == held_verdict(op, case, compared_at_zero=frame == "change_abs")
 
 
 # Contrast 4: one physical target stated in fraction (raw units x0.01), percent (x1) and scaled
@@ -380,7 +389,7 @@ def test_fraction_percent_and_scaled_raw_units_give_the_same_verdicts(op, case, 
         }[case]
         request = goal_and_constraint_request(frame, op, threshold, raw_unit_scale=k)
         chances = chances_asked_both_ways(request)
-        assert chances["hold"] == held_verdict(op, case, today), k
+        assert chances["hold"] == held_verdict(op, case, compared_at_zero=frame == "change_abs"), k
         seen.append(chances)
     assert seen[1] == seen[0] and seen[2] == seen[0]
 
@@ -471,6 +480,29 @@ def test_joint_unit_invariance(frame):
                 assert new_margin == pytest.approx(old_margin, abs=1e-14)
         # Probabilities, counts, precision and all other diagnostics stay exact.
         assert new == old
+
+
+# ISL re-scope I-2: the EVPI joint (p_win_sensitivity's current_metric, P(joint goal) for the
+# recommended option) reads the SAME comparison as the wire block. Before, it compared a change_rel
+# limit's LEVELS (0.5 + effect) against its STATED relative change (25/70), true on every draw: 1.0
+# beside a wire joint of ~0.48. Its own draws (EVPI seeds, at most 2,000) differ from the wire
+# block's 10,000, so the two agree within Monte Carlo error (about four standard errors), not exactly.
+@pytest.mark.parametrize("frame", ["level", "change_abs", "change_rel"])
+def test_the_evpi_joint_reads_the_wire_blocks_comparison(frame):
+    request = linear_request(frame)
+    request.include_voi = True
+    request.parameter_uncertainties = [
+        ParameterUncertainty(node_id="f", distribution="uniform", range_min=0.0, range_max=1.0)
+    ]
+    request.goal_constraints = [constraint("g", ">=", request.goal_threshold, frame)]
+    response = RobustnessAnalyzerV2().analyze(request)
+    assert response.recommended_option_id == "push"
+    (push,) = [option for option in response.results if option.option_id == "push"]
+    wire_joint = push.constraint_analysis.joint_probability
+    assert 0.2 < wire_joint < 0.8  # a genuinely uncertain limit, not a structural 0 or 1
+    (sensitivity,) = [entry for entry in response.p_win_sensitivity if entry["factor_id"] == "f"]
+    assert sensitivity["metric_type"] == "p_joint_goal"
+    assert sensitivity["current_metric"] == pytest.approx(wire_joint, abs=0.05)
 
 
 def test_two_independent_normal_targets_through_real_sampler():
