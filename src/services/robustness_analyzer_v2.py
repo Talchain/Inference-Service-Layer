@@ -530,6 +530,8 @@ PHASE_COST_ATTRIBUTION: Dict[str, str] = {
     "_compute_confidence_interval": "subsumed:_compute_option_results",
     "_compute_constraint_analysis": "subsumed:_compute_option_results",
     "_compute_constraint_probabilities": "subsumed:_compute_constraint_analysis",
+    # Batch I: one more count over the satisfaction matrix the joint already built; no evaluate().
+    "_compute_targets_joint_probability": "subsumed:_compute_constraint_analysis",
     "_compute_conditional_probabilities": "subsumed:_compute_constraint_analysis",
     "_compute_near_miss_diagnostics": "subsumed:_compute_constraint_analysis",
     "_compute_sensitivity": "priced:sensitivity",
@@ -8651,6 +8653,10 @@ class RobustnessAnalyzerV2:
                         constraints=constraint_results,
                         joint_probability=analysis_dict["joint_probability"],
                         joint_probability_precision=analysis_dict["joint_probability_precision"],
+                        targets_joint_probability=analysis_dict["targets_joint_probability"],
+                        targets_joint_probability_precision=analysis_dict[
+                            "targets_joint_probability_precision"
+                        ],
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
                     sampled_ranges = [
@@ -12971,6 +12977,37 @@ class RobustnessAnalyzerV2:
 
         return per_constraint_probs, joint_probability, satisfaction_matrix, informative
 
+    @staticmethod
+    def _compute_targets_joint_probability(
+        satisfaction_matrix: List[List[bool]],
+        informative: List[bool],
+        target_positions: Sequence[int],
+    ) -> Optional[float]:
+        """P(every TARGET row holds), or None (Batch I; AIE #94 6130197656 item 1).
+
+        Counted on exactly the satisfaction matrix and informative mask
+        ``_compute_constraint_probabilities`` returned for ``joint_probability``: the same
+        draws, the same per-draw verdicts (strict operators, the numerical-tie budget, the
+        frame), the same denominator. Only the rows differ — the target positions instead of
+        every row — so limits are excluded and nothing is multiplied: correlated targets keep
+        their dependence. The caller has already required at least two targets, all scored.
+
+        2.477(m) for THIS figure only: a 0 or 1 on partial coverage is withheld by returning
+        None. Unlike the existing figures it does not refuse the block, so the limit checks
+        and ``joint_probability`` stay exactly what they would be without it.
+        """
+        n_samples = len(informative)
+        n_informative = sum(1 for ok in informative if ok)
+        targets_satisfied_count = sum(
+            1
+            for sample_idx, sample in enumerate(satisfaction_matrix)
+            if informative[sample_idx] and all(sample[position] for position in target_positions)
+        )
+        targets_joint_probability = targets_satisfied_count / n_informative
+        if n_informative < n_samples and targets_joint_probability in (0.0, 1.0):
+            return None
+        return targets_joint_probability
+
     def _compute_conditional_probabilities(
         self,
         satisfaction_matrix: List[List[bool]],
@@ -13259,6 +13296,31 @@ class RobustnessAnalyzerV2:
         if range_joint_deferred:
             joint_emitted = False
 
+        # Batch I (AIE #94 6130197656 item 1; DL #94 6132232654): the TARGET-ONLY joint, a
+        # separately named figure beside `joint_probability`, which is untouched. Its rows are
+        # the ones the request marked role='goal_target' (a read-only selector). Emitted only
+        # with at least two targets, EVERY target scored (an unscored LIMIT does not block it;
+        # an unscored TARGET does) and no target scored from a stated range. Never a subset.
+        target_indices = [
+            index
+            for index, constraint in enumerate(constraints)
+            if constraint.role == "goal_target"
+        ]
+        range_scored_positions = {
+            position
+            for position, constraint in enumerate(scored)
+            if constraint.node_id in (range_series or {})
+            and option_id in dict(scored_plans[position].pinned_levels)
+        }
+        target_positions = [
+            position for position, index in enumerate(scored_indices) if index in target_indices
+        ]
+        targets_emitted = (
+            len(target_indices) >= 2
+            and len(target_positions) == len(target_indices)
+            and range_scored_positions.isdisjoint(target_positions)
+        )
+
         # ISL re-scope I-2: every scored limit's COMPARED draws and threshold, from the ONE builder
         # the single goal reads (``GoalThresholdPlan.compared``), so a limit and the goal asked about
         # the same target are decided on identical arithmetic, once, before any comparison sees them.
@@ -13359,6 +13421,15 @@ class RobustnessAnalyzerV2:
 
         # Precision uses exactly the probability's shared finite-draw population.
         n_informative = sum(informative)
+        # Batch I: counted on the SAME satisfaction matrix and informative mask the joint above
+        # was counted on (the very objects returned), over the target positions only.
+        targets_joint_probability = (
+            self._compute_targets_joint_probability(
+                satisfaction_matrix, informative, target_positions
+            )
+            if targets_emitted
+            else None
+        )
         constraint_results = []
         for c_idx, constraint in enumerate(scored):
             diag = near_miss_diagnostics.get(c_idx, {})
@@ -13410,6 +13481,20 @@ class RobustnessAnalyzerV2:
                     joint_probability * (1.0 - joint_probability) / n_informative
                 ),
             } if joint_emitted else None,
+            # Batch I: ABSENT unless `targets_emitted` (above) and not a partial-coverage extremum.
+            "targets_joint_probability": targets_joint_probability,
+            "targets_joint_probability_precision": (
+                {
+                    "n_informative": n_informative,
+                    "standard_error": math.sqrt(
+                        targets_joint_probability
+                        * (1.0 - targets_joint_probability)
+                        / n_informative
+                    ),
+                }
+                if targets_joint_probability is not None
+                else None
+            ),
             "conditional_probabilities": (
                 conditional_probs if conditional_probs and not range_joint_deferred else None
             ),

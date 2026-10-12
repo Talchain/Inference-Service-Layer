@@ -1089,6 +1089,11 @@ async def _analyze_robustness_v2_enhanced(
                     ],
                     joint_probability=ca.joint_probability,
                     joint_probability_precision=ca.joint_probability_precision,
+                    # Batch I: threaded at THIS hop too, or it dies here after
+                    # surviving the analyzer (exclude_none keeps it off the wire
+                    # whenever no row carries role='goal_target').
+                    targets_joint_probability=ca.targets_joint_probability,
+                    targets_joint_probability_precision=ca.targets_joint_probability_precision,
                     conditional_probabilities=ca.conditional_probabilities,
                 )
 

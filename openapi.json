@@ -455,6 +455,31 @@
               }
             ],
             "description": "Monte Carlo precision of same-draw joint_probability. Omitted whenever the joint is withheld, including incomplete conjunctions. Not model uncertainty."
+          },
+          "targets_joint_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "P(every goal_target row satisfied simultaneously), on the same informative draws and per-draw verdicts as joint_probability, limits excluded. Present only with at least two goal_target rows, every one scored and none scored from a stated range; withheld (not the block) when it would be a 0 or 1 on partial coverage. Never a substitute for joint_probability.",
+            "title": "Targets Joint Probability"
+          },
+          "targets_joint_probability_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monte Carlo precision of targets_joint_probability: sqrt(p(1-p)/n_informative) on the same population. Present exactly when the figure is. Not model uncertainty."
           }
         },
         "required": [
@@ -516,6 +541,31 @@
               }
             ],
             "description": "Monte Carlo precision of same-draw joint_probability. Omitted whenever the joint is withheld, including incomplete conjunctions. Not model uncertainty."
+          },
+          "targets_joint_probability": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "P(every goal_target row satisfied simultaneously): the same informative draws and per-draw verdicts as joint_probability, over the rows the request marked role='goal_target' only (limits excluded). ABSENT unless at least two target rows were sent, every one is scored and none is scored from a stated range; also absent (the rest of the block kept) when it would be a 0 or 1 on partial coverage. A separately named figure: it never replaces joint_probability.",
+            "title": "Targets Joint Probability"
+          },
+          "targets_joint_probability_precision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConstraintPrecision"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Monte Carlo precision of same-draw targets_joint_probability, sqrt(p(1-p)/n_informative). Present exactly when the figure is. Not model uncertainty."
           }
         },
         "required": [
@@ -4245,6 +4295,18 @@
             ],
             "title": "Operator",
             "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "const": "goal_target"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "'goal_target' marks this row as one of the goal's own targets. With at least two such rows, every one scored and none scored from a stated range, each option also reports targets_joint_probability: the share of the SAME informative draws on which every target row holds. Limits (rows without a role) are still checked and still in joint_probability.",
+            "title": "Role"
           },
           "value": {
             "description": "Threshold value for the constraint (v2.7 contract field name)",

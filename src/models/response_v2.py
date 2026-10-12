@@ -712,6 +712,27 @@ class ConstraintAnalysisV2(BaseModel):
             "joint is withheld, including incomplete conjunctions. Not model uncertainty."
         ),
     )
+    targets_joint_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description=(
+            "P(every goal_target row satisfied simultaneously): the same informative draws "
+            "and per-draw verdicts as joint_probability, over the rows the request marked "
+            "role='goal_target' only (limits excluded). ABSENT unless at least two target "
+            "rows were sent, every one is scored and none is scored from a stated range; "
+            "also absent (the rest of the block kept) when it would be a 0 or 1 on partial "
+            "coverage. A separately named figure: it never replaces joint_probability."
+        ),
+    )
+    targets_joint_probability_precision: Optional[ConstraintPrecision] = Field(
+        None,
+        description=(
+            "Monte Carlo precision of same-draw targets_joint_probability, "
+            "sqrt(p(1-p)/n_informative). Present exactly when the figure is. Not model "
+            "uncertainty."
+        ),
+    )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
         None,
         description="Pairwise conditional probabilities: P(C_j | C_i). "

@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.61.0",
     "omission_count": 51,
-    "superset_count": 88
+    "superset_count": 91
   },
   "omissions": [
     {
@@ -390,6 +390,16 @@
       "reason": "ISL superset — ConstraintAnalysisV2.joint_probability_precision is not present in the paired contract schema (ISL emits ahead of contract adoption)"
     },
     {
+      "isl_model": "ConstraintAnalysisV2",
+      "prop": "targets_joint_probability",
+      "reason": "ISL superset — ConstraintAnalysisV2.targets_joint_probability is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #94 6130197656 (AIE item 1: a separately named target-only conjunction) and 6132232654 (DL: Batch I, ISL computes it on the same draws and mask; no schema bump, every seam is passthrough). Absent unless a request marks at least two rows role='goal_target'. Remove when the schemas pin adopts it."
+    },
+    {
+      "isl_model": "ConstraintAnalysisV2",
+      "prop": "targets_joint_probability_precision",
+      "reason": "ISL superset — ConstraintAnalysisV2.targets_joint_probability_precision is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #94 6130197656 (AIE item 1: a separately named target-only conjunction) and 6132232654 (DL: Batch I, ISL computes it on the same draws and mask; no schema bump, every seam is passthrough). Present exactly when targets_joint_probability is. Remove when the schemas pin adopts it."
+    },
+    {
       "isl_model": "ConstraintResultV2",
       "prop": "binding",
       "reason": "ISL superset — ConstraintResultV2.binding is not present in the paired contract schema (ISL emits ahead of contract adoption)"
@@ -593,6 +603,11 @@
       "isl_model": "GoalConstraint",
       "prop": "level_domain",
       "reason": "ISL superset — GoalConstraint.level_domain is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #70 5844770854 (Delivery Lead: the churn-limit release is gated on a level-domain guard; AI Quality 5844762506). Deliberately ISL-first: every ISL request model is extra=\"ignore\", so PLoT can send level_domain before or after this lands. Remove when the schemas pin adopts it."
+    },
+    {
+      "isl_model": "GoalConstraint",
+      "prop": "role",
+      "reason": "ISL superset — GoalConstraint.role is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: olumi-programme-docs #94 6130197656 (AIE item 1: a separately named target-only conjunction) and 6132232654 (DL: Batch I, ISL computes it on the same draws and mask; no schema bump, every seam is passthrough). Reader-first, like level_domain: every ISL request model is extra=\"ignore\", so PLoT can forward role before or after this lands. Read-only selector, never compared. Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "ISLResponseV2",

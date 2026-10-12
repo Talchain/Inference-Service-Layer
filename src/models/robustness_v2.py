@@ -1278,6 +1278,21 @@ class GoalConstraint(BaseModel):
             "levels ISL reports for the node, this limit's included, are clamped to it."
         ),
     )
+    # Batch I (AIE #94 6130197656 item 1; DL #94 6132232654): a READ-ONLY selector
+    # naming this row as one of the user's goal TARGETS (a limit carries no role).
+    # It only selects the rows `targets_joint_probability` is counted over; it is
+    # never compared, never moves a threshold, a frame or any existing figure.
+    # Absent on every row => the response is byte-identical to before.
+    role: Optional[Literal["goal_target"]] = Field(
+        None,
+        description=(
+            "'goal_target' marks this row as one of the goal's own targets. With at "
+            "least two such rows, every one scored and none scored from a stated "
+            "range, each option also reports targets_joint_probability: the share of "
+            "the SAME informative draws on which every target row holds. Limits "
+            "(rows without a role) are still checked and still in joint_probability."
+        ),
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -2256,6 +2271,25 @@ class ConstraintAnalysis(BaseModel):
         description=(
             "Monte Carlo precision of same-draw joint_probability. Omitted whenever the "
             "joint is withheld, including incomplete conjunctions. Not model uncertainty."
+        ),
+    )
+    targets_joint_probability: Optional[float] = Field(
+        None,
+        ge=0,
+        le=1,
+        description=(
+            "P(every goal_target row satisfied simultaneously), on the same informative "
+            "draws and per-draw verdicts as joint_probability, limits excluded. Present "
+            "only with at least two goal_target rows, every one scored and none scored "
+            "from a stated range; withheld (not the block) when it would be a 0 or 1 on "
+            "partial coverage. Never a substitute for joint_probability."
+        ),
+    )
+    targets_joint_probability_precision: Optional[ConstraintPrecision] = Field(
+        None,
+        description=(
+            "Monte Carlo precision of targets_joint_probability: sqrt(p(1-p)/n_informative) "
+            "on the same population. Present exactly when the figure is. Not model uncertainty."
         ),
     )
     conditional_probabilities: Optional[Dict[str, Dict[str, float]]] = Field(
