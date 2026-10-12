@@ -446,6 +446,8 @@ def direct_option_result(strict, quantities):
         request=request,
         goal_threshold_plan=plan,
         goal_chance_quantities=quantities,
+        level_domains={},
+        range_series=None,
     )
     return results[0]
 
@@ -636,6 +638,8 @@ def test_withheld_partial_extremum_omits_every_new_field():
             request=request,
             goal_threshold_plan=plan,
             goal_chance_quantities=[quantity],
+            level_domains={},
+            range_series=None,
         )[0]
 
     # Every informative draw meets the goal, but two draws are not informative: withheld.

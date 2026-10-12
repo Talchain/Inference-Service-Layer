@@ -17,9 +17,12 @@ from src.models.response_v2 import ConstraintAnalysisV2
 from src.models.robustness_v2 import (
     ConstraintAnalysis,
     GoalConstraint,
+    InterventionOption,
+    LevelDomain,
     NodeV2,
     ObservedState,
     ParameterUncertainty,
+    RawRange,
 )
 from src.services.robustness_analyzer_v2 import (
     CONSTRAINT_OPERATOR_SENSE,
@@ -30,6 +33,7 @@ from src.services.robustness_analyzer_v2 import (
     meets_threshold,
 )
 from tests.unit.test_goal_node_propagation import _edge
+from tests.unit.test_goal_threshold_frame import build_request
 from tests.unit.test_recovery_numerical_check import TOL, linear_request, phi
 
 
@@ -43,11 +47,12 @@ def constraint(node, operator=">=", value=0.0, frame="delta"):
     )
 
 
-def analyze_draws(values, constraints, *, plans=None, reference=None, **kwargs):
+def analyze_draws(values, constraints, *, plans=None, reference=None, level_domains=None, range_series=None):
     if plans is None:
         plans = {i: GoalThresholdPlan(delta_threshold=c.value) for i, c in enumerate(constraints)}
     return RobustnessAnalyzerV2()._compute_constraint_analysis(
-        {"push": values}, constraints, "push", plans, reference, **kwargs
+        {"push": values}, constraints, "push", plans, reference,
+        level_domains=level_domains, range_series=range_series,
     )
 
 
@@ -448,6 +453,7 @@ def test_a_non_finite_goal_level_leaves_the_population_on_both_routes(non_finite
         constraint_plans=constraint_plans,
         status_quo_node_values={"g": status_quo},
         level_domains={"g": (0.0, 1.0)},
+        range_series=None,
     )
     (option,) = [result for result in results if result.option_id == "push"]
     ca = option.constraint_analysis
@@ -568,6 +574,46 @@ def test_the_evpi_joint_reads_the_wire_blocks_comparison(frame):
     (sensitivity,) = [entry for entry in response.p_win_sensitivity if entry["factor_id"] == "f"]
     assert sensitivity["metric_type"] == "p_joint_goal"
     assert sensitivity["current_metric"] == pytest.approx(wire_joint, abs=0.05)
+
+
+# Independent check r1 (ISL re-scope, 12 Oct) BLOCKING: the EVPI joint compared UNCLAMPED levels while the
+# goal, marginal and joint compared levels clamped to the goal's domain. The checker's witness: today's
+# level 0.5 on a '%' goal (frame 100, unit domain [0, 1]), driver ~ U(0, 1), edge N(0.5, 0.0011), "push"
+# sets the driver to 2, target strictly above 1 (level, or the same target as change_abs +0.5 / change_rel
+# +100% of today's 50), seed 42, 1,000 draws. Push's level lies in about [1.0, 1.5], clamped to 1: never
+# strictly above 1, so every figure is 0. EVPI read 0.999.
+@pytest.mark.parametrize("frame,target", [("level", 1.0), ("change_abs", 0.5), ("change_rel", 1.0)])
+def test_the_evpi_joint_reads_clamped_levels_like_the_goal_marginal_and_joint(frame, target):
+    request = build_request(
+        goal_threshold=target, goal_threshold_frame=frame, baseline=0.5, goal_observed_value=0.5,
+        strength_mean=0.5, factor_pu=True,
+    )
+    goal = next(node for node in request.graph.nodes if node.id == "g")
+    goal.observed_state = ObservedState(value=0.5, baseline=0.5, source="user_confirmed", cap=100.0)
+    goal.raw_range = RawRange(min=0.0, max=100.0)
+    request.options = [
+        InterventionOption(id="hold", label="Status quo", interventions={}),
+        InterventionOption(id="push", label="Push", interventions={"f": 2.0}),
+    ]
+    request.goal_direction = "maximise"
+    request.goal_threshold_strict = True
+    request.goal_constraints = [
+        GoalConstraint(
+            constraint_id="g:>:limit", node_id="g", operator=">", value=target, value_frame=frame,
+            level_domain=LevelDomain(min=0.0, max=1.0),
+        )
+    ]
+    request.n_samples = 1000
+    request.seed = 42
+    request.include_voi = True
+    response = RobustnessAnalyzerV2().analyze(request)
+    (option,) = [o for o in response.results if o.option_id == response.recommended_option_id]
+    ca = option.constraint_analysis
+    (row,) = [c for c in ca.constraints if c.constraint_id == "g:>:limit"]
+    (sensitivity,) = [entry for entry in response.p_win_sensitivity if entry["factor_id"] == "f"]
+    assert sensitivity["metric_type"] == "p_joint_goal"
+    figures = (option.probability_of_goal, row.prob_satisfied, ca.joint_probability, sensitivity["current_metric"])
+    assert figures == (0.0, 0.0, 0.0, 0.0), (response.recommended_option_id, figures)
 
 
 def test_two_independent_normal_targets_through_real_sampler():

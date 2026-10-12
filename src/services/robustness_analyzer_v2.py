@@ -3604,10 +3604,17 @@ class GoalThresholdPlan:
         status_quo: "Sequence[float] | np.ndarray | None",
         *,
         option_id: str,
-        domain: Optional[Tuple[float, float]] = None,
-        range_draws: Optional[Sequence[float]] = None,
+        domain: Optional[Tuple[float, float]],
+        range_draws: Optional[Sequence[float]],
     ) -> Tuple[np.ndarray, float]:
         """THE compared draws and threshold for one option under this plan: the ONE builder.
+
+        Every argument that changes the compared array is REQUIRED (independent check r1, 12 Oct:
+        the EVPI joint omitted the level domains and compared unclamped levels beside a clamped
+        goal, marginal and joint, 0.999 against 0). The baseline mode (``per_draw_baseline``) and
+        the clamp exemption (``change_frame``) ride on the plan itself; ``domain`` is the node's
+        entry in the analysis's ``level_domains`` (None when it has none: a horizon stock never
+        does), and ``range_draws`` its stated-range draws for this option, or None.
 
         ISL re-scope I-2 (DL, 12 Oct): ``probability_of_goal`` (Channel A), every goal
         constraint's marginal and joint (Channel B) and the EVPI joint all take their verdicts
@@ -5190,6 +5197,8 @@ class RobustnessAnalyzerV2:
                         budget_ms=min(self.EVPI_BUDGET_MS, remaining_ms),
                         constraint_plans=constraint_plans,
                         objective=objective_plan,
+                        # The SAME level domains the goal, marginal and joint are clamped to.
+                        level_domains=level_domains,
                     )
                 except (AccumulationDrawRefusedError, IdentityNotEvaluatedError):
                     evpi_refused = True
@@ -6319,13 +6328,16 @@ class RobustnessAnalyzerV2:
             for option in request.options:
                 if not level_index or option.id not in constraint_node_values:
                     continue
-                # Unclamped levels (no domain): this disclosure reports what lies outside it.
+                # Report-only: the UNCLAMPED levels (no domain), because this disclosure reports
+                # what lies outside the domain; never a verdict. No stated range, as before.
                 resolved, _ = self._resolve_constraint_series(
                     constraint_node_values,
                     constraints,
                     constraint_plans,
                     status_quo_node_values,
                     option.id,
+                    range_series=None,
+                    level_domains=None,
                 )
                 for node_id, index in level_index.items():
                     level_series.setdefault(node_id, {})[option.id] = resolved[index]
@@ -8227,8 +8239,9 @@ class RobustnessAnalyzerV2:
         constraint_plans: Dict[int, "GoalThresholdPlan"],
         status_quo_node_values: Dict[str, List[float]],
         option_id: str,
-        range_series: Optional[Dict[str, List[float]]] = None,
-        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
+        *,
+        range_series: Optional[Dict[str, List[float]]],
+        level_domains: Optional[Dict[str, Tuple[float, float]]],
     ) -> Tuple[Dict[int, List[float]], Dict[int, float]]:
         """Each constraint's COMPARED draws and threshold, from the ONE builder.
 
@@ -8242,8 +8255,10 @@ class RobustnessAnalyzerV2:
         the level ``b + change``, as the goal is), the raw samples for a 'delta' plan (the
         caller's attestation), and what an option sets for an option that sets the target.
         Returned with each limit's COMPARED threshold (the plan's, not the value as stated).
-        With ``level_domains`` the levels are clipped as the goal's are; without, they are the
-        unclamped levels (the report-only out-of-domain disclosures read those).
+        Both ``range_series`` and ``level_domains`` are REQUIRED: every verdict-bearing caller
+        passes the analysis's own (the goal route clips with the same ``level_domains``); only
+        the report-only out-of-domain disclosures pass ``level_domains=None``, by name, to read
+        the unclamped levels.
 
         Keyed by constraint INDEX, not node_id: two constraints may target the
         same node with different frames, and collapsing them by node would let one
@@ -8275,9 +8290,10 @@ class RobustnessAnalyzerV2:
         status_quo_outcomes: Optional[List[float]] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
-        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
+        *,
+        level_domains: Dict[str, Tuple[float, float]],
         goal_level_anchor: Optional[float] = None,
-        range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
+        range_series: Optional[Dict[str, Dict[str, List[float]]]],
         goal_chance_quantities: Optional[Sequence[GoalChanceQuantity]] = None,
     ) -> List[OptionResult]:
         """Compute distribution statistics for each option.
@@ -8338,6 +8354,11 @@ class RobustnessAnalyzerV2:
             and goal_identity.accumulation_derived
         )
         spread_goal = horizon_goal and _rate_spread_horizon(request.graph, request.goal_node_id)
+        if horizon_goal and request.goal_node_id in level_domains:
+            # P45: a stock at the horizon is the explicit closed form; today's domain never trims it.
+            # ``_node_level_frames`` gives it none; a direct caller's is dropped HERE, once, so the
+            # goal and every limit on it read the SAME domains (ISL re-scope, independent check r1).
+            level_domains = {k: v for k, v in level_domains.items() if k != request.goal_node_id}
         if goal_chance_quantities is not None:
             stock_cut_quantities = accumulation_stock_cut_quantities(
                 request.graph, request.goal_node_id, factor_centres(request)
@@ -8399,12 +8420,15 @@ class RobustnessAnalyzerV2:
                 # goal's LEVEL per draw, the option's causal effect added to the level the goal is at,
                 # paired with the status-quo draw so the factors' current values, the sampled
                 # strengths and the goal's intercept cancel instead of being mistaken for progress;
-                # B1a: a reported level is clamped to the goal's domain (a horizon stock has none).
+                # B1a: a reported level is clamped to the goal's domain, read exactly as every other
+                # route reads it, ``level_domains.get(node)`` (a horizon stock has none: see above).
                 compared, compared_threshold = goal_threshold_plan.compared(
                     samples_array,
                     status_quo_outcomes,
                     option_id=option.id,
-                    domain=None if horizon_goal else level_domains.get(request.goal_node_id),
+                    domain=level_domains.get(request.goal_node_id),
+                    # Channel A refuses a goal an option sets, so no option's stated range applies.
+                    range_draws=None,
                 )
                 meets = meets_threshold(
                     compared, compared_threshold, minimise=minimise, strict=strict
@@ -11982,6 +12006,8 @@ class RobustnessAnalyzerV2:
         budget_ms: Optional[float] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         objective: Optional["ObjectivePlan"] = None,
+        *,
+        level_domains: Dict[str, Tuple[float, float]],
     ) -> Optional[List[Dict[str, Any]]]:
         """Compute Expected Value of Perfect Information (EVPI) per factor.
 
@@ -12072,6 +12098,7 @@ class RobustnessAnalyzerV2:
             deadline=deadline,
             constraint_plans=constraint_plans,
             objective=objective,
+            level_domains=level_domains,
         )
         if baseline_metric is None:
             # Deadline tripped inside the baseline sample loop.
@@ -12126,6 +12153,7 @@ class RobustnessAnalyzerV2:
                 deadline=deadline,
                 constraint_plans=constraint_plans,
                 objective=objective,
+                level_domains=level_domains,
             )
             if perfect_metric is None:
                 # Deadline tripped inside this factor's MC pass — discard the whole
@@ -12215,6 +12243,8 @@ class RobustnessAnalyzerV2:
         deadline: Optional["PhaseDeadline"] = None,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         objective: Optional["ObjectivePlan"] = None,
+        *,
+        level_domains: Dict[str, Tuple[float, float]],
     ) -> Optional[float]:
         """Compute the EVPI metric for a fixed decision policy over n_samples.
 
@@ -12327,13 +12357,17 @@ class RobustnessAnalyzerV2:
                 return None
             # ISL re-scope I-2: compared on the ONE builder's draws and threshold, as the wire
             # block's joint is. Before, this compared a change-stated limit's LEVELS against its
-            # STATED change, a frame mismatch on every draw. Unclipped here, as before.
+            # STATED change, a frame mismatch on every draw; and (independent check r1) its levels
+            # UNCLAMPED beside the wire block's clamped ones. Now the analysis's own level_domains.
+            # No stated range: this phase is skipped when any limit is scored from one.
             resolved_values, compared_thresholds = self._resolve_constraint_series(
                 constraint_node_values,
                 request.goal_constraints,
                 constraint_plans,
                 status_quo_node_values,
                 recommended_option_id,
+                range_series=None,
+                level_domains=level_domains,
             )
             probabilities = self._compute_constraint_probabilities(
                 resolved_values,
@@ -13155,8 +13189,9 @@ class RobustnessAnalyzerV2:
         option_id: str,
         constraint_plans: Optional[Dict[int, "GoalThresholdPlan"]] = None,
         status_quo_node_values: Optional[Dict[str, List[float]]] = None,
-        level_domains: Optional[Dict[str, Tuple[float, float]]] = None,
-        range_series: Optional[Dict[str, List[float]]] = None,
+        *,
+        level_domains: Optional[Dict[str, Tuple[float, float]]],
+        range_series: Optional[Dict[str, List[float]]],
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -13253,6 +13288,7 @@ class RobustnessAnalyzerV2:
                 status_quo_node_values or {},
                 option_id,
                 range_series=range_series,
+                level_domains=None,  # report-only: the unclamped levels
             )[0]
             if level_domains
             else resolved_values
