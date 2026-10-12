@@ -599,6 +599,17 @@ def get_max_cost_units() -> int:
 GOAL_THRESHOLD_TIE_SPACINGS = 8
 
 
+
+def _finite_spacing(x: "np.ndarray | float") -> np.ndarray:
+    """ulp(|x|), finite at every finite magnitude. ``np.spacing`` of float64 max is inf (its next step up
+    overflows), which once made the tie budget unbounded (independent delta check, 12 Oct): there the step
+    toward zero is used. A non-finite ``x`` keeps NaN, so a non-finite draw is still never a tie."""
+    a = np.abs(np.asarray(x, dtype=float))
+    with np.errstate(over="ignore"):
+        step = np.spacing(a)
+    return np.where(np.isinf(step) & np.isfinite(a), a - np.nextafter(a, 0.0), step)
+
+
 def meets_threshold(
     values: np.ndarray, threshold: float, *, minimise: bool, strict: bool
 ) -> np.ndarray:
@@ -613,7 +624,7 @@ def meets_threshold(
     (its spacing is NaN); the informative mask excludes it downstream.
     """
     values = np.asarray(values, dtype=float)
-    spacing = np.maximum(np.spacing(np.abs(values)), np.spacing(abs(threshold)))
+    spacing = np.maximum(_finite_spacing(values), _finite_spacing(threshold))
     on = np.abs(values - threshold) <= GOAL_THRESHOLD_TIE_SPACINGS * spacing
     past = values < threshold if minimise else values > threshold
     return np.asarray(past & ~on if strict else past | on, dtype=bool)

@@ -146,6 +146,44 @@ def test_non_finite_draws_stay_outside_the_population_beside_numerical_ties(op, 
     assert_precision(result, 4)
 
 
+
+# Independent delta check (12 Oct) BLOCKING: np.spacing(float64 max) is inf, so the tie budget became
+# unbounded and the largest finite draws read as ties — ">=" met at -max, ">" missed at +max, with a
+# negative failure margin. The budget stays finite at every finite magnitude; these take their literal side.
+BIG = float(np.finfo(float).max)
+
+
+@pytest.mark.parametrize(
+    "op,draw,expected",
+    [
+        (">=", -BIG, 0.0), (">", -BIG, 0.0), (">", BIG, 1.0), (">=", BIG, 1.0),
+        ("<=", BIG, 0.0), ("<", BIG, 0.0), ("<", -BIG, 1.0), ("<=", -BIG, 1.0),
+    ],
+)
+def test_the_largest_finite_draws_take_their_literal_side(op, draw, expected):
+    t = 0.3
+    minimise, strict = CONSTRAINT_OPERATOR_SENSE[op]
+    assert meets_threshold(np.array([draw]), t, minimise=minimise, strict=strict).tolist() == [expected == 1.0]
+    result = analyze_draws({"x": [draw]}, [constraint("x", op, t)])
+    row = result["constraints"][0]
+    assert row["prob_satisfied"] == expected
+    assert result["joint_probability"] == expected
+    # A failing draw's margin is its distance on the failing side: never negative.
+    assert row["failure_margin_median"] is None or row["failure_margin_median"] >= 0
+
+
+# The same budget at a threshold of float64 max: an exact tie and one step below are ties (met only by
+# the non-strict operator); a far draw is literal.
+@pytest.mark.parametrize(
+    "op,draw,expected",
+    [(">=", BIG, True), (">", BIG, False), (">=", None, True), (">", None, False), (">=", 0.3, False), (">", 0.3, False)],
+)
+def test_a_threshold_at_the_largest_finite_value_keeps_a_finite_tie_budget(op, draw, expected):
+    value = down(BIG) if draw is None else draw
+    minimise, strict = CONSTRAINT_OPERATOR_SENSE[op]
+    assert meets_threshold(np.array([value]), BIG, minimise=minimise, strict=strict).tolist() == [expected]
+
+
 def goal_and_constraint_request(frame, op, threshold, **kwargs):
     """One request asking the same target both ways: as the single goal and as a one-limit joint."""
     request = linear_request(frame, **kwargs)
