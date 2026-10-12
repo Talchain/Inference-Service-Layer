@@ -1,4 +1,9 @@
-"""P45 round 3: accumulation change origins await a Science ruling."""
+"""P45 round 3, ruled by D4 (i') (AIE #94 6133159652): an accumulation-dependent target's change origin.
+
+The origin is the target's stated TODAY level (a held ``observed_state.baseline``), through the known-base/level
+resolver. With no held baseline, or on a carrier itself, it stays refused: the status quo AT THE HORIZON is not an
+origin.
+"""
 
 from __future__ import annotations
 
@@ -41,8 +46,32 @@ def change_request(frame: str) -> Dict[str, Any]:
 
 
 @pytest.mark.parametrize("frame", ["change_abs", "change_rel"])
-def test_accumulation_change_goal_and_constraint_are_withheld(frame: str) -> None:
+def test_accumulation_change_goal_and_constraint_read_todays_stated_level(frame: str) -> None:
+    """The reviewer's reproducer, ruled: "no lower than today" is read from today's stated 12,250.
+
+    At month 12 the stock is 377.6 (250, 3% churn, +20 a month), so keep gives 49 x 377.6 = 18,502 and the lower
+    price 39 x 377.6 = 14,726. Both are at or above today's 12,250, so both meet it, though the lower price falls
+    below carrying on's own horizon level. That is why the origin had to be ruled: today, never the horizon.
+    """
     body = v2_body(change_request(frame))
+    keep, lower = body["options"]
+    assert keep["outcome"]["mean"] * 100000.0 == pytest.approx(49.0 * 377.6, rel=1e-3)
+    assert lower["outcome"]["mean"] * 100000.0 == pytest.approx(39.0 * 377.6, rel=1e-3)
+    assert (keep["probability_of_goal"], lower["probability_of_goal"]) == (1.0, 1.0)
+    assert (
+        keep["constraint_analysis"]["constraints"][0]["prob_satisfied"],
+        lower["constraint_analysis"]["constraints"][0]["prob_satisfied"],
+    ) == (1.0, 1.0)
+    assert body["objective_ranking"]["status"] == "computed"
+    assert not any(warning["detail"].get("reason") == REASON for warning in body["inference_warnings"])
+
+
+@pytest.mark.parametrize("frame", ["change_abs", "change_rel"])
+def test_accumulation_change_goal_and_constraint_are_withheld(frame: str) -> None:
+    """With no held baseline (a value only), the paired change would read the status quo at the horizon: refused."""
+    request = change_request(frame)
+    next(node for node in request["graph"]["nodes"] if node["id"] == GOAL)["observed_state"].pop("baseline")
+    body = v2_body(request)
     for option in body["options"]:
         assert option.get("probability_of_goal") is None
         constraint = option.get("constraint_analysis")
@@ -145,12 +174,15 @@ def test_accumulation_carrier_and_ordinary_descendant_limits_are_scoped() -> Non
         },
     ]
     body = v2_body(request)
+    # D4 (i'): cashflow holds today's 0.5, so its change reads from that (the carrier grows 250 -> 377.6 through a
+    # positive link, so it rises on every draw). The carrier's own observed level is never the origin: still refused.
     for option in body["options"]:
         assert option["probability_of_goal"] == 1.0
         assert [row["constraint_id"] for row in option["constraint_analysis"]["constraints"]] == [
-            "price-level"
+            "cashflow-change",
+            "price-level",
         ]
-        assert option["constraint_analysis"]["constraints"][0]["prob_satisfied"] == 1.0
+        assert [row["prob_satisfied"] for row in option["constraint_analysis"]["constraints"]] == [1.0, 1.0]
         assert option["constraint_analysis"].get("joint_probability") is None
     refusals = [
         warning
@@ -159,6 +191,5 @@ def test_accumulation_carrier_and_ordinary_descendant_limits_are_scoped() -> Non
     ]
     assert {warning["detail"]["constraint_id"] for warning in refusals} == {
         "carrier-change",
-        "cashflow-change",
     }
     assert all(warning["code"] == "CONSTRAINT_NOT_CONVERTIBLE" for warning in refusals)

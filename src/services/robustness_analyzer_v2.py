@@ -7331,14 +7331,27 @@ class RobustnessAnalyzerV2:
                     if child not in affected:
                         affected.add(child)
                         pending.append(child)
-            if target_id in affected:
+            # D4 (i') (DL 12 Oct; AIE ACK pending): the origin is the target's stated TODAY level,
+            # and only the known-base path below reads it (the level resolver at baseline + change).
+            # A carrier's own observed level is not S_0, a change node is 0 today by definition, and
+            # a value-only node takes the paired change: their origin would be the status quo at the
+            # horizon, which stays unsupported.
+            target = next((n for n in request.graph.nodes if n.id == target_id), None)
+            today_stated = (
+                target is not None
+                and target_id not in carriers
+                and target.quantity_frame != "change"
+                and target.observed_state is not None
+                and target.observed_state.baseline is not None
+            )
+            if target_id in affected and not today_stated:
                 return refuse(
                     "accumulation_change_frame_unsupported",
                     frame_field,
                     (
                         f"Change-frame origin for accumulation-dependent node '{target_id}' "
-                        f"awaits a Science ruling (today or the status quo at the horizon). "
-                        f"{omitted_field} is omitted."
+                        f"is its stated level today, and none is stated; the status quo at "
+                        f"the horizon is not a supported origin. {omitted_field} is omitted."
                     ),
                     accumulation_carrier_ids=sorted(carriers),
                     affected_node_id=target_id,
