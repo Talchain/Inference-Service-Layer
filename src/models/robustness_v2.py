@@ -62,6 +62,7 @@ from src.utils.correlation import (
     EFFECTIVE_DISCLOSURE_MOVE_TOL,
     assemble_correlation_matrix,
     evaluate_correlation_admissibility,
+    is_positive_semidefinite,
 )
 
 
@@ -1110,6 +1111,21 @@ class InterventionRange(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class InterventionRangeCorrelation(FactorCorrelation):
+    """Within-option Gaussian-copula dependence between two stated ranges.
+
+    rho is the latent normal correlation, not the Pearson correlation of the
+    resulting lognormal levels. No node parameter_uncertainty is required.
+    """
+
+    rho: float = Field(
+        ..., ge=-1.0, le=1.0, allow_inf_nan=False,
+        description="Latent standard-normal correlation for this option's range "
+        "Gaussian copula. Zero explicitly declares independence for this pair; "
+        "not the Pearson correlation of the resulting lognormal levels.",
+    )
+
+
 class InterventionOption(BaseModel):
     """A decision option with its interventions."""
 
@@ -1130,6 +1146,48 @@ class InterventionOption(BaseModel):
             "also be in `interventions` (the point, within the range's P40-P60)."
         ),
     )
+
+    intervention_range_correlations: Optional[List[InterventionRangeCorrelation]] = Field(
+        None,
+        description="Within-option range dependence. Both factors must have an "
+        "intervention range on this option; unordered pairs must be unique and "
+        "distinct. The assembled matrix must be positive semidefinite. Every "
+        "pair of scored range targets must be explicitly declared to emit a "
+        "joint; zero rho declares independence. Missing/partial declarations "
+        "and mixed range/point conditions retain legacy marginals and withhold "
+        "the joint. Does not declare dependence across options.",
+    )
+
+    @model_validator(mode="after")
+    def validate_intervention_range_correlations(self) -> "InterventionOption":
+        correlations = self.intervention_range_correlations or []
+        if not correlations:
+            return self
+        ranges = self.intervention_ranges or {}
+        seen: set[tuple[str, str]] = set()
+        for pair in correlations:
+            a, b = pair.factor_a, pair.factor_b
+            if a == b:
+                raise ValueError("intervention_range_correlations: self-pairs are not permitted")
+            if a not in ranges or b not in ranges:
+                raise ValueError(
+                    "intervention_range_correlations: both factors must carry an "
+                    "intervention range on this option"
+                )
+            key = (min(a, b), max(a, b))
+            if key in seen:
+                raise ValueError("intervention_range_correlations: duplicate unordered pair")
+            seen.add(key)
+        # Reuse the copula's PSD tolerance, but do not project a declared forecast
+        # matrix: that would silently change its dependence. Missing pairs are
+        # zero-filled for validation ONLY; partial declarations never license a joint.
+        order = sorted({f for pair in correlations for f in (pair.factor_a, pair.factor_b)})
+        matrix = assemble_correlation_matrix(
+            order, [(p.factor_a, p.factor_b, p.rho) for p in correlations]
+        )
+        if not is_positive_semidefinite(matrix):
+            raise ValueError("intervention_range_correlations: matrix must be positive semidefinite")
+        return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.

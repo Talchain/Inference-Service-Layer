@@ -1872,6 +1872,10 @@ async def analyze_robustness_unified(
             return await analyze_robustness_v2(  # type: ignore[no-any-return]
                 validated_request,
                 http_request=http_request,
+                # Direct Python calls do not resolve FastAPI Query/Header defaults.
+                response_version=DEFAULT_RESPONSE_VERSION,
+                include_diagnostics=False,
+                x_isl_response_version=None,
                 x_request_id=request_id,
                 x_api_key=x_api_key,
             )

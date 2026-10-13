@@ -5197,6 +5197,21 @@
             "title": "Id",
             "type": "string"
           },
+          "intervention_range_correlations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InterventionRangeCorrelation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Within-option range dependence. Both factors must have an intervention range on this option; unordered pairs must be unique and distinct. The assembled matrix must be positive semidefinite. Every pair of scored range targets must be explicitly declared to emit a joint; zero rho declares independence. Missing/partial declarations and mixed range/point conditions retain legacy marginals and withhold the joint. Does not declare dependence across options.",
+            "title": "Intervention Range Correlations"
+          },
           "intervention_ranges": {
             "anyOf": [
               {
@@ -5275,6 +5290,42 @@
           "meaning"
         ],
         "title": "InterventionRange",
+        "type": "object"
+      },
+      "InterventionRangeCorrelation": {
+        "description": "Within-option Gaussian-copula dependence between two stated ranges.\n\nrho is the latent normal correlation, not the Pearson correlation of the\nresulting lognormal levels. No node parameter_uncertainty is required.",
+        "example": {
+          "factor_a": "marketing_spend",
+          "factor_b": "demand",
+          "rho": 0.6
+        },
+        "properties": {
+          "factor_a": {
+            "description": "ID of the first factor node in the correlated pair",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor A",
+            "type": "string"
+          },
+          "factor_b": {
+            "description": "ID of the second factor node in the correlated pair",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor B",
+            "type": "string"
+          },
+          "rho": {
+            "description": "Latent standard-normal correlation for this option's range Gaussian copula. Zero explicitly declares independence for this pair; not the Pearson correlation of the resulting lognormal levels.",
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Rho",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor_a",
+          "factor_b",
+          "rho"
+        ],
+        "title": "InterventionRangeCorrelation",
         "type": "object"
       },
       "InterventionRangeNormalisation": {
