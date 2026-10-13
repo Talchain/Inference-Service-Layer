@@ -1648,8 +1648,7 @@ class FactorSampler:
         plan = self._correlation_plan
         assert plan is not None
         order = plan.factor_order
-        z = np.array([self.rng.normal(0.0, 1.0) for _ in order], dtype=float)
-        y = plan.cholesky @ z  # correlated standard normals
+        y = self.draw_copula_normals(plan, self.rng)
         for i, node_id in enumerate(order):
             uncertainty = self._uncertainty_map.get(node_id)
             node = self._node_map.get(node_id)
@@ -1663,6 +1662,12 @@ class FactorSampler:
             value = self._copula_transform(uncertainty, mean, float(y[i]))
             factor_values[node_id] = value
             self._value_sums[node_id] += value
+
+    @staticmethod
+    def draw_copula_normals(plan: CorrelationPlan, rng: SeededRNG) -> np.ndarray:
+        """One shared Gaussian-copula draw, used by factors and option ranges."""
+        z = np.array([rng.normal(0.0, 1.0) for _ in plan.factor_order], dtype=float)
+        return plan.cholesky @ z
 
     def _copula_transform(self, uncertainty: ParameterUncertainty, mean: float, y: float) -> float:
         """Map a correlated standard-normal draw ``y`` onto a factor's marginal.
@@ -3468,6 +3473,8 @@ class PhaseDeadline:
 # TEMPORAL step 1, R3 #75 5911436566 (1): a point counts as the range's middle when it lies
 # between the fitted P40 and P60. z at 0.60 of the standard normal.
 INTERVENTION_RANGE_MIDDLE_Z = 0.2533471031357997
+# AIE policy switch. No undeclared within-option independence is assumed.
+UNDECLARED_RANGE_DEPENDENCE = "withhold"
 
 
 def _lognormal_limit_probability(median: float, sigma: float, operator: str, limit: float) -> float:
@@ -4706,6 +4713,7 @@ class RobustnessAnalyzerV2:
                 result.sampled_intervention_ranges
                 and analysis is not None
                 and len(analysis.constraints) > 1
+                and analysis.joint_probability is None
             ):
                 inference_warnings.append(
                     InferenceWarning(
@@ -8622,6 +8630,9 @@ class RobustnessAnalyzerV2:
                     status_quo_node_values,
                     level_domains=level_domains,
                     range_series=(range_series or {}).get(option.id),
+                    range_joint_declared=bool(self._joint_range_targets(
+                        request, option, set((range_series or {}).get(option.id, {}))
+                    )),
                 )
                 if analysis_dict:
                     # Convert dict to ConstraintAnalysis model
@@ -9117,6 +9128,16 @@ class RobustnessAnalyzerV2:
                     "different claim, so this limit is omitted rather than misread.",
                     {**ident, "meaning": stated.meaning},
                 )
+            target_is_change = any(
+                n.id == node_id and n.quantity_frame == "change" for n in request.graph.nodes
+            )
+            if target_is_change:
+                return (
+                    "intervention_range_frame_unsupported",
+                    "A stated range requires an absolute level target; this node measures "
+                    "a change. The limit is omitted.",
+                    ident,
+                )
             if constraint.value_frame != "level":
                 return (
                     "intervention_range_frame_unsupported",
@@ -9208,6 +9229,46 @@ class RobustnessAnalyzerV2:
         return None
 
     @staticmethod
+    def _joint_range_targets(
+        request: RobustnessRequestV2,
+        option: InterventionOption,
+        scored_target_ids: Set[str],
+    ) -> List[str]:
+        """Return the canonical jointly drawable targets, or retain the legacy path.
+
+        One option's carrier never licenses another option or a point/model row.
+        Refused conditions cannot acquire a joint over a surviving subset.
+        """
+        constraints = request.goal_constraints or []
+        ranges = option.intervention_ranges or {}
+        parents = {edge.to for edge in request.graph.edges}
+        change_nodes = {n.id for n in request.graph.nodes if n.quantity_frame == "change"}
+        if not constraints or any(
+            c.value_frame != "level" or c.node_id in parents or c.node_id in change_nodes
+            or c.node_id not in scored_target_ids or c.node_id not in ranges
+            or ranges[c.node_id].meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS
+            for c in constraints
+        ):
+            return []
+        targets = sorted({c.node_id for c in constraints})
+        if len(targets) < 2:
+            return []  # preserve existing single-range behaviour
+        pairs = {
+            frozenset((p.factor_a, p.factor_b))
+            for p in (option.intervention_range_correlations or [])
+        }
+        complete = all(
+            frozenset((a, b)) in pairs
+            for i, a in enumerate(targets) for b in targets[i + 1:]
+        )
+        if not complete:
+            # The switch applies only to wholly undeclared inputs, never to a
+            # partial declaration whose unknown entries cannot be guessed.
+            if pairs or UNDECLARED_RANGE_DEPENDENCE != "independent":
+                return []
+        return targets
+
+    @staticmethod
     def _intervention_range_series(
         request: RobustnessRequestV2,
         seed: int,
@@ -9216,13 +9277,36 @@ class RobustnessAnalyzerV2:
         """``{option_id: {node_id: per-draw level in the node's frame}}`` for each sampled range.
 
         Only ranges whose meaning ISL samples, and (when given) only on a scored limit's
-        target. Each (option, node) draws from ITS OWN tagged stream, created only when it is
-        needed, so no existing stream moves and one option's range never moves another's
-        draws. ``{}`` when nothing is ranged: the request is then byte-identical.
+        target. Complete within-option declarations use one tagged population and
+        the existing Gaussian copula. Otherwise the legacy (option, node) streams
+        are unchanged. Neither path consumes the model's random streams.
         """
         series: Dict[str, Dict[str, List[float]]] = {}
         for option in request.options:
-            for node_id, stated in sorted((option.intervention_ranges or {}).items()):
+            ranges = option.intervention_ranges or {}
+            targets = RobustnessAnalyzerV2._joint_range_targets(
+                request, option, scored_target_ids if scored_target_ids is not None else set(ranges)
+            )
+            if targets:
+                plan = build_correlation_plan(targets, [
+                    (p.factor_a, p.factor_b, p.rho)
+                    for p in (option.intervention_range_correlations or [])
+                    if p.factor_a in targets and p.factor_b in targets
+                ])
+                rng = SeededRNG(RobustnessAnalyzerV2._per_factor_seed(
+                    seed, "intervention_range_joint", option.id
+                ))
+                fits = {n: fit_lognormal_range(ranges[n].low, ranges[n].high) for n in targets}
+                series[option.id] = {n: [] for n in targets}
+                for _ in range(request.n_samples):
+                    normals = FactorSampler.draw_copula_normals(plan, rng)
+                    for i, node_id in enumerate(targets):
+                        mu, sigma = fits[node_id]
+                        raw = float(np.exp(mu + sigma * normals[i]))
+                        series[option.id][node_id].append(ranges[node_id].to_frame(raw))
+            for node_id, stated in sorted(ranges.items()):
+                if node_id in targets:
+                    continue
                 if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
                     continue
                 if scored_target_ids is not None and node_id not in scored_target_ids:
@@ -13192,6 +13276,7 @@ class RobustnessAnalyzerV2:
         *,
         level_domains: Optional[Dict[str, Tuple[float, float]]],
         range_series: Optional[Dict[str, List[float]]],
+        range_joint_declared: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Compute full constraint analysis for an option, or REFUSE (ROADMAP 2.798).
@@ -13243,10 +13328,9 @@ class RobustnessAnalyzerV2:
         scored_plans = {
             position: constraint_plans[index] for position, index in enumerate(scored_indices)
         }
-        # TEMPORAL step 1: the rows this option scores from a stated range. The JOINT across a
-        # range-scored row and any other row is held back (with its conditionals): the range is
-        # sampled independently of the model, and that dependence is not yet defined (Paul, 30
-        # Sep). A single limit keeps its joint, which is that row.
+        # Range/model mixtures retain the legacy withholding rule. ISL2 licenses
+        # an all-range joint only after the option's complete dependence declaration
+        # produced one shared population. A single limit keeps its own joint.
         sampled_range_node_ids = sorted(
             {
                 constraint.node_id
@@ -13255,7 +13339,11 @@ class RobustnessAnalyzerV2:
                 and option_id in dict(scored_plans[position].pinned_levels)
             }
         )
-        range_joint_deferred = bool(sampled_range_node_ids) and len(scored) > 1
+        all_rows_ranged = all(c.node_id in sampled_range_node_ids for c in scored)
+        range_joint_deferred = (
+            bool(sampled_range_node_ids) and len(scored) > 1
+            and not (range_joint_declared and all_rows_ranged)
+        )
         if range_joint_deferred:
             joint_emitted = False
 
