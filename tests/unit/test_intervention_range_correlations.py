@@ -74,6 +74,21 @@ def oracle(option):
     return levels, met
 
 
+def assert_same_marginals(actual, expected):
+    if isinstance(expected, float) and not isinstance(actual, bool):
+        assert actual == pytest.approx(expected, rel=1e-12, abs=0.0)
+    elif isinstance(expected, dict):
+        assert isinstance(actual, dict) and actual.keys() == expected.keys()
+        for key in expected:
+            assert_same_marginals(actual[key], expected[key])
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected)
+        for a, e in zip(actual, expected):
+            assert_same_marginals(a, e)
+    else:
+        assert actual == expected and type(actual) is type(expected)
+
+
 def assert_withheld(response, ids=('a', 'b')):
     warnings = [w for w in response.inference_warnings if w.code == 'CONSTRAINT_JOINT_WITHHELD']
     assert {w.detail['option_id'] for w in warnings} == set(ids)
@@ -113,8 +128,10 @@ def test_b_undeclared_withholds_and_preserves_baseline_marginals():
     response = run(payload(False))
     assert_withheld(response)
     golden = Path(__file__).with_name('fixtures') / 'isl2_undeclared_marginals.json'
-    assert marginals(response) == json.loads(golden.read_text())
-    assert (json.dumps(marginals(response), indent=2, sort_keys=True) + '\n').encode() == golden.read_bytes()
+    # The golden was written on macOS; Linux libm differs in the last bit of a few derived
+    # floats (CI: 0.5230681201757788 vs ...789). Structure, keys, ids, operators, verdicts and
+    # every non-float stay EXACT; floats agree to 1e-12 relative (platform ULPs, not a change).
+    assert_same_marginals(marginals(response), json.loads(golden.read_text()))
 
 
 def test_c_partial_declaration_withholds_and_preserves_baseline_marginals():
