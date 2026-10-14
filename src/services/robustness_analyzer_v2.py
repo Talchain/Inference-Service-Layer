@@ -1670,7 +1670,7 @@ class FactorSampler:
     def draw_copula_normals(plan: CorrelationPlan, rng: SeededRNG) -> np.ndarray:
         """One shared Gaussian-copula draw, used by factors and option ranges."""
         z = np.array([rng.normal(0.0, 1.0) for _ in plan.factor_order], dtype=float)
-        return plan.cholesky @ z
+        return np.asarray(plan.cholesky @ z, dtype=float)
 
     def _copula_transform(self, uncertainty: ParameterUncertainty, mean: float, y: float) -> float:
         """Map a correlated standard-normal draw ``y`` onto a factor's marginal.
@@ -4711,9 +4711,9 @@ class RobustnessAnalyzerV2:
         # AIE laws ruling (same cohort): each option's same-cohort target forecast, scored on its
         # own tagged stream. No option sends one today, so nothing is drawn and results are unchanged.
         for result in results:
-            option = next((o for o in request.options if o.id == result.option_id), None)
-            if option is not None and option.target_forecast is not None:
-                result.target_forecast_analysis = self._target_forecast_analysis(request, option, seed)
+            forecast_option = next((o for o in request.options if o.id == result.option_id), None)
+            if forecast_option is not None and forecast_option.target_forecast is not None:
+                result.target_forecast_analysis = self._target_forecast_analysis(request, forecast_option, seed)
         # TEMPORAL step 1: name each option whose joint was held back because a limit row was
         # scored from its stated range beside other limits (B5: an absence always has a name).
         for result in results:
