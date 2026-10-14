@@ -72,6 +72,8 @@ from src.models.robustness_v2 import (
     PathDecomposition,
     ResponseMetadataV2,
     SampledInterventionRange,
+    TargetForecastAnalysis,
+    TargetForecastConditionResult,
     RobustnessRequestV2,
     RobustnessResponseV2,
     RobustnessResult,
@@ -124,7 +126,8 @@ from src.services.goal_chance_drivers import (
     goal_chance_quantities,
     quantities_upstream_of_set,
 )
-from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, resolve_range_fits
+from src.services.range_fit import RATIFIED_COVERAGE, fit_lognormal_range, fit_range_distribution, resolve_range_fits
+from src.models.range_fit import RangeFitRefusal
 from src.services.event_risk import (
     OCCURRENCE_STREAM_OFFSET,
     OccurrenceMode,
@@ -4705,6 +4708,12 @@ class RobustnessAnalyzerV2:
             range_series=intervention_range_series or None,
             goal_chance_quantities=goal_chance_draws,
         )
+        # AIE laws ruling (same cohort): each option's same-cohort target forecast, scored on its
+        # own tagged stream. No option sends one today, so nothing is drawn and results are unchanged.
+        for result in results:
+            option = next((o for o in request.options if o.id == result.option_id), None)
+            if option is not None and option.target_forecast is not None:
+                result.target_forecast_analysis = self._target_forecast_analysis(request, option, seed)
         # TEMPORAL step 1: name each option whose joint was held back because a limit row was
         # scored from its stated range beside other limits (B5: an absence always has a name).
         for result in results:
@@ -9041,6 +9050,75 @@ class RobustnessAnalyzerV2:
         duplicate node_ids with a 422, but a direct internal caller could bypass it,
         so a repeated node_id can never double-count in the per-factor VOI loops."""
         return list({u.node_id: u for u in (request.parameter_uncertainties or [])}.values())
+
+    def _target_forecast_analysis(
+        self, request: RobustnessRequestV2, option: InterventionOption, seed: int
+    ) -> Optional[TargetForecastAnalysis]:
+        """AIE laws ruling (13 Oct, N_customers / same_cohort): the option's rate and count of ONE
+        cohort, on ONE draw population, through the EXISTING per-draw comparator and AND.
+
+        Per draw: p ~ Beta with quartiles at ``rate_quartiles`` (the existing quartile fit, no new
+        family); N ~ Binomial(exposure, p); C = N / exposure. Each condition reads C or N with its
+        ``goal_constraints`` row's operator (strict kept), so the joint is the share of draws on
+        which every condition holds, never a product of marginals. Own tagged stream, consumes no
+        model draw. ``None`` (absent, never a fabricated figure) when the fit refuses or no draw
+        is informative.
+        """
+        forecast = option.target_forecast
+        if forecast is None:
+            return None
+        rows = {c.constraint_id: c for c in (request.goal_constraints or []) if c.constraint_id}
+        q25, q75 = forecast.rate_quartiles
+        try:
+            fit = fit_range_distribution(q25, q75, "unit_interval")
+        except RangeFitRefusal:
+            return None
+        if fit.alpha is None or fit.beta is None:
+            return None
+        rng = np.random.Generator(np.random.PCG64(self._per_factor_seed(seed, "target_forecast", option.id)))
+        propensity = rng.beta(fit.alpha, fit.beta, request.n_samples)
+        count = rng.binomial(forecast.exposure, propensity).astype(float)
+        rate = count / forecast.exposure
+        constraints = [rows[condition.constraint_id] for condition in forecast.conditions]
+        series = {
+            index: (rate if condition.quantity == "rate" else count).tolist()
+            for index, condition in enumerate(forecast.conditions)
+        }
+        thresholds = {index: condition.threshold for index, condition in enumerate(forecast.conditions)}
+        probabilities = self._compute_constraint_probabilities(
+            series, constraints, thresholds=thresholds, joint_emitted=True
+        )
+        if probabilities is None:
+            return None
+        per_condition, joint, _matrix, informative = probabilities
+        n_informative = sum(informative)
+
+        def precision(p: float) -> Dict[str, float]:
+            return {"n_informative": float(n_informative), "standard_error": math.sqrt(p * (1.0 - p) / n_informative)}
+
+        return TargetForecastAnalysis(
+            conditions=[
+                TargetForecastConditionResult(
+                    constraint_id=condition.constraint_id,
+                    quantity=condition.quantity,
+                    operator=constraints[index].operator,
+                    threshold=condition.threshold,
+                    prob_satisfied=per_condition[str(index)],
+                    prob_satisfied_precision=precision(per_condition[str(index)]),
+                )
+                for index, condition in enumerate(forecast.conditions)
+            ],
+            joint_probability=joint,
+            joint_probability_precision=precision(joint),
+            law={
+                "family": "beta_binomial",
+                "alpha": fit.alpha,
+                "beta": fit.beta,
+                "rate_quartiles": [q25, q75],
+                "exposure": forecast.exposure,
+                "trials": "conditionally independent given the cohort's propensity",
+            },
+        )
 
     @staticmethod
     def _per_factor_seed(seed: int, phase: str, node_id: str) -> int:

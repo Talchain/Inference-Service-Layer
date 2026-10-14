@@ -1126,6 +1126,68 @@ class InterventionRangeCorrelation(FactorCorrelation):
     )
 
 
+class TargetForecastCondition(BaseModel):
+    """One target the option's same-cohort forecast is scored against.
+
+    ``constraint_id`` names a row of ``goal_constraints``: its OPERATOR is the one compared
+    (strict kept). ``threshold`` is in the quantity's natural unit, stated here so no node
+    frame is guessed: a rate as a fraction of the cohort (15% -> 0.15), a count as people.
+    """
+
+    constraint_id: str = Field(..., min_length=1, description="The goal_constraints row this condition scores")
+    quantity: Literal["rate", "count"] = Field(
+        ..., description="'rate': realised share of the cohort that converts; 'count': people who convert"
+    )
+    threshold: float = Field(
+        ..., allow_inf_nan=False, ge=0.0,
+        description="Natural units: a rate as a fraction in [0, 1], a count in people",
+    )
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _rate_is_a_fraction(self) -> "TargetForecastCondition":
+        if self.quantity == "rate" and self.threshold > 1.0:
+            raise ValueError("target_forecast: a rate threshold is a fraction in [0, 1]")
+        return self
+
+
+class SameCohortTargetForecast(BaseModel):
+    """AIE laws ruling (13 Oct, N_customers / same_cohort): one option's forecast for targets that
+    count the SAME cohort over the same window, a conversion rate and the customers it yields.
+
+    Per draw: the cohort's conversion propensity p ~ Beta, quartiles at ``rate_quartiles`` (the
+    existing quartile fit, ``range_fit.fit_range_distribution``); the customers
+    N ~ Binomial(exposure, p) (trials conditionally independent given p); the realised rate
+    C = N / exposure, ON THE SAME DRAW. The targets' dependence is that accounting identity,
+    never a declared or assumed correlation, and E*p (expected customers) never stands in for
+    the realised N.
+
+    The caller owns the reading: ``rate_quartiles`` are the quartiles an adopted card stated,
+    never inferred from a min-max; ``exposure`` is the cohort size the card stated (a point:
+    its own uncertainty is excluded, which the caller discloses). Inert when absent.
+    """
+
+    law: Literal["same_cohort_beta_binomial"] = Field(..., description="The only law this carrier licenses")
+    exposure: int = Field(..., ge=1, le=10_000_000, description="People in the cohort over the window (adopted point)")
+    rate_quartiles: Tuple[float, float] = Field(
+        ..., description="(q25, q75) of the cohort's conversion propensity, fractions, 0 < q25 < q75 < 1"
+    )
+    conditions: List[TargetForecastCondition] = Field(..., min_length=1, max_length=10)
+
+    model_config = {"extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _well_formed(self) -> "SameCohortTargetForecast":
+        q25, q75 = self.rate_quartiles
+        if not (math.isfinite(q25) and math.isfinite(q75) and 0.0 < q25 < q75 < 1.0):
+            raise ValueError("target_forecast: rate_quartiles need 0 < q25 < q75 < 1")
+        ids = [c.constraint_id for c in self.conditions]
+        if len(set(ids)) != len(ids):
+            raise ValueError("target_forecast: each constraint_id at most once")
+        return self
+
+
 class InterventionOption(BaseModel):
     """A decision option with its interventions."""
 
@@ -1145,6 +1207,11 @@ class InterventionOption(BaseModel):
             "node_id -> the option's stated range for the value it sets there. Each key must "
             "also be in `interventions` (the point, within the range's P40-P60)."
         ),
+    )
+    target_forecast: Optional[SameCohortTargetForecast] = Field(
+        None,
+        description="Same-cohort forecast of this option's targets (the rate and count of one cohort), "
+        "scored on one draw population into target_forecast_analysis. Inert when absent.",
     )
 
     intervention_range_correlations: Optional[List[InterventionRangeCorrelation]] = Field(
@@ -1930,6 +1997,18 @@ class RobustnessRequestV2(BaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def validate_target_forecast_conditions(self) -> "RobustnessRequestV2":
+        """Each same-cohort condition names a goal_constraints row by id (its operator is compared)."""
+        known = {c.constraint_id for c in (self.goal_constraints or []) if c.constraint_id}
+        for option in self.options:
+            for condition in (option.target_forecast.conditions if option.target_forecast else []):
+                if condition.constraint_id not in known:
+                    raise ValueError(
+                        f"target_forecast on option {option.id!r} names no goal_constraints row: {condition.constraint_id!r}"
+                    )
+        return self
+
     def _correlation_matrix_inputs(self) -> Tuple[List[str], List[Tuple[str, str, float]]]:
         """Canonical (factor_order, pairs) for the assembled correlation matrix.
 
@@ -2338,6 +2417,30 @@ class SampledInterventionRange(BaseModel):
     high: float = Field(..., description="Stated bad case, raw units")
 
 
+class TargetForecastConditionResult(BaseModel):
+    """One condition of an option's same-cohort forecast, on the shared draws."""
+
+    constraint_id: str
+    quantity: Literal["rate", "count"]
+    operator: str
+    threshold: float = Field(..., description="Natural units, as sent")
+    prob_satisfied: float = Field(..., ge=0, le=1)
+    prob_satisfied_precision: Dict[str, float] = Field(..., description="{n_informative, standard_error}")
+
+
+class TargetForecastAnalysis(BaseModel):
+    """Every condition of ``target_forecast`` and their joint, from ONE draw population.
+
+    The law echo says how the forecast was read, so a surface can name it: the propensity's
+    Beta (fitted to the sent quartiles), the cohort size held as a point, and conditionally
+    independent trials given the propensity."""
+
+    conditions: List[TargetForecastConditionResult]
+    joint_probability: float = Field(..., ge=0, le=1, description="P(every condition holds on the same draw)")
+    joint_probability_precision: Dict[str, float] = Field(..., description="{n_informative, standard_error}")
+    law: Dict[str, Any] = Field(..., description="family, alpha, beta, rate_quartiles, exposure, trials")
+
+
 class OptionResult(BaseModel):
     """Results for a single decision option."""
 
@@ -2368,6 +2471,9 @@ class OptionResult(BaseModel):
     )
     # TEMPORAL step 1 echo. A REGULAR field (not a PrivateAttr) for the same offload
     # boundary reason as pre_noise_expected_regret below.
+    target_forecast_analysis: Optional[TargetForecastAnalysis] = Field(
+        None, description="The option's same-cohort target forecast, scored. Absent unless the option sent one."
+    )
     sampled_intervention_ranges: Optional[List[SampledInterventionRange]] = Field(
         None,
         description="The stated ranges ISL sampled to score this option's limits. Absent when none.",

@@ -477,6 +477,28 @@ class SampledInterventionRangeV2(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class TargetForecastConditionResultV2(BaseModel):
+    """One condition of an option's same-cohort forecast, on the shared draws."""
+
+    constraint_id: str
+    quantity: Literal["rate", "count"]
+    operator: str
+    threshold: float = Field(..., description="Natural units, as sent (a rate as a fraction, a count in people)")
+    prob_satisfied: float = Field(..., ge=0, le=1)
+    prob_satisfied_precision: Dict[str, float] = Field(..., description="{n_informative, standard_error}")
+
+
+class TargetForecastAnalysisV2(BaseModel):
+    """AIE laws ruling (same cohort): every condition of the option's ``target_forecast`` and their
+    joint, from ONE draw population (p ~ Beta on the sent quartiles, N ~ Binomial(exposure, p),
+    rate = N / exposure on the same draw). The joint is never a product of the marginals."""
+
+    conditions: List[TargetForecastConditionResultV2]
+    joint_probability: float = Field(..., ge=0, le=1)
+    joint_probability_precision: Dict[str, float] = Field(..., description="{n_informative, standard_error}")
+    law: Dict[str, Any] = Field(..., description="family, alpha, beta, rate_quartiles, exposure, trials")
+
+
 class OptionResultV2(BaseModel):
     """Analysis result for a single option."""
 
@@ -528,6 +550,13 @@ class OptionResultV2(BaseModel):
     constraint_analysis: Optional["ConstraintAnalysisV2"] = Field(
         None,
         description="Multi-constraint analysis results. Only present when goal_constraints is provided in request.",
+    )
+    target_forecast_analysis: Optional[TargetForecastAnalysisV2] = Field(
+        None,
+        description=(
+            "The option's same-cohort target forecast (request options[].target_forecast), scored "
+            "on one draw population. Absent unless the option sent one."
+        ),
     )
     sampled_intervention_ranges: Optional[List[SampledInterventionRangeV2]] = Field(
         None,
