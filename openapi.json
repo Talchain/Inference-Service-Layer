@@ -5197,6 +5197,21 @@
             "title": "Id",
             "type": "string"
           },
+          "intervention_range_correlations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InterventionRangeCorrelation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Within-option range dependence. Both factors must have an intervention range on this option; unordered pairs must be unique and distinct. The assembled matrix must be positive semidefinite. Every pair of scored range targets must be explicitly declared to emit a joint; zero rho declares independence. Missing/partial declarations and mixed range/point conditions retain legacy marginals and withhold the joint. Does not declare dependence across options.",
+            "title": "Intervention Range Correlations"
+          },
           "intervention_ranges": {
             "anyOf": [
               {
@@ -5225,6 +5240,17 @@
             "maxLength": 500,
             "title": "Label",
             "type": "string"
+          },
+          "target_forecast": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SameCohortTargetForecast"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Same-cohort forecast of this option's targets (the rate and count of one cohort), scored on one draw population into target_forecast_analysis. Inert when absent."
           }
         },
         "required": [
@@ -5275,6 +5301,42 @@
           "meaning"
         ],
         "title": "InterventionRange",
+        "type": "object"
+      },
+      "InterventionRangeCorrelation": {
+        "description": "Within-option Gaussian-copula dependence between two stated ranges.\n\nrho is the latent normal correlation, not the Pearson correlation of the\nresulting lognormal levels. No node parameter_uncertainty is required.",
+        "example": {
+          "factor_a": "marketing_spend",
+          "factor_b": "demand",
+          "rho": 0.6
+        },
+        "properties": {
+          "factor_a": {
+            "description": "ID of the first factor node in the correlated pair",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor A",
+            "type": "string"
+          },
+          "factor_b": {
+            "description": "ID of the second factor node in the correlated pair",
+            "pattern": "^[a-z0-9_:-]+$",
+            "title": "Factor B",
+            "type": "string"
+          },
+          "rho": {
+            "description": "Latent standard-normal correlation for this option's range Gaussian copula. Zero explicitly declares independence for this pair; not the Pearson correlation of the resulting lognormal levels.",
+            "maximum": 1.0,
+            "minimum": -1.0,
+            "title": "Rho",
+            "type": "number"
+          }
+        },
+        "required": [
+          "factor_a",
+          "factor_b",
+          "rho"
+        ],
+        "title": "InterventionRangeCorrelation",
         "type": "object"
       },
       "InterventionRangeNormalisation": {
@@ -6230,6 +6292,17 @@
             "description": "The stated ranges ISL sampled to score this option's limits. Absent when none.",
             "title": "Sampled Intervention Ranges"
           },
+          "target_forecast_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetForecastAnalysis"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The option's same-cohort target forecast, scored. Absent unless the option sent one."
+          },
           "win_probability": {
             "anyOf": [
               {
@@ -6375,6 +6448,17 @@
             ],
             "description": "Reason for non-computed status",
             "title": "Status Reason"
+          },
+          "target_forecast_analysis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TargetForecastAnalysisV2"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The option's same-cohort target forecast (request options[].target_forecast), scored on one draw population. Absent unless the option sent one."
           },
           "win_probability": {
             "anyOf": [
@@ -8499,6 +8583,56 @@
         "title": "RobustnessResultV2",
         "type": "object"
       },
+      "SameCohortTargetForecast": {
+        "additionalProperties": false,
+        "description": "AIE laws ruling (13 Oct, N_customers / same_cohort): one option's forecast for targets that\ncount the SAME cohort over the same window, a conversion rate and the customers it yields.\n\nPer draw: the cohort's conversion propensity p ~ Beta, quartiles at ``rate_quartiles`` (the\nexisting quartile fit, ``range_fit.fit_range_distribution``); the customers\nN ~ Binomial(exposure, p) (trials conditionally independent given p); the realised rate\nC = N / exposure, ON THE SAME DRAW. The targets' dependence is that accounting identity,\nnever a declared or assumed correlation, and E*p (expected customers) never stands in for\nthe realised N.\n\nThe caller owns the reading: ``rate_quartiles`` are the quartiles an adopted card stated,\nnever inferred from a min-max; ``exposure`` is the cohort size the card stated (a point:\nits own uncertainty is excluded, which the caller discloses). Inert when absent.",
+        "properties": {
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/TargetForecastCondition"
+            },
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Conditions",
+            "type": "array"
+          },
+          "exposure": {
+            "description": "People in the cohort over the window (adopted point)",
+            "maximum": 10000000.0,
+            "minimum": 1.0,
+            "title": "Exposure",
+            "type": "integer"
+          },
+          "law": {
+            "const": "same_cohort_beta_binomial",
+            "description": "The only law this carrier licenses",
+            "title": "Law"
+          },
+          "rate_quartiles": {
+            "description": "(q25, q75) of the cohort's conversion propensity, fractions, 0 < q25 < q75 < 1",
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "title": "Rate Quartiles",
+            "type": "array"
+          }
+        },
+        "required": [
+          "law",
+          "exposure",
+          "rate_quartiles",
+          "conditions"
+        ],
+        "title": "SameCohortTargetForecast",
+        "type": "object"
+      },
       "SamplePopulationProvenanceV2": {
         "description": "Which sample population produced each served metric (arch step 1, 2026-07-26).\n\n``auto_noise_applied`` is a single boolean for a whole envelope that mixes two\npopulations. The B2 CRN-fix comment in ``RobustnessAnalyzerV2.analyze``\nrecords why they are mixed: ``expected_regret`` is a JOINT\nCommon-Random-Numbers metric and must come from the PRE-noise samples (the\nauto-noise draw is independent per option, which breaks CRN alignment and\ninflates regret by a max-over-independent-noise premium), while the marginal\ntail metrics stay on the noised samples for consistency with the noised\npercentiles. That is a defensible choice \u2014 but a consumer reading a response\ncould not tell which of the numbers in front of it the noise had reached.\nThis block says so per metric.",
         "properties": {
@@ -9676,6 +9810,219 @@
           "distributions"
         ],
         "title": "StructuralModel",
+        "type": "object"
+      },
+      "TargetForecastAnalysis": {
+        "description": "Every condition of ``target_forecast`` and their joint, from ONE draw population.\n\nThe law echo says how the forecast was read, so a surface can name it: the propensity's\nBeta (fitted to the sent quartiles), the cohort size held as a point, and conditionally\nindependent trials given the propensity.",
+        "properties": {
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/TargetForecastConditionResult"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "joint_probability": {
+            "description": "P(every condition holds on the same draw)",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Joint Probability",
+            "type": "number"
+          },
+          "joint_probability_precision": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "{n_informative, standard_error}",
+            "title": "Joint Probability Precision",
+            "type": "object"
+          },
+          "law": {
+            "description": "family, alpha, beta, rate_quartiles, exposure, trials",
+            "title": "Law",
+            "type": "object"
+          }
+        },
+        "required": [
+          "conditions",
+          "joint_probability",
+          "joint_probability_precision",
+          "law"
+        ],
+        "title": "TargetForecastAnalysis",
+        "type": "object"
+      },
+      "TargetForecastAnalysisV2": {
+        "description": "AIE laws ruling (same cohort): every condition of the option's ``target_forecast`` and their\njoint, from ONE draw population (p ~ Beta on the sent quartiles, N ~ Binomial(exposure, p),\nrate = N / exposure on the same draw). The joint is never a product of the marginals.",
+        "properties": {
+          "conditions": {
+            "items": {
+              "$ref": "#/components/schemas/TargetForecastConditionResultV2"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "joint_probability": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Joint Probability",
+            "type": "number"
+          },
+          "joint_probability_precision": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "{n_informative, standard_error}",
+            "title": "Joint Probability Precision",
+            "type": "object"
+          },
+          "law": {
+            "description": "family, alpha, beta, rate_quartiles, exposure, trials",
+            "title": "Law",
+            "type": "object"
+          }
+        },
+        "required": [
+          "conditions",
+          "joint_probability",
+          "joint_probability_precision",
+          "law"
+        ],
+        "title": "TargetForecastAnalysisV2",
+        "type": "object"
+      },
+      "TargetForecastCondition": {
+        "additionalProperties": false,
+        "description": "One target the option's same-cohort forecast is scored against.\n\n``constraint_id`` names a row of ``goal_constraints``: its OPERATOR is the one compared\n(strict kept). ``threshold`` is in the quantity's natural unit, stated here so no node\nframe is guessed: a rate as a fraction of the cohort (15% -> 0.15), a count as people.",
+        "properties": {
+          "constraint_id": {
+            "description": "The goal_constraints row this condition scores",
+            "minLength": 1,
+            "title": "Constraint Id",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "'rate': realised share of the cohort that converts; 'count': people who convert",
+            "enum": [
+              "rate",
+              "count"
+            ],
+            "title": "Quantity",
+            "type": "string"
+          },
+          "threshold": {
+            "description": "Natural units: a rate as a fraction in [0, 1], a count in people",
+            "minimum": 0.0,
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "constraint_id",
+          "quantity",
+          "threshold"
+        ],
+        "title": "TargetForecastCondition",
+        "type": "object"
+      },
+      "TargetForecastConditionResult": {
+        "description": "One condition of an option's same-cohort forecast, on the shared draws.",
+        "properties": {
+          "constraint_id": {
+            "title": "Constraint Id",
+            "type": "string"
+          },
+          "operator": {
+            "title": "Operator",
+            "type": "string"
+          },
+          "prob_satisfied": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Prob Satisfied",
+            "type": "number"
+          },
+          "prob_satisfied_precision": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "{n_informative, standard_error}",
+            "title": "Prob Satisfied Precision",
+            "type": "object"
+          },
+          "quantity": {
+            "enum": [
+              "rate",
+              "count"
+            ],
+            "title": "Quantity",
+            "type": "string"
+          },
+          "threshold": {
+            "description": "Natural units, as sent",
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "constraint_id",
+          "quantity",
+          "operator",
+          "threshold",
+          "prob_satisfied",
+          "prob_satisfied_precision"
+        ],
+        "title": "TargetForecastConditionResult",
+        "type": "object"
+      },
+      "TargetForecastConditionResultV2": {
+        "description": "One condition of an option's same-cohort forecast, on the shared draws.",
+        "properties": {
+          "constraint_id": {
+            "title": "Constraint Id",
+            "type": "string"
+          },
+          "operator": {
+            "title": "Operator",
+            "type": "string"
+          },
+          "prob_satisfied": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Prob Satisfied",
+            "type": "number"
+          },
+          "prob_satisfied_precision": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "{n_informative, standard_error}",
+            "title": "Prob Satisfied Precision",
+            "type": "object"
+          },
+          "quantity": {
+            "enum": [
+              "rate",
+              "count"
+            ],
+            "title": "Quantity",
+            "type": "string"
+          },
+          "threshold": {
+            "description": "Natural units, as sent (a rate as a fraction, a count in people)",
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "constraint_id",
+          "quantity",
+          "operator",
+          "threshold",
+          "prob_satisfied",
+          "prob_satisfied_precision"
+        ],
+        "title": "TargetForecastConditionResultV2",
         "type": "object"
       },
       "UncertaintyBreakdown": {

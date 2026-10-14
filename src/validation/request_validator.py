@@ -171,6 +171,15 @@ def detect_identical_options(options: List[Dict[str, Any]]) -> Optional[Tuple[st
         ranges = option.get("intervention_ranges")
         if ranges:
             canonical += "|ranges=" + json.dumps(ranges, sort_keys=True)
+        correlations = option.get("intervention_range_correlations")
+        if correlations:
+            # Same marginals with different dependence can have different joints.
+            # Pair orientation/list order do not change the declaration.
+            canonical_pairs = sorted(
+                (*sorted((p["factor_a"], p["factor_b"])), p["rho"])
+                for p in correlations
+            )
+            canonical += "|range_correlations=" + json.dumps(canonical_pairs)
 
         if canonical in seen:
             prev_id, prev_label = seen[canonical]

@@ -7,7 +7,7 @@
     "package_name": "@talchain/schemas",
     "package_version": "0.61.0",
     "omission_count": 51,
-    "superset_count": 88
+    "superset_count": 89
   },
   "omissions": [
     {
@@ -758,6 +758,11 @@
       "isl_model": "OptionResultV2",
       "prop": "sampled_intervention_ranges",
       "reason": "ISL superset — OptionResultV2.sampled_intervention_ranges is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: TEMPORAL step 1 (olumi-programme-docs #75 5911362141; R3 science ruling 5909972020, AIQ words 5909998288). Additive and optional: present only on an option whose limit row was scored from a stated range; PLoT keys its fail-closed forward on it. Remove when the schemas pin adopts it."
+    },
+    {
+      "isl_model": "OptionResultV2",
+      "prop": "target_forecast_analysis",
+      "reason": "ISL superset — OptionResultV2.target_forecast_analysis is not present in the paired contract schema (ISL emits ahead of contract adoption). DECISION REF: SCIENCE builder 14 Oct (DL inbox 16:14Z ACK; AIE laws ruling 13 Oct, same_cohort). The same-cohort target forecast is scored ISL-first and carried by PLoT; nothing sends options[].target_forecast until the CEE half lands, so the field is absent on every served response. Remove when the schemas pin adopts it."
     },
     {
       "isl_model": "RobustnessResultV2",

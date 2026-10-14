@@ -57,6 +57,7 @@ from src.models.response_v2 import (
     ObjectiveRankingV2,
     OptionResultV2,
     SampledInterventionRangeV2,
+    TargetForecastAnalysisV2,
     OutcomeDistributionV2,
     PathContributionV2,
     PathDecompositionV2,
@@ -1281,6 +1282,11 @@ async def _analyze_robustness_v2_enhanced(
                     probability_of_goal_precision=result.probability_of_goal_precision,
                     probability_of_goal_drivers=result.probability_of_goal_drivers,
                     constraint_analysis=constraint_analysis_v2,
+                    target_forecast_analysis=(
+                        TargetForecastAnalysisV2(**result.target_forecast_analysis.model_dump())
+                        if result.target_forecast_analysis is not None
+                        else None
+                    ),
                     # TEMPORAL step 1 echo, V1 → V2 field for field. None → omitted.
                     sampled_intervention_ranges=(
                         [
@@ -1872,6 +1878,10 @@ async def analyze_robustness_unified(
             return await analyze_robustness_v2(  # type: ignore[no-any-return]
                 validated_request,
                 http_request=http_request,
+                # Direct Python calls do not resolve FastAPI Query/Header defaults.
+                response_version=DEFAULT_RESPONSE_VERSION,
+                include_diagnostics=False,
+                x_isl_response_version=None,
                 x_request_id=request_id,
                 x_api_key=x_api_key,
             )

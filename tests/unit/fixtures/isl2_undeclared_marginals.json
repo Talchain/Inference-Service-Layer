@@ -1,0 +1,108 @@
+{
+  "a": [
+    {
+      "binding": true,
+      "constraint_id": "x",
+      "failure_margin_median": 0.2565982752278526,
+      "frame_verdict": "scored",
+      "label": null,
+      "level_out_of_domain_fraction": null,
+      "near_miss_fraction": 0.06972477064220184,
+      "node_id": "x",
+      "operator": ">",
+      "prob_satisfied": 0.455,
+      "prob_satisfied_precision": {
+        "n_informative": 1000,
+        "standard_error": 0.015747221977225064
+      },
+      "threshold": 0.45
+    },
+    {
+      "binding": true,
+      "constraint_id": "y",
+      "failure_margin_median": 0.268982546820588,
+      "frame_verdict": "scored",
+      "label": null,
+      "level_out_of_domain_fraction": null,
+      "near_miss_fraction": 0.06457242582897033,
+      "node_id": "y",
+      "operator": ">=",
+      "prob_satisfied": 0.427,
+      "prob_satisfied_precision": {
+        "n_informative": 1000,
+        "standard_error": 0.015641962792437524
+      },
+      "threshold": 0.5
+    },
+    {
+      "binding": false,
+      "constraint_id": "z",
+      "failure_margin_median": 0.4958821870599903,
+      "frame_verdict": "scored",
+      "label": null,
+      "level_out_of_domain_fraction": null,
+      "near_miss_fraction": 0.08493150684931507,
+      "node_id": "z",
+      "operator": "<=",
+      "prob_satisfied": 0.635,
+      "prob_satisfied_precision": {
+        "n_informative": 1000,
+        "standard_error": 0.015224158433227107
+      },
+      "threshold": 0.55
+    }
+  ],
+  "b": [
+    {
+      "binding": false,
+      "constraint_id": "x",
+      "failure_margin_median": 0.20536845392126168,
+      "frame_verdict": "scored",
+      "label": null,
+      "level_out_of_domain_fraction": null,
+      "near_miss_fraction": 0.09259259259259259,
+      "node_id": "x",
+      "operator": ">",
+      "prob_satisfied": 0.622,
+      "prob_satisfied_precision": {
+        "n_informative": 1000,
+        "standard_error": 0.015333492752794452
+      },
+      "threshold": 0.45
+    },
+    {
+      "binding": true,
+      "constraint_id": "y",
+      "failure_margin_median": 0.23422739822906782,
+      "frame_verdict": "scored",
+      "label": null,
+      "level_out_of_domain_fraction": null,
+      "near_miss_fraction": 0.0958904109589041,
+      "node_id": "y",
+      "operator": ">=",
+      "prob_satisfied": 0.562,
+      "prob_satisfied_precision": {
+        "n_informative": 1000,
+        "standard_error": 0.01568935945155187
+      },
+      "threshold": 0.5
+    },
+    {
+      "binding": true,
+      "constraint_id": "z",
+      "failure_margin_median": 0.5230681201757789,
+      "frame_verdict": "scored",
+      "label": null,
+      "level_out_of_domain_fraction": null,
+      "near_miss_fraction": 0.08022388059701492,
+      "node_id": "z",
+      "operator": "<=",
+      "prob_satisfied": 0.464,
+      "prob_satisfied_precision": {
+        "n_informative": 1000,
+        "standard_error": 0.015770351930125086
+      },
+      "threshold": 0.55
+    }
+  ]
+}
