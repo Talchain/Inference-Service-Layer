@@ -1659,6 +1659,7 @@ async def _analyze_robustness_v2_enhanced(
         )
         # event_risk.v1 echo (request-gated; None on every legacy request).
         builder.event_risks_applied = v1_response.event_risks_applied
+        builder.at_month_scoring = v1_response.at_month_scoring  # SPIKE S8
 
         # B3-S1: surface the correlated-factors disclosure (Gaussian copula method,
         # mandatory tail-independence caveat, any Higham PSD projection, suppressed-

@@ -363,6 +363,24 @@ class OutcomeDistributionV2(BaseModel):
 
 
 # event_risk.v1 echo (ISL robustness_v2 NodeV2.event_risk; src/services/event_risk.py).
+class AtMonthOption(BaseModel):
+    """What was in force for one option at the scored month (echo)."""
+
+    option_id: str
+    in_force: Dict[str, float]
+    not_yet_in_force: List[str]
+
+
+class AtMonthScoring(BaseModel):
+    """Echo: every figure in this response is the model AT ``at_month``, under the step shape."""
+
+    at_month: float
+    step_shape: Literal["no_effect_before_from_month_full_step_after"] = (
+        "no_effect_before_from_month_full_step_after"
+    )
+    options: List[AtMonthOption]
+
+
 class EventRiskAppliedV1(BaseModel):
     """Echo of one applied event risk, with the probability the analysis actually used.
 
@@ -2254,6 +2272,9 @@ class ISLResponseV2(BaseModel):
         "Absent when the request carried no event_risk. A caller that sent event_risk and finds "
         "no matching entry must fail closed: the risk was evaluated as an ordinary node.",
     )
+    # SPIKE S8 echo: present only when the request asked for at_month. A caller that sent
+    # at_month and finds no echo must fail closed (an older ISL dropped it: extra=ignore).
+    at_month_scoring: Optional[AtMonthScoring] = Field(None)
 
     # Arch step 1 (2026-07-26): per-metric population provenance. `auto_noise_applied`
     # says noise ran; it cannot say which of the numbers in front of you it reached.

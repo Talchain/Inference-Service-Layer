@@ -37,6 +37,8 @@ from src.constants import (
 
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
 from src.models.response_v2 import (
+    AtMonthOption,
+    AtMonthScoring,
     EventRiskAppliedV1,
     CorrelationModelV2,
     CritiqueV2,
@@ -1188,6 +1190,17 @@ class SameCohortTargetForecast(BaseModel):
         return self
 
 
+class EffectStep(BaseModel):
+    """SPIKE S8 (T7 lead): from ``from_month`` (months after the reference) the option's
+    setting on the node is ``value`` (same frame as ``interventions``). The step shape is
+    Olumi's disclosed assumption: no effect before from_month, the full step from it on."""
+
+    from_month: float = Field(..., ge=0, le=120, allow_inf_nan=False)
+    value: float = Field(..., allow_inf_nan=False)
+
+    model_config = {"extra": "forbid"}
+
+
 class InterventionOption(BaseModel):
     """A decision option with its interventions."""
 
@@ -1196,6 +1209,29 @@ class InterventionOption(BaseModel):
     interventions: Dict[str, float] = Field(
         ..., description="node_id -> intervention value mapping"
     )
+    # SPIKE S8: per intervened node, when the setting takes effect. Read only with the
+    # request's `at_month`; the last step's value must equal the node's full setting.
+    effect_steps: Optional[Dict[str, List[EffectStep]]] = Field(
+        None,
+        description="node_id -> ordered steps (from_month, value); last value == interventions[node]",
+    )
+
+    @model_validator(mode="after")
+    def validate_effect_steps(self) -> "InterventionOption":
+        for node_id, steps in (self.effect_steps or {}).items():
+            if node_id not in self.interventions:
+                raise ValueError(f"EFFECT_STEPS_NODE: '{node_id}' is not a node option '{self.id}' sets")
+            if not steps:
+                raise ValueError(f"EFFECT_STEPS_EMPTY: option '{self.id}' node '{node_id}'")
+            months = [s.from_month for s in steps]
+            if any(b <= a for a, b in zip(months, months[1:])):
+                raise ValueError(f"EFFECT_STEPS_ORDER: option '{self.id}' node '{node_id}' from_month must increase")
+            if steps[-1].value != self.interventions[node_id]:
+                raise ValueError(
+                    f"EFFECT_STEPS_FULL_SETTING: option '{self.id}' node '{node_id}' last step "
+                    f"{steps[-1].value} != its full setting {self.interventions[node_id]}"
+                )
+        return self
     # TEMPORAL step 1 (brief dl-claude-27fbe09b/briefs/TEMPORAL.md; R3 #75 5909972020).
     # Reader-first and INERT WHEN ABSENT: a request without it is byte-identical (T0 in
     # tests/unit/test_intervention_ranges.py). It moves ONLY this option's own probability of
@@ -1588,6 +1624,13 @@ class RobustnessRequestV2(BaseModel):
         "(win_probability, downside, percentiles, factor_evppi) remain valid.",
     )
 
+    # SPIKE S8: score every option as it stands at month M (each option's effect_steps).
+    # Inert when absent (byte-identical request path).
+    at_month: Optional[float] = Field(
+        None, ge=0, le=120, allow_inf_nan=False,
+        description="Score the goal at this month; requires effect_steps on every intervened node",
+    )
+
     # Goal threshold configuration (single constraint, legacy)
     goal_threshold: Optional[float] = Field(
         None,
@@ -1879,6 +1922,36 @@ class RobustnessRequestV2(BaseModel):
                         f"Option '{option.id}' intervention_ranges['{node_id}'] is not a node "
                         "the option sets (it must also be in interventions)"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def validate_at_month(self) -> "RobustnessRequestV2":
+        """SPIKE S8: at-month scoring is explicit. A missing lead is UNKNOWN, never zero (R2)."""
+        stepped = [o.id for o in self.options if o.effect_steps]
+        if self.at_month is None:
+            if stepped:
+                raise ValueError(f"EFFECT_STEPS_WITHOUT_AT_MONTH: options {stepped} carry effect_steps")
+            return self
+        m = self.at_month
+        for option in self.options:
+            steps = option.effect_steps or {}
+            missing = sorted(set(option.interventions) - set(steps))
+            if missing:
+                raise ValueError(f"EFFECT_LEAD_MISSING: option '{option.id}' sets {missing} with no effect_steps")
+            if option.target_forecast is not None:
+                raise ValueError(f"AT_MONTH_UNSUPPORTED: option '{option.id}' target_forecast has its own window")
+            for node_id in option.intervention_ranges or {}:
+                if steps[node_id][-1].from_month > m:
+                    raise ValueError(f"AT_MONTH_RANGE_NOT_IN_FORCE: option '{option.id}' node '{node_id}'")
+        for node in self.graph.nodes:
+            identity = node.nonlinear_identity
+            if identity is not None and identity.operation == "accumulation" and identity.horizon_months != m:
+                raise ValueError(f"AT_MONTH_HORIZON_MISMATCH: '{node.id}' is month {identity.horizon_months}, scored at {m}")
+            if node.event_risk is not None and node.event_risk.horizon.months != m:
+                raise ValueError(
+                    f"AT_MONTH_EVENT_WINDOW_MISMATCH: '{node.id}' chance is over {node.event_risk.horizon.months} "
+                    f"months, scored at month {m}"
+                )
         return self
 
     @model_validator(mode="after")
@@ -3135,6 +3208,9 @@ class RobustnessResponseV2(BaseModel):
     event_risks_applied: Optional[List[EventRiskAppliedV1]] = Field(
         None, description="Applied event-risk occurrence probabilities; absent when no event risk was supplied."
     )
+    # SPIKE S8: present only when the request asked for at_month; a consumer licenses an
+    # at-month figure ONLY on this echo (an older ISL drops at_month silently: extra=ignore).
+    at_month_scoring: Optional[AtMonthScoring] = Field(None)
 
     model_config = {
         "populate_by_name": True,

@@ -165,6 +165,7 @@ class ResponseBuilder:
         # Preserves False as False; never coerced to None on the path through the route.
         self.auto_noise_applied: Optional[bool] = None
         self.event_risks_applied: Optional[list] = None
+        self.at_month_scoring = None  # SPIKE S8
         # Arch step 1: per-metric population provenance, derived alongside the
         # boolean above by set_auto_noise_applied so the two cannot desync.
         self.sample_population_provenance: Optional[SamplePopulationProvenanceV2] = None
@@ -418,6 +419,7 @@ class ResponseBuilder:
             structural_influence=self.structural_influence,  # R3-5
             auto_noise_applied=self.auto_noise_applied,
             event_risks_applied=self.event_risks_applied,
+            at_month_scoring=self.at_month_scoring,
             sample_population_provenance=self.sample_population_provenance,
             request_id=self.request_id,
             processing_time_ms=processing_time,

@@ -47,6 +47,8 @@ from src.models.node_level import LevelAnchorSource, NodeLevelFrame, NoLevelReas
 from src.models.structural_influence import StructuralInfluence
 from src.models.robustness_v2 import (
     CHANGE_FRAMES,
+    AtMonthOption,
+    AtMonthScoring,
     BucketResult,
     ClampMetrics,
     ConditionalWinner,
@@ -3783,6 +3785,38 @@ class ObjectivePlan:
 # =============================================================================
 
 
+
+def options_at_month(
+    request: RobustnessRequestV2,
+) -> Tuple[RobustnessRequestV2, Optional[AtMonthScoring]]:
+    """SPIKE S8: each option AS IT STANDS at ``request.at_month`` (T7 step shape).
+
+    A step is in force iff from_month <= at_month; the node then takes the last in-force
+    step's value. A node with no step in force is NOT intervened: it stays as it is without
+    the option, on the same draw, so paired claims (win share, drivers) keep the shared
+    baseline. Every downstream reader sees the at-month option. Absent at_month: unchanged.
+    """
+    m = request.at_month
+    if m is None:
+        return request, None
+    options: List[InterventionOption] = []
+    echo: List[AtMonthOption] = []
+    for option in request.options:
+        in_force: Dict[str, float] = {}
+        pending: List[str] = []
+        for node_id, steps in sorted((option.effect_steps or {}).items()):
+            active = [s for s in steps if s.from_month <= m]
+            if active:
+                in_force[node_id] = active[-1].value
+            if len(active) < len(steps):
+                pending.append(node_id)
+        ranges = {k: v for k, v in (option.intervention_ranges or {}).items() if k in in_force}
+        options.append(option.model_copy(update={
+            "interventions": in_force, "effect_steps": None, "intervention_ranges": ranges or None,
+        }))
+        echo.append(AtMonthOption(option_id=option.id, in_force=in_force, not_yet_in_force=pending))
+    return request.model_copy(update={"options": options}), AtMonthScoring(at_month=m, options=echo)
+
 class RobustnessAnalyzerV2:
     """
     Robustness analysis with dual uncertainty (v2.2).
@@ -3901,6 +3935,7 @@ class RobustnessAnalyzerV2:
         the same seed and the surviving options, including their RNG/tie behavior.
         This makes their figures identical to a request without the refused options.
         """
+        request, at_month_scoring = options_at_month(request)
         original_options = request.options
         failed_ids: Set[str] = set()
         seed, _ = compute_effective_seed(request)
@@ -3952,6 +3987,8 @@ class RobustnessAnalyzerV2:
             response.results = [by_id[option.id] for option in original_options]
             if response._mc_draws is not None:
                 response._mc_draws["accumulation_refused_option_ids"] = sorted(failed_ids)
+        if at_month_scoring is not None:
+            response.at_month_scoring = at_month_scoring
         return response
 
     def _analyze(self, request: RobustnessRequestV2) -> RobustnessResponseV2:
