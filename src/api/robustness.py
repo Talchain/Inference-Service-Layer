@@ -1298,7 +1298,7 @@ async def _analyze_robustness_v2_enhanced(
                     ),
                     status=status,
                     status_reason=(
-                        "accumulation_draw_refused" if result.win_probability is None
+                        "accumulation_draw_refused" if result.win_probability is None and status != "computed"
                         else "Numerical issues in sampling" if status != "computed" else None
                     ),
                 )

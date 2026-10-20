@@ -4383,6 +4383,19 @@ class RobustnessAnalyzerV2:
             else {}
         )
 
+        outcome_range_series = self._intervention_range_series(request, seed, downstream=True)
+        for option_id, rows in outcome_range_series.items():
+            intervention_range_series.setdefault(option_id, {}).update(rows)
+        unsupported_goal_options = {
+            option.id for option in request.options
+            if request.goal_threshold is not None and self._reached_by(
+                request.goal_node_id,
+                set(option.intervention_ranges or {}) - set(outcome_range_series.get(option.id, {})),
+                parent_map,
+            )
+        }
+        marginal_range_mode = bool(outcome_range_series or unsupported_goal_options)
+
         # ROADMAP 2.1192: WHAT "wins" MEANS for this request. Resolved here,
         # beside the threshold plan it reuses and BEFORE the Monte Carlo, for
         # the same reason: it decides whether the goal needs a per-draw
@@ -4396,6 +4409,16 @@ class RobustnessAnalyzerV2:
         objective_plan, objective_warning = self._resolve_objective_plan(
             request, goal_threshold_plan
         )
+        if marginal_range_mode and objective_plan.sense != "withheld":
+            objective_plan = replace(objective_plan, sense="withheld")
+            objective_warning = InferenceWarning(
+                code="OBJECTIVE_RANKING_WITHHELD", field="objective_ranking", severity="warning",
+                detail={"reason": "range_joint_law_not_declared", "message":
+                        "Range endpoints do not declare a probability law. Explicit outcome laws "
+                        "support only their marginals here; no cross-option dependence was declared. "
+                        "Win shares, regret and value of information are withheld; point and "
+                        "conditional reasoning remain available."},
+            )
         if objective_warning is not None:
             inference_warnings.append(objective_warning)
         objective_ranking_withheld = objective_plan.sense == "withheld"
@@ -4460,6 +4483,7 @@ class RobustnessAnalyzerV2:
             objective=objective_plan,
             information_evaluator=information_evaluator,
             information_outcomes=event_risk_information_outcomes,
+            range_series=outcome_range_series,
         )
         # The p-conditional population when an event risk exists; otherwise the realised one
         # itself (the same object), so a legacy request computes exactly what it did before.
@@ -4493,7 +4517,10 @@ class RobustnessAnalyzerV2:
         # event_risk.v1 (Science C-EVPI): regret is measured against the best choice an INFORMED
         # team could make, which knows p but never whether the event happens. So it reads the
         # p-conditional population. That population IS option_outcomes when no event risk exists.
-        pre_noise_expected_regret = expected_regret_per_option(information_outcomes)
+        pre_noise_expected_regret: Dict[str, Optional[float]] = (
+            {option.id: None for option in request.options} if marginal_range_mode
+            else expected_regret_per_option(information_outcomes)
+        )
 
         # S2 (D-23.8) factor_evppi and S4 (D-23.8) factor_evpc both need the PRE-noise
         # per-option outcomes — the same CRN-aligned joint population that produced
@@ -4506,7 +4533,8 @@ class RobustnessAnalyzerV2:
         pre_noise_option_outcomes: Optional[Dict[str, List[float]]] = None
         if (
             request.include_voi and factor_sampler.has_uncertainties()
-        ) or request.control_candidates:
+            or request.control_candidates
+        ) and not marginal_range_mode:
             pre_noise_option_outcomes = {
                 oid: list(vals) for oid, vals in information_outcomes.items()
             }
@@ -4708,6 +4736,23 @@ class RobustnessAnalyzerV2:
             range_series=intervention_range_series or None,
             goal_chance_quantities=goal_chance_draws,
         )
+        for result in results:
+            if marginal_range_mode:
+                result.win_probability = None
+            if result.option_id in unsupported_goal_options:
+                result.probability_of_goal = None
+                result.probability_of_goal_precision = None
+                result.probability_of_goal_drivers = None
+                inference_warnings.append(InferenceWarning(
+                    code="GOAL_THRESHOLD_NOT_CONVERTIBLE", field="probability_of_goal", severity="warning",
+                    detail={"reason": "outcome_range_law_unavailable", "option_id": result.option_id,
+                            "message": "The range has no supported outcome law/dependence declaration. "
+                            "The point result is conditional on the stated setting; its goal chance "
+                            "is withheld. Compare endpoints or declare a disclosed outcome law."},
+                ))
+            elif result.option_id in outcome_range_series:
+                # Existing driver quantities do not include this new outcome population.
+                result.probability_of_goal_drivers = None
         # AIE laws ruling (same cohort): each option's same-cohort target forecast, scored on its
         # own tagged stream. No option sends one today, so nothing is drawn and results are unchanged.
         for result in results:
@@ -5642,8 +5687,8 @@ class RobustnessAnalyzerV2:
             # one is never silently reading the other.
             objective_ranking=ObjectiveRanking(
                 direction=(
-                    cast(Literal["maximise", "minimise", "target"], request.goal_direction)
-                    if objective_ranking_withheld and request.goal_direction is not None
+                    cast(Literal["maximise", "minimise", "target"], request.goal_direction or "maximise")
+                    if objective_ranking_withheld
                     else cast(
                         Literal["maximise", "minimise", "target"], objective_plan.sense
                     )
@@ -5651,8 +5696,8 @@ class RobustnessAnalyzerV2:
                 attested=objective_plan.attested,
                 status="withheld" if objective_ranking_withheld else "computed",
                 withheld_reason=(
-                    "target_not_resolvable_in_sample_frame"
-                    if objective_ranking_withheld
+                    objective_warning.detail["reason"]
+                    if objective_ranking_withheld and objective_warning is not None
                     else None
                 ),
             ),
@@ -5795,6 +5840,7 @@ class RobustnessAnalyzerV2:
         objective: Optional["ObjectivePlan"] = None,
         information_evaluator: Optional[SCMEvaluatorV2] = None,
         information_outcomes: Optional[Dict[str, List[float]]] = None,
+        range_series: Optional[Dict[str, Dict[str, List[float]]]] = None,
     ) -> Tuple[
         Dict[str, List[float]],
         Dict[str, float],
@@ -5944,7 +5990,17 @@ class RobustnessAnalyzerV2:
         check_accumulation_status_quo = any(
             plan.operation == "accumulation" for plan in evaluator._evaluated_identities.values()
         )
-        for _ in range(request.n_samples):
+        interventions_by_option = {option.id: option.interventions for option in request.options}
+        for sample_index in range(request.n_samples):
+            if range_series:
+                interventions_by_option = {
+                    option.id: {
+                        **option.interventions,
+                        **{node_id: values[sample_index]
+                           for node_id, values in range_series.get(option.id, {}).items()},
+                    }
+                    for option in request.options
+                }
             # Sample edge configuration (structural + parametric uncertainty)
             edge_config = sampler.sample_edge_configuration()
 
@@ -5957,7 +6013,7 @@ class RobustnessAnalyzerV2:
                 try:
                     legacy_outcomes = {
                         option.id: legacy_evaluator.evaluate(
-                            edge_config, option.interventions, request.goal_node_id,
+                            edge_config, interventions_by_option[option.id], request.goal_node_id,
                             factor_values=factor_values,
                         ) for option in request.options
                     }
@@ -6007,7 +6063,7 @@ class RobustnessAnalyzerV2:
                         all_target_nodes = list(set([request.goal_node_id] + constraint_target_nodes))
                         node_values = evaluator.evaluate_multi(
                             edge_strengths=edge_config,
-                            interventions=option.interventions,
+                            interventions=interventions_by_option[option.id],
                             target_nodes=all_target_nodes,
                             factor_values=factor_values,
                         )
@@ -6022,7 +6078,7 @@ class RobustnessAnalyzerV2:
                         # Standard evaluation for goal node only
                         outcome = evaluator.evaluate(
                             edge_strengths=edge_config,
-                            interventions=option.interventions,
+                            interventions=interventions_by_option[option.id],
                             goal_node=request.goal_node_id,
                             factor_values=factor_values,
                         )
@@ -6034,7 +6090,7 @@ class RobustnessAnalyzerV2:
                         information_outcomes[option.id].append(
                             information_evaluator.evaluate(
                                 edge_strengths=edge_config,
-                                interventions=option.interventions,
+                                interventions=interventions_by_option[option.id],
                                 goal_node=request.goal_node_id,
                                 factor_values=factor_values,
                             )
@@ -8630,6 +8686,13 @@ class RobustnessAnalyzerV2:
             # Compute constraint analysis if constraints provided
             constraint_analysis_result: Optional[ConstraintAnalysis] = None
             sampled_ranges: Optional[List[SampledInterventionRange]] = None
+            eligible = option.outcome_range
+            if eligible is not None and eligible[0] in (range_series or {}).get(option.id, {}):
+                node_id, stated = eligible
+                sampled_ranges = [SampledInterventionRange(
+                    node_id=node_id, meaning=stated.meaning, family="uniform", coverage=1.0,
+                    low=stated.low, high=stated.high, source=stated.source, law=stated.law,
+                )]
             if request.goal_constraints and constraint_node_values:
                 analysis_dict = self._compute_constraint_analysis(
                     constraint_node_values,
@@ -8673,7 +8736,7 @@ class RobustnessAnalyzerV2:
                         joint_probability_precision=analysis_dict["joint_probability_precision"],
                         conditional_probabilities=analysis_dict["conditional_probabilities"],
                     )
-                    sampled_ranges = [
+                    sampled_ranges = sampled_ranges or [
                         SampledInterventionRange(
                             node_id=node_id,
                             meaning=option.intervention_ranges[node_id].meaning,
@@ -9167,6 +9230,7 @@ class RobustnessAnalyzerV2:
             (option, node_id, stated)
             for option in request.options
             for node_id, stated in sorted((option.intervention_ranges or {}).items())
+            if option.outcome_range is None or node_id != option.outcome_range[0]
         ]
         if not ranged:
             return None
@@ -9198,7 +9262,7 @@ class RobustnessAnalyzerV2:
             if node_id != target:
                 continue
             ident = {"option_id": option.id, "ranged_node_id": node_id}
-            if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
+            if stated.law is not None or stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
                 return (
                     "intervention_range_meaning_unsupported",
                     f"Option '{option.id}' states its range as '{stated.meaning}'. ISL samples "
@@ -9324,6 +9388,7 @@ class RobustnessAnalyzerV2:
         if not constraints or any(
             c.value_frame != "level" or c.node_id in parents or c.node_id in change_nodes
             or c.node_id not in scored_target_ids or c.node_id not in ranges
+            or ranges[c.node_id].law is not None
             or ranges[c.node_id].meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS
             for c in constraints
         ):
@@ -9351,6 +9416,7 @@ class RobustnessAnalyzerV2:
         request: RobustnessRequestV2,
         seed: int,
         scored_target_ids: Optional[Set[str]] = None,
+        *, downstream: bool = False,
     ) -> Dict[str, Dict[str, List[float]]]:
         """``{option_id: {node_id: per-draw level in the node's frame}}`` for each sampled range.
 
@@ -9362,6 +9428,16 @@ class RobustnessAnalyzerV2:
         series: Dict[str, Dict[str, List[float]]] = {}
         for option in request.options:
             ranges = option.intervention_ranges or {}
+            if downstream:
+                eligible = option.outcome_range
+                if eligible is not None:
+                    node_id, stated = eligible
+                    rng = SeededRNG(RobustnessAnalyzerV2._per_factor_seed(
+                        seed, "outcome_range", f"{option.id}:{node_id}"
+                    ))
+                    uniform_draws = rng.uniform_array(stated.low, stated.high, request.n_samples)
+                    series[option.id] = {node_id: [stated.to_frame(float(x)) for x in uniform_draws]}
+                continue
             targets = RobustnessAnalyzerV2._joint_range_targets(
                 request, option, scored_target_ids if scored_target_ids is not None else set(ranges)
             )
@@ -9385,7 +9461,7 @@ class RobustnessAnalyzerV2:
             for node_id, stated in sorted(ranges.items()):
                 if node_id in targets:
                     continue
-                if stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
+                if stated.law is not None or stated.meaning not in INTERVENTION_RANGE_SAMPLED_MEANINGS:
                     continue
                 if scored_target_ids is not None and node_id not in scored_target_ids:
                     continue
