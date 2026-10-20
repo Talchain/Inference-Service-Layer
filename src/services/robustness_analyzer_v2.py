@@ -4390,7 +4390,8 @@ class RobustnessAnalyzerV2:
             option.id for option in request.options
             if request.goal_threshold is not None and self._reached_by(
                 request.goal_node_id,
-                set(option.intervention_ranges or {}) - set(outcome_range_series.get(option.id, {})),
+                {node_id for node_id, stated in (option.intervention_ranges or {}).items()
+                 if stated.law is not None} - set(outcome_range_series.get(option.id, {})),
                 parent_map,
             )
         }

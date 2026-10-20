@@ -2,6 +2,9 @@
 
 import copy
 
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -117,16 +120,11 @@ def test_real_route_declared_law_spread_exact_sum_and_exact_other_option(frame, 
     np.testing.assert_array_equal(draws["point"], np.full(body["n_samples"], 57 / frame))
 
 
-@pytest.mark.parametrize("missing", ["law", "independence", "multiple", "source", "family", "min_max"])
-def test_no_law_or_undeclared_dependence_retains_points_withholds_only_unsupported_chance(missing):
+@pytest.mark.parametrize("missing", ["independence", "multiple", "source", "family"])
+def test_unsupported_declared_law_retains_points_withholds_only_unsupported_chance(missing):
     body = payload()
     ranges = body["options"][0]["intervention_ranges"]
-    if missing == "law":
-        ranges["bookings_variable"].pop("law")
-    elif missing == "min_max":
-        ranges["bookings_variable"].pop("law")
-        ranges["bookings_variable"]["meaning"] = "min_max"
-    elif missing == "family":
+    if missing == "family":
         ranges["bookings_variable"]["law"]["family"] = "lognormal"
     elif missing == "source":
         ranges["bookings_variable"].pop("source")
@@ -212,3 +210,31 @@ def test_v1_route_and_worker_payload_preserve_law_and_withheld_comparison():
     assert ranged.sampled_intervention_ranges[0].law.model_dump() == original["law"]
     assert ranged.sampled_intervention_ranges[0].source == original["source"]
     assert all(row.win_probability is None for row in restored.results)
+
+
+@pytest.mark.parametrize("frame,subject", [(1000, "bookings"), (100, "hours")])
+@pytest.mark.parametrize("meaning", ["likely_range", "min_max"])
+@pytest.mark.parametrize("version", ["1", "2"])
+def test_bare_range_is_byte_equal_to_legacy_point_response(monkeypatch, frame, subject, meaning, version):
+    # Fix envelope clocks/identity, not numeric output, to compare the actual wire bytes.
+    import time
+
+    import src.utils.response_builder as builder
+
+    monkeypatch.setattr(time, "time", lambda: 1_700_000_000.0)
+    monkeypatch.setattr(builder, "datetime", SimpleNamespace(
+        now=lambda _: datetime(2026, 10, 20, tzinfo=timezone.utc),
+    ))
+    body = payload(frame, subject)
+    body["request_id"] = "l3-bare-range-equality"
+    stated = body["options"][0]["intervention_ranges"][f"{subject}_variable"]
+    stated.pop("law")
+    stated["meaning"] = meaning
+    point_body = copy.deepcopy(body)
+    point_body["options"][0].pop("intervention_ranges")
+    headers = {"X-ISL-Response-Version": version, "X-Request-Id": "l3-bare-range-equality"}
+    client = TestClient(app)
+    bare = client.post("/api/v1/robustness/analyze/v2", json=body, headers=headers)
+    point = client.post("/api/v1/robustness/analyze/v2", json=point_body, headers=headers)
+    assert bare.status_code == point.status_code == 200
+    assert bare.content == point.content
