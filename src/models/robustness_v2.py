@@ -38,6 +38,7 @@ from src.constants import (
 # Import from response_v2 (no circular import since response_v2 doesn't import this module)
 from src.models.response_v2 import (
     EventRiskAppliedV1,
+    InterventionOutcomeLaw,
     CorrelationModelV2,
     CritiqueV2,
     InferenceWarning,
@@ -618,7 +619,7 @@ class NonlinearIdentityV2(BaseModel):
         Legacy identities retain their original keys, and accumulation never serializes an
         addends key, including null. No return annotation so JSON schema retains the fields.
         """
-        data = handler(self)
+        data: Dict[str, Any] = handler(self)
         if self.rate_sigma_log is None:
             data.pop("rate_sigma_log", None)
         if self.operation == "accumulation":
@@ -1063,7 +1064,12 @@ INTERVENTION_RANGE_SAMPLED_MEANINGS = frozenset({"likely_range"})
 class InterventionRange(BaseModel):
     """TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).
 
-    The caller states the range and what it MEANS, never a distribution family: ISL chooses
+    An explicit ``law`` may propagate an uncertain outcome downstream; raw endpoints
+    and source remain separate from its basis. Currently bounded uniform is supported,
+    one ranged outcome per option with declared independence from model randomness.
+    No law is inferred from ``likely_range``. The legacy own-limit path below is unchanged.
+
+    For that legacy path the caller states what the range MEANS: ISL chooses
     the science-owned family for the meaning and echoes what it used
     (``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);
     ``normalisation`` maps them onto the node's frame (absent = the frame is raw units).
@@ -1072,6 +1078,11 @@ class InterventionRange(BaseModel):
     asked (R3 #75 5911436566 (1)). The range is scored with its own median.
     """
 
+    source: Optional[str] = Field(None, description="Raw range source; never the law's explanatory basis")
+    law: Optional[InterventionOutcomeLaw] = Field(
+        None, description="Explicit law for an uncertain outcome, not a controllable setting. "
+        "Absent means no downstream probability law; likely_range alone licenses none."
+    )
     low: float = Field(..., gt=0, description="The stated good case, raw units (> 0)")
     high: float = Field(..., gt=0, description="The stated bad case, raw units (> low)")
     meaning: str = Field(
@@ -1198,14 +1209,16 @@ class InterventionOption(BaseModel):
     )
     # TEMPORAL step 1 (brief dl-claude-27fbe09b/briefs/TEMPORAL.md; R3 #75 5909972020).
     # Reader-first and INERT WHEN ABSENT: a request without it is byte-identical (T0 in
-    # tests/unit/test_intervention_ranges.py). It moves ONLY this option's own probability of
-    # a 'level' limit on the ranged node; the Monte Carlo, win share, EVPI and every other
-    # option are untouched. PLoT keys its fail-closed forward on the echo.
+    # tests/unit/test_intervention_ranges.py). Legacy ranges move only their own limit.
+    # L3 amendment: only an explicit outcome law propagates in MC; bare ranges
+    # retain points. Marginals do not license cross-option win share or VOI.
+    # PLoT keys its fail-closed forward on the actual sampled-range echo.
     intervention_ranges: Optional[Dict[str, InterventionRange]] = Field(
         None,
         description=(
             "node_id -> the option's stated range for the value it sets there. Each key must "
-            "also be in `interventions` (the point, within the range's P40-P60)."
+            "also be in `interventions`. Legacy own-limit readings check the point against "
+            "P40-P60; downstream propagation requires the separate explicit outcome law."
         ),
     )
     target_forecast: Optional[SameCohortTargetForecast] = Field(
@@ -1224,6 +1237,19 @@ class InterventionOption(BaseModel):
         "and mixed range/point conditions retain legacy marginals and withhold "
         "the joint. Does not declare dependence across options.",
     )
+
+    @property
+    def outcome_range(self) -> Optional[Tuple[str, InterventionRange]]:
+        """One declared marginal; multiple ranges need a joint law, never assumed independence."""
+        ranges = self.intervention_ranges or {}
+        if len(ranges) != 1:
+            return None
+        node_id, stated = next(iter(ranges.items()))
+        if (stated.law is None or stated.law.family != "uniform"
+                or stated.law.role != "uncertain_outcome"
+                or not stated.law.independent_of_model or not stated.source):
+            return None
+        return node_id, stated
 
     @model_validator(mode="after")
     def validate_intervention_range_correlations(self) -> "InterventionOption":
@@ -2401,20 +2427,31 @@ class ConstraintAnalysis(BaseModel):
 
 
 class SampledInterventionRange(BaseModel):
-    """TEMPORAL step 1 echo: a stated range ISL SAMPLED to score this option's limit(s).
+    """Actual sampled range, either a legacy own-limit reading or an explicit MC law.
 
-    Present only when at least one of the option's constraint rows was scored from the
-    range; PLoT's fail-closed forward keys on it. Says how the range was read, so every
-    surface can name the reading (AIQ #75 5909998288)."""
+    Raw source/endpoints and the law/basis remain distinct. Absence never licences
+    a range probability; presence never licenses cross-option dependence or time.
+    """
 
     node_id: str = Field(..., description="The node whose range was sampled")
     meaning: str = Field(..., description="The stated meaning ISL read (e.g. 'likely_range')")
-    family: Literal["lognormal"] = Field(..., description="The family ISL chose for that meaning")
+    family: Literal["lognormal", "uniform"] = Field(..., description="The law actually sampled")
     coverage: float = Field(
         ..., description="Central share of mass the stated bounds hold (0.5 = quartiles)"
     )
     low: float = Field(..., description="Stated good case, raw units")
     high: float = Field(..., description="Stated bad case, raw units")
+    source: Optional[str] = Field(None, description="Raw range source, separate from law basis")
+    law: Optional[InterventionOutcomeLaw] = Field(None, description="Explicit downstream law and basis used")
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_law(self, handler: SerializerFunctionWrapHandler) -> Dict[str, Any]:
+        # Preserve the legacy echo bytes, including direct model_dump() callers.
+        data: Dict[str, Any] = handler(self)
+        for key in ("source", "law"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
 
 class TargetForecastConditionResult(BaseModel):
@@ -2476,7 +2513,7 @@ class OptionResult(BaseModel):
     )
     sampled_intervention_ranges: Optional[List[SampledInterventionRange]] = Field(
         None,
-        description="The stated ranges ISL sampled to score this option's limits. Absent when none.",
+        description="The ranges actually sampled in MC or own-limit scoring. Absent when none.",
     )
 
     # B2 CRN-fix (CODE-REVIEW-ISL F1): the JOINT expected_regret, computed in the

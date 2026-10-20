@@ -5224,7 +5224,7 @@
                 "type": "null"
               }
             ],
-            "description": "node_id -> the option's stated range for the value it sets there. Each key must also be in `interventions` (the point, within the range's P40-P60).",
+            "description": "node_id -> the option's stated range for the value it sets there. Each key must also be in `interventions`. Legacy own-limit readings check the point against P40-P60; downstream propagation requires the separate explicit outcome law.",
             "title": "Intervention Ranges"
           },
           "interventions": {
@@ -5261,14 +5261,98 @@
         "title": "InterventionOption",
         "type": "object"
       },
+      "InterventionOutcomeLaw": {
+        "additionalProperties": false,
+        "description": "Caller-declared bounded uniform outcome law; never inferred from endpoints.\n\nThe basis must disclose compatibility with the source's quantity, reference,\nperiod and conditions. Olumi illustrative laws are untested assumptions.\nIndependence from the rest of the model is explicit; this declares nothing\nabout other options. No UI questionnaire or approval authority lives here.",
+        "properties": {
+          "basis": {
+            "minLength": 1,
+            "title": "Basis",
+            "type": "string"
+          },
+          "conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Conditions",
+            "type": "array"
+          },
+          "family": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Family",
+            "type": "string"
+          },
+          "independent_of_model": {
+            "title": "Independent Of Model",
+            "type": "boolean"
+          },
+          "origin": {
+            "enum": [
+              "declared",
+              "supported",
+              "olumi_illustrative"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "period": {
+            "minLength": 1,
+            "title": "Period",
+            "type": "string"
+          },
+          "quantity": {
+            "minLength": 1,
+            "title": "Quantity",
+            "type": "string"
+          },
+          "reference": {
+            "minLength": 1,
+            "title": "Reference",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "uncertain_outcome",
+              "setting"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "family",
+          "role",
+          "origin",
+          "basis",
+          "quantity",
+          "reference",
+          "period",
+          "conditions",
+          "independent_of_model"
+        ],
+        "title": "InterventionOutcomeLaw",
+        "type": "object"
+      },
       "InterventionRange": {
-        "description": "TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).\n\nThe caller states the range and what it MEANS, never a distribution family: ISL chooses\nthe science-owned family for the meaning and echoes what it used\n(``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);\n``normalisation`` maps them onto the node's frame (absent = the frame is raw units).\nThe option's point in ``interventions`` stays. It must lie between the range's fitted\nP40 and P60 without moving the verdict's side, or the limit is refused and the user\nasked (R3 #75 5911436566 (1)). The range is scored with its own median.",
+        "description": "TEMPORAL step 1: an option's stated RANGE for a quantity it sets (e.g. downtime days).\n\nAn explicit ``law`` may propagate an uncertain outcome downstream; raw endpoints\nand source remain separate from its basis. Currently bounded uniform is supported,\none ranged outcome per option with declared independence from model randomness.\nNo law is inferred from ``likely_range``. The legacy own-limit path below is unchanged.\n\nFor that legacy path the caller states what the range MEANS: ISL chooses\nthe science-owned family for the meaning and echoes what it used\n(``OptionResult.sampled_intervention_ranges``). ``low``/``high`` are RAW units (days);\n``normalisation`` maps them onto the node's frame (absent = the frame is raw units).\nThe option's point in ``interventions`` stays. It must lie between the range's fitted\nP40 and P60 without moving the verdict's side, or the limit is refused and the user\nasked (R3 #75 5911436566 (1)). The range is scored with its own median.",
         "properties": {
           "high": {
             "description": "The stated bad case, raw units (> low)",
             "exclusiveMinimum": 0.0,
             "title": "High",
             "type": "number"
+          },
+          "law": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterventionOutcomeLaw"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit law for an uncertain outcome, not a controllable setting. Absent means no downstream probability law; likely_range alone licenses none."
           },
           "low": {
             "description": "The stated good case, raw units (> 0)",
@@ -5293,6 +5377,18 @@
               }
             ],
             "description": "Raw \u2192 node-frame map (computational only, never a bound)"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw range source; never the law's explanatory basis",
+            "title": "Source"
           }
         },
         "required": [
@@ -6289,7 +6385,7 @@
                 "type": "null"
               }
             ],
-            "description": "The stated ranges ISL sampled to score this option's limits. Absent when none.",
+            "description": "The ranges actually sampled in MC or own-limit scoring. Absent when none.",
             "title": "Sampled Intervention Ranges"
           },
           "target_forecast_analysis": {
@@ -6424,7 +6520,7 @@
                 "type": "null"
               }
             ],
-            "description": "TEMPORAL step 1: the stated ranges ISL sampled to score this option's own limits (each read as the quartiles of a lognormal). Present iff a limit row of this option was scored from a range; a consumer that sent a range and finds no entry here must not show that limit's probability.",
+            "description": "Ranges actually sampled: explicit outcome laws in MC (law and raw source echoed), or legacy own-limit lognormal readings. No entry means no range probability; an echo does not license cross-option dependence or an untested horizon.",
             "title": "Sampled Intervention Ranges"
           },
           "status": {
@@ -8688,52 +8784,12 @@
         "type": "object"
       },
       "SampledInterventionRange": {
-        "description": "TEMPORAL step 1 echo: a stated range ISL SAMPLED to score this option's limit(s).\n\nPresent only when at least one of the option's constraint rows was scored from the\nrange; PLoT's fail-closed forward keys on it. Says how the range was read, so every\nsurface can name the reading (AIQ #75 5909998288).",
-        "properties": {
-          "coverage": {
-            "description": "Central share of mass the stated bounds hold (0.5 = quartiles)",
-            "title": "Coverage",
-            "type": "number"
-          },
-          "family": {
-            "const": "lognormal",
-            "description": "The family ISL chose for that meaning",
-            "title": "Family"
-          },
-          "high": {
-            "description": "Stated bad case, raw units",
-            "title": "High",
-            "type": "number"
-          },
-          "low": {
-            "description": "Stated good case, raw units",
-            "title": "Low",
-            "type": "number"
-          },
-          "meaning": {
-            "description": "The stated meaning ISL read (e.g. 'likely_range')",
-            "title": "Meaning",
-            "type": "string"
-          },
-          "node_id": {
-            "description": "The node whose range was sampled",
-            "title": "Node Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node_id",
-          "meaning",
-          "family",
-          "coverage",
-          "low",
-          "high"
-        ],
+        "description": "Actual sampled range, either a legacy own-limit reading or an explicit MC law.\n\nRaw source/endpoints and the law/basis remain distinct. Absence never licences\na range probability; presence never licenses cross-option dependence or time.",
         "title": "SampledInterventionRange",
         "type": "object"
       },
       "SampledInterventionRangeV2": {
-        "description": "TEMPORAL step 1: a stated range ISL sampled to score this option's limit(s).",
+        "description": "Range actually sampled: a legacy own-limit reading or an explicit outcome law.",
         "properties": {
           "coverage": {
             "description": "Central share of mass the stated bounds hold (0.5 = the quartiles)",
@@ -8741,14 +8797,29 @@
             "type": "number"
           },
           "family": {
-            "const": "lognormal",
-            "description": "The family ISL chose for that meaning",
-            "title": "Family"
+            "description": "The law actually sampled",
+            "enum": [
+              "lognormal",
+              "uniform"
+            ],
+            "title": "Family",
+            "type": "string"
           },
           "high": {
             "description": "Stated bad case, raw units",
             "title": "High",
             "type": "number"
+          },
+          "law": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InterventionOutcomeLaw"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Explicit downstream law and basis used"
           },
           "low": {
             "description": "Stated good case, raw units",
@@ -8764,6 +8835,18 @@
             "description": "The node whose range was sampled",
             "title": "Node Id",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Raw range source, separate from the law's basis",
+            "title": "Source"
           }
         },
         "required": [

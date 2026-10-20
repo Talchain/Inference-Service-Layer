@@ -213,7 +213,7 @@ class CritiqueV2(BaseModel):
         """Drop ``identity`` when it is None, so the new key never appears as a null on a
         critique it does not describe (the blocked 422 dumps WITHOUT exclude_none). No return
         annotation on purpose: the JSON schema then stays the field schema above."""
-        data = handler(self)
+        data: Dict[str, Any] = handler(self)
         if self.identity is None and isinstance(data, dict):
             data.pop("identity", None)
         return data
@@ -461,17 +461,50 @@ class DownsideV2(BaseModel):
 # =============================================================================
 
 
+class InterventionOutcomeLaw(BaseModel):
+    """Caller-declared bounded uniform outcome law; never inferred from endpoints.
+
+    The basis must disclose compatibility with the source's quantity, reference,
+    period and conditions. Olumi illustrative laws are untested assumptions.
+    Independence from the rest of the model is explicit; this declares nothing
+    about other options. No UI questionnaire or approval authority lives here.
+    """
+
+    family: str = Field(..., min_length=1, max_length=64)
+    role: Literal["uncertain_outcome", "setting"]
+    origin: Literal["declared", "supported", "olumi_illustrative"]
+    basis: str = Field(..., min_length=1)
+    quantity: str = Field(..., min_length=1)
+    reference: str = Field(..., min_length=1)
+    period: str = Field(..., min_length=1)
+    conditions: List[str]
+    independent_of_model: bool
+
+    model_config = {"extra": "forbid"}
+
+
 class SampledInterventionRangeV2(BaseModel):
-    """TEMPORAL step 1: a stated range ISL sampled to score this option's limit(s)."""
+    """Range actually sampled: a legacy own-limit reading or an explicit outcome law."""
 
     node_id: str = Field(..., description="The node whose range was sampled")
     meaning: str = Field(..., description="The stated meaning ISL read (e.g. 'likely_range')")
-    family: Literal["lognormal"] = Field(..., description="The family ISL chose for that meaning")
+    family: Literal["lognormal", "uniform"] = Field(..., description="The law actually sampled")
     coverage: float = Field(
         ..., description="Central share of mass the stated bounds hold (0.5 = the quartiles)"
     )
     low: float = Field(..., description="Stated good case, raw units")
     high: float = Field(..., description="Stated bad case, raw units")
+    source: Optional[str] = Field(None, description="Raw range source, separate from the law's basis")
+    law: Optional[InterventionOutcomeLaw] = Field(None, description="Explicit downstream law and basis used")
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_law(self, handler: SerializerFunctionWrapHandler) -> Dict[str, Any]:
+        # Preserve the legacy echo bytes, including direct model_dump() callers.
+        data: Dict[str, Any] = handler(self)
+        for key in ("source", "law"):
+            if data.get(key) is None:
+                data.pop(key, None)
+        return data
 
     # CIL 0.2: consistent extra='ignore' across all response models
     model_config = {"extra": "ignore"}
@@ -561,10 +594,9 @@ class OptionResultV2(BaseModel):
     sampled_intervention_ranges: Optional[List[SampledInterventionRangeV2]] = Field(
         None,
         description=(
-            "TEMPORAL step 1: the stated ranges ISL sampled to score this option's own "
-            "limits (each read as the quartiles of a lognormal). Present iff a limit row "
-            "of this option was scored from a range; a consumer that sent a range and "
-            "finds no entry here must not show that limit's probability."
+            "Ranges actually sampled: explicit outcome laws in MC (law and raw source echoed), "
+            "or legacy own-limit lognormal readings. No entry means no range probability; "
+            "an echo does not license cross-option dependence or an untested horizon."
         ),
     )
     status: Literal["computed", "partial", "failed"] = Field(
