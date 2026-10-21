@@ -81,11 +81,12 @@ def summarise(cells, faults=frozenset()):
     o_reg = {o: [] for o in OPTIONS}; e_reg = {o: [] for o in OPTIONS}; incomplete = []
     for key in settings:
         row = {c["option"]: c for c in g2 if (c["hypothesis"], c["x"], c["y"]) == key}
-        best_o = max(row[o]["oracle_level"] for o in OPTIONS)
+        exact = {o: oracle_level(o, *key) for o in OPTIONS}            # the reference never depends on which rows came back
+        best_o = max(exact.values())
         for o in OPTIONS:
-            o_reg[o].append(best_o - row[o]["oracle_level"])
-        tied_o = sorted(o for o in OPTIONS if row[o]["oracle_level"] == best_o)
-        if any(not row[o]["engine"] or row[o]["engine"]["status"] != "supported" for o in OPTIONS):
+            o_reg[o].append(best_o - exact[o])
+        tied_o = sorted(o for o in OPTIONS if exact[o] == best_o)
+        if any(o not in row or not row[o]["engine"] or row[o]["engine"]["status"] != "supported" for o in OPTIONS):
             incomplete.append(list(map(str, key)))
             out["highest_tested"][str(key)] = {"oracle": tied_o, "engine": "incomplete"}
             continue

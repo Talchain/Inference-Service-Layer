@@ -234,3 +234,13 @@ class M2Review(unittest.TestCase):
         finally:
             A.PLOT_URL = saved; srv.shutdown()
         self.assertEqual((r1["http_status"], r2["cache_hit"], e.calls), (429, False, 2))
+
+
+class FinalNote(unittest.TestCase):
+    def test_every_single_cell_deletion_is_incomplete_without_error(self):
+        from track3.run import analyse
+        full = cells_from_oracle()
+        for i in range(len(full)):
+            cells = full[:i] + full[i + 1:]
+            a = analyse(cells, sum_route=resolved_ties(cells))
+            self.assertNotEqual(a["verdict"], "PASS", full[i]["scenario_id"] + " " + full[i]["option"])
