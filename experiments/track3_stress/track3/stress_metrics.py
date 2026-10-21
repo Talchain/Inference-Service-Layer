@@ -186,23 +186,66 @@ def sum_route_failures(sum_route):
     return fails
 
 
+def expected_population():
+    """Every row the fixtures request: G2 = 2 hypotheses x 4 settings x 3 options; G1 extras = option A at 3 points."""
+    from .fixtures import G1_EXTRA
+    pop = {("G2", h, x, y, o) for h in HYPOTHESES for x, y in G2_SETTINGS for o in OPTIONS}
+    return pop | {("G1", "M0", x, y, "A") for x, y in G1_EXTRA}
+
+
+def withstands(cells, option, sum_route):
+    """An option withstands only if EVERY requested G2 row is a determinate 'meets', or an UNRESOLVED (engine floor)
+    tie that the exact-sum route resolves as meets. Returns (bool, basis)."""
+    from .fixtures import scenario_id
+    sr = {(r["option"], r["scenario_id"]): r for r in sum_route}
+    rows = {(c["hypothesis"], c["x"], c["y"]): c for c in cells if c["group"] == "G2" and c["option"] == option}
+    exact_route = []
+    for h in HYPOTHESES:
+        for x, y in G2_SETTINGS:
+            c = rows.get((h, x, y))
+            if c is None:
+                return False, f"row {scenario_id(h, x, y)} missing"
+            if c["engine_side"] == "meets":
+                continue
+            r = sr.get((option, c["scenario_id"]))
+            if c["engine_side"] == "indeterminate" and r and r.get("resolved") and r.get("p_goal") == 1.0:
+                exact_route.append(c["scenario_id"])
+                continue
+            return False, f"{c['scenario_id']} is {c['engine_side']}"
+    return True, ("all rows determinate on the floored path" if not exact_route
+                  else f"{8 - len(exact_route)} determinate rows + {len(exact_route)} ties met on the exact-sum route ({', '.join(exact_route)})")
+
+
 def completeness_gaps(cells, analysis):
-    """What stops a clean reference check from being a PASS: unevaluated rows, and any of the brief's §0
-    demonstrations 1-3 the engine rows do not show. An incomplete run is INCOMPLETE, never PASS."""
-    gaps = [f"row not evaluated: {c['option']} {c['scenario_id']} ({c['checks']['side']})"
-            for c in cells if c["engine"] is None or c["engine"]["status"] != "supported"]
+    """What stops a clean reference check from being a PASS: rows missing from the requested population, unevaluated
+    rows, UNRESOLVED (engine floor) rows without an exact-route resolution, and any brief §0 demonstration 1-3 the
+    evaluated rows do not show. An incomplete run is INCOMPLETE, never PASS."""
+    from .fixtures import scenario_id
+    present = {(c["group"], c["hypothesis"], c["x"], c["y"], c["option"]) for c in cells}
+    expected = expected_population()
+    gaps = [f"row missing from the requested population: {g} {o} {scenario_id(h, x, y)}"
+            for g, h, x, y, o in sorted(expected - present, key=str)]
+    gaps += [f"row outside the requested population: {g} {o} {scenario_id(h, x, y)}"
+             for g, h, x, y, o in sorted(present - expected, key=str)]
+    gaps += [f"row not evaluated: {c['option']} {c['scenario_id']} ({c['checks']['side']})"
+             for c in cells if c["engine"] is None or c["engine"]["status"] != "supported"]
+    sr = {(r["option"], r["scenario_id"]): r for r in analysis.get("sum_route", [])}
+    for c in cells:
+        if c["engine_side"] == "indeterminate" and not (sr.get((c["option"], c["scenario_id"])) or {}).get("resolved"):
+            gaps.append(f"UNRESOLVED (engine floor) row with no exact-route resolution: {c['option']} {c['scenario_id']}")
     if not analysis["witnesses"]["engine"]:
         gaps.append("demonstration 1 missing: no joint-failure witness on engine rows")
     det = {"meets", "falls_short"}
     if not [d for d in analysis["disagreements"]["engine"] if {d["M0"], d["M1"]} <= det]:
         gaps.append("demonstration 2 missing: no determinate disagreement between hypotheses on engine rows")
     s = analysis["summary"]["options"]
-    withstand = [o for o in s if s[o]["engine"]["complete"] and s[o]["engine"]["falls_short"] == 0]
-    if len(withstand) < 2:
-        gaps.append(f"demonstration 3 missing: fewer than two options withstand every tested setting ({withstand})")
+    analysis["withstand"] = {o: withstands(cells, o, analysis.get("sum_route", [])) for o in OPTIONS}
+    holding = [o for o, (ok, _) in analysis["withstand"].items() if ok]
+    if len(holding) < 2:
+        gaps.append(f"demonstration 3 missing: fewer than two options withstand every tested setting ({holding})")
     else:
-        low_regret = min(withstand, key=lambda o: s[o]["engine"]["max_regret"])
-        high_worst = max(withstand, key=lambda o: s[o]["engine"]["worst"])
+        low_regret = min(holding, key=lambda o: s[o]["engine"]["max_regret"])
+        high_worst = max(holding, key=lambda o: s[o]["engine"]["worst"])
         if low_regret == high_worst:
             gaps.append(f"demonstration 3 missing: {low_regret} leads on both regret and worst outcome, so no trade-off is shown")
     return gaps

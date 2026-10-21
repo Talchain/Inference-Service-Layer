@@ -50,7 +50,7 @@ def write_report(out, manifest, cells, clean, controls):
     idn = manifest["identity"]
     w(f"- Path: {manifest['path']}.")
     w(f"- PLoT `{idn['plot_commit']}` · ISL `{idn['isl_commit']}` · @talchain/schemas {idn['plot_talchain_schemas']} · "
-      f"ISL analyser `{idn['isl_analyzer_module']}` · seed {manifest['seed']} · n = {manifest['n_samples']} draws per call · Z = {Z}.")
+      f"ISL src identical to pin: {idn.get('isl_src_identical_to_pin')} · ISL analyser `{idn['isl_analyzer_module']}` · runner `{idn.get('runner_commit', '?')[:8]}`{' (+ uncommitted)' if idn.get('runner_dirty') else ''} · seed {manifest['seed']} · n = {manifest['n_samples']} draws per G1/G2 call, 10,000 per G3/G4 call · Z = {Z}.")
     w(f"- Units: {UNIT}, 12 months, target Y ≥ {TARGET} (inclusive). PLoT scale: goal_threshold_cap = {manifest['scale_gbp000_per_unit']:g} {UNIT} per unit.")
     rt = manifest["runtime"]
     w(f"- Runtime: {rt['wall_s']} s wall for {rt['plot_calls']} PLoT calls (clean run and controls); "
@@ -86,6 +86,9 @@ def write_report(out, manifest, cells, clean, controls):
         f"{s['options'][o]['engine']['meets']} / {s['options'][o]['engine']['indeterminate']} / {s['options'][o]['engine']['falls_short']}" for o in OPTIONS) + " |")
     w("| Worst tested outcome, exact / engine | " + " | ".join(f"{_f(s['options'][o]['oracle']['worst'], 0)} / {_f(s['options'][o]['engine']['worst'])}" for o in OPTIONS) + " |")
     w("| Maximum tested regret, exact / engine | " + " | ".join(f"{_f(s['options'][o]['oracle']['max_regret'], 0)} / {_f(s['options'][o]['engine']['max_regret'])}" for o in OPTIONS) + " |")
+    ws = clean.get("withstand", {})
+    w("\n**Withstands every tested setting:** " + ("; ".join(f"{o} ({basis})" for o, (ok, basis) in ws.items() if ok) or "none")
+      + ". **Does not:** " + ("; ".join(f"{o} ({basis})" for o, (ok, basis) in ws.items() if not ok) or "none") + ".")
     det = {"meets", "falls_short"}
     dis = [d for d in clean["disagreements"]["engine"] if {d["M0"], d["M1"]} <= det]
     w(f"\n**Explanations disagree (engine, both rows determinate):** " + "; ".join(f"{d['option']} at ({d['x']:g},{d['y']:g}) {d['M0']} under M0, {d['M1']} under M1" for d in dis) + ".")
@@ -132,6 +135,9 @@ def write_report(out, manifest, cells, clean, controls):
         w("| Declared joint law | Exact P(both) | Sent to engine | Engine P(both) | Engine marginals | n |")
         w("|---|---:|---|---:|---|---:|")
         for r in m["g3"]["rows"]:
+            if r.get("unmapped"):
+                w(f"| {r['law'].replace('_', ' ')} | {float(Q(r['exact_p_both'])):.2f} | **unsupported**: {r.get('reason')} | — | — | — |")
+                continue
             sent = "no correlation" if r["rho_sent"] is None else f"Gaussian copula rho = {r['rho_sent']:g}"
             w(f"| {r['law'].replace('_', ' ')} | {float(Q(r['exact_p_both'])):.2f} | {sent} | {_f(r['engine_joint'], 4)} | "
               f"{', '.join(f'{k} {v:.4f}' for k, v in r['engine_marginals'].items())} | {r['n']} |")
@@ -140,8 +146,11 @@ def write_report(out, manifest, cells, clean, controls):
         w("- Invalid tables refused, never repaired: " + "; ".join(f"{k} ({v.get('reason')})" for k, v in m["g3"]["admission"].items()) + ".")
         ref = m["g3"]["engine_refusal_rho_1_2"]
         w(f"- Engine refuses rho = 1.2: {ref['analysis_status']} (HTTP {ref['http_status']}).")
-        w("- Scope: these three laws are exact for thresholded Normal drivers at rho 0, +1 and −1. Other joint laws have no mapping "
-          "here and come back unsupported. ISL's copula note says 'zero tail dependence', which is not true at |rho| = 1.\n")
+        w("- Scope: thresholded Normal drivers at rho 0, +1 and −1 realise these three laws in exact arithmetic. The engine "
+          "regularises a singular ±1 pair to about ±0.99999999 (`src/utils/correlation.py:289`), so its joint is numerically approximate; "
+          "the check is the stated Monte Carlo tolerance. Other joint laws have no mapping here and come back unsupported, unevaluated. "
+          "ISL's copula note says 'zero tail dependence': an ideal rho = +1 has perfect same-tail dependence, and rho = −1 has opposite-tail "
+          "dependence (zero same-tail).\n")
         w("## Milestone 2 · G4: Y ~ Normal(mu, 10²) £000, target Y ≥ 100\n")
         w("| mu | Exact P(Y ≥ 100) | Engine (target on the uncertain root, Channel B) | n | Within 4 SE + 1/n |")
         w("|---:|---:|---:|---:|---|")
@@ -157,7 +166,7 @@ def write_report(out, manifest, cells, clean, controls):
         d = b["sum_declared_spread"]
         w(f"- **The exact-sum route silently drops a declared spread.** PLoT sent {d['spread_sent_to_isl']} for today's level, but ISL returned "
           + "; ".join(f"mu {x['mu']}: sd {x['sd']}, P(goal) {x['p_goal']} (exact if drawn {x['exact_if_drawn']:.4f})" for x in d["rows"])
-          + ". No warning was attached.\n")
+          + ". No warning says the declared spread was lost (only generic DEGENERATE_OPTION_ZERO_VARIANCE critiques).\n")
     w("## Negative controls (each fault must turn the reference check red)\n")
     w("| Fault | Brief | Expected | Observed | First failure it caused |")
     w("|---|---|---|---|---|")
@@ -170,7 +179,8 @@ def write_report(out, manifest, cells, clean, controls):
       "'met at 6 of 8 tested settings' is not a 75 % chance.")
     w("- Stresses are scenario parameter assumptions (edge strengths −x, −y on controllable exposures); options are interventions. "
       "M1's £30k is an illustrative assumption carried on a named intervention → retention → contribution path.")
-    w("- Engine spread here is PLoT's floor artefact, not uncertainty in the fixture. Monte Carlo precision is not model validity.")
+    w("- In G1/G2 the engine spread is PLoT's floor artefact, not uncertainty in the fixture. G3/G4 carry genuinely declared laws. "
+      "Monte Carlo precision is not model validity.")
     w(f"- Status: isolated prototype with numerical and service-boundary evidence. Not integrated, not served.")
     with open(os.path.join(out, "report.md"), "w") as f:
         f.write("\n".join(L) + "\n")

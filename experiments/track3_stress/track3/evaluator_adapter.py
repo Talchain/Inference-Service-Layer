@@ -53,7 +53,10 @@ class Engine:
         node = subprocess.run(["node", "-v"], capture_output=True, text=True).stdout.strip()
         schemas = json.load(open(os.path.join(ROOT, "plot/node_modules/@talchain/schemas/package.json")))["version"]
         return {
-            "plot_commit": _git("plot", "rev-parse", "HEAD"), "isl_commit": _git("isl", "rev-parse", "HEAD"),
+            "plot_commit": _git("plot", "rev-parse", "HEAD"), "isl_commit": "8d862f5a752c2c3259721d8e102455e7fa22294c",
+            "isl_src_identical_to_pin": subprocess.run(["git", "-C", os.path.join(ROOT, "isl"), "diff", "--quiet",
+                                                         "8d862f5a752c2c3259721d8e102455e7fa22294c", "--", "src"]).returncode == 0,
+            "isl_checkout_head": _git("isl", "rev-parse", "HEAD"),
             "plot_dirty_tracked": _git("plot", "status", "--porcelain", "--untracked-files=no") != "",
             "isl_dirty_tracked": _git("isl", "status", "--porcelain", "--untracked-files=no") != "",
             "isl_analyzer_module": isl_module[0] if isl_module else "UNKNOWN",
@@ -61,6 +64,9 @@ class Engine:
             "plot_node": node, "plot_talchain_schemas": schemas,
             "isl_process_cwd": _cwd_of("isl.pid"), "plot_process_cwd": _cwd_of("plot.pid"),
             "plot_endpoint": PLOT_URL, "isl_endpoint": ISL_PATH,
+            "runner_dir": HERE,
+            "runner_commit": subprocess.run(["git", "-C", HERE, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip(),
+            "runner_dirty": subprocess.run(["git", "-C", HERE, "status", "--porcelain", "--", "."], capture_output=True, text=True).stdout.strip() != "",
         }
 
     def key(self, body, hypothesis):
@@ -92,7 +98,7 @@ class Engine:
         isl = [json.load(open(os.path.join(self.capture_dir, f))) for f in new]
         isl = [c for c in isl if c["path"].startswith(ISL_PATH)]
         result = {"http_status": status, "plot": plot, "isl_exchanges": isl, "elapsed_s": elapsed, "cache_hit": False}
-        if status is not None and status < 500 and plot.get("analysis_status") != "failed":
+        if status in (200, 400, 422) and plot.get("analysis_status") != "failed":
             self.cache[k] = result          # a timeout or engine failure is never memoised as a result
         return result
 

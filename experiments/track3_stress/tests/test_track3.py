@@ -8,16 +8,20 @@ from track3.stress_metrics import (BRIEF_REFERENCE, check_reference, engine_side
                                    oracle_side, summarise, cell_checks)
 
 
-def cells_from_oracle(faults=frozenset(), se=0.03, drop=None):
-    """Cells whose 'engine' rows are the exact oracle levels with a small stated SE: a perfect engine."""
+def cells_from_oracle(faults=frozenset(), se=0.03, drop=None, omit=None):
+    """Cells whose 'engine' rows are the exact oracle levels with a small stated SE: a perfect engine.
+    G2 rows plus the G1 extras (option A); `drop` keeps the cell without an engine row, `omit` removes the cell."""
     out = []
-    for h in F.HYPOTHESES:
-        for x, y in F.G2_SETTINGS:
+    settings = [(h, x, y, "G2") for h in F.HYPOTHESES for x, y in F.G2_SETTINGS] + [("M0", x, y, "G1") for x, y in F.G1_EXTRA]
+    for h, x, y, group in settings:
+        if True:
             body, _ = build_request(h, x, y, seed=1, n_samples=100, faults=faults)
-            for o in F.OPTIONS:
+            for o in (["A"] if group == "G1" else F.OPTIONS):
+                if (h, x, y, o) == omit:
+                    continue
                 lvl = graph_level(body, o)
                 row = None if (h, x, y, o) == drop else {"status": "supported", "level": float(lvl), "se": se}
-                c = {"group": "G2", "hypothesis": h, "x": x, "y": y, "scenario_id": F.scenario_id(h, x, y), "option": o,
+                c = {"group": group, "hypothesis": h, "x": x, "y": y, "scenario_id": F.scenario_id(h, x, y), "option": o,
                      "oracle_level": F.oracle_level(o, h, x, y), "engine": row,
                      "meta": {"unit": F.UNIT, "horizon_months": 12, "target": 90.0, "operator": ">="}}
                 c["oracle_side"] = oracle_side(c["oracle_level"])
@@ -99,11 +103,17 @@ if __name__ == "__main__":
     unittest.main()
 
 
+def resolved_ties(cells, p_goal=1.0):
+    return [{"option": c["option"], "scenario_id": c["scenario_id"], "exact_level": str(c["oracle_level"]),
+             "p_goal": p_goal, "identity_evaluated": True, "resolved": p_goal == 1.0}
+            for c in cells if c["oracle_level"] == F.TARGET]
+
+
 class Verdict(unittest.TestCase):
-    """Buddy R1 BLOCK: dropping the only joint-failure row must not read as PASS."""
-    def _analysis(self, cells):
+    """Buddy R1/R2 BLOCKs: no incomplete or unresolved run may read as PASS."""
+    def _analysis(self, cells, sum_route=None):
         from track3.run import analyse
-        return analyse(cells)
+        return analyse(cells, sum_route=resolved_ties(cells) if sum_route is None else sum_route)
 
     def test_clean_perfect_engine_passes(self):
         a = self._analysis(cells_from_oracle())
@@ -161,3 +171,66 @@ class AdapterCache(unittest.TestCase):
         finally:
             A.PLOT_URL = saved
         self.assertEqual((r1["http_status"], r1["cache_hit"], r2["cache_hit"], e.calls), (None, False, False, 2))
+
+
+class R2Gaps(unittest.TestCase):
+    def _a(self, cells, sum_route):
+        from track3.run import analyse
+        return analyse(cells, sum_route=sum_route)
+
+    def test_wholly_omitted_g1_cell_is_incomplete(self):
+        cells = cells_from_oracle(omit=("M0", Q("0.80"), Q("0.80"), "A"))
+        a = self._a(cells, resolved_ties(cells))
+        self.assertEqual(a["verdict"], "INCOMPLETE")
+        self.assertTrue(any("missing from the requested population" in g for g in a["gaps"]))
+
+    def test_unresolved_ties_without_exact_route_are_incomplete(self):
+        cells = cells_from_oracle()
+        a = self._a(cells, [])
+        self.assertEqual(a["verdict"], "INCOMPLETE")
+        self.assertFalse(a["withstand"]["B"][0])
+        self.assertTrue(a["withstand"]["C"][0])
+
+    def test_b_ties_dropped_from_exact_route_is_incomplete(self):
+        cells = cells_from_oracle()
+        sr = [r for r in resolved_ties(cells) if r["option"] != "B"]
+        self.assertEqual(self._a(cells, sr)["verdict"], "INCOMPLETE")
+
+
+class M2Review(unittest.TestCase):
+    def test_unmapped_law_is_unsupported_not_evaluated(self):
+        from track3 import m2
+        class NoEngine:
+            def evaluate(self, *a, **k):
+                raise AssertionError("an unmapped law must not reach the engine")
+        g3 = {"rows": [], "admission": {}, "marginals_only": {}, "engine_refusal_rho_1_2": {"analysis_status": "blocked"}}
+        adm = F.admit_joint(F.G3_UNMAPPED["partial_overlap"], (Q(9, 10), Q(9, 10)))
+        from track3.scenario_builder import g3_rho_for
+        self.assertTrue(adm["admitted"])
+        self.assertIsNone(g3_rho_for(adm))
+        bad = {"law": "partial_overlap", "exact_p_both": "17/20", "unmapped": True, "status": "computed", "engine_joint": 0.81,
+               "engine_marginals": {}, "n": 10000}
+        self.assertTrue(m2.g3_failures(dict(g3, rows=[bad], marginals_only={"identified": "False", "bounds": ("4/5", "9/10")})))
+        ok = dict(bad, status="unsupported", engine_joint=None, n=0)
+        self.assertEqual(m2.g3_failures(dict(g3, rows=[ok], marginals_only={"identified": "False", "bounds": ("4/5", "9/10")})), [])
+
+    def test_429_is_not_memoised(self):
+        import http.server, threading, track3.evaluator_adapter as A
+        from track3.evaluator_adapter import Engine
+
+        class TooMany(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("content-length") or 0))
+                body = b'{"analysis_status": "blocked", "status_reason": "rate limited"}'
+                self.send_response(429); self.send_header("content-length", str(len(body))); self.end_headers(); self.wfile.write(body)
+            def log_message(self, *a): pass
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), TooMany)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        e = Engine("/nonexistent"); e.identity = {"plot_commit": "p", "isl_commit": "i"}
+        A.PLOT_URL, saved = f"http://127.0.0.1:{srv.server_address[1]}/v2/run", A.PLOT_URL
+        try:
+            r1, r2 = e.evaluate({"x": 1}, "h", timeout_s=2), e.evaluate({"x": 1}, "h", timeout_s=2)
+        finally:
+            A.PLOT_URL = saved; srv.shutdown()
+        self.assertEqual((r1["http_status"], r2["cache_hit"], e.calls), (429, False, 2))

@@ -32,12 +32,16 @@ def run_g3(engine, faults, calls, seed, n):
     if "infer_independence" in faults:                                   # FAULT: missing dependence read as independence
         marginals_only = {"identified": True, "point": F.G3_MARGINAL ** 2}
     rows = []
-    for law, table in F.G3_LAWS.items():
-        adm = F.admit_joint(table)
+    for law, table in {**F.G3_LAWS, **F.G3_UNMAPPED}.items():
+        adm = F.admit_joint(table, (F.G3_MARGINAL, F.G3_MARGINAL))
         rho = g3_rho_for(adm)
-        if "independent_in_shared" in faults and law == "always_together":
-            rho = None                                                   # FAULT: shared case drawn independently
-        body = build_g3_request(law, rho, seed=seed, n_samples=n, p=adm["p1"])
+        if rho is None and "evaluate_unmapped" not in faults:
+            rows.append({"law": law, "exact_p_both": str(adm["p_both"]), "rho_sent": None, "engine_joint": None,
+                         "engine_marginals": {}, "n": 0, "status": "unsupported",
+                         "reason": "admitted, but no engine mapping for this joint law here; not evaluated", "unmapped": True})
+            continue
+        send_correlation = not ("independent_in_shared" in faults and law == "always_together")   # FAULT drops it
+        body = build_g3_request(law, rho if send_correlation else None, seed=seed, n_samples=n, p=adm["p1"])
         res = engine.evaluate(body, "g3:" + law)
         _log(calls, "g3 " + law, res, faults)
         o, _ = _first(res)
@@ -46,14 +50,16 @@ def run_g3(engine, faults, calls, seed, n):
         reported = o.get("probability_of_joint_goal")
         if "multiply_marginals" in faults and cp:                        # FAULT: joint = product of marginals
             reported = cp.get("S1", 0) * cp.get("S2", 0)
-        rows.append({"law": law, "exact_p_both": str(adm["p_both"]), "rho_sent": rho, "engine_joint": reported,
+        rows.append({"law": law, "exact_p_both": str(adm["p_both"]), "rho_sent": rho if send_correlation else None, "engine_joint": reported,
+                     "unmapped": rho is None,
                      "engine_marginals": cp, "n": nn, "status": res["plot"].get("analysis_status"),
                      "copula": bool(res["isl_exchanges"]) and bool(res["isl_exchanges"][-1]["request"].get("factor_correlations")),
                      "options_agree": len({json.dumps(x.get("constraint_probabilities"), sort_keys=True)
                                            for x in res["plot"].get("option_comparison") or []}) == 1})
     if "average_dependence" in faults:                                   # FAULT: the three laws averaged into one
-        mean = sum(r["engine_joint"] for r in rows) / len(rows)
-        for r in rows:
+        mapped = [r for r in rows if r["engine_joint"] is not None]
+        mean = sum(r["engine_joint"] for r in mapped) / len(mapped)
+        for r in mapped:
             r["engine_joint"] = mean
     # Engine admission: an impossible correlation must be refused, not repaired.
     bad = build_g3_request("invalid_rho", 1.2, seed=seed, n_samples=n, p=F.G3_MARGINAL)
@@ -69,6 +75,10 @@ def g3_failures(g3):
     fails = []
     for r in g3["rows"]:
         exact = float(Q(r["exact_p_both"]))
+        if r.get("unmapped"):
+            if r["status"] != "unsupported" or r["engine_joint"] is not None:
+                fails.append(f"G3 {r['law']}: no engine mapping exists, yet it was evaluated ({r['engine_joint']})")
+            continue
         if r["engine_joint"] is None or r["n"] == 0:
             fails.append(f"G3 {r['law']}: no engine joint (status {r['status']})"); continue
         if abs(r["engine_joint"] - exact) > _tol(exact, r["n"]):
@@ -76,7 +86,8 @@ def g3_failures(g3):
         for k, m in r["engine_marginals"].items():
             if abs(m - 0.9) > _tol(0.9, r["n"]):
                 fails.append(f"G3 {r['law']}: marginal {k} {m:.4f} vs 0.9")
-    if len({r["engine_joint"] for r in g3["rows"]}) < len(g3["rows"]):
+    mapped = [r for r in g3["rows"] if not r.get("unmapped")]
+    if len({r["engine_joint"] for r in mapped}) < len(mapped):
         fails.append("G3: the three laws report one shared joint (averaged or collapsed)")
     for name, a in g3["admission"].items():
         if a.get("admitted") == "True":
@@ -167,7 +178,7 @@ def g4_boundary_probes(engine, calls, seed, n):
 
 
 
-G3_CONTROLS = [("multiply_marginals", "multiply the marginals"), ("independent_in_shared", "draw S1/S2 independently in the shared case"),
+G3_CONTROLS = [("evaluate_unmapped", "evaluate a law with no engine mapping (as independent)"), ("multiply_marginals", "multiply the marginals"), ("independent_in_shared", "draw S1/S2 independently in the shared case"),
                ("accept_invalid_table", "accept an invalid mass table"), ("infer_independence", "infer independence from missing dependence"),
                ("average_dependence", "average the three dependence hypotheses")]
 
@@ -178,9 +189,10 @@ def m2_controls(engine, g4_clean, calls, seed, n):
         fails = g3_failures(run_g3(engine, frozenset({fault}), calls, seed, n))
         out.append({"fault": fault, "group": "G3", "meaning": meaning, "detected": bool(fails), "first_failures": fails[:3]})
     base = {r["mu"]: r["engine_p"] for r in g4_clean["rows"]}
-    for fault, meaning, kw in [("reorder_options", "reorder options", {}), ("lineage_only", "add only lineage metadata", {"label_suffix": " [lineage: track3]"}),
-                               ("unit_reexpression", "re-express £000 as £ with matching cap and target", {"unit": "£"})]:
-        f = frozenset({fault}) if fault == "reorder_options" else frozenset()
+    for fault, meaning, kw in [("lineage_only", "add only lineage metadata", {"label_suffix": " [lineage: track3]"}),
+                               ("unit_reexpression", "re-express £000 as £ with matching cap and target (algebraic smoke test only: "
+                                "the normalised numbers are identical by construction, so PLoT's unit conversion is NOT tested)", {"unit": "£"})]:
+        f = frozenset()
         rows = [g4_row(engine, mu, f, calls, seed, n, tag=":" + fault, **kw) for mu in F.G4_MUS]
         moved = [f"mu={r['mu']:g}: {r['engine_p']} vs {base.get(r['mu'])}" for r in rows if r["engine_p"] != base.get(r["mu"])]
         fails = g4_failures({"rows": rows}) + moved

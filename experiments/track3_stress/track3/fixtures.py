@@ -51,6 +51,8 @@ G3_LAWS = {
     "always_together":   {(1, 1): Q(9, 10),   (1, 0): Q(0),      (0, 1): Q(0),      (0, 0): Q(1, 10)},
     "disjoint_failures": {(1, 1): Q(8, 10),   (1, 0): Q(1, 10),  (0, 1): Q(1, 10),  (0, 0): Q(0)},
 }
+# A valid table with the same marginals but no engine mapping here: it must come back unsupported, unevaluated.
+G3_UNMAPPED = {"partial_overlap": {(1, 1): Q(85, 100), (1, 0): Q(5, 100), (0, 1): Q(5, 100), (0, 0): Q(5, 100)}}
 G3_INVALID = {"sums_to_1.1": {(1, 1): Q(85, 100), (1, 0): Q(1, 10), (0, 1): Q(1, 10), (0, 0): Q(5, 100)},
               "negative_mass": {(1, 1): Q(95, 100), (1, 0): Q(-5, 100), (0, 1): Q(5, 100), (0, 0): Q(5, 100)},
               "wrong_marginal": {(1, 1): Q(7, 10), (1, 0): Q(1, 10), (0, 1): Q(2, 10), (0, 0): Q(0)}}

@@ -23,7 +23,9 @@ NEGATIVE_CONTROLS = [  # (fault, brief group, what it breaks)
     ("remove_m1_path", "G2", "remove the M1 path"), ("drop_adverse", "G2", "drop an adverse scenario"),
     ("average_models", "G2", "average the models without weights"), ("oat_only", "G2", "perturb only one coordinate"),
     ("unique_winner", "G2", "select a unique winner at the A/B tie"), ("horizon_mismatch", "G2", "compare different horizons"),
+    ("reorder_options", "G2", "reorder options (A/B/C differ, so a swapped binding would show; must stay GREEN)"),
 ]
+EXPECT_GREEN = {"reorder_options"}
 
 
 def requested_settings(faults):
@@ -40,6 +42,8 @@ def evaluate_all(engine, faults, calls_log):
     for h, x, y, group in requested_settings(faults):
         body, change_record = build_request(h, x, y, seed=SEED, n_samples=N_SAMPLES, faults=faults & BUILDER_FAULTS,
                                             strict="strict_comparison" in faults)
+        if "reorder_options" in faults:
+            body["options"] = list(reversed(body["options"]))       # results must still bind by option id
         result = engine.evaluate(body, h)
         rows = rows_from(result, SCALE)
         horizon = 24 if ("horizon_mismatch" in faults and h == "M1") else F.HORIZON_MONTHS
@@ -146,8 +150,8 @@ def main():
                 cells = evaluate_all(runner, frozenset({fault}), calls)
                 sr = evaluate_sum_route(engine, cells, frozenset({fault}), calls) if fault == "strict_comparison" else ()
                 fails = analyse(cells, frozenset({fault}), sr)["reference_failures"]
-                controls.append({"fault": fault, "group": group, "meaning": meaning,
-                                 "detected": bool(fails), "first_failures": fails[:3]})
+                controls.append({"fault": fault, "group": group, "meaning": meaning, "detected": bool(fails),
+                                 "first_failures": fails[:3], **({"expected_detected": False} if fault in EXPECT_GREEN else {})})
             # Contrast for missing_as_success: the same failed row, counted honestly, must NOT go red.
             honest = analyse(evaluate_all(engine, frozenset({"missing_row"}), calls))
             controls.append({"fault": "missing_row (contrast, no fault)", "group": "G1",
