@@ -1,0 +1,27 @@
+{
+  "request_id": "track3-probe-g1-00",
+  "graph": {
+    "nodes": [
+      {"id": "net_contribution", "kind": "goal", "label": "12-month net contribution (£000)", "intercept": 0,
+       "goal_threshold": 90, "goal_threshold_frame": "delta"},
+      {"id": "planned_contribution", "kind": "factor", "label": "Planned contribution (£100k)", "observed_state": {"value": 0, "std": 0}},
+      {"id": "demand_exposure", "kind": "factor", "label": "Demand-stress exposure (£100k per unit stress)", "observed_state": {"value": 0, "std": 0}},
+      {"id": "cost_exposure", "kind": "factor", "label": "Cost-stress exposure (£100k per unit stress)", "observed_state": {"value": 0, "std": 0}}
+    ],
+    "edges": [
+      {"id": "e_plan", "from": "planned_contribution", "to": "net_contribution", "exists_probability": 1.0, "strength": {"mean": 100, "std": 0}},
+      {"id": "e_demand", "from": "demand_exposure", "to": "net_contribution", "exists_probability": 1.0, "strength": {"mean": -0.0, "std": 0}},
+      {"id": "e_cost", "from": "cost_exposure", "to": "net_contribution", "exists_probability": 1.0, "strength": {"mean": -0.0, "std": 0}}
+    ]
+  },
+  "options": [
+    {"id": "A", "label": "Growth-first", "interventions": {"planned_contribution": 1.2, "demand_exposure": 0.2, "cost_exposure": 0.2}},
+    {"id": "B", "label": "Balanced rollout", "interventions": {"planned_contribution": 1.05, "demand_exposure": 0.1, "cost_exposure": 0.05}},
+    {"id": "C", "label": "Protect margin", "interventions": {"planned_contribution": 0.95, "demand_exposure": 0.02, "cost_exposure": 0.02}}
+  ],
+  "goal_node_id": "net_contribution",
+  "goal_threshold": 90,
+  "goal_direction": "maximise",
+  "seed": 20261021,
+  "n_samples": 2000
+}
