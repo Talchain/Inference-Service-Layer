@@ -9,9 +9,9 @@ from fractions import Fraction as Q
 from . import fixtures as F
 from .evaluator_adapter import ROOT, Engine, rows_from
 from .report import write_report
-from .scenario_builder import BUILDER_FAULTS, SCALE, build_request, graph_level
-from .stress_metrics import (METRIC_FAULTS, Z, cell_checks, check_reference, engine_side, hypothesis_disagreements,
-                             joint_failure_witnesses, oracle_side, summarise)
+from .scenario_builder import BUILDER_FAULTS, SCALE, build_request, build_sum_route_request, graph_level
+from .stress_metrics import (METRIC_FAULTS, Z, cell_checks, check_reference, completeness_gaps, engine_side,
+                             hypothesis_disagreements, joint_failure_witnesses, oracle_side, sum_route_failures, summarise)
 
 SEED, N_SAMPLES = 20261021, 2000
 SET_FAULTS = {"drop_adverse": ("M1", Q(0), Q(1)), "oat_only": None}
@@ -37,7 +37,8 @@ def requested_settings(faults):
 def evaluate_all(engine, faults, calls_log):
     cells = []
     for h, x, y, group in requested_settings(faults):
-        body, change_record = build_request(h, x, y, seed=SEED, n_samples=N_SAMPLES, faults=faults & BUILDER_FAULTS)
+        body, change_record = build_request(h, x, y, seed=SEED, n_samples=N_SAMPLES, faults=faults & BUILDER_FAULTS,
+                                            strict="strict_comparison" in faults)
         result = engine.evaluate(body, h)
         rows = rows_from(result, SCALE)
         horizon = 24 if ("horizon_mismatch" in faults and h == "M1") else F.HORIZON_MONTHS
@@ -60,19 +61,46 @@ def evaluate_all(engine, faults, calls_log):
     return cells
 
 
+def evaluate_sum_route(engine, cells, faults, calls_log):
+    """Re-ask every exact-tie row on the core's exact-sum route. The strict_comparison fault sends '>' to the engine."""
+    out = []
+    for c in [c for c in cells if c["oracle_level"] == F.TARGET]:
+        body = build_sum_route_request(c["hypothesis"], c["x"], c["y"], seed=SEED, n_samples=N_SAMPLES)
+        if "strict_comparison" in faults:
+            body["goal_threshold_strict"] = True
+        res = engine.evaluate(body, "sum-route")
+        calls_log.append({"scenario_id": "sum-route " + c["scenario_id"], "faults": sorted(faults), "http_status": res["http_status"],
+                          "analysis_status": res["plot"].get("analysis_status"), "elapsed_s": round(res["elapsed_s"], 3),
+                          "cache_hit": res["cache_hit"], "isl_calls": len(res["isl_exchanges"])})
+        isl = res["isl_exchanges"][-1] if res["isl_exchanges"] else {"request": {}, "response": {}}
+        raw = next((o for o in (isl.get("response") or {}).get("options", []) if o["id"] == c["option"]), {})
+        ident = (res["plot"].get("identity_evaluations") or [{}])[0]
+        out.append({"scenario_id": c["scenario_id"], "option": c["option"], "exact_level": str(c["oracle_level"]),
+                    "isl_level_normalised": repr((raw.get("outcome") or {}).get("mean")),
+                    "threshold_normalised": repr(isl["request"].get("goal_threshold")),
+                    "strict_sent": bool(isl["request"].get("goal_threshold_strict")),
+                    "p_goal": raw.get("probability_of_goal"), "identity_evaluated": ident.get("evaluated")})
+    for r in out:
+        r["resolved"] = not sum_route_failures([r])
+    return out
+
+
 def comparability_of(cells):
     keys = ["unit", "horizon_months", "target", "operator"]
     differs = [k for k in keys if len({c["meta"][k] for c in cells}) > 1]
     return {"comparable": not differs, "differs": differs, "shared": {k: cells[0]["meta"][k] for k in keys if k not in differs}}
 
 
-def analyse(cells, faults=frozenset()):
+def analyse(cells, faults=frozenset(), sum_route=()):
     summary = summarise(cells, faults & METRIC_FAULTS)
     comparability = comparability_of(cells)
-    return {"summary": summary, "comparability": comparability,
-            "witnesses": {"oracle": joint_failure_witnesses(cells, "oracle_side"), "engine": joint_failure_witnesses(cells, "engine_side")},
-            "disagreements": {"oracle": hypothesis_disagreements(cells, "oracle_side"), "engine": hypothesis_disagreements(cells, "engine_side")},
-            "reference_failures": check_reference(cells, summary, comparability)}
+    out = {"summary": summary, "comparability": comparability, "sum_route": list(sum_route),
+           "witnesses": {"oracle": joint_failure_witnesses(cells, "oracle_side"), "engine": joint_failure_witnesses(cells, "engine_side")},
+           "disagreements": {"oracle": hypothesis_disagreements(cells, "oracle_side"), "engine": hypothesis_disagreements(cells, "engine_side")},
+           "reference_failures": check_reference(cells, summary, comparability) + sum_route_failures(sum_route)}
+    out["gaps"] = completeness_gaps(cells, out)
+    out["verdict"] = "FAIL" if out["reference_failures"] else ("INCOMPLETE" if out["gaps"] else "PASS")
+    return out
 
 
 def engine_only_probe(capture_dir):
@@ -108,14 +136,15 @@ def main():
     t0, calls = time.perf_counter(), []
     with Engine(os.path.join(a.out, "capture")) as engine:
         clean_cells = evaluate_all(engine, frozenset(), calls)
-        clean = analyse(clean_cells)
+        clean = analyse(clean_cells, sum_route=evaluate_sum_route(engine, clean_cells, frozenset(), calls))
         controls = []
         if not a.skip_controls:
             stale = Engine(engine.capture_dir, faults={"stale_cache"}); stale.identity = engine.identity
             for fault, group, meaning in NEGATIVE_CONTROLS:
                 runner = stale if fault == "stale_cache" else engine
                 cells = evaluate_all(runner, frozenset({fault}), calls)
-                fails = analyse(cells, frozenset({fault}))["reference_failures"]
+                sr = evaluate_sum_route(engine, cells, frozenset({fault}), calls) if fault == "strict_comparison" else ()
+                fails = analyse(cells, frozenset({fault}), sr)["reference_failures"]
                 controls.append({"fault": fault, "group": group, "meaning": meaning,
                                  "detected": bool(fails), "first_failures": fails[:3]})
             # Contrast for missing_as_success: the same failed row, counted honestly, must NOT go red.
@@ -123,6 +152,7 @@ def main():
             controls.append({"fault": "missing_row (contrast, no fault)", "group": "G1",
                              "meaning": "same failed row, reported as missing", "detected": bool(honest["reference_failures"]),
                              "expected_detected": False, "first_failures": honest["reference_failures"][:3],
+                             "verdict": honest["verdict"], "expected_verdict": "INCOMPLETE", "gaps": honest["gaps"],
                              "A_summary": honest["summary"]["options"]["A"]})
         probes = [engine_only_probe(engine.capture_dir)]
         rss = {}
@@ -148,9 +178,10 @@ def main():
                     "runner_max_rss_mb": round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**20, 1)},
     }
     write_report(a.out, manifest, clean_cells, clean, controls)
-    ok = not clean["reference_failures"] and all(c["detected"] == c.get("expected_detected", True) for c in controls)
-    print(json.dumps({"clean_reference_failures": len(clean["reference_failures"]),
-                      "controls_as_expected": f"{sum(c['detected'] == c.get('expected_detected', True) for c in controls)}/{len(controls)}",
+    as_expected = lambda c: c["detected"] == c.get("expected_detected", True) and c.get("verdict") == c.get("expected_verdict")
+    ok = clean["verdict"] == "PASS" and all(as_expected(c) for c in controls)
+    print(json.dumps({"verdict": clean["verdict"], "clean_reference_failures": len(clean["reference_failures"]), "gaps": len(clean["gaps"]),
+                      "controls_as_expected": f"{sum(map(as_expected, controls))}/{len(controls)}",
                       "plot_calls": n_calls, "wall_s": round(wall, 1), "out": a.out}))
     sys.exit(0 if ok else 1)
 

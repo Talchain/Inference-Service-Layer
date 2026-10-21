@@ -39,11 +39,14 @@ def write_report(out, manifest, cells, clean, controls):
     ties = [c for c in cells if c["checks"]["side"] == "tie_unresolved_on_engine_path"]
     L = []
     w = L.append
-    ok_controls = sum(c["detected"] == c.get("expected_detected", True) for c in controls)
+    ok_controls = sum(c["detected"] == c.get("expected_detected", True) and c.get("verdict") == c.get("expected_verdict") for c in controls)
     w("# Track 3 Milestone 1: G1 and G2 on the local PLoT→ISL path\n")
-    w(f"**Verdict:** {'PASS' if not fails else 'FAIL'} against the exact oracle on every determinate row "
-      f"({len(fails)} reference failures). {len(ties)} exact-tie rows are **unresolved on the engine path** (a located boundary loss, below). "
+    w(f"**Verdict: {clean['verdict']}.** {len(fails)} reference failures against the exact oracle; {len(clean['gaps'])} completeness gaps. "
+      f"{len(ties)} exact-tie rows are **UNRESOLVED (engine floor)** on the floored path, never counted as met or missed; "
+      f"{sum(r['resolved'] for r in clean['sum_route'])}/{len(clean['sum_route'])} resolve on the core's exact-sum route (below). "
       f"Negative controls behaved as expected: {ok_controls}/{len(controls)}.\n")
+    for g in clean["gaps"]:
+        w(f"- GAP: {g}")
     idn = manifest["identity"]
     w(f"- Path: {manifest['path']}.")
     w(f"- PLoT `{idn['plot_commit']}` · ISL `{idn['isl_commit']}` · @talchain/schemas {idn['plot_talchain_schemas']} · "
@@ -72,14 +75,14 @@ def write_report(out, manifest, cells, clean, controls):
     g2 = [c for c in cells if c["group"] == "G2"]
     for h, x, y in sorted({(c["hypothesis"], c["x"], c["y"]) for c in g2}):
         row = {c["option"]: c for c in g2 if (c["hypothesis"], c["x"], c["y"]) == (h, x, y)}
-        cellstr = lambda c: f"{float(c['oracle_level']):g} / {_f(c['engine'] and c['engine']['level'])}" + (" (tie)" if c["checks"]["side"].startswith("tie") else "")
+        cellstr = lambda c: f"{float(c['oracle_level']):g} / {_f(c['engine'] and c['engine']['level'])}" + (" UNRESOLVED (engine floor)" if c["checks"]["side"].startswith("tie") else "")
         ht = s["highest_tested"].get(str((h, x, y)), {})
         w(f"| {h} | {float(x):g} | {float(y):g} | " + " | ".join(cellstr(row[o]) for o in OPTIONS) +
           f" | {'/'.join(ht.get('engine', [])) if isinstance(ht.get('engine'), list) else ht.get('engine')} |")
     w("\n| Measure over the 8 tested settings | " + " | ".join(OPTIONS) + " |")
     w("|---|" + "---:|" * len(OPTIONS))
     w("| Meets ≥ 90, exact (brief reference) | " + " | ".join(f"{s['options'][o]['oracle']['meets']}/8 ({BRIEF_REFERENCE['meets'][o]}/8)" for o in OPTIONS) + " |")
-    w("| Meets / unresolved tie / falls short, engine | " + " | ".join(
+    w("| Meets / UNRESOLVED (engine floor) / falls short, engine | " + " | ".join(
         f"{s['options'][o]['engine']['meets']} / {s['options'][o]['engine']['indeterminate']} / {s['options'][o]['engine']['falls_short']}" for o in OPTIONS) + " |")
     w("| Worst tested outcome, exact / engine | " + " | ".join(f"{_f(s['options'][o]['oracle']['worst'], 0)} / {_f(s['options'][o]['engine']['worst'])}" for o in OPTIONS) + " |")
     w("| Maximum tested regret, exact / engine | " + " | ".join(f"{_f(s['options'][o]['oracle']['max_regret'], 0)} / {_f(s['options'][o]['engine']['max_regret'])}" for o in OPTIONS) + " |")
@@ -111,14 +114,25 @@ def write_report(out, manifest, cells, clean, controls):
           ". The spread comes only from PLoT's floor, so the runner decides the side from the level and never reports these as chances.")
     for b in manifest.get("boundary_probes", []):
         w(f"- Engine-only probe: {b}")
+    sr = clean["sum_route"]
+    if sr:
+        w("\n### The core's exact-sum route on the UNRESOLVED rows (goal = today + change; CEE `mapper.ts` exact sum)\n")
+        w("| Row | Exact | ISL level (normalised) | Threshold | Strict sent | P(goal) | Identity evaluated | Resolved |")
+        w("|---|---:|---:|---:|---|---:|---|---|")
+        for r in sr:
+            w(f"| {r['option']} {r['scenario_id']} | {r['exact_level']} | {r['isl_level_normalised']} | {r['threshold_normalised']} | "
+              f"{r['strict_sent']} | {r['p_goal']} | {r['identity_evaluated']} | {'yes' if r['resolved'] else 'NO'} |")
+        w("\nThis route admits no parent of the goal except option-set changes and no negative change, so the runner computes each "
+          "option's stressed change exactly and the engine only adds and compares: it proves the exact comparison, not stress "
+          "propagation. The inclusive tie holds by one unit in the last place (level 0.4500000000000001 against 0.45), which comes from the cap round-trip.")
     w("")
     w("## Negative controls (each fault must turn the reference check red)\n")
     w("| Fault | Brief | Expected | Observed | First failure it caused |")
     w("|---|---|---|---|---|")
     for c in controls:
-        exp = "RED" if c.get("expected_detected", True) else "GREEN"
-        obs = "RED" if c["detected"] else "GREEN"
-        w(f"| {c['fault']} | {c['group']}: {c['meaning']} | {exp} | {obs} | {(c['first_failures'] or ['—'])[0][:140]} |")
+        exp = ("RED" if c.get("expected_detected", True) else "GREEN") + (f", verdict {c['expected_verdict']}" if c.get("expected_verdict") else "")
+        obs = ("RED" if c["detected"] else "GREEN") + (f", verdict {c['verdict']}" if c.get("verdict") else "")
+        w(f"| {c['fault']} | {c['group']}: {c['meaning']} | {exp} | {obs} | {((c['first_failures'] or c.get('gaps') or ['—'])[0])[:140]} |")
     w("\n## Scope and what this does not show\n")
     w("- Synthetic fixtures from brief v1.0 §6; not customer evidence. Stresses are explicit coordinates, not probabilities; "
       "'met at 6 of 8 tested settings' is not a 75 % chance.")

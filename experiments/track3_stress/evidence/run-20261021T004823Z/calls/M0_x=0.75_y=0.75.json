@@ -1,0 +1,3372 @@
+{
+ "request": {
+  "request_id": "track3:M0:x=0.75,y=0.75",
+  "graph": {
+   "nodes": [
+    {
+     "id": "net_contribution",
+     "kind": "goal",
+     "label": "12-month net contribution (\u00a3000)",
+     "intercept": 0.475,
+     "goal_threshold": 0.45,
+     "goal_threshold_frame": "delta",
+     "goal_threshold_cap": 200.0
+    },
+    {
+     "id": "planned_uplift",
+     "kind": "factor",
+     "label": "Planned uplift over the common base",
+     "observed_state": {
+      "value": 0,
+      "std": 0.0001
+     }
+    },
+    {
+     "id": "demand_exposure",
+     "kind": "factor",
+     "label": "Demand-stress exposure",
+     "observed_state": {
+      "value": 0,
+      "std": 0.0001
+     }
+    },
+    {
+     "id": "cost_exposure",
+     "kind": "factor",
+     "label": "Cost-stress exposure",
+     "observed_state": {
+      "value": 0,
+      "std": 0.0001
+     }
+    }
+   ],
+   "edges": [
+    {
+     "id": "e_planned_uplift",
+     "from": "planned_uplift",
+     "to": "net_contribution",
+     "exists_probability": 1.0,
+     "strength": {
+      "mean": 1.0,
+      "std": 0
+     }
+    },
+    {
+     "id": "e_demand_exposure",
+     "from": "demand_exposure",
+     "to": "net_contribution",
+     "exists_probability": 1.0,
+     "strength": {
+      "mean": -0.75,
+      "std": 0
+     }
+    },
+    {
+     "id": "e_cost_exposure",
+     "from": "cost_exposure",
+     "to": "net_contribution",
+     "exists_probability": 1.0,
+     "strength": {
+      "mean": -0.75,
+      "std": 0
+     }
+    }
+   ]
+  },
+  "options": [
+   {
+    "id": "A",
+    "label": "Growth-first",
+    "interventions": {
+     "planned_uplift": 0.125,
+     "demand_exposure": 0.1,
+     "cost_exposure": 0.1
+    }
+   },
+   {
+    "id": "B",
+    "label": "Balanced rollout",
+    "interventions": {
+     "planned_uplift": 0.05,
+     "demand_exposure": 0.05,
+     "cost_exposure": 0.025
+    }
+   },
+   {
+    "id": "C",
+    "label": "Protect margin",
+    "interventions": {
+     "planned_uplift": 0.0,
+     "demand_exposure": 0.01,
+     "cost_exposure": 0.01
+    }
+   }
+  ],
+  "goal_node_id": "net_contribution",
+  "goal_threshold": 0.45,
+  "goal_direction": "maximise",
+  "seed": 20261021,
+  "n_samples": 2000
+ },
+ "change_record": [
+  {
+   "element": "goal",
+   "change": "target >= 90 \u00a3000 as 0.45 on cap 200",
+   "origin": "brief v1.0 \u00a76"
+  },
+  {
+   "element": "e_demand_exposure",
+   "change": "strength -0.75 (demand stress x=0.75)",
+   "kind": "scenario parameter assumption",
+   "origin": "synthetic stress coordinate"
+  },
+  {
+   "element": "e_cost_exposure",
+   "change": "strength -0.75 (cost stress y=0.75)",
+   "kind": "scenario parameter assumption",
+   "origin": "synthetic stress coordinate"
+  },
+  {
+   "element": "hypothesis",
+   "change": "M0",
+   "origin": "brief v1.0 \u00a76 base hypothesis"
+  }
+ ],
+ "plot_response": {
+  "request_schema_version": "v3",
+  "endpoint_version": "v2/run",
+  "preflight_version": "2025-12-26",
+  "request_id": "track3:M0:x=0.75,y=0.75",
+  "analysis_status": "computed",
+  "approximate": false,
+  "option_comparison_status": "computed",
+  "robustness_status": "computed",
+  "drivers_status": "computed",
+  "constraints_status": "computed",
+  "constraint_results": [
+   {
+    "constraint_id": "auto_goal_threshold",
+    "node_id": "net_contribution",
+    "operator": ">=",
+    "value": 0.45,
+    "probability": 0.4845,
+    "probability_precision": {
+     "n_informative": 2000,
+     "standard_error": 0.011174966442902638
+    },
+    "option_id": "A",
+    "scale_provenance": {
+     "source": "default",
+     "range_unified": true,
+     "decision_grade": false
+    },
+    "frame_verdict": "scored"
+   }
+  ],
+  "constraint_diagnostics": [
+   {
+    "constraint_id": "auto_goal_threshold",
+    "failure_margin_median": 0.006114688398478785,
+    "near_miss_fraction": 1,
+    "binding": true
+   }
+  ],
+  "conditional_probabilities": [],
+  "auto_noise_applied": false,
+  "auto_noise_provenance": {
+   "applied": false,
+   "effect": "widens_outcome_and_risk_uncertainty",
+   "formula_version": "plot_auto_v1",
+   "multiplier": 1,
+   "noise_distribution": "normal_zero_mean_outcome_std",
+   "filter_scope": "outcome_and_risk_nodes",
+   "is_provisional": true,
+   "calibration_status": "provisional_pending_pilot_calibration"
+  },
+  "isl_analysis_status": "computed",
+  "critiques": [
+   {
+    "id": "ac52e7c5-ce32-4dfb-a8ab-f70c527261b9",
+    "code": "CONSTRAINT_MISSING_RANGE",
+    "severity": "info",
+    "message": "Constraint \"auto_goal_threshold\" target node \"net_contribution\" has no derivable range. Constraint value will be compared as-is by ISL.",
+    "source": "validation",
+    "affected_node_ids": [
+     "net_contribution"
+    ],
+    "blocks_analysis": false,
+    "user_message": "The constraint on 12-month net contribution (\u00a3000) cannot be range-checked. The constraint value will be used as-is."
+   },
+   {
+    "id": "critique_165d4546dbf8",
+    "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+    "severity": "warning",
+    "message": "Constraint node 'net_contribution' is the objective node and has no ParameterUncertainty \u2014 defaulted to base=0.0 as expected for a non-root objective; its constraint probability is scored from the modelled outcome distribution, not a missing-data placeholder",
+    "suggestion": "This is expected for a non-root objective node without an explicit baseline. Supply a ParameterUncertainty entry only if you intend an additive exogenous base on top of parent propagation \u2014 the sampled base is ADDED to parent contributions, it does not replace them",
+    "source": "isl",
+    "affected_node_ids": [
+     "net_contribution"
+    ],
+    "blocks_analysis": false,
+    "user_message": "A factor used by one of your constraints carries no starting value, so the analysis substituted zero. The constraint probability may be unreliable \u2014 add a value for that factor and re-run."
+   }
+  ],
+  "option_comparison": [
+   {
+    "option_id": "A",
+    "option_label": "Growth-first",
+    "id": "A",
+    "label": "Growth-first",
+    "outcome": {
+     "mean": 0.4499102117150869,
+     "std": 0.009446669948515188,
+     "p10": 0.4381124386161317,
+     "p50": 0.44959392146908994,
+     "p90": 0.4624280003862026,
+     "n_samples": 2000,
+     "n_valid_samples": 2000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 0.4845,
+    "probability_of_goal_precision": {
+     "basis": "simulation_precision",
+     "method": "wilson_score",
+     "confidence_level": 0.95,
+     "n_informative": 2000,
+     "n_met": 969,
+     "interval_lower": 0.46264816646677237,
+     "interval_upper": 0.5064112619989464
+    },
+    "probability_of_goal_drivers": {
+     "method": "tercile_conditional_v1",
+     "min_group_n": 30,
+     "n_candidates": 6,
+     "n_compared": 3,
+     "n_dropped": 3,
+     "dropped_by_reason": {
+      "outcome_constant": 0,
+      "no_variance": 0,
+      "group_below_min_n": 0,
+      "tied_at_tercile_boundary": 0,
+      "set_by_option": 3,
+      "set_by_option_upstream": 0,
+      "non_finite_values": 0,
+      "zero_spread": 0
+     },
+     "drivers": [
+      {
+       "quantity_id": "planned_uplift->net_contribution",
+       "kind": "link_strength",
+       "from": "planned_uplift",
+       "to": "net_contribution",
+       "p_goal_if_low": 0.17717717717717718,
+       "p_goal_if_high": 0.7867867867867868,
+       "n_low": 666,
+       "n_high": 666,
+       "low_upper_value": 0.9788052906456867,
+       "high_lower_value": 1.020854700997553,
+       "spread": 0.6096096096096096,
+       "spread_noise_floor": 0.06559464245327418,
+       "status": "resolved"
+      },
+      {
+       "quantity_id": "cost_exposure->net_contribution",
+       "kind": "link_strength",
+       "from": "cost_exposure",
+       "to": "net_contribution",
+       "p_goal_if_low": 0.24174174174174173,
+       "p_goal_if_high": 0.7342342342342343,
+       "n_low": 666,
+       "n_high": 666,
+       "low_upper_value": -0.7734533436920695,
+       "high_lower_value": -0.7312810676185105,
+       "spread": 0.49249249249249255,
+       "spread_noise_floor": 0.06559464245327418,
+       "status": "resolved"
+      },
+      {
+       "quantity_id": "demand_exposure->net_contribution",
+       "kind": "link_strength",
+       "from": "demand_exposure",
+       "to": "net_contribution",
+       "p_goal_if_low": 0.25075075075075076,
+       "p_goal_if_high": 0.7177177177177178,
+       "n_low": 666,
+       "n_high": 666,
+       "low_upper_value": -0.7708848083555765,
+       "high_lower_value": -0.7284129044276701,
+       "spread": 0.466966966966967,
+       "spread_noise_floor": 0.06559464245327418,
+       "status": "resolved"
+      }
+     ]
+    },
+    "win_probability": 0.002,
+    "downside": {
+     "cvar_10": 0.43353105960489613,
+     "p05": 0.4345227056600594,
+     "expected_regret": 0.01883527066695631
+    },
+    "probability_of_joint_goal": 0.4845,
+    "probability_of_joint_goal_precision": {
+     "n_informative": 2000,
+     "standard_error": 0.011174966442902638
+    },
+    "constraint_probabilities": {
+     "auto_goal_threshold": 0.4845
+    },
+    "constraint_probabilities_precision": {
+     "auto_goal_threshold": {
+      "n_informative": 2000,
+      "standard_error": 0.011174966442902638
+     }
+    },
+    "constraints_decision_grade": false,
+    "constraint_margins": [
+     {
+      "constraint_id": "auto_goal_threshold",
+      "failure_margin_median": 0.006114688398478785,
+      "near_miss_fraction": 1
+     }
+    ],
+    "goal_fit_basis": {
+     "scored_from": "modelled_outcome_distribution",
+     "node_ids": [
+      "net_contribution"
+     ]
+    }
+   },
+   {
+    "option_id": "B",
+    "option_label": "Balanced rollout",
+    "id": "B",
+    "label": "Balanced rollout",
+    "outcome": {
+     "mean": 0.46874109238376516,
+     "std": 0.00371807460885513,
+     "p10": 0.46408893214152397,
+     "p50": 0.46870075247578147,
+     "p90": 0.47360138526091977,
+     "n_samples": 2000,
+     "n_valid_samples": 2000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 1,
+    "probability_of_goal_precision": {
+     "basis": "simulation_precision",
+     "method": "wilson_score",
+     "confidence_level": 0.95,
+     "n_informative": 2000,
+     "n_met": 2000,
+     "interval_lower": 0.9980829527187469,
+     "interval_upper": 1
+    },
+    "probability_of_goal_drivers": {
+     "method": "tercile_conditional_v1",
+     "min_group_n": 30,
+     "n_candidates": 6,
+     "n_compared": 0,
+     "n_dropped": 6,
+     "dropped_by_reason": {
+      "outcome_constant": 6,
+      "no_variance": 0,
+      "group_below_min_n": 0,
+      "tied_at_tercile_boundary": 0,
+      "set_by_option": 0,
+      "set_by_option_upstream": 0,
+      "non_finite_values": 0,
+      "zero_spread": 0
+     },
+     "drivers": []
+    },
+    "win_probability": 0.994,
+    "downside": {
+     "cvar_10": 0.4622759632999798,
+     "p05": 0.4627398017824091,
+     "expected_regret": 4.3899982780927495e-06
+    },
+    "probability_of_joint_goal": 1,
+    "probability_of_joint_goal_precision": {
+     "n_informative": 2000,
+     "standard_error": 0
+    },
+    "constraint_probabilities": {
+     "auto_goal_threshold": 1
+    },
+    "constraint_probabilities_precision": {
+     "auto_goal_threshold": {
+      "n_informative": 2000,
+      "standard_error": 0
+     }
+    },
+    "constraints_decision_grade": false,
+    "constraint_margins": [
+     {
+      "constraint_id": "auto_goal_threshold"
+     }
+    ],
+    "goal_fit_basis": {
+     "scored_from": "modelled_outcome_distribution",
+     "node_ids": [
+      "net_contribution"
+     ]
+    }
+   },
+   {
+    "option_id": "C",
+    "option_label": "Protect margin",
+    "id": "C",
+    "label": "Protect margin",
+    "outcome": {
+     "mean": 0.45999099719835684,
+     "std": 0.0006917822921871879,
+     "p10": 0.45909781851493286,
+     "p50": 0.4599700301113525,
+     "p90": 0.4608823715407076,
+     "n_samples": 2000,
+     "n_valid_samples": 2000,
+     "validity_ratio": 1,
+     "percentiles_source": "samples"
+    },
+    "status": "computed",
+    "probability_of_goal": 1,
+    "probability_of_goal_precision": {
+     "basis": "simulation_precision",
+     "method": "wilson_score",
+     "confidence_level": 0.95,
+     "n_informative": 2000,
+     "n_met": 2000,
+     "interval_lower": 0.9980829527187469,
+     "interval_upper": 1
+    },
+    "probability_of_goal_drivers": {
+     "method": "tercile_conditional_v1",
+     "min_group_n": 30,
+     "n_candidates": 6,
+     "n_compared": 0,
+     "n_dropped": 6,
+     "dropped_by_reason": {
+      "outcome_constant": 6,
+      "no_variance": 0,
+      "group_below_min_n": 0,
+      "tied_at_tercile_boundary": 0,
+      "set_by_option": 0,
+      "set_by_option_upstream": 0,
+      "non_finite_values": 0,
+      "zero_spread": 0
+     },
+     "drivers": []
+    },
+    "win_probability": 0.004,
+    "downside": {
+     "cvar_10": 0.45880858818786907,
+     "p05": 0.4588829131855169,
+     "expected_regret": 0.008754485183686359
+    },
+    "probability_of_joint_goal": 1,
+    "probability_of_joint_goal_precision": {
+     "n_informative": 2000,
+     "standard_error": 0
+    },
+    "constraint_probabilities": {
+     "auto_goal_threshold": 1
+    },
+    "constraint_probabilities_precision": {
+     "auto_goal_threshold": {
+      "n_informative": 2000,
+      "standard_error": 0
+     }
+    },
+    "constraints_decision_grade": false,
+    "constraint_margins": [
+     {
+      "constraint_id": "auto_goal_threshold"
+     }
+    ],
+    "goal_fit_basis": {
+     "scored_from": "modelled_outcome_distribution",
+     "node_ids": [
+      "net_contribution"
+     ]
+    }
+   }
+  ],
+  "edge_sensitivity": [
+   {
+    "edge_id": "planned_uplift::net_contribution",
+    "from": "planned_uplift",
+    "to": "net_contribution",
+    "from_label": "Planned uplift over the common base",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "sensitivity_type": "existence",
+    "elasticity": 0.27317520500198894,
+    "importance_rank": 1,
+    "interpretation": "Decision is highly sensitive to planned_uplift->net_contribution existence - consider validating this relationship"
+   },
+   {
+    "edge_id": "cost_exposure::net_contribution",
+    "from": "cost_exposure",
+    "to": "net_contribution",
+    "from_label": "Cost-stress exposure",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "sensitivity_type": "existence",
+    "elasticity": -0.169105899372854,
+    "importance_rank": 2,
+    "interpretation": "Decision is moderately sensitive to cost_exposure->net_contribution existence"
+   },
+   {
+    "edge_id": "demand_exposure::net_contribution",
+    "from": "demand_exposure",
+    "to": "net_contribution",
+    "from_label": "Demand-stress exposure",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "sensitivity_type": "existence",
+    "elasticity": -0.16375422890902022,
+    "importance_rank": 3,
+    "interpretation": "Decision is moderately sensitive to demand_exposure->net_contribution existence"
+   },
+   {
+    "edge_id": "planned_uplift::net_contribution",
+    "from": "planned_uplift",
+    "to": "net_contribution",
+    "from_label": "Planned uplift over the common base",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "sensitivity_type": "magnitude",
+    "elasticity": 0.01577554290328316,
+    "importance_rank": 4,
+    "interpretation": "Decision is robust to effect size variation in planned_uplift->net_contribution"
+   },
+   {
+    "edge_id": "demand_exposure::net_contribution",
+    "from": "demand_exposure",
+    "to": "net_contribution",
+    "from_label": "Demand-stress exposure",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "sensitivity_type": "magnitude",
+    "elasticity": 0.013234505523606851,
+    "importance_rank": 5,
+    "interpretation": "Decision is robust to effect size variation in demand_exposure->net_contribution"
+   },
+   {
+    "edge_id": "cost_exposure::net_contribution",
+    "from": "cost_exposure",
+    "to": "net_contribution",
+    "from_label": "Cost-stress exposure",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "sensitivity_type": "magnitude",
+    "elasticity": 0.010682250910755735,
+    "importance_rank": 6,
+    "interpretation": "Decision is robust to effect size variation in cost_exposure->net_contribution"
+   }
+  ],
+  "sensitivity_reference_option_id": "A",
+  "decision_evpi": 4.3899982780927495e-06,
+  "p_win_sensitivity": [
+   {
+    "factor_id": "planned_uplift",
+    "p_win_delta": 0,
+    "p_win_delta_percentage_points": 0,
+    "current_metric": 1,
+    "perfect_metric": 1,
+    "metric_type": "p_joint_goal",
+    "method": "p_win_delta_at_mean_v1",
+    "n_samples": 2000,
+    "status": "below_resolution",
+    "clamped": false,
+    "noise_floor": 0.03099,
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "labelling_doctrine": "provisional_doctrine_v0"
+   },
+   {
+    "factor_id": "demand_exposure",
+    "p_win_delta": 0,
+    "p_win_delta_percentage_points": 0,
+    "current_metric": 1,
+    "perfect_metric": 1,
+    "metric_type": "p_joint_goal",
+    "method": "p_win_delta_at_mean_v1",
+    "n_samples": 2000,
+    "status": "below_resolution",
+    "clamped": false,
+    "noise_floor": 0.03099,
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "labelling_doctrine": "provisional_doctrine_v0"
+   },
+   {
+    "factor_id": "cost_exposure",
+    "p_win_delta": 0,
+    "p_win_delta_percentage_points": 0,
+    "current_metric": 1,
+    "perfect_metric": 1,
+    "metric_type": "p_joint_goal",
+    "method": "p_win_delta_at_mean_v1",
+    "n_samples": 2000,
+    "status": "below_resolution",
+    "clamped": false,
+    "noise_floor": 0.03099,
+    "noise_floor_method": "z95_worst_case_bernoulli_diff",
+    "labelling_doctrine": "provisional_doctrine_v0"
+   }
+  ],
+  "edge_e_values": [
+   {
+    "edge_id": "planned_uplift::net_contribution",
+    "from_id": "planned_uplift",
+    "to_id": "net_contribution",
+    "from_label": "Planned uplift over the common base",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "e_value": 1,
+    "flip_direction": "decrease",
+    "current_mean": 1,
+    "flip_mean": 0.824999,
+    "stability": {
+     "n_seeds": 10,
+     "n_seeds_flipped": 10,
+     "band_min": 0.769127,
+     "band_median": 0.828863,
+     "band_max": 0.943754,
+     "band_width": 0.174627,
+     "seed_flip_means": [
+      0.869999,
+      0.814335,
+      0.837725,
+      0.769127,
+      0.943754,
+      0.821484,
+      0.803373,
+      0.902205,
+      0.836241,
+      0.795855
+     ]
+    }
+   },
+   {
+    "edge_id": "demand_exposure::net_contribution",
+    "from_id": "demand_exposure",
+    "to_id": "net_contribution",
+    "from_label": "Demand-stress exposure",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "e_value": 1,
+    "flip_direction": "increase",
+    "current_mean": -0.75,
+    "flip_mean": -0.375,
+    "stability": {
+     "n_seeds": 10,
+     "n_seeds_flipped": 10,
+     "band_min": -0.478353,
+     "band_median": -0.323044,
+     "band_max": -0.100274,
+     "band_width": 0.378079,
+     "seed_flip_means": [
+      -0.186307,
+      -0.467023,
+      -0.100274,
+      -0.423801,
+      -0.279826,
+      -0.260374,
+      -0.478353,
+      -0.300258,
+      -0.373625,
+      -0.34583
+     ]
+    }
+   },
+   {
+    "edge_id": "cost_exposure::net_contribution",
+    "from_id": "cost_exposure",
+    "to_id": "net_contribution",
+    "from_label": "Cost-stress exposure",
+    "to_label": "12-month net contribution (\u00a3000)",
+    "e_value": 1,
+    "flip_direction": "increase",
+    "current_mean": -0.75,
+    "flip_mean": -0.499999,
+    "stability": {
+     "n_seeds": 10,
+     "n_seeds_flipped": 10,
+     "band_min": -0.576436,
+     "band_median": -0.490342,
+     "band_max": -0.406502,
+     "band_width": 0.169934,
+     "seed_flip_means": [
+      -0.406502,
+      -0.503486,
+      -0.412327,
+      -0.549468,
+      -0.420957,
+      -0.531424,
+      -0.576436,
+      -0.444042,
+      -0.481292,
+      -0.499392
+     ]
+    }
+   }
+  ],
+  "conditional_winners": [],
+  "factor_sensitivity": [
+   {
+    "factor_id": "planned_uplift",
+    "factor_label": "Planned uplift over the common base",
+    "influence_score": 1,
+    "influence_rank": 1,
+    "sensitivity_score": 0,
+    "elasticity": 0,
+    "direction": "positive",
+    "importance_rank": 1,
+    "value_of_information": 0,
+    "confidence": 0.3,
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "confidence_provenance": {
+     "computation_source": "plot_unified_from_isl_bootstrap",
+     "formula_version": "plot_unified_v3",
+     "is_provisional": true,
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "input_quality": "standard"
+    },
+    "confidence_components": {
+     "structural_certainty": 0.5,
+     "sampling_stability": 0
+    },
+    "zero_reason": "intervention_override",
+    "source": "graph",
+    "flip_risk_category": "negligible",
+    "attribution_stability": "negligible",
+    "rank_flip_rate": 0,
+    "influence_basis": "isl_structural",
+    "importance_basis": "isl_structural",
+    "driver_label": "biggest",
+    "range_derivation_source": "default"
+   },
+   {
+    "factor_id": "demand_exposure",
+    "factor_label": "Demand-stress exposure",
+    "influence_score": 0.75,
+    "influence_rank": 2,
+    "sensitivity_score": 0,
+    "elasticity": 0,
+    "direction": "negative",
+    "importance_rank": 2,
+    "value_of_information": 0,
+    "confidence": 0.3,
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "confidence_provenance": {
+     "computation_source": "plot_unified_from_isl_bootstrap",
+     "formula_version": "plot_unified_v3",
+     "is_provisional": true,
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "input_quality": "standard"
+    },
+    "confidence_components": {
+     "structural_certainty": 0.5,
+     "sampling_stability": 0
+    },
+    "zero_reason": "intervention_override",
+    "source": "graph",
+    "flip_risk_category": "negligible",
+    "attribution_stability": "negligible",
+    "rank_flip_rate": 0,
+    "influence_basis": "isl_structural",
+    "importance_basis": "isl_structural",
+    "driver_label": "strong",
+    "range_derivation_source": "default"
+   },
+   {
+    "factor_id": "cost_exposure",
+    "factor_label": "Cost-stress exposure",
+    "influence_score": 0.75,
+    "influence_rank": 3,
+    "sensitivity_score": 0,
+    "elasticity": 0,
+    "direction": "negative",
+    "importance_rank": 3,
+    "value_of_information": 0,
+    "confidence": 0.3,
+    "confidence_source": "plot_unified_from_isl_bootstrap",
+    "confidence_provenance": {
+     "computation_source": "plot_unified_from_isl_bootstrap",
+     "formula_version": "plot_unified_v3",
+     "is_provisional": true,
+     "calibration_status": "provisional_pending_pilot_calibration",
+     "input_quality": "standard"
+    },
+    "confidence_components": {
+     "structural_certainty": 0.5,
+     "sampling_stability": 0
+    },
+    "zero_reason": "intervention_override",
+    "source": "graph",
+    "flip_risk_category": "negligible",
+    "attribution_stability": "negligible",
+    "rank_flip_rate": 0,
+    "influence_basis": "isl_structural",
+    "importance_basis": "isl_structural",
+    "driver_label": "strong",
+    "range_derivation_source": "default"
+   }
+  ],
+  "driver_order": {
+   "version": 1,
+   "basis": "isl_structural",
+   "ranked_factor_ids": [
+    "planned_uplift",
+    "demand_exposure",
+    "cost_exposure"
+   ],
+   "species": "single",
+   "lever_policy": "du_union",
+   "lever_ids": [
+    "planned_uplift",
+    "demand_exposure",
+    "cost_exposure"
+   ],
+   "separability": {
+    "top_pair_separable": true,
+    "method": "relative_gap_0.10_provisional"
+   },
+   "rank_stability": {
+    "max_rank_flip_rate": 0,
+    "min_attribution_stability": "negligible"
+   }
+  },
+  "factor_stability": [
+   {
+    "factor_id": "planned_uplift",
+    "factor_label": "Planned uplift over the common base",
+    "elasticity_std": 0,
+    "attribution_stability": "negligible",
+    "rank_flip_rate": 0,
+    "stability_method": "bootstrap_20"
+   },
+   {
+    "factor_id": "demand_exposure",
+    "factor_label": "Demand-stress exposure",
+    "elasticity_std": 0,
+    "attribution_stability": "negligible",
+    "rank_flip_rate": 0,
+    "stability_method": "bootstrap_20"
+   },
+   {
+    "factor_id": "cost_exposure",
+    "factor_label": "Cost-stress exposure",
+    "elasticity_std": 0,
+    "attribution_stability": "negligible",
+    "rank_flip_rate": 0,
+    "stability_method": "bootstrap_20"
+   }
+  ],
+  "stability_thresholds": {
+   "high_moderate_boundary": 0.1,
+   "moderate_low_boundary": 0.3,
+   "version": "v1.0-operational-defaults",
+   "provisional": true
+  },
+  "inference_warnings": [
+   {
+    "code": "CONSTRAINT_GOALFIT_MODELLED_BASIS",
+    "message": "Goal-fit for \"12-month net contribution (\u00a3000)\" is modelled: \"12-month net contribution (\u00a3000)\" has no observed baseline value, so each option's probability is scored from the modelled outcome distribution for \"12-month net contribution (\u00a3000)\" against your target \u2014 it reflects modelled change driven by upstream factors, not distance from a measured starting point. Set a value for \"12-month net contribution (\u00a3000)\" to anchor these probabilities to an observed baseline.",
+    "severity": "info"
+   },
+   {
+    "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+    "message": "Node 'net_contribution' is the objective node and has no ParameterUncertainty \u2014 defaulted to base=0.0 as expected for a non-root objective; its constraint probability is scored from the modelled outcome distribution, not a missing-data placeholder",
+    "severity": "info",
+    "field": "nodes[net_contribution].base"
+   },
+   {
+    "code": "FACTOR_EVPPI_NOT_COMPUTED",
+    "message": "Value-of-information ran but produced no rows. The reason is not known at this layer and has deliberately not been inferred.",
+    "severity": "info",
+    "field": "factor_evppi"
+   }
+  ],
+  "m1_coaching": {
+   "story_headlines": {
+    "B": "On this model, Balanced rollout came out best 99 percentage points more often than the next option, and that held under the changes we tested",
+    "C": "Runner-up with 0% win probability",
+    "A": "Runner-up with 0% win probability"
+   },
+   "evidence_gaps": [],
+   "model_critiques": [
+    {
+     "type": "CONSTRAINT_UNGROUNDED",
+     "severity": "warn",
+     "challenge_question": "Constraint on \"12-month net contribution (\u00a3000)\" lacks a baseline value. The feasibility assessment for this constraint is based on defaults rather than evidence.",
+     "suggested_action": "Provide a current observed value for 12-month net contribution (\u00a3000) to strengthen the constraint analysis.",
+     "targets": [
+      "net_contribution"
+     ]
+    }
+   ],
+   "next_actions": [
+    {
+     "priority": 7,
+     "action": "Move forward with Balanced rollout while validating the key assumptions",
+     "rationale": "Balanced rollout has a strong current lead by 99 points",
+     "target_type": "option",
+     "target_id": "B",
+     "target_label": "Balanced rollout"
+    }
+   ],
+   "readiness": "needs_evidence",
+   "headline_type": "clear_winner",
+   "assumptions_ledger": {
+    "assumptions": [
+     {
+      "dedup_key": "plot_normaliser:clamped:global:unknown:cost_exposure::net_contribution.strength.std",
+      "source_service": "plot_normaliser",
+      "action": "clamped",
+      "entity_type": "global",
+      "entity_id": "unknown",
+      "field": "cost_exposure::net_contribution.strength.std",
+      "from_value": 0,
+      "to_value": 0.05,
+      "reason": "Value below minimum 0.05",
+      "impact": "medium",
+      "impact_reason_code": "FRAGILE_EDGE",
+      "audience": "internal"
+     },
+     {
+      "dedup_key": "plot_normaliser:clamped:global:unknown:demand_exposure::net_contribution.strength.std",
+      "source_service": "plot_normaliser",
+      "action": "clamped",
+      "entity_type": "global",
+      "entity_id": "unknown",
+      "field": "demand_exposure::net_contribution.strength.std",
+      "from_value": 0,
+      "to_value": 0.05,
+      "reason": "Value below minimum 0.05",
+      "impact": "medium",
+      "impact_reason_code": "FRAGILE_EDGE",
+      "audience": "internal"
+     },
+     {
+      "dedup_key": "plot_normaliser:clamped:global:unknown:planned_uplift::net_contribution.strength.std",
+      "source_service": "plot_normaliser",
+      "action": "clamped",
+      "entity_type": "global",
+      "entity_id": "unknown",
+      "field": "planned_uplift::net_contribution.strength.std",
+      "from_value": 0,
+      "to_value": 0.05,
+      "reason": "Value below minimum 0.05",
+      "impact": "medium",
+      "impact_reason_code": "FRAGILE_EDGE",
+      "audience": "internal"
+     },
+     {
+      "dedup_key": "plot_normaliser:derived:global:unknown:goal_constraints",
+      "source_service": "plot_normaliser",
+      "action": "derived",
+      "entity_type": "global",
+      "entity_id": "unknown",
+      "field": "goal_constraints",
+      "from_value": "goal_threshold=0.45",
+      "to_value": "auto_goal_threshold",
+      "reason": "No goal_constraints provided; auto-generated single constraint from goal_threshold",
+      "impact": "low",
+      "impact_reason_code": "STRUCTURAL_ONLY",
+      "audience": "internal"
+     }
+    ],
+    "total_count": 4,
+    "high_impact_count": 0,
+    "medium_impact_count": 3,
+    "low_impact_count": 1,
+    "user_count": 0,
+    "user_high_impact_count": 0
+   },
+   "thresholds_used": {
+    "headline_clear_winner_delta": 0.2,
+    "headline_clear_winner_stability": 0.7,
+    "headline_moderate_winner_delta": 0.1,
+    "headline_moderate_winner_stability": 0.5,
+    "headline_close_call_delta": 0.1,
+    "headline_high_uncertainty_voi": 0.3,
+    "headline_high_uncertainty_fragile": 0.25,
+    "headline_fragile_edge_min": 0.15,
+    "evidence_gap_min_voi": 0,
+    "evidence_gap_top_quartile": true,
+    "evidence_gap_floor": 3,
+    "evidence_gap_cap": 3,
+    "critique_dominant_factor_threshold": 0.5,
+    "critique_influential_external_quartile": 0.25,
+    "critique_narrow_framing_max_options": 2,
+    "critique_anchoring_baseline_value": 0.5,
+    "critique_overconfidence_threshold": 0.85,
+    "action_fragile_edge_threshold": 0.2,
+    "action_high_voi_threshold": 0.4,
+    "readiness_high_evidence_gap_count": 2,
+    "readiness_high_voi_threshold": 0.4,
+    "readiness_joint_prob_floor": 0.05,
+    "readiness_joint_prob_close_call": 0.3,
+    "tone_confident_stability_min": 0.75,
+    "tone_low_driver_confidence_max": 0.5
+   },
+   "readiness_signals": {
+    "overall": "needs_evidence",
+    "overall_score": 0.35,
+    "computed_score_raw": 0.92,
+    "dimensions": {
+     "evidence_quality": 0.8,
+     "model_robustness": 1,
+     "framing_quality": 1
+    },
+    "signals": [
+     {
+      "dimension": "evidence",
+      "signal": "Low average confidence (30%)",
+      "impact": "negative",
+      "weight": 0.2
+     },
+     {
+      "dimension": "robustness",
+      "signal": "High recommendation stability",
+      "impact": "positive",
+      "weight": 0.2
+     },
+     {
+      "dimension": "robustness",
+      "signal": "Clear 99-point margin",
+      "impact": "positive",
+      "weight": 0.15
+     },
+     {
+      "dimension": "framing",
+      "signal": "3 options considered",
+      "impact": "positive",
+      "weight": 0.1
+     }
+    ]
+   },
+   "key_drivers": [
+    {
+     "factor_id": "planned_uplift",
+     "factor_label": "Planned uplift over the common base",
+     "influence_score": 1,
+     "normalised_impact": 1,
+     "impact_display": "Very High",
+     "direction": "positive",
+     "rank": 1
+    },
+    {
+     "factor_id": "demand_exposure",
+     "factor_label": "Demand-stress exposure",
+     "influence_score": 0.75,
+     "normalised_impact": 0.75,
+     "impact_display": "Very High",
+     "direction": "negative",
+     "rank": 2
+    },
+    {
+     "factor_id": "cost_exposure",
+     "factor_label": "Cost-stress exposure",
+     "influence_score": 0.75,
+     "normalised_impact": 0.75,
+     "impact_display": "Very High",
+     "direction": "negative",
+     "rank": 3
+    }
+   ],
+   "executive_summary": {
+    "summary": "Balanced rollout has a strong current lead with a 99-point advantage. Significant evidence gaps remain. Gather additional evidence before deciding.",
+    "decision_statement": "Balanced rollout has a strong current lead with a 99-point advantage.",
+    "key_qualifier": "Significant evidence gaps remain.",
+    "action_implication": "Gather additional evidence before deciding."
+   },
+   "readiness_tone": "confident",
+   "readiness_reasons": [],
+   "coaching_version": "1.2.0",
+   "computed_at": "2026-10-21T00:48:49.486Z"
+  },
+  "confidence_tier": "needs_work",
+  "flip_thresholds": [],
+  "flip_thresholds_status": "unavailable",
+  "flip_thresholds_margin_status": "unavailable",
+  "flip_thresholds_margin_coverage": {
+   "total": 0,
+   "with_margin": 0,
+   "without_margin": 0
+  },
+  "identifiability": {
+   "status": "identifiable",
+   "method": "backdoor",
+   "pairs_checked": 3,
+   "pairs_identifiable": 3
+  },
+  "m1_review": null,
+  "review_status": "disabled",
+  "robustness": {
+   "fragile_edges": [
+    {
+     "edge_id": "planned_uplift->net_contribution",
+     "from_id": "planned_uplift",
+     "to_id": "net_contribution",
+     "switch_probability": 0.016,
+     "marginal_switch_probability": 0,
+     "alternative_winner_id": "C",
+     "from_label": "Planned uplift over the common base",
+     "to_label": "12-month net contribution (\u00a3000)",
+     "severity": "warning",
+     "visible": false,
+     "alternative_winner_label": "Protect margin"
+    },
+    {
+     "edge_id": "demand_exposure->net_contribution",
+     "from_id": "demand_exposure",
+     "to_id": "net_contribution",
+     "switch_probability": 0.012,
+     "marginal_switch_probability": 0,
+     "alternative_winner_id": "C",
+     "from_label": "Demand-stress exposure",
+     "to_label": "12-month net contribution (\u00a3000)",
+     "severity": "warning",
+     "visible": false,
+     "alternative_winner_label": "Protect margin"
+    },
+    {
+     "edge_id": "cost_exposure->net_contribution",
+     "from_id": "cost_exposure",
+     "to_id": "net_contribution",
+     "switch_probability": 0.01,
+     "marginal_switch_probability": 0,
+     "alternative_winner_id": "C",
+     "from_label": "Cost-stress exposure",
+     "to_label": "12-month net contribution (\u00a3000)",
+     "severity": "warning",
+     "visible": false,
+     "alternative_winner_label": "Protect margin"
+    }
+   ],
+   "robust_edges": [],
+   "is_robust": true,
+   "level": "high",
+   "confidence": 0.994,
+   "confidence_basis": "recommendation_stability_uncalibrated",
+   "recommended_option_id": "B",
+   "recommended_option_label": "Balanced rollout",
+   "recommended_option_compliance": "not_applicable",
+   "recommended_option_compliance_reason": "no limits were set for this decision",
+   "near_tie": {
+    "is_tie": false,
+    "top_option_id": "B",
+    "second_option_id": "C",
+    "tied_option_ids": [
+     "B"
+    ],
+    "gap": 0.99,
+    "threshold": 0.1
+   },
+   "display_verdict": "robust",
+   "display_verdict_reason": "this run held up under the changes we tested"
+  },
+  "robustness_synthesis": null,
+  "cee_status": "skipped",
+  "decision_quality": null,
+  "insights": null,
+  "improvement_guidance": null,
+  "rationale": null,
+  "ceeTrace": {
+   "requestId": "track3:M0:x=0.75,y=0.75",
+   "degraded": false,
+   "timestamp": "2026-10-21T00:48:49.485Z",
+   "source": "orchestrator",
+   "reason": "CEE feature disabled"
+  },
+  "processing_time_ms": 1771.8007089999992,
+  "response_hash": "11fa2cd062349c52",
+  "decision_brief": {
+   "brief_id": "1729693f-90fd-4294-91e0-04b81a7f9904",
+   "version": "1",
+   "graph_hash": "11fa2cd062349c52",
+   "seed": 20261021,
+   "created_at": "2026-10-21T00:48:49.487Z",
+   "headline": "Balanced rollout has a strong current lead with a 99-point advantage. Significant evidence gaps remain. Gather additional evidence before deciding.",
+   "options": [
+    {
+     "option_id": "B",
+     "label": "Balanced rollout",
+     "win_probability": 0.994,
+     "rank": 1
+    },
+    {
+     "option_id": "C",
+     "label": "Protect margin",
+     "win_probability": 0.004,
+     "rank": 2
+    },
+    {
+     "option_id": "A",
+     "label": "Growth-first",
+     "win_probability": 0.002,
+     "rank": 3
+    }
+   ],
+   "top_drivers": [],
+   "key_assumptions": [],
+   "what_would_change": [],
+   "robustness": "robust",
+   "warnings": [
+    {
+     "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+     "message": "Constraint node 'net_contribution' is the objective node and has no ParameterUncertainty \u2014 defaulted to base=0.0 as expected for a non-root objective; its constraint probability is scored from the modelled outcome distribution, not a missing-data placeholder",
+     "severity": "warning"
+    },
+    {
+     "code": "CONSTRAINT_UNGROUNDED",
+     "message": "Constraint on \"12-month net contribution (\u00a3000)\" lacks a baseline value. The feasibility assessment for this constraint is based on defaults rather than evidence.",
+     "severity": "warning"
+    },
+    {
+     "code": "M2_UNAVAILABLE",
+     "message": "Decision review was unavailable; brief uses deterministic coaching fallback",
+     "severity": "warning"
+    }
+   ],
+   "lineage": {
+    "config_version": "49701b4868de",
+    "response_hash": "11fa2cd062349c52",
+    "n_samples": 2000
+   },
+   "headline_banded": {
+    "text": "Balanced rollout is clearly ahead.",
+    "band": "clearly_ahead",
+    "leader_option_id": "B",
+    "leader_label": "Balanced rollout",
+    "runner_up_option_id": "C",
+    "runner_up_label": "Protect margin",
+    "win_probability_gap": 0.99,
+    "robustness_gated": false,
+    "doctrine": "provisional_doctrine_v0"
+   },
+   "defaulted_assumptions": [
+    {
+     "factor_label": null,
+     "note": "Node 'net_contribution' is the objective node and has no ParameterUncertainty \u2014 defaulted to base=0.0 as expected for a non-root objective; its constraint probability is scored from the modelled outcome distribution, not a missing-data placeholder",
+     "source": "default_disclosure",
+     "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+     "doctrine": "provisional_doctrine_v0"
+    }
+   ],
+   "robustness_caveat": {
+    "text": "This run held up under the changes we tested. That is not a guarantee. Defaulted or uncertain inputs could still change it.",
+    "basis": "is_robust",
+    "doctrine": "provisional_doctrine_v0"
+   },
+   "warning_codes": []
+  },
+  "review_cards": [],
+  "fact_objects": [],
+  "_meta": {
+   "source_path": "isl",
+   "repairs_applied": [
+    {
+     "field": "cost_exposure::net_contribution.strength.std",
+     "action": "clamped",
+     "from_value": 0,
+     "to_value": 0.05,
+     "reason": "Value below minimum 0.05",
+     "code": "CLAMP_STRENGTH_STD",
+     "layer": "plot",
+     "field_path": "cost_exposure::net_contribution.strength.std",
+     "before": 0,
+     "after": 0.05,
+     "severity": "warn"
+    },
+    {
+     "field": "demand_exposure::net_contribution.strength.std",
+     "action": "clamped",
+     "from_value": 0,
+     "to_value": 0.05,
+     "reason": "Value below minimum 0.05",
+     "code": "CLAMP_STRENGTH_STD",
+     "layer": "plot",
+     "field_path": "demand_exposure::net_contribution.strength.std",
+     "before": 0,
+     "after": 0.05,
+     "severity": "warn"
+    },
+    {
+     "field": "planned_uplift::net_contribution.strength.std",
+     "action": "clamped",
+     "from_value": 0,
+     "to_value": 0.05,
+     "reason": "Value below minimum 0.05",
+     "code": "CLAMP_STRENGTH_STD",
+     "layer": "plot",
+     "field_path": "planned_uplift::net_contribution.strength.std",
+     "before": 0,
+     "after": 0.05,
+     "severity": "warn"
+    },
+    {
+     "field": "goal_constraints",
+     "action": "derived",
+     "from_value": "goal_threshold=0.45",
+     "to_value": "auto_goal_threshold",
+     "reason": "No goal_constraints provided; auto-generated single constraint from goal_threshold",
+     "code": "LEGACY_REPAIR",
+     "layer": "plot",
+     "field_path": "goal_constraints",
+     "before": "goal_threshold=0.45",
+     "after": "auto_goal_threshold",
+     "severity": "info"
+    }
+   ],
+   "request_id": "track3:M0:x=0.75,y=0.75",
+   "plot_build": "acf2476",
+   "hash_version": 8,
+   "response_hash": "11fa2cd062349c52",
+   "request_id_chain": {
+    "ui": "track3:M0:x=0.75,y=0.75",
+    "plot": "track3:M0:x=0.75,y=0.75",
+    "isl": "track3:M0:x=0.75,y=0.75",
+    "isl_echoed": "req_03e2704e895c448a",
+    "cee": null,
+    "cee_echoed": null,
+    "all_match": false,
+    "chain_complete": true
+   },
+   "constraint_sources": {
+    "auto_goal_threshold": "auto_from_goal_threshold"
+   },
+   "range_derivation_sources": {
+    "planned_uplift": "default",
+    "demand_exposure": "default",
+    "cost_exposure": "default"
+   },
+   "evidence": {
+    "plot_build": "acf2476",
+    "isl_build": "dev",
+    "isl_request_digest": {
+     "sha256": "b41f48595da4b33640e5517eb5a07e34e0d038315716bdbcfc2601ee81e5fbb4",
+     "bytes": 1998,
+     "key_manifest": [
+      "analysis_types",
+      "goal_constraints",
+      "goal_direction",
+      "goal_node_id",
+      "goal_threshold",
+      "goal_threshold_frame",
+      "graph",
+      "include_e_values",
+      "include_factor_flips",
+      "include_voi",
+      "n_samples",
+      "options",
+      "parameter_uncertainties",
+      "request_id",
+      "seed"
+     ]
+    },
+    "isl_response_digest": {
+     "sha256": "2b78cb119e42bf2705e502b8a1d574b83d2f37014d69fbdda3fca2883af5eab6",
+     "bytes": 16783,
+     "key_manifest": [
+      "analysis_status",
+      "auto_noise_applied",
+      "build",
+      "critiques",
+      "decision_evpi",
+      "endpoint_version",
+      "engine_version",
+      "factor_flip_values",
+      "factor_sensitivity",
+      "factor_sensitivity_status",
+      "inference_warnings",
+      "node_levels",
+      "objective_ranking",
+      "options",
+      "p_win_sensitivity",
+      "processing_time_ms",
+      "request_echo",
+      "request_id",
+      "robustness",
+      "robustness_status",
+      "sample_population_provenance",
+      "seed_source",
+      "seed_used",
+      "sensitivity_reference_option_id",
+      "stability_thresholds",
+      "structural_influence",
+      "timestamp",
+      "version"
+     ]
+    },
+    "isl_draw_structure_key": "0c983b9b9598ea61b5ec123fcccbae6647fdeaf0c9cc983d3ef2b822b58b484c",
+    "isl_wire_generation_ok": true,
+    "enrichment_contract_schema_parsed": true,
+    "enrichment_contract_ok": true,
+    "enrichment_contract_withheld": []
+   },
+   "feature_flags_snapshot": {
+    "SCM_LITE_ENABLE": "0",
+    "PROD_SCM_LITE_PLACEHOLDER": "0",
+    "ADAPTIVE_K_ENABLE": "0",
+    "CONFIDENCE_CALIBRATED": "0",
+    "IDENT_TAG_ENABLE": "0",
+    "PROVENANCE_ENABLE": "0",
+    "ENABLE_DUAL_BELIEFS": "0",
+    "ENABLE_NOISY_OR": "0",
+    "ENABLE_LOGISTIC": "0",
+    "ENABLE_NOISY_AND_NOT": "0",
+    "ENABLE_MIXED_COMBINATION": "0",
+    "ENABLE_TRACE_CACHING": "0",
+    "ENABLE_STRATIFIED_SAMPLING": "0",
+    "ENABLE_IMPORTANCE_SAMPLING": "0",
+    "ENABLE_OPTION_PROBABILITIES": "0",
+    "RATE_LIMIT_ENABLED": "0",
+    "TOKEN_RL_ENABLE": "0",
+    "RL_CB_ENABLE": "0",
+    "PROMETHEUS_METRICS": "0",
+    "PROMETHEUS_ENABLE": "0",
+    "OPS_SNAPSHOT_ENABLE": "0",
+    "METRICS": "0",
+    "AUTH_ENABLED": "0",
+    "AUTH_V2_ENABLED": "0",
+    "TEST_ROUTES": "0",
+    "CORS_DEV": "0",
+    "OPENAPI_DEV": "0",
+    "COMPARE_VIEW_ENABLE": "0",
+    "INSPECTOR_DEBUG_ENABLE": "0",
+    "FEATURE_STREAM": "0",
+    "STREAM_PARITY_ENABLE": "0",
+    "WHATIF_DELTA_ENABLE": "0",
+    "CEE_ORCHESTRATOR_ENABLED": "0",
+    "DECISION_REVIEW_ENABLE": "0",
+    "ENABLE_FACTS_ASSEMBLY": "0",
+    "ENABLE_REVIEW_PASS": "0",
+    "ENABLE_VALIDATE_PATCH": "0",
+    "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+    "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "0"
+   },
+   "decision_brief_assembled": true,
+   "review_cards_count": 0,
+   "evidence_priority_card_present": false,
+   "response_content_hash": "rch_v2:ec039f004b1f2215"
+  },
+  "downstream_calls": {
+   "isl": [
+    {
+     "service": "isl",
+     "endpoint": "/api/v1/robustness/analyze/v2",
+     "status": 200,
+     "elapsed_ms": 1764,
+     "payload_hash": "024df8cef5d3",
+     "response_hash": "02b665431bc9",
+     "request_id": "track3:M0:x=0.75,y=0.75",
+     "request_payload": {
+      "request_id": "sha8:0e95ec51",
+      "graph": {
+       "nodes": [
+        {
+         "id": "sha8:dede7e3f",
+         "kind": "sha8:4dd44847",
+         "label": "sha8:ab2356e7",
+         "intercept": "sha8:c72b3b1c",
+         "epsilon_std": "sha8:90834737"
+        },
+        {
+         "id": "sha8:03e1684f",
+         "kind": "sha8:3ee83a08",
+         "label": "sha8:335db0c8",
+         "observed_state": {
+          "value": "sha8:90834737",
+          "std": "sha8:f634a972"
+         },
+         "intercept": "sha8:90834737",
+         "epsilon_std": "sha8:90834737"
+        },
+        {
+         "id": "sha8:b7e5e2b1",
+         "kind": "sha8:3ee83a08",
+         "label": "sha8:a0f03d66",
+         "observed_state": {
+          "value": "sha8:90834737",
+          "std": "sha8:f634a972"
+         },
+         "intercept": "sha8:90834737",
+         "epsilon_std": "sha8:90834737"
+        },
+        {
+         "id": "sha8:93c94946",
+         "kind": "sha8:3ee83a08",
+         "label": "sha8:ba4eaa4e",
+         "observed_state": {
+          "value": "sha8:90834737",
+          "std": "sha8:f634a972"
+         },
+         "intercept": "sha8:90834737",
+         "epsilon_std": "sha8:90834737"
+        }
+       ],
+       "edges": [
+        {
+         "from": "sha8:03e1684f",
+         "to": "sha8:dede7e3f",
+         "exists_probability": "sha8:513e56d8",
+         "strength": {
+          "mean": "sha8:513e56d8",
+          "std": "sha8:b59d9289"
+         }
+        },
+        {
+         "from": "sha8:b7e5e2b1",
+         "to": "sha8:dede7e3f",
+         "exists_probability": "sha8:513e56d8",
+         "strength": {
+          "mean": "sha8:65d267b7",
+          "std": "sha8:b59d9289"
+         }
+        },
+        {
+         "from": "sha8:93c94946",
+         "to": "sha8:dede7e3f",
+         "exists_probability": "sha8:513e56d8",
+         "strength": {
+          "mean": "sha8:65d267b7",
+          "std": "sha8:b59d9289"
+         }
+        }
+       ]
+      },
+      "options": [
+       {
+        "id": "sha8:2e12d68d",
+        "label": "sha8:4bf8ba03",
+        "interventions": {
+         "sha8:03e1684f": "sha8:4cec0c46",
+         "sha8:b7e5e2b1": "sha8:cf2d666d",
+         "sha8:93c94946": "sha8:cf2d666d"
+        }
+       },
+       {
+        "id": "sha8:7a8d65b4",
+        "label": "sha8:3376a42e",
+        "interventions": {
+         "sha8:03e1684f": "sha8:b59d9289",
+         "sha8:b7e5e2b1": "sha8:b59d9289",
+         "sha8:93c94946": "sha8:1d4c5ac4"
+        }
+       },
+       {
+        "id": "sha8:a6b3ae9d",
+        "label": "sha8:6299cfb9",
+        "interventions": {
+         "sha8:03e1684f": "sha8:90834737",
+         "sha8:b7e5e2b1": "sha8:09828f46",
+         "sha8:93c94946": "sha8:09828f46"
+        }
+       }
+      ],
+      "goal_node_id": "sha8:dede7e3f",
+      "n_samples": "sha8:88ddda28",
+      "analysis_types": [
+       "sha8:07ffa71d",
+       "sha8:809ac05e",
+       "sha8:cfc8d7c0"
+      ],
+      "parameter_uncertainties": [
+       {
+        "node_id": "sha8:03e1684f",
+        "distribution": "sha8:bfc1eaad",
+        "std": "sha8:f634a972"
+       },
+       {
+        "node_id": "sha8:b7e5e2b1",
+        "distribution": "sha8:bfc1eaad",
+        "std": "sha8:f634a972"
+       },
+       {
+        "node_id": "sha8:93c94946",
+        "distribution": "sha8:bfc1eaad",
+        "std": "sha8:f634a972"
+       }
+      ],
+      "include_e_values": true,
+      "include_voi": true,
+      "sha8:5ba0b15d": true,
+      "goal_threshold": "sha8:c5ee9ac0",
+      "sha8:26f2f272": "sha8:b9c19b6c",
+      "goal_constraints": [
+       {
+        "constraint_id": "sha8:e3976ca6",
+        "node_id": "sha8:dede7e3f",
+        "operator": "sha8:ff019612",
+        "value": "sha8:c5ee9ac0",
+        "label": "sha8:dfb31719",
+        "value_frame": "sha8:b9c19b6c"
+       }
+      ],
+      "goal_direction": "sha8:6312973e",
+      "seed": "sha8:22e9fb28"
+     },
+     "response_payload": {
+      "version": "sha8:4fc1ca8c",
+      "endpoint_version": "sha8:4749903b",
+      "sha8:a4ea974f": "sha8:bb477c17",
+      "build": "dev",
+      "timestamp": "sha8:0d5a9838",
+      "analysis_status": "sha8:c16641ec",
+      "robustness_status": "sha8:c16641ec",
+      "sha8:075b585d": "sha8:c16641ec",
+      "critiques": [
+       {
+        "id": "sha8:0b261489",
+        "code": "sha8:83165aa0",
+        "severity": "sha8:9016a44a",
+        "message": "sha8:67a7fa74",
+        "source": "sha8:266e6e05",
+        "affected_node_ids": [
+         "sha8:dede7e3f"
+        ],
+        "suggestion": "sha8:85b0464e"
+       }
+      ],
+      "sha8:7bd0472f": {
+       "sha8:a51c6544": "sha8:c1ecdfdd",
+       "sha8:2a590f18": "sha8:4d529bc7",
+       "options_count": "sha8:4d529bc7",
+       "sha8:a9b6efdf": "sha8:a236de01",
+       "n_samples": "sha8:88ddda28",
+       "sha8:a5e2b018": "sha8:17eb69b6",
+       "sha8:7e0749c6": false
+      },
+      "sha8:9d07bb15": {
+       "direction": "sha8:6312973e",
+       "sha8:ea75c2e1": true,
+       "status": "sha8:c16641ec"
+      },
+      "options": [
+       {
+        "id": "sha8:2e12d68d",
+        "label": "sha8:4bf8ba03",
+        "outcome": {
+         "mean": "sha8:ec505125",
+         "std": "sha8:b656fd19",
+         "p10": "sha8:e1c31379",
+         "p50": "sha8:8b1a88a7",
+         "p90": "sha8:c6669678",
+         "n_samples": "sha8:88ddda28",
+         "n_valid_samples": "sha8:88ddda28",
+         "validity_ratio": "sha8:513e56d8",
+         "percentiles_source": "sha8:28283749"
+        },
+        "downside": {
+         "cvar_10": "sha8:94eb0e65",
+         "p05": "sha8:b08acffb",
+         "expected_regret": "sha8:a1db7ea7"
+        },
+        "win_probability": "sha8:9a500514",
+        "probability_of_goal": "sha8:360d6b80",
+        "probability_of_goal_precision": {
+         "basis": "sha8:5764949c",
+         "method": "sha8:7abb1d89",
+         "confidence_level": "sha8:d86ecc4f",
+         "n_informative": "sha8:88ddda28",
+         "n_met": "sha8:ab0df99d",
+         "interval_lower": "sha8:143d8e73",
+         "interval_upper": "sha8:b959559d"
+        },
+        "probability_of_goal_drivers": {
+         "method": "sha8:3d5d307a",
+         "min_group_n": "sha8:e09fdff5",
+         "n_candidates": "sha8:dffaedbb",
+         "n_compared": "sha8:4d529bc7",
+         "n_dropped": "sha8:4d529bc7",
+         "dropped_by_reason": {
+          "sha8:ec9c9372": "sha8:90834737",
+          "sha8:ed0a7017": "sha8:90834737",
+          "sha8:45b1ca97": "sha8:90834737",
+          "sha8:8ac4d5a9": "sha8:90834737",
+          "sha8:4d46e764": "sha8:4d529bc7",
+          "sha8:6e70beec": "sha8:90834737",
+          "sha8:96ea1b97": "sha8:90834737",
+          "sha8:dc742446": "sha8:90834737"
+         },
+         "drivers": [
+          {
+           "quantity_id": "sha8:600b8bea",
+           "kind": "sha8:17321588",
+           "from": "sha8:03e1684f",
+           "to": "sha8:dede7e3f",
+           "p_goal_if_low": "sha8:d46befe8",
+           "p_goal_if_high": "sha8:46a947b3",
+           "n_low": "sha8:83dd2b9e",
+           "n_high": "sha8:83dd2b9e",
+           "low_upper_value": "sha8:ecf73b0d",
+           "high_lower_value": "sha8:1edbc00e",
+           "spread": "sha8:6e5c5331",
+           "spread_noise_floor": "sha8:874fe524",
+           "status": "sha8:c57b46b8"
+          },
+          {
+           "quantity_id": "sha8:79f742e1",
+           "kind": "sha8:17321588",
+           "from": "sha8:93c94946",
+           "to": "sha8:dede7e3f",
+           "p_goal_if_low": "sha8:f8e270e5",
+           "p_goal_if_high": "sha8:58c9bdfd",
+           "n_low": "sha8:83dd2b9e",
+           "n_high": "sha8:83dd2b9e",
+           "low_upper_value": "sha8:fe3fc046",
+           "high_lower_value": "sha8:f6096de8",
+           "spread": "sha8:d9c0efbf",
+           "spread_noise_floor": "sha8:874fe524",
+           "status": "sha8:c57b46b8"
+          },
+          {
+           "quantity_id": "sha8:955649b8",
+           "kind": "sha8:17321588",
+           "from": "sha8:b7e5e2b1",
+           "to": "sha8:dede7e3f",
+           "p_goal_if_low": "sha8:e8280657",
+           "p_goal_if_high": "sha8:7278480f",
+           "n_low": "sha8:83dd2b9e",
+           "n_high": "sha8:83dd2b9e",
+           "low_upper_value": "sha8:7101db9d",
+           "high_lower_value": "sha8:81561e55",
+           "spread": "sha8:ab2e3f81",
+           "spread_noise_floor": "sha8:874fe524",
+           "status": "sha8:c57b46b8"
+          }
+         ]
+        },
+        "constraint_analysis": {
+         "constraints": [
+          {
+           "constraint_id": "sha8:e3976ca6",
+           "node_id": "sha8:dede7e3f",
+           "operator": "sha8:ff019612",
+           "threshold": "sha8:c5ee9ac0",
+           "label": "sha8:dfb31719",
+           "prob_satisfied": "sha8:360d6b80",
+           "prob_satisfied_precision": {
+            "n_informative": "sha8:88ddda28",
+            "standard_error": "sha8:cfd499a3"
+           },
+           "failure_margin_median": "sha8:abe516ec",
+           "near_miss_fraction": "sha8:513e56d8",
+           "binding": true,
+           "frame_verdict": "sha8:6659e459",
+           "value": "sha8:c5ee9ac0"
+          }
+         ],
+         "joint_probability": "sha8:360d6b80",
+         "joint_probability_precision": {
+          "n_informative": "sha8:88ddda28",
+          "standard_error": "sha8:cfd499a3"
+         }
+        },
+        "status": "sha8:c16641ec"
+       },
+       {
+        "id": "sha8:7a8d65b4",
+        "label": "sha8:3376a42e",
+        "outcome": {
+         "mean": "sha8:e1b392d6",
+         "std": "sha8:05b4c452",
+         "p10": "sha8:53bfc339",
+         "p50": "sha8:5e0b8e91",
+         "p90": "sha8:965ce7eb",
+         "n_samples": "sha8:88ddda28",
+         "n_valid_samples": "sha8:88ddda28",
+         "validity_ratio": "sha8:513e56d8",
+         "percentiles_source": "sha8:28283749"
+        },
+        "downside": {
+         "cvar_10": "sha8:4102f8ef",
+         "p05": "sha8:4c26bf9d",
+         "expected_regret": "sha8:b324f303"
+        },
+        "win_probability": "sha8:c68d36b8",
+        "probability_of_goal": "sha8:513e56d8",
+        "probability_of_goal_precision": {
+         "basis": "sha8:5764949c",
+         "method": "sha8:7abb1d89",
+         "confidence_level": "sha8:d86ecc4f",
+         "n_informative": "sha8:88ddda28",
+         "n_met": "sha8:88ddda28",
+         "interval_lower": "sha8:a773006f",
+         "interval_upper": "sha8:513e56d8"
+        },
+        "probability_of_goal_drivers": {
+         "method": "sha8:3d5d307a",
+         "min_group_n": "sha8:e09fdff5",
+         "n_candidates": "sha8:dffaedbb",
+         "n_compared": "sha8:90834737",
+         "n_dropped": "sha8:dffaedbb",
+         "dropped_by_reason": {
+          "sha8:ec9c9372": "sha8:dffaedbb",
+          "sha8:ed0a7017": "sha8:90834737",
+          "sha8:45b1ca97": "sha8:90834737",
+          "sha8:8ac4d5a9": "sha8:90834737",
+          "sha8:4d46e764": "sha8:90834737",
+          "sha8:6e70beec": "sha8:90834737",
+          "sha8:96ea1b97": "sha8:90834737",
+          "sha8:dc742446": "sha8:90834737"
+         },
+         "drivers": []
+        },
+        "constraint_analysis": {
+         "constraints": [
+          {
+           "constraint_id": "sha8:e3976ca6",
+           "node_id": "sha8:dede7e3f",
+           "operator": "sha8:ff019612",
+           "threshold": "sha8:c5ee9ac0",
+           "label": "sha8:dfb31719",
+           "prob_satisfied": "sha8:513e56d8",
+           "prob_satisfied_precision": {
+            "n_informative": "sha8:88ddda28",
+            "standard_error": "sha8:90834737"
+           },
+           "binding": false,
+           "frame_verdict": "sha8:6659e459",
+           "value": "sha8:c5ee9ac0"
+          }
+         ],
+         "joint_probability": "sha8:513e56d8",
+         "joint_probability_precision": {
+          "n_informative": "sha8:88ddda28",
+          "standard_error": "sha8:90834737"
+         }
+        },
+        "status": "sha8:c16641ec"
+       },
+       {
+        "id": "sha8:a6b3ae9d",
+        "label": "sha8:6299cfb9",
+        "outcome": {
+         "mean": "sha8:f4068f6e",
+         "std": "sha8:f304fb59",
+         "p10": "sha8:d52d8f6e",
+         "p50": "sha8:3b2e3c38",
+         "p90": "sha8:1bb06ceb",
+         "n_samples": "sha8:88ddda28",
+         "n_valid_samples": "sha8:88ddda28",
+         "validity_ratio": "sha8:513e56d8",
+         "percentiles_source": "sha8:28283749"
+        },
+        "downside": {
+         "cvar_10": "sha8:0ab2f7bf",
+         "p05": "sha8:07b39289",
+         "expected_regret": "sha8:0f7a01ac"
+        },
+        "win_probability": "sha8:df3ea573",
+        "probability_of_goal": "sha8:513e56d8",
+        "probability_of_goal_precision": {
+         "basis": "sha8:5764949c",
+         "method": "sha8:7abb1d89",
+         "confidence_level": "sha8:d86ecc4f",
+         "n_informative": "sha8:88ddda28",
+         "n_met": "sha8:88ddda28",
+         "interval_lower": "sha8:a773006f",
+         "interval_upper": "sha8:513e56d8"
+        },
+        "probability_of_goal_drivers": {
+         "method": "sha8:3d5d307a",
+         "min_group_n": "sha8:e09fdff5",
+         "n_candidates": "sha8:dffaedbb",
+         "n_compared": "sha8:90834737",
+         "n_dropped": "sha8:dffaedbb",
+         "dropped_by_reason": {
+          "sha8:ec9c9372": "sha8:dffaedbb",
+          "sha8:ed0a7017": "sha8:90834737",
+          "sha8:45b1ca97": "sha8:90834737",
+          "sha8:8ac4d5a9": "sha8:90834737",
+          "sha8:4d46e764": "sha8:90834737",
+          "sha8:6e70beec": "sha8:90834737",
+          "sha8:96ea1b97": "sha8:90834737",
+          "sha8:dc742446": "sha8:90834737"
+         },
+         "drivers": []
+        },
+        "constraint_analysis": {
+         "constraints": [
+          {
+           "constraint_id": "sha8:e3976ca6",
+           "node_id": "sha8:dede7e3f",
+           "operator": "sha8:ff019612",
+           "threshold": "sha8:c5ee9ac0",
+           "label": "sha8:dfb31719",
+           "prob_satisfied": "sha8:513e56d8",
+           "prob_satisfied_precision": {
+            "n_informative": "sha8:88ddda28",
+            "standard_error": "sha8:90834737"
+           },
+           "binding": false,
+           "frame_verdict": "sha8:6659e459",
+           "value": "sha8:c5ee9ac0"
+          }
+         ],
+         "joint_probability": "sha8:513e56d8",
+         "joint_probability_precision": {
+          "n_informative": "sha8:88ddda28",
+          "standard_error": "sha8:90834737"
+         }
+        },
+        "status": "sha8:c16641ec"
+       }
+      ],
+      "robustness": {
+       "level": "sha8:627097e9",
+       "confidence": "sha8:c68d36b8",
+       "confidence_basis": "sha8:44307e87",
+       "fragile_edges": [
+        {
+         "edge_id": "sha8:600b8bea",
+         "from_id": "sha8:03e1684f",
+         "to_id": "sha8:dede7e3f",
+         "alternative_winner_id": "sha8:a6b3ae9d",
+         "switch_probability": "sha8:d04d57ef",
+         "marginal_switch_probability": "sha8:90834737"
+        },
+        {
+         "edge_id": "sha8:79f742e1",
+         "from_id": "sha8:93c94946",
+         "to_id": "sha8:dede7e3f",
+         "alternative_winner_id": "sha8:a6b3ae9d",
+         "switch_probability": "sha8:09828f46",
+         "marginal_switch_probability": "sha8:90834737"
+        },
+        {
+         "edge_id": "sha8:955649b8",
+         "from_id": "sha8:b7e5e2b1",
+         "to_id": "sha8:dede7e3f",
+         "alternative_winner_id": "sha8:a6b3ae9d",
+         "switch_probability": "sha8:5d967800",
+         "marginal_switch_probability": "sha8:90834737"
+        }
+       ],
+       "is_robust": true,
+       "sha8:9421f7ca": [
+        "sha8:79f742e1",
+        "sha8:955649b8",
+        "sha8:600b8bea"
+       ],
+       "robust_edges": [],
+       "recommendation_stability": "sha8:c68d36b8",
+       "edge_e_values": [
+        {
+         "edge_id": "sha8:600b8bea",
+         "from_id": "sha8:03e1684f",
+         "to_id": "sha8:dede7e3f",
+         "e_value": "sha8:513e56d8",
+         "is_unflippable": false,
+         "flip_direction": "sha8:219927aa",
+         "current_mean": "sha8:513e56d8",
+         "flip_mean": "sha8:c45e81aa",
+         "alternative_winner_id": "sha8:a6b3ae9d",
+         "baseline_winner_id": "sha8:7a8d65b4",
+         "stability": {
+          "n_seeds": "sha8:ccfade0d",
+          "n_seeds_flipped": "sha8:ccfade0d",
+          "band_min": "sha8:9c123ecb",
+          "band_median": "sha8:5fa163c0",
+          "band_max": "sha8:187a24d7",
+          "band_width": "sha8:d9145cfb",
+          "seed_flip_means": [
+           "sha8:b3a10064",
+           "sha8:58916177",
+           "sha8:6b89a154",
+           "sha8:9c123ecb",
+           "sha8:187a24d7",
+           "sha8:3dba52c2",
+           "sha8:67dd921e",
+           "sha8:ddc9daa6",
+           "sha8:0360eeab",
+           "sha8:2db24ebe"
+          ]
+         }
+        },
+        {
+         "edge_id": "sha8:955649b8",
+         "from_id": "sha8:b7e5e2b1",
+         "to_id": "sha8:dede7e3f",
+         "e_value": "sha8:513e56d8",
+         "is_unflippable": false,
+         "flip_direction": "sha8:c292e0dd",
+         "current_mean": "sha8:65d267b7",
+         "flip_mean": "sha8:099cdd60",
+         "alternative_winner_id": "sha8:2e12d68d",
+         "baseline_winner_id": "sha8:7a8d65b4",
+         "stability": {
+          "n_seeds": "sha8:ccfade0d",
+          "n_seeds_flipped": "sha8:ccfade0d",
+          "band_min": "sha8:c2c3cb78",
+          "band_median": "sha8:fd0ef74c",
+          "band_max": "sha8:a14fbac8",
+          "band_width": "sha8:c5bd8ccb",
+          "seed_flip_means": [
+           "sha8:ba51ec83",
+           "sha8:b59a6257",
+           "sha8:a14fbac8",
+           "sha8:1899fda6",
+           "sha8:f942b182",
+           "sha8:1f756793",
+           "sha8:c2c3cb78",
+           "sha8:d99c72e8",
+           "sha8:61bcb970",
+           "sha8:ae5f20c0"
+          ]
+         }
+        },
+        {
+         "edge_id": "sha8:79f742e1",
+         "from_id": "sha8:93c94946",
+         "to_id": "sha8:dede7e3f",
+         "e_value": "sha8:513e56d8",
+         "is_unflippable": false,
+         "flip_direction": "sha8:c292e0dd",
+         "current_mean": "sha8:65d267b7",
+         "flip_mean": "sha8:1fa7d033",
+         "alternative_winner_id": "sha8:2e12d68d",
+         "baseline_winner_id": "sha8:7a8d65b4",
+         "stability": {
+          "n_seeds": "sha8:ccfade0d",
+          "n_seeds_flipped": "sha8:ccfade0d",
+          "band_min": "sha8:cce254b4",
+          "band_median": "sha8:45cf10a0",
+          "band_max": "sha8:4178e93c",
+          "band_width": "sha8:a5260464",
+          "seed_flip_means": [
+           "sha8:4178e93c",
+           "sha8:8532f9f1",
+           "sha8:0d6274bb",
+           "sha8:ef7a4015",
+           "sha8:6771e9e7",
+           "sha8:9c1c9035",
+           "sha8:cce254b4",
+           "sha8:dcf7f5f3",
+           "sha8:b53af367",
+           "sha8:0f77192a"
+          ]
+         }
+        }
+       ],
+       "edge_sensitivity": [
+        {
+         "edge_id": "sha8:600b8bea",
+         "from_id": "sha8:03e1684f",
+         "to_id": "sha8:dede7e3f",
+         "sensitivity_type": "sha8:b6f53b86",
+         "sensitivity_score": "sha8:513e56d8",
+         "direction": "sha8:c262cacd",
+         "elasticity": "sha8:d7eab312",
+         "importance_rank": "sha8:513e56d8",
+         "interpretation": "sha8:5f062608"
+        },
+        {
+         "edge_id": "sha8:79f742e1",
+         "from_id": "sha8:93c94946",
+         "to_id": "sha8:dede7e3f",
+         "sensitivity_type": "sha8:b6f53b86",
+         "sensitivity_score": "sha8:5156c5bd",
+         "direction": "sha8:5d8e273a",
+         "elasticity": "sha8:2af7b33d",
+         "importance_rank": "sha8:17eb69b6",
+         "interpretation": "sha8:ae983e4c"
+        },
+        {
+         "edge_id": "sha8:955649b8",
+         "from_id": "sha8:b7e5e2b1",
+         "to_id": "sha8:dede7e3f",
+         "sensitivity_type": "sha8:b6f53b86",
+         "sensitivity_score": "sha8:d6dad68b",
+         "direction": "sha8:5d8e273a",
+         "elasticity": "sha8:d3b13b97",
+         "importance_rank": "sha8:4d529bc7",
+         "interpretation": "sha8:67470629"
+        },
+        {
+         "edge_id": "sha8:600b8bea",
+         "from_id": "sha8:03e1684f",
+         "to_id": "sha8:dede7e3f",
+         "sensitivity_type": "sha8:32f35a24",
+         "sensitivity_score": "sha8:4ca66e86",
+         "direction": "sha8:c262cacd",
+         "elasticity": "sha8:47c28dfd",
+         "importance_rank": "sha8:c1ecdfdd",
+         "interpretation": "sha8:231bfbab"
+        },
+        {
+         "edge_id": "sha8:955649b8",
+         "from_id": "sha8:b7e5e2b1",
+         "to_id": "sha8:dede7e3f",
+         "sensitivity_type": "sha8:32f35a24",
+         "sensitivity_score": "sha8:906098ac",
+         "direction": "sha8:c262cacd",
+         "elasticity": "sha8:c0e6074a",
+         "importance_rank": "sha8:3e81195c",
+         "interpretation": "sha8:6f50d553"
+        },
+        {
+         "edge_id": "sha8:79f742e1",
+         "from_id": "sha8:93c94946",
+         "to_id": "sha8:dede7e3f",
+         "sensitivity_type": "sha8:32f35a24",
+         "sensitivity_score": "sha8:af8d6362",
+         "direction": "sha8:c262cacd",
+         "elasticity": "sha8:14b8de5e",
+         "importance_rank": "sha8:dffaedbb",
+         "interpretation": "sha8:3e34d46d"
+        }
+       ]
+      },
+      "factor_sensitivity": [
+       {
+        "node_id": "sha8:03e1684f",
+        "label": "sha8:335db0c8",
+        "sensitivity_score": "sha8:90834737",
+        "sha8:790d0212": "sha8:513e56d8",
+        "elasticity": "sha8:90834737",
+        "sha8:49e08042": "sha8:90834737",
+        "direction": "sha8:5d8e273a",
+        "confidence": "sha8:cf2d666d",
+        "confidence_source": "sha8:15f4ea41",
+        "confidence_provenance": {
+         "method_version": "sha8:7e34c82c",
+         "sha8:c60a612c": false
+        },
+        "importance_rank": "sha8:513e56d8",
+        "sha8:1f19db0f": "sha8:90834737",
+        "interpretation": "sha8:ceb3b598",
+        "zero_reason": "sha8:fbdb0992",
+        "sha8:d84d3c74": false,
+        "influence_score": "sha8:513e56d8",
+        "influence_rank": "sha8:513e56d8",
+        "elasticity_std": "sha8:90834737",
+        "attribution_stability": "sha8:c1907896",
+        "rank_flip_rate": "sha8:90834737",
+        "stability_method": "sha8:4ff4602d"
+       },
+       {
+        "node_id": "sha8:b7e5e2b1",
+        "label": "sha8:a0f03d66",
+        "sensitivity_score": "sha8:90834737",
+        "sha8:790d0212": "sha8:63d9f012",
+        "elasticity": "sha8:90834737",
+        "sha8:49e08042": "sha8:90834737",
+        "direction": "sha8:5d8e273a",
+        "confidence": "sha8:cf2d666d",
+        "confidence_source": "sha8:15f4ea41",
+        "confidence_provenance": {
+         "method_version": "sha8:7e34c82c",
+         "sha8:c60a612c": false
+        },
+        "importance_rank": "sha8:17eb69b6",
+        "sha8:1f19db0f": "sha8:90834737",
+        "interpretation": "sha8:bf37ff6c",
+        "zero_reason": "sha8:fbdb0992",
+        "sha8:d84d3c74": false,
+        "influence_score": "sha8:34123617",
+        "influence_rank": "sha8:17eb69b6",
+        "elasticity_std": "sha8:90834737",
+        "attribution_stability": "sha8:c1907896",
+        "rank_flip_rate": "sha8:90834737",
+        "stability_method": "sha8:4ff4602d"
+       },
+       {
+        "node_id": "sha8:93c94946",
+        "label": "sha8:ba4eaa4e",
+        "sensitivity_score": "sha8:90834737",
+        "sha8:790d0212": "sha8:90834737",
+        "elasticity": "sha8:90834737",
+        "sha8:49e08042": "sha8:90834737",
+        "direction": "sha8:5d8e273a",
+        "confidence": "sha8:cf2d666d",
+        "confidence_source": "sha8:15f4ea41",
+        "confidence_provenance": {
+         "method_version": "sha8:7e34c82c",
+         "sha8:c60a612c": false
+        },
+        "importance_rank": "sha8:4d529bc7",
+        "sha8:1f19db0f": "sha8:90834737",
+        "interpretation": "sha8:622dec60",
+        "zero_reason": "sha8:fbdb0992",
+        "sha8:d84d3c74": false,
+        "influence_score": "sha8:34123617",
+        "influence_rank": "sha8:4d529bc7",
+        "elasticity_std": "sha8:90834737",
+        "attribution_stability": "sha8:c1907896",
+        "rank_flip_rate": "sha8:90834737",
+        "stability_method": "sha8:4ff4602d"
+       }
+      ],
+      "inference_warnings": [
+       {
+        "code": "sha8:83165aa0",
+        "field": "sha8:bd85469a",
+        "detail": {
+         "node_id": "sha8:dede7e3f",
+         "sha8:07f19ade": "sha8:90834737",
+         "reason": "sha8:6de9b2c0",
+         "sha8:e76d8422": "sha8:c6ca7f80",
+         "sha8:c6078deb": [],
+         "message": "sha8:2e74528e"
+        },
+        "severity": "sha8:84770b31"
+       },
+       {
+        "code": "sha8:85203cd4",
+        "field": "sha8:1c313420",
+        "detail": {
+         "reason": "sha8:f9423e8b",
+         "message": "sha8:4c16b57e"
+        },
+        "severity": "sha8:84770b31"
+       }
+      ],
+      "stability_thresholds": {
+       "high_moderate_boundary": "sha8:cf2d666d",
+       "moderate_low_boundary": "sha8:7021472b",
+       "version": "sha8:1e9fb392",
+       "provisional": true
+      },
+      "p_win_sensitivity": [
+       {
+        "factor_id": "sha8:03e1684f",
+        "sha8:1f3bae17": "sha8:90834737",
+        "sha8:6a2f359a": "sha8:90834737",
+        "sha8:5e66f2b4": "sha8:513e56d8",
+        "sha8:5b3ca5e1": "sha8:513e56d8",
+        "sha8:4b1b2fe2": "sha8:f035dd9a",
+        "method": "sha8:e33e7fc7",
+        "n_samples": "sha8:88ddda28",
+        "status": "sha8:8dd08074",
+        "sha8:3ae3bbd6": false,
+        "sha8:bc31b78f": "sha8:96f13ce8",
+        "sha8:6cc6fa76": "sha8:1a2fa4ef",
+        "sha8:a3e2da8a": "sha8:96735462"
+       },
+       {
+        "factor_id": "sha8:b7e5e2b1",
+        "sha8:1f3bae17": "sha8:90834737",
+        "sha8:6a2f359a": "sha8:90834737",
+        "sha8:5e66f2b4": "sha8:513e56d8",
+        "sha8:5b3ca5e1": "sha8:513e56d8",
+        "sha8:4b1b2fe2": "sha8:f035dd9a",
+        "method": "sha8:e33e7fc7",
+        "n_samples": "sha8:88ddda28",
+        "status": "sha8:8dd08074",
+        "sha8:3ae3bbd6": false,
+        "sha8:bc31b78f": "sha8:96f13ce8",
+        "sha8:6cc6fa76": "sha8:1a2fa4ef",
+        "sha8:a3e2da8a": "sha8:96735462"
+       },
+       {
+        "factor_id": "sha8:93c94946",
+        "sha8:1f3bae17": "sha8:90834737",
+        "sha8:6a2f359a": "sha8:90834737",
+        "sha8:5e66f2b4": "sha8:513e56d8",
+        "sha8:5b3ca5e1": "sha8:513e56d8",
+        "sha8:4b1b2fe2": "sha8:f035dd9a",
+        "method": "sha8:e33e7fc7",
+        "n_samples": "sha8:88ddda28",
+        "status": "sha8:8dd08074",
+        "sha8:3ae3bbd6": false,
+        "sha8:bc31b78f": "sha8:96f13ce8",
+        "sha8:6cc6fa76": "sha8:1a2fa4ef",
+        "sha8:a3e2da8a": "sha8:96735462"
+       }
+      ],
+      "decision_evpi": "sha8:b324f303",
+      "factor_flip_values": [
+       {
+        "factor_id": "sha8:03e1684f",
+        "current_value": "sha8:90834737",
+        "flip_reason": "sha8:27855eb3",
+        "baseline_winner_id": "sha8:7a8d65b4"
+       },
+       {
+        "factor_id": "sha8:b7e5e2b1",
+        "current_value": "sha8:90834737",
+        "flip_reason": "sha8:27855eb3",
+        "baseline_winner_id": "sha8:7a8d65b4"
+       },
+       {
+        "factor_id": "sha8:93c94946",
+        "current_value": "sha8:90834737",
+        "flip_reason": "sha8:27855eb3",
+        "baseline_winner_id": "sha8:7a8d65b4"
+       }
+      ],
+      "sensitivity_reference_option_id": "sha8:2e12d68d",
+      "sha8:cf1d6f0c": [
+       {
+        "node_id": "sha8:dede7e3f",
+        "sha8:6717c935": "sha8:7bacdec9",
+        "sha8:026d2e36": "sha8:21f52670"
+       }
+      ],
+      "structural_influence": [
+       {
+        "node_id": "sha8:03e1684f",
+        "influence_score": "sha8:513e56d8",
+        "influence_rank": "sha8:513e56d8"
+       },
+       {
+        "node_id": "sha8:b7e5e2b1",
+        "influence_score": "sha8:34123617",
+        "influence_rank": "sha8:17eb69b6"
+       },
+       {
+        "node_id": "sha8:93c94946",
+        "influence_score": "sha8:34123617",
+        "influence_rank": "sha8:4d529bc7"
+       }
+      ],
+      "auto_noise_applied": false,
+      "sha8:ebd854dd": {
+       "sha8:387dcecd": false,
+       "calibration_status": "sha8:f30b122b",
+       "sha8:97051387": {
+        "expected_regret": "sha8:14f624b7",
+        "win_probability": "sha8:14f624b7",
+        "factor_evppi": "sha8:14f624b7",
+        "sha8:2b3a4ba7": "sha8:14f624b7",
+        "decision_evpi": "sha8:14f624b7",
+        "p05": "sha8:14f624b7",
+        "p10": "sha8:14f624b7",
+        "p50": "sha8:14f624b7",
+        "p90": "sha8:14f624b7",
+        "mean": "sha8:14f624b7",
+        "cvar_10": "sha8:14f624b7",
+        "probability_of_goal": "sha8:14f624b7"
+       },
+       "sha8:d17a75a3": []
+      },
+      "request_id": "sha8:caf6e37e",
+      "processing_time_ms": "sha8:874e08e1",
+      "seed_used": "sha8:22e9fb28",
+      "seed_source": "sha8:7b4bcb50"
+     },
+     "request_digest": {
+      "sha256": "b41f48595da4b33640e5517eb5a07e34e0d038315716bdbcfc2601ee81e5fbb4",
+      "bytes": 1998,
+      "key_manifest": [
+       "analysis_types",
+       "goal_constraints",
+       "goal_direction",
+       "goal_node_id",
+       "goal_threshold",
+       "goal_threshold_frame",
+       "graph",
+       "include_e_values",
+       "include_factor_flips",
+       "include_voi",
+       "n_samples",
+       "options",
+       "parameter_uncertainties",
+       "request_id",
+       "seed"
+      ]
+     },
+     "response_digest": {
+      "sha256": "2b78cb119e42bf2705e502b8a1d574b83d2f37014d69fbdda3fca2883af5eab6",
+      "bytes": 16783,
+      "key_manifest": [
+       "analysis_status",
+       "auto_noise_applied",
+       "build",
+       "critiques",
+       "decision_evpi",
+       "endpoint_version",
+       "engine_version",
+       "factor_flip_values",
+       "factor_sensitivity",
+       "factor_sensitivity_status",
+       "inference_warnings",
+       "node_levels",
+       "objective_ranking",
+       "options",
+       "p_win_sensitivity",
+       "processing_time_ms",
+       "request_echo",
+       "request_id",
+       "robustness",
+       "robustness_status",
+       "sample_population_provenance",
+       "seed_source",
+       "seed_used",
+       "sensitivity_reference_option_id",
+       "stability_thresholds",
+       "structural_influence",
+       "timestamp",
+       "version"
+      ]
+     },
+     "draw_structure_key": "0c983b9b9598ea61b5ec123fcccbae6647fdeaf0c9cc983d3ef2b822b58b484c"
+    }
+   ]
+  },
+  "meta": {
+   "seed_used": "20261021",
+   "seed_source": "client_generated",
+   "n_samples": 2000,
+   "detail_level": "standard",
+   "latency_ms": 1771.8007089999992,
+   "normalization_ms": 0.6166250000023865,
+   "validation_ms": 0.15779100000145263,
+   "isl_ms": 1767.4089160000003,
+   "cee_ms": 0,
+   "build": "acf2476",
+   "computed_at": "2026-10-21T00:48:49.472817Z",
+   "request_id_chain": {
+    "ui": "track3:M0:x=0.75,y=0.75",
+    "plot": "track3:M0:x=0.75,y=0.75",
+    "isl": "track3:M0:x=0.75,y=0.75",
+    "isl_echoed": "req_03e2704e895c448a",
+    "cee": null,
+    "cee_echoed": null,
+    "all_match": false,
+    "chain_complete": true
+   },
+   "feature_flags": {
+    "SCM_LITE_ENABLE": "0",
+    "PROD_SCM_LITE_PLACEHOLDER": "0",
+    "ADAPTIVE_K_ENABLE": "0",
+    "CONFIDENCE_CALIBRATED": "0",
+    "IDENT_TAG_ENABLE": "0",
+    "PROVENANCE_ENABLE": "0",
+    "ENABLE_DUAL_BELIEFS": "0",
+    "ENABLE_NOISY_OR": "0",
+    "ENABLE_LOGISTIC": "0",
+    "ENABLE_NOISY_AND_NOT": "0",
+    "ENABLE_MIXED_COMBINATION": "0",
+    "ENABLE_TRACE_CACHING": "0",
+    "ENABLE_STRATIFIED_SAMPLING": "0",
+    "ENABLE_IMPORTANCE_SAMPLING": "0",
+    "ENABLE_OPTION_PROBABILITIES": "0",
+    "RATE_LIMIT_ENABLED": "0",
+    "TOKEN_RL_ENABLE": "0",
+    "RL_CB_ENABLE": "0",
+    "PROMETHEUS_METRICS": "0",
+    "PROMETHEUS_ENABLE": "0",
+    "OPS_SNAPSHOT_ENABLE": "0",
+    "METRICS": "0",
+    "AUTH_ENABLED": "0",
+    "AUTH_V2_ENABLED": "0",
+    "TEST_ROUTES": "0",
+    "CORS_DEV": "0",
+    "OPENAPI_DEV": "0",
+    "COMPARE_VIEW_ENABLE": "0",
+    "INSPECTOR_DEBUG_ENABLE": "0",
+    "FEATURE_STREAM": "0",
+    "STREAM_PARITY_ENABLE": "0",
+    "WHATIF_DELTA_ENABLE": "0",
+    "CEE_ORCHESTRATOR_ENABLED": "0",
+    "DECISION_REVIEW_ENABLE": "0",
+    "ENABLE_FACTS_ASSEMBLY": "0",
+    "ENABLE_REVIEW_PASS": "0",
+    "ENABLE_VALIDATE_PATCH": "0",
+    "BRIEF_CLAIM_SAFE_SURFACES_ENABLE": "0",
+    "BRIEF_DECISION_RECORD_SUMMARY_ENABLE": "0",
+    "facts_assembly": false,
+    "review_pass": false
+   }
+  }
+ },
+ "isl_exchanges": [
+  {
+   "seq": 9,
+   "t": 1792543729.479153,
+   "method": "POST",
+   "path": "/api/v1/robustness/analyze/v2?response_version=2",
+   "request": {
+    "request_id": "track3:M0:x=0.75,y=0.75",
+    "graph": {
+     "nodes": [
+      {
+       "id": "net_contribution",
+       "kind": "goal",
+       "label": "12-month net contribution (\u00a3000)",
+       "intercept": 0.475,
+       "epsilon_std": 0
+      },
+      {
+       "id": "planned_uplift",
+       "kind": "factor",
+       "label": "Planned uplift over the common base",
+       "observed_state": {
+        "value": 0,
+        "std": 0.0001
+       },
+       "intercept": 0,
+       "epsilon_std": 0
+      },
+      {
+       "id": "demand_exposure",
+       "kind": "factor",
+       "label": "Demand-stress exposure",
+       "observed_state": {
+        "value": 0,
+        "std": 0.0001
+       },
+       "intercept": 0,
+       "epsilon_std": 0
+      },
+      {
+       "id": "cost_exposure",
+       "kind": "factor",
+       "label": "Cost-stress exposure",
+       "observed_state": {
+        "value": 0,
+        "std": 0.0001
+       },
+       "intercept": 0,
+       "epsilon_std": 0
+      }
+     ],
+     "edges": [
+      {
+       "from": "planned_uplift",
+       "to": "net_contribution",
+       "exists_probability": 1,
+       "strength": {
+        "mean": 1,
+        "std": 0.05
+       }
+      },
+      {
+       "from": "demand_exposure",
+       "to": "net_contribution",
+       "exists_probability": 1,
+       "strength": {
+        "mean": -0.75,
+        "std": 0.05
+       }
+      },
+      {
+       "from": "cost_exposure",
+       "to": "net_contribution",
+       "exists_probability": 1,
+       "strength": {
+        "mean": -0.75,
+        "std": 0.05
+       }
+      }
+     ]
+    },
+    "options": [
+     {
+      "id": "A",
+      "label": "Growth-first",
+      "interventions": {
+       "planned_uplift": 0.125,
+       "demand_exposure": 0.1,
+       "cost_exposure": 0.1
+      }
+     },
+     {
+      "id": "B",
+      "label": "Balanced rollout",
+      "interventions": {
+       "planned_uplift": 0.05,
+       "demand_exposure": 0.05,
+       "cost_exposure": 0.025
+      }
+     },
+     {
+      "id": "C",
+      "label": "Protect margin",
+      "interventions": {
+       "planned_uplift": 0,
+       "demand_exposure": 0.01,
+       "cost_exposure": 0.01
+      }
+     }
+    ],
+    "goal_node_id": "net_contribution",
+    "n_samples": 2000,
+    "analysis_types": [
+     "comparison",
+     "sensitivity",
+     "robustness"
+    ],
+    "parameter_uncertainties": [
+     {
+      "node_id": "planned_uplift",
+      "distribution": "normal",
+      "std": 0.0001
+     },
+     {
+      "node_id": "demand_exposure",
+      "distribution": "normal",
+      "std": 0.0001
+     },
+     {
+      "node_id": "cost_exposure",
+      "distribution": "normal",
+      "std": 0.0001
+     }
+    ],
+    "include_e_values": true,
+    "include_voi": true,
+    "include_factor_flips": true,
+    "goal_threshold": 0.45,
+    "goal_threshold_frame": "delta",
+    "goal_constraints": [
+     {
+      "constraint_id": "auto_goal_threshold",
+      "node_id": "net_contribution",
+      "operator": ">=",
+      "value": 0.45,
+      "label": "Goal target",
+      "value_frame": "delta"
+     }
+    ],
+    "goal_direction": "maximise",
+    "seed": "20261021"
+   },
+   "status": 200,
+   "response": {
+    "version": "2.0",
+    "endpoint_version": "analyze/v2",
+    "engine_version": "1.0.0",
+    "build": "dev",
+    "timestamp": "2026-10-21T00:48:49.472817Z",
+    "analysis_status": "computed",
+    "robustness_status": "computed",
+    "factor_sensitivity_status": "computed",
+    "critiques": [
+     {
+      "id": "critique_165d4546dbf8",
+      "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+      "severity": "warning",
+      "message": "Constraint node 'net_contribution' is the objective node and has no ParameterUncertainty \u2014 defaulted to base=0.0 as expected for a non-root objective; its constraint probability is scored from the modelled outcome distribution, not a missing-data placeholder",
+      "source": "analysis",
+      "affected_node_ids": [
+       "net_contribution"
+      ],
+      "suggestion": "This is expected for a non-root objective node without an explicit baseline. Supply a ParameterUncertainty entry only if you intend an additive exogenous base on top of parent propagation \u2014 the sampled base is ADDED to parent contributions, it does not replace them"
+     }
+    ],
+    "request_echo": {
+     "graph_node_count": 4,
+     "graph_edge_count": 3,
+     "options_count": 3,
+     "goal_node_id_hash": "8843a49803a2",
+     "n_samples": 2000,
+     "response_version_requested": 2,
+     "include_diagnostics": false
+    },
+    "objective_ranking": {
+     "direction": "maximise",
+     "attested": true,
+     "status": "computed"
+    },
+    "options": [
+     {
+      "id": "A",
+      "label": "Growth-first",
+      "outcome": {
+       "mean": 0.4499102117150869,
+       "std": 0.009446669948515188,
+       "p10": 0.4381124386161317,
+       "p50": 0.44959392146908994,
+       "p90": 0.4624280003862026,
+       "n_samples": 2000,
+       "n_valid_samples": 2000,
+       "validity_ratio": 1.0,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "cvar_10": 0.43353105960489613,
+       "p05": 0.4345227056600594,
+       "expected_regret": 0.01883527066695631
+      },
+      "win_probability": 0.002,
+      "probability_of_goal": 0.4845,
+      "probability_of_goal_precision": {
+       "basis": "simulation_precision",
+       "method": "wilson_score",
+       "confidence_level": 0.95,
+       "n_informative": 2000,
+       "n_met": 969,
+       "interval_lower": 0.46264816646677237,
+       "interval_upper": 0.5064112619989464
+      },
+      "probability_of_goal_drivers": {
+       "method": "tercile_conditional_v1",
+       "min_group_n": 30,
+       "n_candidates": 6,
+       "n_compared": 3,
+       "n_dropped": 3,
+       "dropped_by_reason": {
+        "outcome_constant": 0,
+        "no_variance": 0,
+        "group_below_min_n": 0,
+        "tied_at_tercile_boundary": 0,
+        "set_by_option": 3,
+        "set_by_option_upstream": 0,
+        "non_finite_values": 0,
+        "zero_spread": 0
+       },
+       "drivers": [
+        {
+         "quantity_id": "planned_uplift->net_contribution",
+         "kind": "link_strength",
+         "from": "planned_uplift",
+         "to": "net_contribution",
+         "p_goal_if_low": 0.17717717717717718,
+         "p_goal_if_high": 0.7867867867867868,
+         "n_low": 666,
+         "n_high": 666,
+         "low_upper_value": 0.9788052906456867,
+         "high_lower_value": 1.020854700997553,
+         "spread": 0.6096096096096096,
+         "spread_noise_floor": 0.06559464245327418,
+         "status": "resolved"
+        },
+        {
+         "quantity_id": "cost_exposure->net_contribution",
+         "kind": "link_strength",
+         "from": "cost_exposure",
+         "to": "net_contribution",
+         "p_goal_if_low": 0.24174174174174173,
+         "p_goal_if_high": 0.7342342342342343,
+         "n_low": 666,
+         "n_high": 666,
+         "low_upper_value": -0.7734533436920695,
+         "high_lower_value": -0.7312810676185105,
+         "spread": 0.49249249249249255,
+         "spread_noise_floor": 0.06559464245327418,
+         "status": "resolved"
+        },
+        {
+         "quantity_id": "demand_exposure->net_contribution",
+         "kind": "link_strength",
+         "from": "demand_exposure",
+         "to": "net_contribution",
+         "p_goal_if_low": 0.25075075075075076,
+         "p_goal_if_high": 0.7177177177177178,
+         "n_low": 666,
+         "n_high": 666,
+         "low_upper_value": -0.7708848083555765,
+         "high_lower_value": -0.7284129044276701,
+         "spread": 0.466966966966967,
+         "spread_noise_floor": 0.06559464245327418,
+         "status": "resolved"
+        }
+       ]
+      },
+      "constraint_analysis": {
+       "constraints": [
+        {
+         "constraint_id": "auto_goal_threshold",
+         "node_id": "net_contribution",
+         "operator": ">=",
+         "threshold": 0.45,
+         "label": "Goal target",
+         "prob_satisfied": 0.4845,
+         "prob_satisfied_precision": {
+          "n_informative": 2000,
+          "standard_error": 0.011174966442902638
+         },
+         "failure_margin_median": 0.006114688398478785,
+         "near_miss_fraction": 1.0,
+         "binding": true,
+         "frame_verdict": "scored",
+         "value": 0.45
+        }
+       ],
+       "joint_probability": 0.4845,
+       "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.011174966442902638
+       }
+      },
+      "status": "computed"
+     },
+     {
+      "id": "B",
+      "label": "Balanced rollout",
+      "outcome": {
+       "mean": 0.46874109238376516,
+       "std": 0.00371807460885513,
+       "p10": 0.46408893214152397,
+       "p50": 0.46870075247578147,
+       "p90": 0.47360138526091977,
+       "n_samples": 2000,
+       "n_valid_samples": 2000,
+       "validity_ratio": 1.0,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "cvar_10": 0.4622759632999798,
+       "p05": 0.4627398017824091,
+       "expected_regret": 4.3899982780927495e-06
+      },
+      "win_probability": 0.994,
+      "probability_of_goal": 1.0,
+      "probability_of_goal_precision": {
+       "basis": "simulation_precision",
+       "method": "wilson_score",
+       "confidence_level": 0.95,
+       "n_informative": 2000,
+       "n_met": 2000,
+       "interval_lower": 0.9980829527187469,
+       "interval_upper": 1.0
+      },
+      "probability_of_goal_drivers": {
+       "method": "tercile_conditional_v1",
+       "min_group_n": 30,
+       "n_candidates": 6,
+       "n_compared": 0,
+       "n_dropped": 6,
+       "dropped_by_reason": {
+        "outcome_constant": 6,
+        "no_variance": 0,
+        "group_below_min_n": 0,
+        "tied_at_tercile_boundary": 0,
+        "set_by_option": 0,
+        "set_by_option_upstream": 0,
+        "non_finite_values": 0,
+        "zero_spread": 0
+       },
+       "drivers": []
+      },
+      "constraint_analysis": {
+       "constraints": [
+        {
+         "constraint_id": "auto_goal_threshold",
+         "node_id": "net_contribution",
+         "operator": ">=",
+         "threshold": 0.45,
+         "label": "Goal target",
+         "prob_satisfied": 1.0,
+         "prob_satisfied_precision": {
+          "n_informative": 2000,
+          "standard_error": 0.0
+         },
+         "binding": false,
+         "frame_verdict": "scored",
+         "value": 0.45
+        }
+       ],
+       "joint_probability": 1.0,
+       "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.0
+       }
+      },
+      "status": "computed"
+     },
+     {
+      "id": "C",
+      "label": "Protect margin",
+      "outcome": {
+       "mean": 0.45999099719835684,
+       "std": 0.0006917822921871879,
+       "p10": 0.45909781851493286,
+       "p50": 0.4599700301113525,
+       "p90": 0.4608823715407076,
+       "n_samples": 2000,
+       "n_valid_samples": 2000,
+       "validity_ratio": 1.0,
+       "percentiles_source": "samples"
+      },
+      "downside": {
+       "cvar_10": 0.45880858818786907,
+       "p05": 0.4588829131855169,
+       "expected_regret": 0.008754485183686359
+      },
+      "win_probability": 0.004,
+      "probability_of_goal": 1.0,
+      "probability_of_goal_precision": {
+       "basis": "simulation_precision",
+       "method": "wilson_score",
+       "confidence_level": 0.95,
+       "n_informative": 2000,
+       "n_met": 2000,
+       "interval_lower": 0.9980829527187469,
+       "interval_upper": 1.0
+      },
+      "probability_of_goal_drivers": {
+       "method": "tercile_conditional_v1",
+       "min_group_n": 30,
+       "n_candidates": 6,
+       "n_compared": 0,
+       "n_dropped": 6,
+       "dropped_by_reason": {
+        "outcome_constant": 6,
+        "no_variance": 0,
+        "group_below_min_n": 0,
+        "tied_at_tercile_boundary": 0,
+        "set_by_option": 0,
+        "set_by_option_upstream": 0,
+        "non_finite_values": 0,
+        "zero_spread": 0
+       },
+       "drivers": []
+      },
+      "constraint_analysis": {
+       "constraints": [
+        {
+         "constraint_id": "auto_goal_threshold",
+         "node_id": "net_contribution",
+         "operator": ">=",
+         "threshold": 0.45,
+         "label": "Goal target",
+         "prob_satisfied": 1.0,
+         "prob_satisfied_precision": {
+          "n_informative": 2000,
+          "standard_error": 0.0
+         },
+         "binding": false,
+         "frame_verdict": "scored",
+         "value": 0.45
+        }
+       ],
+       "joint_probability": 1.0,
+       "joint_probability_precision": {
+        "n_informative": 2000,
+        "standard_error": 0.0
+       }
+      },
+      "status": "computed"
+     }
+    ],
+    "robustness": {
+     "level": "high",
+     "confidence": 0.994,
+     "confidence_basis": "recommendation_stability_uncalibrated",
+     "fragile_edges": [
+      {
+       "edge_id": "planned_uplift->net_contribution",
+       "from_id": "planned_uplift",
+       "to_id": "net_contribution",
+       "alternative_winner_id": "C",
+       "switch_probability": 0.016,
+       "marginal_switch_probability": 0.0
+      },
+      {
+       "edge_id": "cost_exposure->net_contribution",
+       "from_id": "cost_exposure",
+       "to_id": "net_contribution",
+       "alternative_winner_id": "C",
+       "switch_probability": 0.01,
+       "marginal_switch_probability": 0.0
+      },
+      {
+       "edge_id": "demand_exposure->net_contribution",
+       "from_id": "demand_exposure",
+       "to_id": "net_contribution",
+       "alternative_winner_id": "C",
+       "switch_probability": 0.012,
+       "marginal_switch_probability": 0.0
+      }
+     ],
+     "is_robust": true,
+     "fragile_edges_v1": [
+      "cost_exposure->net_contribution",
+      "demand_exposure->net_contribution",
+      "planned_uplift->net_contribution"
+     ],
+     "robust_edges": [],
+     "recommendation_stability": 0.994,
+     "edge_e_values": [
+      {
+       "edge_id": "planned_uplift->net_contribution",
+       "from_id": "planned_uplift",
+       "to_id": "net_contribution",
+       "e_value": 1.0,
+       "is_unflippable": false,
+       "flip_direction": "decrease",
+       "current_mean": 1.0,
+       "flip_mean": 0.824999,
+       "alternative_winner_id": "C",
+       "baseline_winner_id": "B",
+       "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": 0.769127,
+        "band_median": 0.828863,
+        "band_max": 0.943754,
+        "band_width": 0.174627,
+        "seed_flip_means": [
+         0.869999,
+         0.814335,
+         0.837725,
+         0.769127,
+         0.943754,
+         0.821484,
+         0.803373,
+         0.902205,
+         0.836241,
+         0.795855
+        ]
+       }
+      },
+      {
+       "edge_id": "demand_exposure->net_contribution",
+       "from_id": "demand_exposure",
+       "to_id": "net_contribution",
+       "e_value": 1.0,
+       "is_unflippable": false,
+       "flip_direction": "increase",
+       "current_mean": -0.75,
+       "flip_mean": -0.375,
+       "alternative_winner_id": "A",
+       "baseline_winner_id": "B",
+       "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.478353,
+        "band_median": -0.323044,
+        "band_max": -0.100274,
+        "band_width": 0.378079,
+        "seed_flip_means": [
+         -0.186307,
+         -0.467023,
+         -0.100274,
+         -0.423801,
+         -0.279826,
+         -0.260374,
+         -0.478353,
+         -0.300258,
+         -0.373625,
+         -0.34583
+        ]
+       }
+      },
+      {
+       "edge_id": "cost_exposure->net_contribution",
+       "from_id": "cost_exposure",
+       "to_id": "net_contribution",
+       "e_value": 1.0,
+       "is_unflippable": false,
+       "flip_direction": "increase",
+       "current_mean": -0.75,
+       "flip_mean": -0.499999,
+       "alternative_winner_id": "A",
+       "baseline_winner_id": "B",
+       "stability": {
+        "n_seeds": 10,
+        "n_seeds_flipped": 10,
+        "band_min": -0.576436,
+        "band_median": -0.490342,
+        "band_max": -0.406502,
+        "band_width": 0.169934,
+        "seed_flip_means": [
+         -0.406502,
+         -0.503486,
+         -0.412327,
+         -0.549468,
+         -0.420957,
+         -0.531424,
+         -0.576436,
+         -0.444042,
+         -0.481292,
+         -0.499392
+        ]
+       }
+      }
+     ],
+     "edge_sensitivity": [
+      {
+       "edge_id": "planned_uplift->net_contribution",
+       "from_id": "planned_uplift",
+       "to_id": "net_contribution",
+       "sensitivity_type": "existence",
+       "sensitivity_score": 1.0,
+       "direction": "positive",
+       "elasticity": 0.27317520500198894,
+       "importance_rank": 1,
+       "interpretation": "Decision is highly sensitive to planned_uplift->net_contribution existence - consider validating this relationship"
+      },
+      {
+       "edge_id": "cost_exposure->net_contribution",
+       "from_id": "cost_exposure",
+       "to_id": "net_contribution",
+       "sensitivity_type": "existence",
+       "sensitivity_score": 0.6190382446006503,
+       "direction": "negative",
+       "elasticity": -0.169105899372854,
+       "importance_rank": 2,
+       "interpretation": "Decision is moderately sensitive to cost_exposure->net_contribution existence"
+      },
+      {
+       "edge_id": "demand_exposure->net_contribution",
+       "from_id": "demand_exposure",
+       "to_id": "net_contribution",
+       "sensitivity_type": "existence",
+       "sensitivity_score": 0.5994476288864795,
+       "direction": "negative",
+       "elasticity": -0.16375422890902022,
+       "importance_rank": 3,
+       "interpretation": "Decision is moderately sensitive to demand_exposure->net_contribution existence"
+      },
+      {
+       "edge_id": "planned_uplift->net_contribution",
+       "from_id": "planned_uplift",
+       "to_id": "net_contribution",
+       "sensitivity_type": "magnitude",
+       "sensitivity_score": 0.05774880960798877,
+       "direction": "positive",
+       "elasticity": 0.01577554290328316,
+       "importance_rank": 4,
+       "interpretation": "Decision is robust to effect size variation in planned_uplift->net_contribution"
+      },
+      {
+       "edge_id": "demand_exposure->net_contribution",
+       "from_id": "demand_exposure",
+       "to_id": "net_contribution",
+       "sensitivity_type": "magnitude",
+       "sensitivity_score": 0.048446950093843595,
+       "direction": "positive",
+       "elasticity": 0.013234505523606851,
+       "importance_rank": 5,
+       "interpretation": "Decision is robust to effect size variation in demand_exposure->net_contribution"
+      },
+      {
+       "edge_id": "cost_exposure->net_contribution",
+       "from_id": "cost_exposure",
+       "to_id": "net_contribution",
+       "sensitivity_type": "magnitude",
+       "sensitivity_score": 0.03910402816638486,
+       "direction": "positive",
+       "elasticity": 0.010682250910755735,
+       "importance_rank": 6,
+       "interpretation": "Decision is robust to effect size variation in cost_exposure->net_contribution"
+      }
+     ]
+    },
+    "factor_sensitivity": [
+     {
+      "node_id": "planned_uplift",
+      "label": "Planned uplift over the common base",
+      "sensitivity_score": 0.0,
+      "importance_score": 1.0,
+      "elasticity": 0.0,
+      "elasticity_display": 0.0,
+      "direction": "negative",
+      "confidence": 0.1,
+      "confidence_source": "bootstrap_sampling",
+      "confidence_provenance": {
+       "method_version": "stability-cv-blend-v1",
+       "calibrated": false
+      },
+      "importance_rank": 1,
+      "observed_value": 0.0,
+      "interpretation": "Decision is robust to Planned uplift over the common base value variation",
+      "zero_reason": "intervention_override",
+      "baseline_near_zero": false,
+      "influence_score": 1.0,
+      "influence_rank": 1,
+      "elasticity_std": 0.0,
+      "attribution_stability": "negligible",
+      "rank_flip_rate": 0.0,
+      "stability_method": "bootstrap_20"
+     },
+     {
+      "node_id": "demand_exposure",
+      "label": "Demand-stress exposure",
+      "sensitivity_score": 0.0,
+      "importance_score": 0.5,
+      "elasticity": 0.0,
+      "elasticity_display": 0.0,
+      "direction": "negative",
+      "confidence": 0.1,
+      "confidence_source": "bootstrap_sampling",
+      "confidence_provenance": {
+       "method_version": "stability-cv-blend-v1",
+       "calibrated": false
+      },
+      "importance_rank": 2,
+      "observed_value": 0.0,
+      "interpretation": "Decision is robust to Demand-stress exposure value variation",
+      "zero_reason": "intervention_override",
+      "baseline_near_zero": false,
+      "influence_score": 0.75,
+      "influence_rank": 2,
+      "elasticity_std": 0.0,
+      "attribution_stability": "negligible",
+      "rank_flip_rate": 0.0,
+      "stability_method": "bootstrap_20"
+     },
+     {
+      "node_id": "cost_exposure",
+      "label": "Cost-stress exposure",
+      "sensitivity_score": 0.0,
+      "importance_score": 0.0,
+      "elasticity": 0.0,
+      "elasticity_display": 0.0,
+      "direction": "negative",
+      "confidence": 0.1,
+      "confidence_source": "bootstrap_sampling",
+      "confidence_provenance": {
+       "method_version": "stability-cv-blend-v1",
+       "calibrated": false
+      },
+      "importance_rank": 3,
+      "observed_value": 0.0,
+      "interpretation": "Decision is robust to Cost-stress exposure value variation",
+      "zero_reason": "intervention_override",
+      "baseline_near_zero": false,
+      "influence_score": 0.75,
+      "influence_rank": 3,
+      "elasticity_std": 0.0,
+      "attribution_stability": "negligible",
+      "rank_flip_rate": 0.0,
+      "stability_method": "bootstrap_20"
+     }
+    ],
+    "inference_warnings": [
+     {
+      "code": "CONSTRAINT_NODE_DEFAULT_BASE",
+      "field": "nodes[net_contribution].base",
+      "detail": {
+       "node_id": "net_contribution",
+       "defaulted_to": 0.0,
+       "reason": "no_parameter_uncertainty",
+       "base_semantics": "zero_base_offset_plus_parent_propagation",
+       "ancestor_data_gap": [],
+       "message": "Node 'net_contribution' is the objective node and has no ParameterUncertainty \u2014 defaulted to base=0.0 as expected for a non-root objective; its constraint probability is scored from the modelled outcome distribution, not a missing-data placeholder"
+      },
+      "severity": "info"
+     },
+     {
+      "code": "FACTOR_EVPPI_NOT_COMPUTED",
+      "field": "factor_evppi",
+      "detail": {
+       "reason": "estimator_returned_no_rows",
+       "message": "Value-of-information ran but produced no rows. The reason is not known at this layer and has deliberately not been inferred."
+      },
+      "severity": "info"
+     }
+    ],
+    "stability_thresholds": {
+     "high_moderate_boundary": 0.1,
+     "moderate_low_boundary": 0.3,
+     "version": "v1.0-operational-defaults",
+     "provisional": true
+    },
+    "p_win_sensitivity": [
+     {
+      "factor_id": "planned_uplift",
+      "p_win_delta": 0.0,
+      "p_win_delta_percentage_points": 0.0,
+      "current_metric": 1.0,
+      "perfect_metric": 1.0,
+      "metric_type": "p_joint_goal",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+     },
+     {
+      "factor_id": "demand_exposure",
+      "p_win_delta": 0.0,
+      "p_win_delta_percentage_points": 0.0,
+      "current_metric": 1.0,
+      "perfect_metric": 1.0,
+      "metric_type": "p_joint_goal",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+     },
+     {
+      "factor_id": "cost_exposure",
+      "p_win_delta": 0.0,
+      "p_win_delta_percentage_points": 0.0,
+      "current_metric": 1.0,
+      "perfect_metric": 1.0,
+      "metric_type": "p_joint_goal",
+      "method": "p_win_delta_at_mean_v1",
+      "n_samples": 2000,
+      "status": "below_resolution",
+      "clamped": false,
+      "noise_floor": 0.03099,
+      "noise_floor_method": "z95_worst_case_bernoulli_diff",
+      "labelling_doctrine": "provisional_doctrine_v0"
+     }
+    ],
+    "decision_evpi": 4.3899982780927495e-06,
+    "factor_flip_values": [
+     {
+      "factor_id": "planned_uplift",
+      "current_value": 0.0,
+      "flip_reason": "structurally_invariant",
+      "baseline_winner_id": "B"
+     },
+     {
+      "factor_id": "demand_exposure",
+      "current_value": 0.0,
+      "flip_reason": "structurally_invariant",
+      "baseline_winner_id": "B"
+     },
+     {
+      "factor_id": "cost_exposure",
+      "current_value": 0.0,
+      "flip_reason": "structurally_invariant",
+      "baseline_winner_id": "B"
+     }
+    ],
+    "sensitivity_reference_option_id": "A",
+    "node_levels": [
+     {
+      "node_id": "net_contribution",
+      "frame": "no_level",
+      "no_level_reason": "no_observed_level"
+     }
+    ],
+    "structural_influence": [
+     {
+      "node_id": "planned_uplift",
+      "influence_score": 1.0,
+      "influence_rank": 1
+     },
+     {
+      "node_id": "demand_exposure",
+      "influence_score": 0.75,
+      "influence_rank": 2
+     },
+     {
+      "node_id": "cost_exposure",
+      "influence_score": 0.75,
+      "influence_rank": 3
+     }
+    ],
+    "auto_noise_applied": false,
+    "sample_population_provenance": {
+     "auto_scaled_noise_applied": false,
+     "calibration_status": "uncalibrated_poc_heuristic",
+     "metric_populations": {
+      "expected_regret": "model_only",
+      "win_probability": "model_only",
+      "factor_evppi": "model_only",
+      "factor_evpc": "model_only",
+      "decision_evpi": "model_only",
+      "p05": "model_only",
+      "p10": "model_only",
+      "p50": "model_only",
+      "p90": "model_only",
+      "mean": "model_only",
+      "cvar_10": "model_only",
+      "probability_of_goal": "model_only"
+     },
+     "unnoised_constraint_node_ids": []
+    },
+    "request_id": "req_513f779d7cd341ab",
+    "processing_time_ms": 1750,
+    "seed_used": "20261021",
+    "seed_source": "client_provided"
+   }
+  }
+ ],
+ "elapsed_s": 1.781769000001077
+}

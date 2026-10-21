@@ -97,3 +97,27 @@ class MetricFaults(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Verdict(unittest.TestCase):
+    """Buddy R1 BLOCK: dropping the only joint-failure row must not read as PASS."""
+    def _analysis(self, cells):
+        from track3.run import analyse
+        return analyse(cells)
+
+    def test_clean_perfect_engine_passes(self):
+        a = self._analysis(cells_from_oracle())
+        self.assertEqual((a["verdict"], a["gaps"]), ("PASS", []))
+
+    def test_missing_witness_row_is_incomplete_not_pass(self):
+        a = self._analysis(cells_from_oracle(drop=("M0", Q(1), Q(1), "A")))
+        self.assertEqual(a["reference_failures"], [])
+        self.assertEqual(a["verdict"], "INCOMPLETE")
+        self.assertTrue(any("demonstration 1" in g for g in a["gaps"]))
+
+    def test_sum_route_strict_flip_is_red(self):
+        from track3.stress_metrics import sum_route_failures
+        row = {"option": "B", "scenario_id": "M0:x=1,y=1", "exact_level": "90", "identity_evaluated": True}
+        self.assertEqual(sum_route_failures([dict(row, p_goal=1.0)]), [])
+        self.assertTrue(sum_route_failures([dict(row, p_goal=0.0)]))
+        self.assertTrue(sum_route_failures([dict(row, p_goal=1.0, identity_evaluated=False)]))

@@ -99,3 +99,26 @@ def graph_level(body, option_id):
         return _q(node.get("intercept", 0)) + sum(s * value(p) for p, s in parents[node_id])
 
     return value(body["goal_node_id"]) * SCALE
+
+
+def build_sum_route_request(hypothesis, x, y, *, seed, n_samples, today=Q(0)):
+    """The core's exact route (CEE mapper.ts exact sum): goal = <goal>_today + <goal>__change, where each
+    option SETS the change. The route admits no other parent of the goal and no negative change, so the
+    stress arithmetic is done HERE, exactly, by the builder: the engine proves the exact comparison,
+    not the stress propagation. Used only to test whether the UNRESOLVED (engine floor) rows resolve."""
+    obs = lambda v: {"value": float(Q(v) / SCALE), "baseline": float(Q(v) / SCALE), "raw_value": float(v), "cap": float(SCALE), "unit": UNIT}
+    today_id, change_id = f"{GOAL}_today", f"{GOAL}__change"
+    nodes = [{"id": GOAL, "kind": "goal", "label": f"{HORIZON_MONTHS}-month net contribution ({UNIT})", "observed_state": obs(today),
+              "goal_threshold": _n(TARGET), "goal_threshold_raw": float(TARGET), "goal_threshold_unit": UNIT,
+              "goal_threshold_cap": float(SCALE), "goal_threshold_frame": "level",
+              "nonlinear_identity": {"operation": "sum", "factor_ids": [today_id, change_id], "stated_in_brief": False}},
+             {"id": today_id, "kind": "factor", "label": "Net contribution today", "category": "observable", "observed_state": obs(today)},
+             {"id": change_id, "kind": "factor", "label": "Change in net contribution", "category": "controllable",
+              "quantity_frame": "change", "observed_state": {"value": 0, "raw_value": 0, "cap": float(SCALE), "unit": UNIT}}]
+    edges = [{"id": f"{p}__{GOAL}", "from": p, "to": GOAL, "strength": {"mean": 1, "std": 0.05}, "exists_probability": 1,
+              "effect_direction": "positive"} for p in (today_id, change_id)]
+    from .fixtures import oracle_level
+    options = [{"id": o, "label": OPTIONS[o][0], "interventions": {change_id: _n(oracle_level(o, hypothesis, x, y) - today)}} for o in OPTIONS]
+    return {"request_id": f"track3-sumroute:{scenario_id(hypothesis, Q(x), Q(y))}", "graph": {"nodes": nodes, "edges": edges},
+            "options": options, "goal_node_id": GOAL, "goal_threshold": _n(TARGET), "goal_direction": "maximise",
+            "seed": seed, "n_samples": n_samples}

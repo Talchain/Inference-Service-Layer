@@ -172,3 +172,37 @@ def check_reference(cells, summary, comparability):
     if not comparability["comparable"]:
         fails.append("rows compared across different " + ", ".join(comparability["differs"]))
     return fails
+
+
+def sum_route_failures(sum_route):
+    """The UNRESOLVED (engine floor) rows re-asked on the core's exact-sum route must come back exact and on
+    the fixture's own side (inclusive >=). A strict comparison sent to the engine flips a tie and is caught here."""
+    fails = []
+    for r in sum_route:
+        p, want = r["p_goal"], meets(Q(r["exact_level"]))
+        if r["identity_evaluated"] is not True or p not in (0.0, 1.0) or (p == 1.0) != want:
+            fails.append(f"exact-sum route {r['option']} {r['scenario_id']}: P(goal) {p}, identity evaluated "
+                         f"{r['identity_evaluated']}, but exact {r['exact_level']} {'meets' if want else 'falls short'} (inclusive)")
+    return fails
+
+
+def completeness_gaps(cells, analysis):
+    """What stops a clean reference check from being a PASS: unevaluated rows, and any of the brief's §0
+    demonstrations 1-3 the engine rows do not show. An incomplete run is INCOMPLETE, never PASS."""
+    gaps = [f"row not evaluated: {c['option']} {c['scenario_id']} ({c['checks']['side']})"
+            for c in cells if c["engine"] is None or c["engine"]["status"] != "supported"]
+    if not analysis["witnesses"]["engine"]:
+        gaps.append("demonstration 1 missing: no joint-failure witness on engine rows")
+    det = {"meets", "falls_short"}
+    if not [d for d in analysis["disagreements"]["engine"] if {d["M0"], d["M1"]} <= det]:
+        gaps.append("demonstration 2 missing: no determinate disagreement between hypotheses on engine rows")
+    s = analysis["summary"]["options"]
+    withstand = [o for o in s if s[o]["engine"]["complete"] and s[o]["engine"]["falls_short"] == 0]
+    if len(withstand) < 2:
+        gaps.append(f"demonstration 3 missing: fewer than two options withstand every tested setting ({withstand})")
+    else:
+        low_regret = min(withstand, key=lambda o: s[o]["engine"]["max_regret"])
+        high_worst = max(withstand, key=lambda o: s[o]["engine"]["worst"])
+        if low_regret == high_worst:
+            gaps.append(f"demonstration 3 missing: {low_regret} leads on both regret and worst outcome, so no trade-off is shown")
+    return gaps
