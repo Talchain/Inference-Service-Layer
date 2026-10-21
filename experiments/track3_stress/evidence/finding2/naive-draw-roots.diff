@@ -1,0 +1,21 @@
+diff --git a/src/services/robustness_analyzer_v2.py b/src/services/robustness_analyzer_v2.py
+index 092cb03..3bcc265 100644
+--- a/src/services/robustness_analyzer_v2.py
++++ b/src/services/robustness_analyzer_v2.py
+@@ -3361,7 +3361,15 @@ class SCMEvaluatorV2:
+             return result
+         elif plan.operation not in ("product", "sum"):
+             raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
+-        term_sq = _identity_term(plan.operation, [user(i, reference) for i in plan.factor_ids])
++        def today(participant: str) -> float:
++            # Track 3 finding 2: a ROOT participant's own draw is uncertainty about today, so it is read against its
++            # stated level and reaches the result. Read against its own status-quo draw it cancelled, and a declared
++            # Normal(90, 10^2) on today served sd 0. A point-mass root draws exactly its level: unchanged.
++            if not self._parents.get(participant):
++                return plan.levels[participant] * plan.frames[participant]
++            return user(participant, reference)
++
++        term_sq = _identity_term(plan.operation, [today(i) for i in plan.factor_ids])
+         addend = math.fsum(user(i, values) for i in plan.addends)
+         addend_sq = math.fsum(user(i, reference) for i in plan.addends)
+         believed = [p for p in self._parents[node_id] if p not in plan.participants]

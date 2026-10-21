@@ -1,0 +1,8 @@
+0074.json track3-g4:sum-zero-spread identity [('net_contribution', True, 'stated_level')]
+   mu90 0.45000000000000007 sd 5.551115123125783e-17 P 0.0
+   mu100 0.5 sd 1.3124601869237571e-17 P 1.0
+   mu110 0.5499999999999999 sd 1.0894337445702241e-16 P 1.0
+0075.json track3-g4:sum-declared-spread identity [('net_contribution', True, 'stated_level')]
+   mu90 0.45000000000000007 sd 5.551115123125783e-17 P 0.0
+   mu100 0.5 sd 3.2368285245694684e-18 P 1.0
+   mu110 0.5499999999999999 sd 1.1058846784929475e-16 P 1.0
