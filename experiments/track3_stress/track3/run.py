@@ -8,6 +8,7 @@ from fractions import Fraction as Q
 
 from . import fixtures as F
 from .evaluator_adapter import ROOT, Engine, rows_from
+from . import m2
 from .report import write_report
 from .scenario_builder import BUILDER_FAULTS, SCALE, build_request, build_sum_route_request, graph_level
 from .stress_metrics import (METRIC_FAULTS, Z, cell_checks, check_reference, completeness_gaps, engine_side,
@@ -155,6 +156,17 @@ def main():
                              "verdict": honest["verdict"], "expected_verdict": "INCOMPLETE", "gaps": honest["gaps"],
                              "A_summary": honest["summary"]["options"]["A"]})
         probes = [engine_only_probe(engine.capture_dir)]
+        # ── Milestone 2: G3 and G4 on the same engine session.
+        g3 = m2.run_g3(engine, frozenset(), calls, SEED, 10000)
+        g4 = m2.run_g4(engine, frozenset(), calls, SEED, 10000)
+        g4_probes = m2.g4_boundary_probes(engine, calls, SEED, 10000)
+        clean["m2"] = {"g3": g3, "g4": g4, "g4_boundary": g4_probes,
+                       "failures": m2.g3_failures(g3) + m2.g4_failures(g4)}
+        if clean["m2"]["failures"]:
+            clean["reference_failures"] += clean["m2"]["failures"]
+            clean["verdict"] = "FAIL"
+        if not a.skip_controls:
+            controls += m2.m2_controls(engine, g4, calls, SEED, 10000)
         rss = {}
         for name in ("isl", "plot"):
             try:

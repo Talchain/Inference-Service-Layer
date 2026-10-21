@@ -121,3 +121,43 @@ class Verdict(unittest.TestCase):
         self.assertEqual(sum_route_failures([dict(row, p_goal=1.0)]), [])
         self.assertTrue(sum_route_failures([dict(row, p_goal=0.0)]))
         self.assertTrue(sum_route_failures([dict(row, p_goal=1.0, identity_evaluated=False)]))
+
+
+class G3G4Reference(unittest.TestCase):
+    def test_laws_admitted_with_equal_marginals(self):
+        for law, t in F.G3_LAWS.items():
+            a = F.admit_joint(t)
+            self.assertTrue(a["admitted"], law)
+            self.assertEqual((a["p1"], a["p2"]), (Q(9, 10), Q(9, 10)))
+        self.assertEqual([F.admit_joint(t)["p_both"] for t in F.G3_LAWS.values()], [Q(81, 100), Q(9, 10), Q(8, 10)])
+
+    def test_invalid_tables_refused(self):
+        for name, t in F.G3_INVALID.items():
+            self.assertFalse(F.admit_joint(t, (Q(9, 10), Q(9, 10)))["admitted"], name)
+
+    def test_marginals_only_gives_bounds_not_a_point(self):
+        r = F.joint_from_marginals_only(Q(9, 10), Q(9, 10))
+        self.assertEqual((r["identified"], r["bounds"]), (False, (Q(4, 5), Q(9, 10))))
+
+    def test_rho_mapping_exact_or_unsupported(self):
+        from track3.scenario_builder import g3_rho_for
+        self.assertEqual([g3_rho_for(F.admit_joint(t)) for t in F.G3_LAWS.values()], [0.0, 1.0, -1.0])
+        self.assertIsNone(g3_rho_for({"p1": Q(9, 10), "p2": Q(9, 10), "p_both": Q(85, 100)}))
+
+    def test_g4_analytic_matches_brief(self):
+        for mu, want in [(90, 0.1586552539), (100, 0.5), (110, 0.8413447461)]:
+            self.assertAlmostEqual(F.normal_goal_probability(Q(mu)), want, places=10)
+
+
+class AdapterCache(unittest.TestCase):
+    def test_failure_is_not_memoised(self):
+        from track3.evaluator_adapter import Engine
+        import track3.evaluator_adapter as A
+        e = Engine("/nonexistent"); e.identity = {"plot_commit": "p", "isl_commit": "i"}
+        A.PLOT_URL, saved = "http://127.0.0.1:9/v2/run", A.PLOT_URL      # nothing listens: a failed call
+        try:
+            r1 = e.evaluate({"x": 1}, "h", timeout_s=0.2)
+            r2 = e.evaluate({"x": 1}, "h", timeout_s=0.2)
+        finally:
+            A.PLOT_URL = saved
+        self.assertEqual((r1["http_status"], r1["cache_hit"], r2["cache_hit"], e.calls), (None, False, False, 2))

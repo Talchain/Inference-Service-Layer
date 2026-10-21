@@ -42,3 +42,44 @@ def meets(level, operator=TARGET_OPERATOR, target=TARGET):
 
 def scenario_id(hypothesis, x, y):
     return f"{hypothesis}:x={float(x):g},y={float(y):g}"
+
+
+# ── G3 (brief §6): two target indicators, both marginal 0.9, three EXPLICIT joint laws.
+G3_MARGINAL = Q(9, 10)
+G3_LAWS = {
+    "independent":       {(1, 1): Q(81, 100), (1, 0): Q(9, 100), (0, 1): Q(9, 100), (0, 0): Q(1, 100)},
+    "always_together":   {(1, 1): Q(9, 10),   (1, 0): Q(0),      (0, 1): Q(0),      (0, 0): Q(1, 10)},
+    "disjoint_failures": {(1, 1): Q(8, 10),   (1, 0): Q(1, 10),  (0, 1): Q(1, 10),  (0, 0): Q(0)},
+}
+G3_INVALID = {"sums_to_1.1": {(1, 1): Q(85, 100), (1, 0): Q(1, 10), (0, 1): Q(1, 10), (0, 0): Q(5, 100)},
+              "negative_mass": {(1, 1): Q(95, 100), (1, 0): Q(-5, 100), (0, 1): Q(5, 100), (0, 0): Q(5, 100)},
+              "wrong_marginal": {(1, 1): Q(7, 10), (1, 0): Q(1, 10), (0, 1): Q(2, 10), (0, 0): Q(0)}}
+
+
+def admit_joint(table, stated_marginals=None):
+    """Admit an explicit joint mass table, or refuse it with the reason. Never repairs a table.
+    With stated marginals, a table that contradicts them is refused too."""
+    if set(table) != {(1, 1), (1, 0), (0, 1), (0, 0)}:
+        return {"admitted": False, "reason": "not a complete 2x2 mass table"}
+    if any(m < 0 for m in table.values()):
+        return {"admitted": False, "reason": "negative mass"}
+    if sum(table.values()) != 1:
+        return {"admitted": False, "reason": f"masses sum to {sum(table.values())}, not 1"}
+    p1, p2 = table[(1, 1)] + table[(1, 0)], table[(1, 1)] + table[(0, 1)]
+    if stated_marginals is not None and (p1, p2) != tuple(stated_marginals):
+        return {"admitted": False, "reason": f"marginals {p1}, {p2} contradict the stated {stated_marginals[0]}, {stated_marginals[1]}"}
+    return {"admitted": True, "p1": p1, "p2": p2, "p_both": table[(1, 1)]}
+
+
+def joint_from_marginals_only(p1, p2):
+    """Marginals alone do not identify the joint: return the Fréchet bounds, never a point."""
+    return {"identified": False, "bounds": (max(Q(0), p1 + p2 - 1), min(p1, p2))}
+
+
+# ── G4 (brief §6): Y ~ Normal(mu, 10^2) in £000, target Y >= 100.
+G4_SD, G4_TARGET, G4_MUS = Q(10), Q(100), (Q(90), Q(100), Q(110))
+
+
+def normal_goal_probability(mu, sd=G4_SD, target=G4_TARGET):
+    import math
+    return 0.5 * math.erfc(float(target - mu) / (float(sd) * math.sqrt(2)))

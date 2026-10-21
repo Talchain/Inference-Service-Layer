@@ -122,3 +122,59 @@ def build_sum_route_request(hypothesis, x, y, *, seed, n_samples, today=Q(0)):
     return {"request_id": f"track3-sumroute:{scenario_id(hypothesis, Q(x), Q(y))}", "graph": {"nodes": nodes, "edges": edges},
             "options": options, "goal_node_id": GOAL, "goal_threshold": _n(TARGET), "goal_direction": "maximise",
             "seed": seed, "n_samples": n_samples}
+
+
+# ── G3: each admitted law is carried as two thresholded Normal drivers joined by ISL's Gaussian copula.
+# For equal marginals p, P(both) = p^2, p and 2p-1 are exactly rho = 0, +1 and -1. Any other P(both) has no
+# mapping here and is returned as unsupported, never approximated.
+G3_DRIVER_MEAN, G3_DRIVER_SD = 0.5, 0.1
+
+
+def g3_rho_for(admitted):
+    p, both = admitted["p1"], admitted["p_both"]
+    if admitted["p1"] != admitted["p2"]:
+        return None
+    return {p * p: 0.0, p: 1.0, 2 * p - 1: -1.0}.get(both)
+
+
+def build_g3_request(law, rho, *, seed, n_samples, p):
+    from statistics import NormalDist
+    t = G3_DRIVER_MEAN + NormalDist().inv_cdf(1 - float(p)) * G3_DRIVER_SD
+    drv = lambda i: {"id": i, "kind": "factor", "label": f"Driver of target indicator {i[-1]}", "category": "observable",
+                     "observed_state": {"value": G3_DRIVER_MEAN, "std": G3_DRIVER_SD}}
+    edge = lambda f: {"id": f"e_{f}", "from": f, "to": "carrier", "exists_probability": 1, "strength": {"mean": 0.5, "std": 0}}
+    body = {"request_id": f"track3-g3:{law}", "graph": {"nodes": [
+                {"id": "carrier", "kind": "goal", "label": "Carrier outcome (not a target)", "intercept": 0},
+                drv("driver_s1"), drv("driver_s2"),
+                {"id": "lever", "kind": "factor", "label": "Unrelated lever", "observed_state": {"value": 0, "std": LEVER_STD}}],
+            "edges": [edge("driver_s1"), edge("driver_s2"), edge("lever")]},
+            "options": [{"id": "o1", "label": "Option 1", "interventions": {"lever": 0.0}},
+                        {"id": "o2", "label": "Option 2", "interventions": {"lever": 0.5}}],
+            "goal_node_id": "carrier", "goal_direction": "maximise", "seed": seed, "n_samples": n_samples,
+            "goal_constraints": [{"constraint_id": f"S{i}", "node_id": f"driver_s{i}", "operator": ">=", "value": t,
+                                  "value_frame": "delta", "label": f"Target {i}"} for i in (1, 2)]}
+    if rho is not None:
+        body["factor_correlations"] = [{"factor_a": "driver_s1", "factor_b": "driver_s2", "rho": rho}]
+    return body
+
+
+# ── G4: the declared Normal law on an uncertain root, the target as a goal constraint on its raw draws
+# (Channel B). Channel A through a goal node is floored by PLoT and is measured separately as a boundary probe.
+def build_g4_request(mu, *, seed, n_samples, unit=UNIT, label_suffix=""):
+    """unit '£' re-expresses every figure in pounds with the matching cap (the unit-invariance control)."""
+    from .fixtures import G4_SD, G4_TARGET
+    k = Q(1000) if unit == "£" else Q(1)
+    scale = SCALE * k
+    n = lambda v: float(Q(v) * k / scale)
+    return {"request_id": f"track3-g4:mu={float(mu):g}{label_suffix}", "graph": {"nodes": [
+                {"id": "y_level", "kind": "factor", "label": f"Outcome Y ({unit}){label_suffix}", "category": "observable",
+                 "observed_state": {"value": n(mu), "std": n(G4_SD)}},
+                {"id": "carrier", "kind": "goal", "label": "Carrier outcome (not a target)", "intercept": 0},
+                {"id": "lever", "kind": "factor", "label": "Unrelated lever", "observed_state": {"value": 0, "std": LEVER_STD}}],
+            "edges": [{"from": "lever", "to": "carrier", "exists_probability": 1, "strength": {"mean": 0.5, "std": 0}},
+                      {"from": "y_level", "to": "carrier", "exists_probability": 1, "strength": {"mean": 0.5, "std": 0}}]},
+            "options": [{"id": "o1", "label": "Option 1", "interventions": {"lever": 0.0}},
+                        {"id": "o2", "label": "Option 2", "interventions": {"lever": 0.5}}],
+            "goal_node_id": "carrier", "goal_direction": "maximise", "seed": seed, "n_samples": n_samples,
+            "goal_constraints": [{"constraint_id": "Y_target", "node_id": "y_level", "operator": ">=", "value": n(G4_TARGET),
+                                  "value_frame": "delta", "label": f"Y >= {G4_TARGET * k} {unit}"}]}

@@ -70,9 +70,9 @@ class Engine:
                           sort_keys=True)
         return hashlib.sha256(blob.encode()).hexdigest()
 
-    def evaluate(self, body, hypothesis, timeout_s=60):
+    def evaluate(self, body, hypothesis, timeout_s=60, use_cache=True):
         k = self.key(body, hypothesis)
-        if k in self.cache:
+        if use_cache and k in self.cache:
             self.cache_hits += 1
             return dict(self.cache[k], cache_hit=True)
         before = set(os.listdir(self.capture_dir)) if os.path.isdir(self.capture_dir) else set()
@@ -92,7 +92,8 @@ class Engine:
         isl = [json.load(open(os.path.join(self.capture_dir, f))) for f in new]
         isl = [c for c in isl if c["path"].startswith(ISL_PATH)]
         result = {"http_status": status, "plot": plot, "isl_exchanges": isl, "elapsed_s": elapsed, "cache_hit": False}
-        self.cache[k] = result
+        if status is not None and status < 500 and plot.get("analysis_status") != "failed":
+            self.cache[k] = result          # a timeout or engine failure is never memoised as a result
         return result
 
 

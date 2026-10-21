@@ -40,7 +40,7 @@ def write_report(out, manifest, cells, clean, controls):
     L = []
     w = L.append
     ok_controls = sum(c["detected"] == c.get("expected_detected", True) and c.get("verdict") == c.get("expected_verdict") for c in controls)
-    w("# Track 3 Milestone 1: G1 and G2 on the local PLoT→ISL path\n")
+    w("# Track 3: G1–G4 on the local PLoT→ISL path (Milestones 1 and 2)\n")
     w(f"**Verdict: {clean['verdict']}.** {len(fails)} reference failures against the exact oracle; {len(clean['gaps'])} completeness gaps. "
       f"{len(ties)} exact-tie rows are **UNRESOLVED (engine floor)** on the floored path, never counted as met or missed; "
       f"{sum(r['resolved'] for r in clean['sum_route'])}/{len(clean['sum_route'])} resolve on the core's exact-sum route (below). "
@@ -126,6 +126,38 @@ def write_report(out, manifest, cells, clean, controls):
           "option's stressed change exactly and the engine only adds and compares: it proves the exact comparison, not stress "
           "propagation. The inclusive tie holds by one unit in the last place (level 0.4500000000000001 against 0.45), which comes from the cap round-trip.")
     w("")
+    m = clean.get("m2")
+    if m:
+        w("## Milestone 2 · G3: identical marginals (0.9), different joints\n")
+        w("| Declared joint law | Exact P(both) | Sent to engine | Engine P(both) | Engine marginals | n |")
+        w("|---|---:|---|---:|---|---:|")
+        for r in m["g3"]["rows"]:
+            sent = "no correlation" if r["rho_sent"] is None else f"Gaussian copula rho = {r['rho_sent']:g}"
+            w(f"| {r['law'].replace('_', ' ')} | {float(Q(r['exact_p_both'])):.2f} | {sent} | {_f(r['engine_joint'], 4)} | "
+              f"{', '.join(f'{k} {v:.4f}' for k, v in r['engine_marginals'].items())} | {r['n']} |")
+        bounds = m["g3"]["marginals_only"].get("bounds")
+        w(f"\n- Marginals alone: **not identified**; bounds [{float(Q(bounds[0])):.2f}, {float(Q(bounds[1])):.2f}]. Never 0.81 by default.")
+        w("- Invalid tables refused, never repaired: " + "; ".join(f"{k} ({v.get('reason')})" for k, v in m["g3"]["admission"].items()) + ".")
+        ref = m["g3"]["engine_refusal_rho_1_2"]
+        w(f"- Engine refuses rho = 1.2: {ref['analysis_status']} (HTTP {ref['http_status']}).")
+        w("- Scope: these three laws are exact for thresholded Normal drivers at rho 0, +1 and −1. Other joint laws have no mapping "
+          "here and come back unsupported. ISL's copula note says 'zero tail dependence', which is not true at |rho| = 1.\n")
+        w("## Milestone 2 · G4: Y ~ Normal(mu, 10²) £000, target Y ≥ 100\n")
+        w("| mu | Exact P(Y ≥ 100) | Engine (target on the uncertain root, Channel B) | n | Within 4 SE + 1/n |")
+        w("|---:|---:|---:|---:|---|")
+        for r in m["g4"]["rows"]:
+            w(f"| {r['mu']:g} | {r['exact']:.10f} | {_f(r['engine_p'], 4)} | {r['n']} | {r['within_tolerance']} |")
+        b = m["g4_boundary"]
+        w("\n**Boundary findings (reported, not gated):**")
+        w("- **The headline chance (Channel A) distorts the declared law.** Through a goal node, PLoT's edge floor widens sd 10 to "
+          + ", ".join(f"{x['engine_sd']:.2f}" for x in b["channel_a_floored"]) + ". P(goal) "
+          + "; ".join(f"mu {x['mu']}: {x['engine_p']:.4f} vs exact {x['exact']:.4f}" for x in b["channel_a_floored"]) + ".")
+        w("- **The exact-sum route with zero spread is determinate** (the brief's zero-spread counterpart): "
+          + "; ".join(f"mu {x['mu']}: level {x['level']:.2f}, margin {x['level'] - 100:+.2f}, P(goal) {x['p_goal']}" for x in b["sum_zero_spread"]) + ".")
+        d = b["sum_declared_spread"]
+        w(f"- **The exact-sum route silently drops a declared spread.** PLoT sent {d['spread_sent_to_isl']} for today's level, but ISL returned "
+          + "; ".join(f"mu {x['mu']}: sd {x['sd']}, P(goal) {x['p_goal']} (exact if drawn {x['exact_if_drawn']:.4f})" for x in d["rows"])
+          + ". No warning was attached.\n")
     w("## Negative controls (each fault must turn the reference check red)\n")
     w("| Fault | Brief | Expected | Observed | First failure it caused |")
     w("|---|---|---|---|---|")
