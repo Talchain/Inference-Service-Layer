@@ -707,3 +707,47 @@ class TestBuddyRoundTwo:
         # Bind the analytic identity too: a negative mismatch must not hide behind the clamp.
         assert abs(row["evpc_raw"]) <= 1e-9, row
         assert row["best_do_expected_utility"] == row["baseline_max_expected_utility"]
+
+
+# =============================================================================
+# Track 2 controls (21 Oct 2026, AMEND per TRACK2-REVIEW §4): the two the Science §4 fixture lacked.
+# =============================================================================
+
+
+def _without_the_cost() -> Dict[str, Any]:
+    """The fixture with Dual-source's £1k/month cost left out (node, link and both options' setting)."""
+    body = supplier_request()
+    body["graph"]["nodes"] = [n for n in body["graph"]["nodes"] if n["id"] != "dual_source_cost"]
+    body["graph"]["edges"] = [e for e in body["graph"]["edges"] if e["from"] != "dual_source_cost"]
+    for option in body["options"]:
+        option["interventions"].pop("dual_source_cost")
+    return body
+
+
+class TestTrack2Controls:
+    def test_c1_an_event_certain_within_the_horizon_carries_its_whole_severity(self):
+        """p = 1 (certain within 12 months): the status quo is at the failure level in EVERY draw, so its chance is exactly
+        0 and its mean 0.40; Dual-source still prevents 70%: P(fails) = 0.3, P(goal) = 0.70, mean = 0.75 - 0.40 x 0.3 = 0.63.
+        ISL cannot tell an event that HAS happened (a present condition, which no preventer can undo) from one certain to
+        happen: refusing the first is the producer's job (the core living model's risk item, Track 2 event-risk slice)."""
+        body = supplier_request()
+        risk = next(n for n in body["graph"]["nodes"] if n["id"] == "supplier_fails")
+        risk["event_risk"]["occurrence"].update({"p_low": 1.0, "p_high": 1.0, "basis": "user"})
+        response = _analyze(body)
+        sq, ds = _result(response, "status_quo"), _result(response, "dual_source")
+        assert sq.probability_of_goal == 0.0, sq.probability_of_goal
+        assert abs(sq.outcome_distribution.mean - 0.40) <= 0.005, sq.outcome_distribution.mean
+        assert abs(ds.probability_of_goal - 0.70) <= 4 * _se(0.70), ds.probability_of_goal
+        assert abs(ds.outcome_distribution.mean - 0.63) <= 0.005, ds.outcome_distribution.mean
+
+    def test_c2_leaving_out_the_cost_moves_the_mean_by_exactly_the_cost_and_never_the_chance(self, event_response):
+        """Omitted, the £1k/month cost no longer lowers Dual-source: mean 0.80 - 0.40 x 0.03 = 0.788 (not 0.738), so it
+        reads better than the status quo (0.760) on the mean. Its chance is unchanged (0.970): £15k is above £12k either way.
+        Same seed, common random numbers: the two means differ by the cost, 0.05, within MC error of the cost link alone."""
+        response = _analyze(_without_the_cost())
+        ds_with, ds_without = _result(event_response, "dual_source"), _result(response, "dual_source")
+        assert abs(ds_without.outcome_distribution.mean - 0.788) <= 0.005, ds_without.outcome_distribution.mean
+        assert abs(ds_without.probability_of_goal - ds_with.probability_of_goal) <= 1e-12, (ds_with.probability_of_goal, ds_without.probability_of_goal)
+        assert abs((ds_without.outcome_distribution.mean - ds_with.outcome_distribution.mean) - 0.05) <= 0.001
+        sq = _result(response, "status_quo")
+        assert abs(sq.outcome_distribution.mean - MEAN["status_quo"]) <= 0.005
