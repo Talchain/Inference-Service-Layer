@@ -5,6 +5,7 @@ ROOT=${T3_ROOT:-/private/tmp/track3-engine}
 HERE=$(cd "$(dirname "$0")" && pwd)
 ISL_PORT=${ISL_PORT:-18731}; PLOT_PORT=${PLOT_PORT:-18732}; PROXY_PORT=${PROXY_PORT:-18733}
 CAPTURE=${CAPTURE:-$ROOT/logs/capture}
+PLOT_DIR=${PLOT_DIR:-$ROOT/plot}
 mkdir -p "$ROOT/logs"
 case "${1:-}" in
 start)
@@ -14,7 +15,7 @@ start)
   nohup /usr/bin/python3 -I "$HERE/track3/capture_proxy.py" "http://127.0.0.1:$ISL_PORT" "$PROXY_PORT" "$CAPTURE" \
      > "$ROOT/logs/proxy.log" 2>&1 & echo $! > "$ROOT/logs/proxy.pid"
   for i in {1..60}; do curl -sf "http://127.0.0.1:$PROXY_PORT/health" >/dev/null 2>&1 && break; sleep 1; done
-  (cd "$ROOT/plot" && PORT="$PLOT_PORT" HOST=127.0.0.1 NODE_ENV=development ISL_ENABLE=1 \
+  (cd "$PLOT_DIR" && PORT="$PLOT_PORT" HOST=127.0.0.1 NODE_ENV=development ISL_ENABLE=1 \
      ISL_BASE_URL="http://127.0.0.1:$PROXY_PORT" AUTH_ENABLED=0 RATE_LIMIT_ENABLED=0 ISL_API_KEY=track3-local-unused TOKEN_HMAC_SECRET="$(openssl rand -hex 32)" \
      nohup ./node_modules/.bin/tsx src/main.ts > "$ROOT/logs/plot.log" 2>&1 & echo $! > "$ROOT/logs/plot.pid")
   for i in {1..90}; do

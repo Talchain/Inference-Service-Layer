@@ -1,0 +1,44 @@
+{
+ "plot_dir": "/private/tmp/track3-engine/plot-floor",
+ "plot_head": "f6d12f9ea0b2310be944c81b9475ac8b8223470a",
+ "plot_dirty": false,
+ "isl_src_identical_to_pin": true,
+ "rows": [
+  {
+   "row": "core_normal_link",
+   "exact_p_goal": 0.691462,
+   "engine_p_goal": 0.6912,
+   "n": 10000,
+   "tolerance": 0.01858,
+   "declared_sd": 4.0,
+   "engine_outcome_sd": 3.97,
+   "strengths_sent_to_isl": [
+    {
+     "mean": 0.1,
+     "std": 0.02
+    }
+   ],
+   "verdict": "GREEN"
+  },
+  {
+   "row": "g4_channel_a",
+   "exact_p_goal": 0.158655,
+   "engine_p_goal": 0.1573,
+   "n": 10000,
+   "tolerance": 0.01471,
+   "declared_sd": 10.0,
+   "engine_outcome_sd": 9.968,
+   "strengths_sent_to_isl": [
+    {
+     "mean": 1,
+     "std": 0.0011
+    },
+    {
+     "mean": 1,
+     "std": 0.0011
+    }
+   ],
+   "verdict": "GREEN"
+  }
+ ]
+}
