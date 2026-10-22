@@ -1,6 +1,10 @@
 # Track 3: minimal integration proposal (draft for the DL)
 
-Status: proposal only. Nothing here is integrated or served. Evidence is in `evidence/` (runs at PLoT acf24764 / ISL 8d862f5a).
+Status (22 Oct 2026): proposal; part of it is now served. Evidence is in `evidence/` (runs at PLoT acf24764 / ISL 8d862f5a).
+- **Served:** the CEE core tool `stress_test` (CEE #3547 → #3562 → #3564, variant Runs, writes nothing). On staging 21 Oct it passed the
+  known-answer case ST1: chances matched the hand calculation, no write, and the cold reopen matched.
+- **Not integrated (parked by the DL, 21 Oct):** the G3/G4 joint-chance and boundary work, and the stress result view below.
+- **PLoT request/result extension:** none required (unchanged; G1–G4 are all expressible on `/v2/run` today).
 
 ## What a user would do
 - **The control:** "Stress-test this model". The user picks two or more assumptions already in the living model, gives each an explicit range or setting, and can add one named alternative explanation, such as a proposed retention-loss link. Olumi proposes the settings and the user authors them. Nothing is saved to the model.
