@@ -22,12 +22,13 @@ def capacity_request():
     def node(id, value, frame, kind="factor"):
         return {
             "id": id, "label": id, "kind": kind,
-            "observed_state": {"value": value, "baseline": value, "raw_value": value * frame,
+            "observed_state": {"value": value, "raw_value": value * frame,
                                "source": "brief_extraction"},
             "execution_frame": {"frame": frame, "carrier": "cap"},
         }
 
     total = node("capacity", 0, 100, "outcome")
+    total["observed_state"]["baseline"] = 0
     total["nonlinear_identity"] = {
         "operation": "product", "factor_ids": ["specialists", "capacity_each"],
         "stated_in_brief": True,
@@ -106,7 +107,7 @@ def test_unsupported_zero_shapes_still_block_instead_of_guessing(which):
     d = capacity_request()
     nodes = {n["id"]: n for n in d["graph"]["nodes"]}
     if which == "nonzero_total":
-        nodes["capacity"]["observed_state"].update(value=.1, raw_value=10)
+        nodes["capacity"]["observed_state"].update(value=.1, baseline=.1, raw_value=10)
     elif which == "nonzero_parts":
         nodes["specialists"]["observed_state"].update(value=.1, raw_value=1)
     else:
