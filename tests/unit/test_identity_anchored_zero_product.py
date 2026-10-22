@@ -22,7 +22,7 @@ def capacity_request():
     def node(id, value, frame, kind="factor"):
         return {
             "id": id, "label": id, "kind": kind,
-            "observed_state": {"value": value, "raw_value": value * frame,
+            "observed_state": {"value": value, "baseline": value, "raw_value": value * frame,
                                "source": "brief_extraction"},
             "execution_frame": {"frame": frame, "carrier": "cap"},
         }
