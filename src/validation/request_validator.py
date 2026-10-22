@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.constants import IDENTICAL_OPTIONS_VALUE_TOLERANCE
 from src.models.critique import (
-    EDGE_STRENGTH_OUT_OF_RANGE,
     EMPTY_INTERVENTIONS,
     GRAPH_CYCLE_DETECTED,
     GRAPH_DISCONNECTED,
@@ -265,20 +264,9 @@ class RequestValidator:
         if disconnected_count > 1:
             critiques.append(GRAPH_DISCONNECTED.build(count=disconnected_count))
 
-        # 0d. Check edge strength ranges (warning only)
-        for edge in self.edges:
-            strength = edge.get("strength", {})
-            mean = strength.get("mean", 0)
-            from_node = edge.get("from") or edge.get("from_")
-            to_node = edge.get("to")
-            if abs(mean) > 3.0:
-                critiques.append(
-                    EDGE_STRENGTH_OUT_OF_RANGE.build(
-                        from_node=from_node,
-                        to_node=to_node,
-                        value=mean,
-                    )
-                )
+        # Finite coefficients have no frame-independent magnitude bound.
+        # StrengthDistribution owns numeric validation; do not critique a
+        # valid slope (including an unused definition weight) as out of range.
 
         # 1. Validate goal node exists
         goal_found = self.goal_node_id in self.nodes_by_id

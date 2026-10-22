@@ -9756,14 +9756,14 @@
         "type": "object"
       },
       "StrengthDistribution": {
-        "description": "Parametric uncertainty over edge effect magnitude.\n\nRepresents a Normal distribution over the causal effect strength.\nPositive mean = positive causal effect (increase in cause -> increase in effect)\nNegative mean = negative causal effect (increase in cause -> decrease in effect)\n\nValidation:\n- mean is clamped to [-1.0, 1.0] at parse time.  The original value is\n  stored in _pre_clamp_mean so that EdgeV2 can emit an InferenceWarning\n  with the correct edge identity.\n- NaN or Inf values for mean or std are rejected with a ValidationError \u2014\n  they cannot be clamped to a meaningful range.",
+        "description": "Parametric uncertainty over edge effect magnitude.\n\nRepresents a Normal distribution over the causal effect strength.\nPositive mean = positive causal effect (increase in cause -> increase in effect)\nNegative mean = negative causal effect (increase in cause -> decrease in effect)\n\nValidation:\n- mean is a finite signed coefficient, not a probability. Its magnitude\n  depends on the source and target frames and is not bounded by one.\n- NaN or Inf values for mean or std are rejected with a ValidationError \u2014\n  they cannot be clamped to a meaningful range.",
         "example": {
           "mean": 0.5,
           "std": 0.1
         },
         "properties": {
           "mean": {
-            "description": "Expected effect size (SIGNED: negative = negative effect), clamped to [-1, 1]",
+            "description": "Expected effect size (SIGNED: negative = negative effect), finite and unbounded",
             "title": "Mean",
             "type": "number"
           },
