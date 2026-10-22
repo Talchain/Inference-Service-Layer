@@ -38,6 +38,12 @@ Tests (no engine, under 1 s): `$T3_ROOT/isl-venv/bin/python -m unittest tests.te
 - Cost scales as hypotheses × settings × options × 1 call (about 2 s each). Proposed ceiling for one user request:
   16 calls and 60 s, with cancellation that keeps partial rows marked incomplete.
 
+## Explanations
+
+Every vulnerability is a direct evaluated contrast witness (baseline passes, each stress alone passes, both together
+fail), linked to its rows. No learned rule was built (optional under brief §5), so the Milestone 2 validation of a rule on
+fresh contrast points does not apply.
+
 ## Integration
 
 See `INTEGRATION-PROPOSAL.md`: no PLoT extension is required; the exact user control, the display fields, the owners,
