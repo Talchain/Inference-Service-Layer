@@ -2105,9 +2105,8 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
                     and not addends
                     and all(edge.from_ in factor_ids for edge in graph.edges if edge.to == node.id)
                     and all(
-                        nodes[i].nonlinear_identity is None
-                        or nodes[i].nonlinear_identity.operation != "accumulation"
-                        for i in factor_ids
+                        operand_identity is None or operand_identity.operation != "accumulation"
+                        for operand_identity in (nodes[i].nonlinear_identity for i in factor_ids)
                     )
                 )
                 plans[node.id] = plan(None if pure_zero else IDENTITY_ZERO_LEVEL)
