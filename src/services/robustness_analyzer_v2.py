@@ -4971,7 +4971,23 @@ class RobustnessAnalyzerV2:
         edge_e_values = None
         if request.include_e_values:
             remaining_ms = _budget_remaining_ms()
-            if remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
+            # These optional searches probe only [-1, 1]. A coefficient outside
+            # that search domain is valid for the base SCM, but reversing a
+            # bisection interval would fabricate a flip (or a no-flip claim).
+            if any(
+                abs(e.strength.mean) > 1 and (e.from_, e.to) not in sampler.fixed_edge_keys
+                for e in request.graph.edges
+            ):
+                for code, field in (
+                    ("E_VALUES_UNAVAILABLE", "robustness.edge_e_values"),
+                    ("STABILITY_BANDS_UNAVAILABLE", "robustness.edge_e_values[].stability"),
+                ):
+                    inference_warnings.append(self._optional_phase_unavailable_warning(
+                        code, field, "coefficient_outside_search_domain", _elapsed_ms(),
+                        "Edge flip analysis was omitted: a coefficient is outside its supported "
+                        "search range. The stated effect and base analysis are unchanged.",
+                    ))
+            elif remaining_ms < self.OPTIONAL_PHASE_MIN_BUDGET_MS:
                 # Not enough budget to run the E-value sweep (and the bands that
                 # ride on it) — disclose both on the wire.
                 elapsed_ms = _elapsed_ms()

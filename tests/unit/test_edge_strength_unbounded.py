@@ -3,8 +3,7 @@
 A normalised strength's magnitude depends on the node's frame (cap): doubling a source's frame
 halves its normalised values and doubles the strengths out of it, and the user-unit answer must
 not move. The former +/-1 cut on DRAWS broke that: journey A's GBP59 effect fell 30% under a x2
-frame on the served tuple, and a 0.85 +/- 0.2 edge lost 23% of its mass. The mean's parse-time
-clamp and the flip-threshold search ranges are unchanged. There is still no sign constraint, but
+frame on the served tuple, and a 0.85 +/- 0.2 edge lost 23% of its mass. Finite means are preserved too; optional flip searches disclose when their fixed domain cannot represent a coefficient. There is still no sign constraint, but
 P(sign flip) now follows the stated normal: 0.159 for 0.5 +/- 0.5, where truncation gave 0.187.
 The frame transform is EXACT under the unbounded law (normal(2m, 2s) consumes the same z as
 normal(m, s)), so the frame rows assert equality: a +/-2 bound passed a 3-SE window (DL 5871402629).
@@ -221,3 +220,69 @@ class TestContractFOnPaulsBody:
             lambda d: with_the_served_truncated_sampler(analyse, d)
         )
         assert abs(doubled - base) > 3 * np.hypot(se_b, se_d), (base, doubled)
+
+
+# Class 2: the parse-time mean bound must not undo the unbounded sampled law.
+@pytest.mark.parametrize("sign", [1, -1])
+def test_coefficient_keeps_natural_units_through_parse_and_scm(sign):
+    from src.services.robustness_analyzer_v2 import SCMEvaluatorV2
+
+    # Source frame 2, target frame 3; beta = +/-2 target units per source unit.
+    # Setting source to 2 units must produce +/-4 target units, not +/-3.
+    mean = sign * 2 * 2 / 3
+    edge = EdgeV2(**{"from": "x", "to": "y"}, exists_probability=1,
+                  strength={"mean": mean, "std": 0.2 * 2 / 3})
+    graph = GraphV2(nodes=[NodeV2(id="x", kind="factor", label="X"),
+                          NodeV2(id="y", kind="outcome", label="Y")], edges=[edge])
+    assert edge.strength.mean == mean
+    assert edge.strength.std == pytest.approx(0.2 * 2 / 3)
+    outcome = SCMEvaluatorV2(graph).evaluate(
+        edge_strengths={("x", "y"): edge.strength.mean},
+        interventions={"x": 2 / 2}, goal_node="y",
+    )
+    assert outcome * 3 == pytest.approx(sign * 4)
+    assert graph.collect_parse_warnings() == []
+
+
+@pytest.mark.parametrize("sign", [1, -1])
+def test_frame_invariance_when_rescaled_coefficient_exceeds_one(sign):
+    base, _ = _effect(_two_level_request(sign * 0.45, 0.1, scale=1, n=100))
+    wider, _ = _effect(_two_level_request(sign * 0.45, 0.1, scale=4, n=100))
+    assert wider == pytest.approx(base, rel=1e-12, abs=1e-12)
+
+
+@pytest.mark.parametrize("mean", [2, -2])
+def test_large_coefficient_preserves_base_analysis_and_discloses_unavailable_search(mean, monkeypatch):
+    req = _two_level_request(mean, 0.1, scale=1, n=100)
+    req.include_e_values = True
+    analyzer = RobustnessAnalyzerV2()
+
+    def unsupported_search(*args, **kwargs):
+        pytest.fail("The [-1,1] optional search must not run on an out-of-domain coefficient")
+
+    monkeypatch.setattr(analyzer, "_compute_edge_e_values", unsupported_search)
+    response = analyzer.analyze(req)
+    assert len(response.results) == 2
+    assert all(r.outcome_distribution.mean is not None for r in response.results)
+    assert response.edge_e_values is None
+    by_code = {w.code: w for w in response.inference_warnings}
+    assert "STRENGTH_MEAN_CLAMPED" not in by_code
+    for code in ("E_VALUES_UNAVAILABLE", "STABILITY_BANDS_UNAVAILABLE"):
+        assert by_code[code].severity == "warning"
+        assert by_code[code].detail["reason"] == "coefficient_outside_search_domain"
+
+
+def test_in_range_coefficient_still_runs_optional_search(monkeypatch):
+    req = _two_level_request(0.45, 0.1, scale=1, n=100)
+    req.include_e_values = True
+    analyzer = RobustnessAnalyzerV2()
+    calls = []
+
+    def supported_search(*args, **kwargs):
+        calls.append(True)
+        return []
+
+    monkeypatch.setattr(analyzer, "_compute_edge_e_values", supported_search)
+    response = analyzer.analyze(req)
+    assert calls == [True]
+    assert not any(w.code == "E_VALUES_UNAVAILABLE" for w in response.inference_warnings)

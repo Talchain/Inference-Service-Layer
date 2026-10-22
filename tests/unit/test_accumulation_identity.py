@@ -581,24 +581,9 @@ def test_accumulation_link_weights_are_unused_through_request_path():
                         ],
                     )
                 )
-    # The ONLY permitted byte difference: EdgeV2's parse-time STRENGTH_MEAN_CLAMPED warning
-    # for an out-of-range mean on the mutated edge itself. It reports the input, not a use
-    # of the strength (no figure moved above), and fires for any edge, identity or not.
-    mutated_fields = lambda idx: {  # noqa: E731
-        f"edges[{d['graph']['edges'][i]['from']}→{d['graph']['edges'][i]['to']}].strength.mean"
-        for i in idx
-    }
-    unexpected = [
-        m for m in byte_mismatches
-        if not (m[1] == "mean" and m[2] == 1e6 and m[4]
-                and all(w["code"] == "STRENGTH_MEAN_CLAMPED" for w in m[4])
-                and {w["field"] for w in m[4]} == mutated_fields(m[0]))
-    ]
-    assert not unexpected, (
-        f"full-response byte mismatches: {unexpected!r}; "
-        f"B control raise outcome.mean {before!r}->{after!r}"
-    )
-    assert len(byte_mismatches) == 4, byte_mismatches  # (0,),(1,),(2,),(0,1,2) at mean 1e6
+    # Definitional edge magnitudes are not sampled: changing them cannot change any wire field.
+    assert not byte_mismatches, byte_mismatches
+
 
 
 def test_withheld_accumulation_message_names_operation_and_three_operands():

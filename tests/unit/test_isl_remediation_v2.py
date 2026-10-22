@@ -157,32 +157,27 @@ class TestTopologicalSortLargeGraph:
 
 
 class TestStrengthDistributionBoundsValidation:
-    """Verify StrengthDistribution clamping and NaN/Inf rejection."""
+    """Verify finite coefficients are preserved and NaN/Inf are rejected."""
 
     def test_valid_mean_unchanged(self):
         sd = StrengthDistribution(mean=0.5, std=0.1)
         assert sd.mean == 0.5
-        assert sd._pre_clamp_mean is None
 
     def test_boundary_mean_1_unchanged(self):
         sd = StrengthDistribution(mean=1.0, std=0.1)
         assert sd.mean == 1.0
-        assert sd._pre_clamp_mean is None
 
     def test_boundary_mean_neg1_unchanged(self):
         sd = StrengthDistribution(mean=-1.0, std=0.1)
         assert sd.mean == -1.0
-        assert sd._pre_clamp_mean is None
 
-    def test_mean_1000_clamped_to_1(self):
+    def test_mean_1000_preserved(self):
         sd = StrengthDistribution(mean=1000, std=0.1)
-        assert sd.mean == 1.0
-        assert sd._pre_clamp_mean == 1000
+        assert sd.mean == 1000
 
-    def test_mean_neg5_clamped_to_neg1(self):
+    def test_mean_neg5_preserved(self):
         sd = StrengthDistribution(mean=-5.0, std=0.1)
-        assert sd.mean == -1.0
-        assert sd._pre_clamp_mean == -5.0
+        assert sd.mean == -5.0
 
     def test_mean_nan_rejected(self):
         with pytest.raises(Exception):
@@ -205,40 +200,13 @@ class TestStrengthDistributionBoundsValidation:
             StrengthDistribution(mean=0.5, std=float("inf"))
 
 
-class TestEdgeV2ClampWarning:
-    """Verify EdgeV2 emits InferenceWarning when strength.mean is clamped."""
-
-    def test_no_warning_valid_mean(self):
-        e = EdgeV2(**{"from": "a", "to": "b"}, strength=StrengthDistribution(mean=0.5, std=0.1))
-        assert e._strength_clamp_warning is None
-
-    def test_warning_emitted_for_clamped_mean(self):
-        e = EdgeV2(
-            **{"from": "src", "to": "tgt"}, strength=StrengthDistribution(mean=1000, std=0.1)
-        )
-        w = e._strength_clamp_warning
-        assert w is not None
-        assert w.code == "STRENGTH_MEAN_CLAMPED"
-        assert "src" in w.field and "tgt" in w.field
-        assert w.detail["original"] == 1000
-        assert w.detail["clamped"] == 1.0
-
-    def test_warning_field_uses_arrow_not_index(self):
-        """Field path uses node IDs with →, not array indices."""
-        e = EdgeV2(
-            **{"from": "revenue_growth", "to": "market_share"},
-            strength=StrengthDistribution(mean=-5.0, std=0.1),
-        )
-        w = e._strength_clamp_warning
-        assert w is not None
-        assert "revenue_growth" in w.field
-        assert "market_share" in w.field
-        assert "[" not in w.field or "→" in w.field  # uses node IDs, not indices
-
-    def test_clamped_value_not_seen_downstream(self):
-        """After parse, edge.strength.mean reflects clamped value, not original."""
-        e = EdgeV2(**{"from": "a", "to": "b"}, strength=StrengthDistribution(mean=500, std=0.1))
-        assert e.strength.mean == 1.0  # downstream always sees clamped value
+class TestEdgeV2CoefficientPreservation:
+    @pytest.mark.parametrize("mean", [0.5, 1000, -5.0])
+    def test_finite_size_reaches_graph_without_a_false_cut_warning(self, mean):
+        g = GraphV2(nodes=[_make_node("a"), _make_node("b")],
+                    edges=[_make_edge("a", "b", mean=mean)])
+        assert g.edges[0].strength.mean == mean
+        assert g.collect_parse_warnings() == []
 
 
 class TestGraphCollectParseWarnings:
@@ -251,16 +219,15 @@ class TestGraphCollectParseWarnings:
         )
         assert g.collect_parse_warnings() == []
 
-    def test_collects_one_warning(self):
+    def test_large_coefficient_has_no_parse_warning(self):
         g = GraphV2(
             nodes=[_make_node("a"), _make_node("b")],
             edges=[_make_edge("a", "b", mean=1000)],
         )
         warnings = g.collect_parse_warnings()
-        assert len(warnings) == 1
-        assert warnings[0].code == "STRENGTH_MEAN_CLAMPED"
+        assert warnings == []
 
-    def test_collects_multiple_warnings(self):
+    def test_multiple_large_coefficients_have_no_parse_warnings(self):
         g = GraphV2(
             nodes=[_make_node("a"), _make_node("b"), _make_node("c")],
             edges=[
@@ -269,10 +236,10 @@ class TestGraphCollectParseWarnings:
             ],
         )
         warnings = g.collect_parse_warnings()
-        assert len(warnings) == 2
+        assert warnings == []
 
-    def test_warnings_included_in_analyzer_response(self):
-        """InferenceWarnings from edge clamping appear in response.inference_warnings."""
+    def test_preserved_size_not_misreported_as_cut_in_analyzer_response(self):
+        """A preserved coefficient produces no clamp warning."""
         g = GraphV2(
             nodes=[_make_node("price"), _make_node("revenue", kind="outcome")],
             edges=[_make_edge("price", "revenue", mean=1000)],
@@ -288,7 +255,7 @@ class TestGraphCollectParseWarnings:
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
         codes = [w.code for w in response.inference_warnings]
-        assert "STRENGTH_MEAN_CLAMPED" in codes
+        assert "STRENGTH_MEAN_CLAMPED" not in codes
 
 
 # =============================================================================
@@ -917,16 +884,15 @@ class TestEnhancedResponseInferenceWarnings:
         assert "inference_warnings" in response_dict
         assert response_dict["inference_warnings"] == []
 
-    def test_clamped_edge_warning_in_enhanced_model(self):
-        """End-to-end: clamped edge produces warning that survives ISLResponseV2 serialization."""
+    def test_preserved_edge_has_no_false_cut_warning_in_enhanced_model(self):
+        """A coefficient above one stays intact without a false cut on the wire."""
         g = GraphV2(
             nodes=[_make_node("price"), _make_node("revenue", kind="outcome")],
             edges=[_make_edge("price", "revenue", mean=5.0)],
         )
-        # Verify parse-time clamp produced a warning
+        # The coefficient was preserved; no parse repair occurred
         warnings = g.collect_parse_warnings()
-        assert len(warnings) == 1
-        assert warnings[0].code == "STRENGTH_MEAN_CLAMPED"
+        assert warnings == []
 
         # Simulate enhanced path: feed warnings through ResponseBuilder
         from src.models.response_v2 import ISLResponseV2, RequestEchoV2
@@ -965,9 +931,7 @@ class TestEnhancedResponseInferenceWarnings:
         )
 
         response = builder.build()
-        assert len(response.inference_warnings) == 1
-
-        # Verify it survives the same serialization path the API uses
+        assert response.inference_warnings == []
         response_dict = response.model_dump(by_alias=True, exclude_none=True)
-        assert response_dict["inference_warnings"][0]["code"] == "STRENGTH_MEAN_CLAMPED"
-        assert response_dict["inference_warnings"][0]["detail"]["original"] == 5.0
+        assert response_dict["inference_warnings"] == []
+        assert g.edges[0].strength.mean == 5.0

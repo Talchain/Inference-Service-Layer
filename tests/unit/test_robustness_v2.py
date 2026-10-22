@@ -783,10 +783,8 @@ class TestDualUncertaintySampler:
         assert abs(np.mean(strengths)) < 0.02
         assert abs(np.std(strengths) - 0.1) < 0.02
 
-    def test_edge_strength_clamp_behavioural_consistency(self):
-        """B5.27: Full analysis respects bounds — extreme edge clamped to 1.0."""
-        # mean=1.5, std=0.002 (minimum valid std) means every sample ≈1.5
-        # without clamping, but should behave as 1.0 with clamping
+    def test_edge_strength_preserved_behavioural_consistency(self):
+        """Full analysis preserves a finite coefficient above one."""
         graph = GraphV2(
             nodes=[
                 NodeV2(id="input", kind="factor", label="Input"),
@@ -816,25 +814,16 @@ class TestDualUncertaintySampler:
         analyzer = RobustnessAnalyzerV2()
         response = analyzer.analyze(request)
 
-        # With clamping: strength ≈ 1.0 (clamped from 1.5)
-        # outcome_opt_a = input(1.0) * 1.0 = 1.0
-        # outcome_opt_b = input(0.5) * 1.0 = 0.5
-        # Without clamping: strength ≈ 1.5
-        # outcome_opt_a = 1.0 * 1.5 = 1.5
-        # outcome_opt_b = 0.5 * 1.5 = 0.75
+        # Finite coefficients reach the SCM as stated: 1 × 1.5 and 0.5 × 1.5.
         opt_a_result = next(r for r in response.results if r.option_id == "opt_a")
         opt_b_result = next(r for r in response.results if r.option_id == "opt_b")
 
-        # Auto-scaled noise adds N(0, std(samples)) to outcome nodes.
-        # With std≈0.002 the pre-noise samples are nearly constant at 1.0,
-        # so noise std ≈ 0 and means stay very close to the clamped value.
-        # Allow ±0.15 for stochastic noise on top of the clamped value.
-        assert opt_a_result.outcome_distribution.mean == pytest.approx(1.0, abs=0.15), (
-            f"opt_a: expected mean ≈ 1.0 (clamped) but got "
+        assert opt_a_result.outcome_distribution.mean == pytest.approx(1.5, abs=0.015), (
+            f"opt_a: expected mean ≈ 1.5 (preserved) but got "
             f"{opt_a_result.outcome_distribution.mean:.4f}"
         )
-        assert opt_b_result.outcome_distribution.mean == pytest.approx(0.5, abs=0.15), (
-            f"opt_b: expected mean ≈ 0.5 (clamped) but got "
+        assert opt_b_result.outcome_distribution.mean == pytest.approx(0.75, abs=0.015), (
+            f"opt_b: expected mean ≈ 0.75 (preserved) but got "
             f"{opt_b_result.outcome_distribution.mean:.4f}"
         )
 

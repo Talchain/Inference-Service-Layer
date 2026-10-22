@@ -118,35 +118,30 @@ class StrengthDistribution(BaseModel):
     Negative mean = negative causal effect (increase in cause -> decrease in effect)
 
     Validation:
-    - mean is clamped to [-1.0, 1.0] at parse time.  The original value is
-      stored in _pre_clamp_mean so that EdgeV2 can emit an InferenceWarning
-      with the correct edge identity.
+    - mean is a finite signed coefficient, not a probability. Its magnitude
+      depends on the source and target frames and is not bounded by one.
     - NaN or Inf values for mean or std are rejected with a ValidationError —
       they cannot be clamped to a meaningful range.
     """
 
     mean: float = Field(
         ...,
-        description="Expected effect size (SIGNED: negative = negative effect), clamped to [-1, 1]",
+        description="Expected effect size (SIGNED: negative = negative effect), finite and unbounded",
     )
     std: float = Field(
         ..., gt=0.001, description="Standard deviation of effect size (must be > 0.001)"
     )
 
-    # Private: records the original mean before clamping (None if no clamp occurred).
-    # Checked by EdgeV2.model_validator to emit the STRENGTH_MEAN_CLAMPED InferenceWarning.
-    _pre_clamp_mean: Optional[float] = PrivateAttr(default=None)
-
     @field_validator("mean", mode="before")
     @classmethod
     def validate_mean(cls, v: Any) -> float:
-        """Reject NaN/Inf; clamp to [-1.0, 1.0]."""
+        """Reject NaN/Inf without changing a finite coefficient."""
         if not isinstance(v, (int, float)):
             raise ValueError(f"mean must be a number, got {type(v).__name__}")
         v = float(v)
         if not math.isfinite(v):
             raise ValueError(f"mean must be a finite number (no NaN or Inf), got {v}")
-        return float(v)  # actual clamp happens in model_validator after all fields are set
+        return float(v)
 
     @field_validator("std", mode="before")
     @classmethod
@@ -158,17 +153,6 @@ class StrengthDistribution(BaseModel):
         if not math.isfinite(v):
             raise ValueError(f"std must be a finite number (no NaN or Inf), got {v}")
         return float(v)
-
-    @model_validator(mode="after")
-    def clamp_mean(self) -> "StrengthDistribution":
-        """Clamp mean to [-1.0, 1.0] and record the original if clamped."""
-        original = self.mean
-        clamped = max(-1.0, min(1.0, original))
-        if clamped != original:
-            # Store original so EdgeV2 can emit InferenceWarning with edge identity
-            object.__setattr__(self, "_pre_clamp_mean", original)
-            object.__setattr__(self, "mean", clamped)
-        return self
 
     # CIL: explicit extra='ignore' — unknown fields are silently dropped.
     # This is a documented contract promise; do not change without cross-service coordination.
@@ -424,25 +408,8 @@ class EdgeV2(BaseModel):
         "'bidirected' = unmeasured confounder between two nodes (used by identifiability analysis).",
     )
 
-    # Private: populated by model_validator when strength.mean was clamped.
-    # Callers (GraphV2 or the analyzer) must collect these to build inference_warnings.
-    _strength_clamp_warning: Optional[InferenceWarning] = PrivateAttr(default=None)
-
     # Private: populated by model_validator when exists_probability used the default.
     _exists_probability_default_warning: Optional[InferenceWarning] = PrivateAttr(default=None)
-
-    @model_validator(mode="after")
-    def emit_strength_clamp_warning(self) -> "EdgeV2":
-        """Record an InferenceWarning if strength.mean was clamped during parsing."""
-        pre_clamp = self.strength._pre_clamp_mean
-        if pre_clamp is not None:
-            warning = InferenceWarning(
-                code="STRENGTH_MEAN_CLAMPED",
-                field=f"edges[{self.from_}\u2192{self.to}].strength.mean",
-                detail={"original": pre_clamp, "clamped": self.strength.mean},
-            )
-            object.__setattr__(self, "_strength_clamp_warning", warning)
-        return self
 
     @model_validator(mode="after")
     def emit_exists_probability_default_warning(self) -> "EdgeV2":
@@ -995,7 +962,6 @@ class GraphV2(BaseModel):
         Return all InferenceWarnings generated during graph parsing.
 
         Collects:
-        - STRENGTH_MEAN_CLAMPED: edges whose strength.mean was clamped to [-1, 1]
         - EXISTS_PROBABILITY_DEFAULT: edges where exists_probability used the 0.8 default
 
         Call this after constructing the graph to retrieve warnings that must
@@ -1003,8 +969,6 @@ class GraphV2(BaseModel):
         """
         warnings: List[InferenceWarning] = []
         for edge in self.edges:
-            if edge._strength_clamp_warning is not None:
-                warnings.append(edge._strength_clamp_warning)
             if edge._exists_probability_default_warning is not None:
                 warnings.append(edge._exists_probability_default_warning)
         return warnings
