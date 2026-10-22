@@ -5086,7 +5086,6 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "description": "Sum only: factor_ids subtracted rather than added; absent means all parts add",
             "title": "Subtract"
           },
@@ -6023,7 +6022,6 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "description": "Sum only: factor_ids subtracted rather than added; absent means all parts add",
             "title": "Subtract"
           }
