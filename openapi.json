@@ -1305,6 +1305,22 @@
             "description": "The node's stated level today, user units",
             "title": "Stated"
           },
+          "subtract": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sum only: participant factor_ids subtracted rather than added",
+            "title": "Subtract"
+          },
           "withheld_reason": {
             "description": "identity_frame_missing | identity_operand_missing | identity_zero_level | identity_inconsistent | identity_scale_out_of_range | identity_rate_out_of_range | identity_non_finite",
             "title": "Withheld Reason",
@@ -6010,20 +6026,13 @@
             "type": "boolean"
           },
           "subtract": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
             "description": "Sum only: factor_ids subtracted rather than added; absent means all parts add",
-            "title": "Subtract"
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Subtract",
+            "type": "array"
           }
         },
         "required": [

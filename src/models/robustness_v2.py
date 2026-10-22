@@ -21,6 +21,7 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 import re
 
 from src.constants import (
@@ -474,9 +475,8 @@ class NonlinearIdentityV2(BaseModel):
             "declared addend is definitional; it is never inferred from an edge."
         ),
     )
-    subtract: Optional[List[str]] = Field(
+    subtract: Union[Annotated[List[str], Field(min_length=1)], SkipJsonSchema[None]] = Field(
         None,
-        min_length=1,
         description="Sum only: factor_ids subtracted rather than added; absent means all parts add",
     )
     horizon_months: Optional[int] = Field(

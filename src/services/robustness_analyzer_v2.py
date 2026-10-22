@@ -2143,7 +2143,11 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
             # AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated 0 is an ordinary
             # level. Scaled absolute check: |o - sum| <= tau x max(|o|, sum|parts|); both
             # sides 0 is consistent exactly (R3-2: a tally of £0 today).
-            scale = max(abs(stated), math.fsum(abs(part) for part in parts))
+            # With subtraction, gross turnover is not the profit's scale. Keep the
+            # existing 5% tolerance, relative to the net, including exact 0 = 0.
+            scale = max(abs(stated), abs(reconstructed)) if identity.subtract else max(
+                abs(stated), math.fsum(abs(part) for part in parts)
+            )
             share = 0.0 if scale == 0.0 else abs(stated - reconstructed) / scale
         elif identity.operation == "accumulation":
             raise AssertionError("accumulation cannot enter today's reconciliation")
@@ -2697,7 +2701,12 @@ def identity_blocking_critiques(
             operation=plan.operation,
             # MG ISL #187 5861838085 (6): the addends are named apart from the operands; the
             # typed ``identity.participants`` below is unchanged (CEE reads it).
-            operands=", ".join(plan.factor_ids),
+            operands=(
+                " ".join(
+                    ("minus " if part in plan.subtract else "plus " if index else "") + part
+                    for index, part in enumerate(plan.factor_ids)
+                ) if plan.subtract else ", ".join(plan.factor_ids)
+            ),
             addends=f" plus {', '.join(plan.addends)}" if plan.addends else "",
             reason=plan.withheld_reason,
             detail=detail,
@@ -2712,6 +2721,7 @@ def identity_blocking_critiques(
                         node_id=plan.node_id,
                         operation=plan.operation,
                         participants=list(plan.participants),
+                        subtract=list(plan.subtract) or None,
                         withheld_reason=plan.withheld_reason,
                         reconstructed=plan.reconstructed,
                         stated=plan.stated,
@@ -6324,21 +6334,19 @@ class RobustnessAnalyzerV2:
         """
         noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
         unit_domains = unit_level_domains(request)
-        horizon_plans = (
-            {
-                node_id: plan
-                for node_id, plan in resolve_identity_plans(
-                    request.graph, factor_centres(request)
-                ).items()
-                if plan.evaluated and plan.accumulation_derived
-            }
+        identity_plans = (
+            resolve_identity_plans(request.graph, factor_centres(request))
             if any(
                 n.nonlinear_identity is not None
-                and n.nonlinear_identity.operation == "accumulation"
+                and (n.nonlinear_identity.operation == "accumulation" or n.nonlinear_identity.subtract)
                 for n in request.graph.nodes
             )
             else {}
         )
+        horizon_plans = {
+            node_id: plan for node_id, plan in identity_plans.items()
+            if plan.evaluated and plan.accumulation_derived
+        }
         frames: List[NodeLevelFrame] = []
         for node in request.graph.nodes:
             if not parent_map.get(node.id):
@@ -6370,6 +6378,11 @@ class RobustnessAnalyzerV2:
                     if horizon_plan is not None
                     else anchored_level_domain(level, unit_domains.get(node.id))
                 )
+                identity_plan = identity_plans.get(node.id)
+                if identity_plan is not None and identity_plan.evaluated and identity_plan.subtract:
+                    # An evaluated difference is signed even when today's profit is positive.
+                    # A loss must stay negative in bands and threshold comparisons.
+                    low = None
                 frames.append(
                     NodeLevelFrame(
                         node_id=node.id,

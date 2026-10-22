@@ -148,6 +148,9 @@ class CritiqueIdentityV2(BaseModel):
     participants: List[str] = Field(
         ..., description="factor_ids then addends, in declaration order"
     )
+    subtract: Optional[List[str]] = Field(
+        None, min_length=1, description="Sum only: participant factor_ids subtracted rather than added"
+    )
     withheld_reason: str = Field(
         ...,
         description="identity_frame_missing | identity_operand_missing | "
@@ -164,6 +167,13 @@ class CritiqueIdentityV2(BaseModel):
 
     # CIL 0.2: consistent extra='ignore' across all response models
     model_config = {"extra": "ignore"}
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_subtract(self, handler: SerializerFunctionWrapHandler):  # type: ignore[no-untyped-def]
+        data: Dict[str, Any] = handler(self)
+        if self.subtract is None:
+            data.pop("subtract", None)
+        return data
 
     @field_validator("reconstructed", "stated", "mismatch_share", mode="before")
     @classmethod
