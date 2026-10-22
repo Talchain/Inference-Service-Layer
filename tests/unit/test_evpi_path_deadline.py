@@ -229,13 +229,11 @@ DEGRADATION_CODES = (
 )
 
 
-def _request_clamped_edge_all_phases():
-    """Graph idx=2 with edges[0].strength.mean forced out of [-1, 1] so parsing
-    emits the benign STRENGTH_MEAN_CLAMPED, plus every optional phase enabled so a
-    budget-exhausted run also emits all four degradation codes."""
+def _request_defaulted_edge_all_phases():
+    """A defaulted existence produces a benign warning beside optional-phase omissions."""
     v = _variants()
     graph = copy.deepcopy(v["graphs"][2])
-    graph["edges"][0]["strength"]["mean"] = 1000.0  # clamped -> STRENGTH_MEAN_CLAMPED
+    graph["edges"][0].pop("exists_probability", None)
     return RobustnessRequestV2(
         request_id="severity-mapping-test",
         graph=graph,
@@ -254,15 +252,15 @@ class TestSeverityMappingDegradationVsBenign:
     def test_only_degradation_codes_are_warning_benign_stays_info(self, monkeypatch):
         # Budget exhausted -> all four optional phases entry-skip and disclose.
         monkeypatch.setattr(RobustnessAnalyzerV2, "OVERALL_REQUEST_BUDGET_MS", 0)
-        resp = RobustnessAnalyzerV2().analyze(_request_clamped_edge_all_phases())
+        resp = RobustnessAnalyzerV2().analyze(_request_defaulted_edge_all_phases())
 
         # POSITIVE CONTROL: the four degradation codes AND the benign
-        # STRENGTH_MEAN_CLAMPED are all present, so the severity assertions below
+        # EXISTS_PROBABILITY_DEFAULT are all present, so the severity assertions below
         # can see a presence (trap-13).
         codes = _codes(resp)
         for c in DEGRADATION_CODES:
             assert c in codes, f"positive control: {c} must be present"
-        assert "STRENGTH_MEAN_CLAMPED" in codes, "positive control: benign code must be present"
+        assert "EXISTS_PROBABILITY_DEFAULT" in codes, "positive control: benign code must be present"
 
         # The four degradation codes opt UP to 'warning'.
         for c in DEGRADATION_CODES:
@@ -272,8 +270,8 @@ class TestSeverityMappingDegradationVsBenign:
         # default-'warning' code caused). RED-first: fails while the default is
         # 'warning'.
         assert (
-            _warn(resp, "STRENGTH_MEAN_CLAMPED").severity == "info"
-        ), "benign STRENGTH_MEAN_CLAMPED must stay 'info', not be stamped 'warning'"
+            _warn(resp, "EXISTS_PROBABILITY_DEFAULT").severity == "info"
+        ), "benign EXISTS_PROBABILITY_DEFAULT must stay 'info', not be stamped 'warning'"
 
         # Pin the mapping on the SERIALISED wire too.
         by_code = {
@@ -282,4 +280,4 @@ class TestSeverityMappingDegradationVsBenign:
         }
         for c in DEGRADATION_CODES:
             assert by_code[c]["severity"] == "warning"
-        assert by_code["STRENGTH_MEAN_CLAMPED"]["severity"] == "info"
+        assert by_code["EXISTS_PROBABILITY_DEFAULT"]["severity"] == "info"

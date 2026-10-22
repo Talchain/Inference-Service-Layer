@@ -90,12 +90,16 @@ def _graph(include_dead_option: bool, dead_first: bool = False):
         {"id": "f_info", "kind": "factor", "label": "INFO", "observed_state": {"value": 1.0}},
         {"id": "goal_out", "kind": "outcome", "label": "Goal"},
     ]
+    # This fixture tests non-finite statistics, not coefficient admission. Its
+    # reference was measured when the parser cut the old 3/3/2 means to 1.
+    # State those actually-analysed means explicitly so that reference remains
+    # a fixed control; >1 preservation has its own signed/scaled contract rows.
     edges = [
         {"from": "f_huge_a", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.05}},
         {"from": "f_huge_b", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.05}},
-        {"from": "f_x", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 3.0, "std": 0.5}},
-        {"from": "f_y", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 3.0, "std": 0.5}},
-        {"from": "f_info", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 2.0, "std": 0.3}},
+        {"from": "f_x", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 1.0, "std": 0.5}},
+        {"from": "f_y", "to": "goal_out", "exists_probability": 0.5, "strength": {"mean": 1.0, "std": 0.5}},
+        {"from": "f_info", "to": "goal_out", "exists_probability": 1.0, "strength": {"mean": 1.0, "std": 0.3}},
     ]
     healthy = [
         {"id": "opt_x", "label": "Push X",

@@ -487,6 +487,17 @@ class TestRequestValidator:
         assert result.has_blockers is False
         assert len(result.critiques) == 0
 
+    @pytest.mark.parametrize("mean", [4.61, -4.61, 1e6])
+    def test_finite_coefficient_has_no_frame_range_critique(self, valid_request, mean):
+        valid_request["graph"]["edges"][0]["strength"]["mean"] = mean
+        result = RequestValidator(
+            graph=valid_request["graph"],
+            options=valid_request["options"],
+            goal_node_id=valid_request["goal_node_id"],
+        ).validate()
+        assert result.is_valid
+        assert not any(c.code == "EDGE_STRENGTH_OUT_OF_RANGE" for c in result.critiques)
+
     def test_missing_goal_node(self, request_missing_goal):
         """Test blocker for missing goal node."""
         config = PathValidationConfig()
