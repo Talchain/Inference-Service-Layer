@@ -19,7 +19,7 @@ def profit_request(*, stated=True):
                                "subtract": ["costs"], "stated_in_brief": True},
     }
     if stated:
-        total["observed_state"] = {"value": .3, "raw_value": 30, "source": "brief_extraction"}
+        total["observed_state"] = {"value": .3, "baseline": .3, "raw_value": 30, "source": "brief_extraction"}
     return {
         "graph": {
             "nodes": [
