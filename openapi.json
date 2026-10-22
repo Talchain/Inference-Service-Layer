@@ -5148,7 +5148,7 @@
         "description": "Structured warning emitted during inference.\n\nContract: inference_warnings is always present in the response as a list\n([] when empty, never absent). This mirrors the PLoT sentinel pattern\n(repairs_applied: [] when empty, never absent).\n\nField path convention: Use edges[{from}\u2192{to}].field.subfield with node IDs,\nnot array indices. Array indices are fragile after reordering.",
         "properties": {
           "code": {
-            "description": "Machine-readable warning code, e.g. 'STRENGTH_MEAN_CLAMPED'",
+            "description": "Machine-readable warning code, e.g. 'E_VALUES_UNAVAILABLE'",
             "title": "Code",
             "type": "string"
           },
