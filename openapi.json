@@ -5073,6 +5073,23 @@
             "title": "Stated In Brief",
             "type": "boolean"
           },
+          "subtract": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sum only: factor_ids subtracted rather than added; absent means all parts add",
+            "title": "Subtract"
+          },
           "today_level": {
             "anyOf": [
               {
@@ -5992,6 +6009,23 @@
             "description": "True when the brief itself states it",
             "title": "Stated In Brief",
             "type": "boolean"
+          },
+          "subtract": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Sum only: factor_ids subtracted rather than added; absent means all parts add",
+            "title": "Subtract"
           }
         },
         "required": [
