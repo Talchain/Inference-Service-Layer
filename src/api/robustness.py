@@ -1389,7 +1389,7 @@ async def _analyze_robustness_v2_enhanced(
         if v1_response.critiques:
             builder.add_critiques(v1_response.critiques)
 
-        # Propagate inference warnings (e.g., STRENGTH_MEAN_CLAMPED, CONSTRAINT_NODE_DEFAULT_BASE)
+        # Propagate inference warnings (e.g., E_VALUES_UNAVAILABLE, CONSTRAINT_NODE_DEFAULT_BASE)
         if v1_response.inference_warnings:
             builder.set_inference_warnings(v1_response.inference_warnings)
 

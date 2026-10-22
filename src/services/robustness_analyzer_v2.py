@@ -187,8 +187,9 @@ MAX_DECOMPOSITION_PATHS = 20000
 # `structural_influence` term whenever the phase can run. Worst wall ≈ 0.3-0.5s.
 MAX_INFLUENCE_WALK_CALLS_TOTAL = 400_000
 
-# Edge strength bounds from schema v2.6. They bound the edge MEAN (parse-time clamp) and the
-# flip-threshold search ranges over that mean. They do NOT bound sampled strengths: a normalised
+# Bounds of the optional flip-threshold search, not bounds on finite edge means or draws.
+# A coefficient outside this search domain keeps its base analysis; optional sweeps are omitted
+# with disclosure. There is no parse-time mean clamp. They do NOT bound sampled strengths: a normalised
 # strength's magnitude depends on the node's frame (cap), so a +/-1 cut on draws removed real
 # user-unit effect frame-dependently (-30% of journey A's GBP59 effect under a x2 frame; a
 # 0.85 +/- 0.2 edge lost 23% of its mass). AIQ ruling #72 5868664986: the magnitude bound on draws
@@ -2003,10 +2004,11 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
        ``identity_frame_missing``: a frame is never inferred from "compatible" operands;
     2. every participant has a level today (``status_quo_level``), else
        ``identity_operand_missing``;
-    3. a product WITH a stated target has no zero operand and no zero target, else
-       ``identity_zero_level`` (its ratio ``k`` and relative check are undefined there). With
-       no stated target there is no ratio (``T = term + A + L`` per draw), so a zero operand
-       is an ordinary level (AIQ #72 5881596876: the cloud share 0 today);
+    3. a product WITH a stated target normally needs non-zero operands and target for its
+       fitted ratio. A pure literal product at zero, with a stated zero and no addends,
+       accumulation operands or extra belief parents, instead uses its declared unit product
+       (k = 1). No ratio is fitted to 0/0. Other zero anchors keep ``identity_zero_level``.
+       With no stated target there is no ratio (``T = term + A + L`` per draw);
     4. with a stated target ``o``, in user units, else ``identity_inconsistent``:
        product ``|o - (term + addends)| / |o| <= 5%``; sum (no ratio, so 0 is an ordinary
        level) ``|o - (term + addends)| <= 5% x max(|o|, sum|parts|)``.
@@ -2094,7 +2096,21 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
             if reconciliation_target is not None and (
                 zero_operands or reconciliation_target == 0.0
             ):
-                plans[node.id] = plan(IDENTITY_ZERO_LEVEL)
+                # The declaration fixes the literal product, not an unidentified scale:
+                # specialists 0 x capacity each = additional capacity 0 today. Accept only
+                # this exact pure shape; a belief contribution cannot be calibrated at 0/0.
+                pure_zero = (
+                    reconciliation_target == 0.0
+                    and bool(zero_operands)
+                    and not addends
+                    and all(edge.from_ in factor_ids for edge in graph.edges if edge.to == node.id)
+                    and all(
+                        nodes[i].nonlinear_identity is None
+                        or nodes[i].nonlinear_identity.operation != "accumulation"
+                        for i in factor_ids
+                    )
+                )
+                plans[node.id] = plan(None if pure_zero else IDENTITY_ZERO_LEVEL)
                 continue
         elif identity.operation == "sum":
             pass
@@ -2352,7 +2368,7 @@ def zero_gated_factor_ids(
     (``identity_partials``: the others' product), not by cancellation, so it is withheld.
 
     An operand edge ``(i, product)`` is gated when some other operand's level today is 0 (only an
-    evaluated product with no stated level can have one: rule 3). A factor is gated when it reaches
+    evaluated product can have one, including an exact stated zero: rule 3). A factor is gated when it reaches
     the goal, but not once every gated edge is removed. Each gated factor maps to the zero operands
     that gate it (``gated_by``, the typed carrier PLoT and the UI read)."""
     if not any(node.nonlinear_identity is not None for node in graph.nodes):
@@ -3283,7 +3299,11 @@ class SCMEvaluatorV2:
             believed = [p for p in self._parents[node_id] if p not in plan.participants]
             linear = frame * math.fsum(means.get((p, node_id), 0.0) * today[p] for p in believed)
             addends = math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
-            # Non-zero: every operand level is non-zero (identity_zero_level withholds otherwise).
+            # The resolver admits a stated zero only for an exact pure zero product.
+            # Its declaration supplies unit scale; do not fit a ratio or replace the zero.
+            if plan.target_level == 0.0:
+                scales[node_id] = 1.0
+                continue
             term = _identity_term(
                 plan.operation, [plan.levels[i] * plan.frames[i] for i in plan.factor_ids]
             )
@@ -4109,8 +4129,7 @@ class RobustnessAnalyzerV2:
         if request.goal_constraints:
             constraint_target_nodes = sorted(set(gc.node_id for gc in request.goal_constraints))
 
-        # Collect parse-time warnings (e.g. STRENGTH_MEAN_CLAMPED) from graph construction.
-        # These are generated during Pydantic model validation of EdgeV2.strength.mean.
+        # Collect graph-construction warnings. Finite edge means are preserved without a clamp.
         inference_warnings: List[InferenceWarning] = request.graph.collect_parse_warnings()
 
         # ---------------------------------------------------------------

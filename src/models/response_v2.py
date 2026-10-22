@@ -51,7 +51,7 @@ class InferenceWarning(BaseModel):
     """
 
     code: str = Field(
-        ..., description="Machine-readable warning code, e.g. 'STRENGTH_MEAN_CLAMPED'"
+        ..., description="Machine-readable warning code, e.g. 'E_VALUES_UNAVAILABLE'"
     )
     field: str = Field(
         ...,
