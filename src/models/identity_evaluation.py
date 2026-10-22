@@ -50,6 +50,7 @@ class IdentityEvaluation(BaseModel):
     operation: Literal["product", "sum", "accumulation"]
     factor_ids: List[str]
     addends: List[str] = Field(default_factory=list)
+    subtract: Optional[List[str]] = Field(None, min_length=1, description="Sum only: factor_ids subtracted rather than added; absent means all parts add")
     stated_in_brief: bool
     evaluated: bool = Field(..., description="True only when the numbers rest on the identity")
     withheld_reason: Optional[IdentityWithheldReason] = None
@@ -116,6 +117,8 @@ class IdentityEvaluation(BaseModel):
     ):
         """Keep legacy evaluation serialization unchanged, including the worker boundary."""
         data = handler(self)
+        if self.subtract is None:
+            data.pop("subtract", None)
         if self.horizon_months is None:
             data.pop("horizon_months", None)
         return data

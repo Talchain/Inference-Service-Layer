@@ -21,6 +21,7 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 import re
 
 from src.constants import (
@@ -474,6 +475,10 @@ class NonlinearIdentityV2(BaseModel):
             "declared addend is definitional; it is never inferred from an edge."
         ),
     )
+    subtract: Union[Annotated[List[str], Field(min_length=1)], SkipJsonSchema[None]] = Field(
+        None,
+        description="Sum only: factor_ids subtracted rather than added; absent means all parts add",
+    )
     horizon_months: Optional[int] = Field(
         None,
         ge=1,
@@ -567,6 +572,11 @@ class NonlinearIdentityV2(BaseModel):
                 )
         else:
             raise ValueError(f"unsupported nonlinear_identity operation: {self.operation!r}")
+        if "subtract" in self.model_fields_set:
+            if self.operation != "sum" or not self.subtract:
+                raise ValueError("subtract requires a sum and a non-empty list of factor_ids")
+            if len(set(self.subtract)) != len(self.subtract) or not set(self.subtract) <= set(self.factor_ids):
+                raise ValueError("subtract must contain distinct ids from factor_ids")
         if len(set(self.factor_ids)) != len(self.factor_ids):
             raise ValueError("nonlinear_identity.factor_ids must be distinct")
         addends = self.addends or []
@@ -587,6 +597,8 @@ class NonlinearIdentityV2(BaseModel):
         addends key, including null. No return annotation so JSON schema retains the fields.
         """
         data: Dict[str, Any] = handler(self)
+        if self.subtract is None:
+            data.pop("subtract", None)
         if self.rate_sigma_log is None:
             data.pop("rate_sigma_log", None)
         if self.operation == "accumulation":

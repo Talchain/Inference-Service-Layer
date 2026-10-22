@@ -1850,6 +1850,11 @@ class IdentityPlan:
     rate_sigma_log: Optional[Tuple[float, float]] = None
     # P45: this identity composes a month-T stock, so today's stated level cannot anchor it.
     accumulation_derived: bool = False
+    subtract: Tuple[str, ...] = ()
+
+    @property
+    def signs(self) -> Tuple[int, ...]:
+        return tuple(-1 if i in self.subtract else 1 for i in self.factor_ids)
 
     @property
     def evaluated(self) -> bool:
@@ -1864,13 +1869,14 @@ def _identity_term(
     operation: str,
     values: Sequence[float],
     *,
+    signs: Optional[Sequence[int]] = None,
     horizon_months: Optional[int] = None,
     rate_scale: Optional[float] = None,
 ) -> float:
     if operation == "product":
         return float(math.prod(values))
     elif operation == "sum":
-        return float(math.fsum(values))
+        return float(math.fsum(values if signs is None else (s * v for s, v in zip(signs, values))))
     elif operation == "accumulation":
         if len(values) != 3 or horizon_months is None or rate_scale is None:
             raise ValueError(
@@ -1957,6 +1963,7 @@ def _accumulation_horizon_levels(
                 term = _identity_term(
                     identity.operation,
                     [user[i] for i in identity.factor_ids],
+                    signs=[-1 if i in (identity.subtract or ()) else 1 for i in identity.factor_ids],
                     horizon_months=identity.horizon_months,
                     rate_scale=identity.rate_scale,
                 )
@@ -2048,6 +2055,7 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
                 operation=_checked_identity_operation(identity.operation),
                 factor_ids=factor_ids,
                 addends=addends,
+                subtract=tuple(identity.subtract or ()),
                 frames=MappingProxyType(dict(frames)),
                 levels=MappingProxyType(dict(levels)),
                 target_level=target_level,
@@ -2125,7 +2133,8 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
             continue
         parts = [reconciliation_user[i] for i in participants]
         reconstructed = _identity_term(
-            identity.operation, [reconciliation_user[i] for i in factor_ids]
+            identity.operation, [reconciliation_user[i] for i in factor_ids],
+            signs=[-1 if i in (identity.subtract or ()) else 1 for i in factor_ids],
         ) + math.fsum(reconciliation_user[i] for i in addends)
         stated = reconciliation_target * frames[node.id]
         if identity.operation == "product":
@@ -2134,7 +2143,11 @@ def _resolve_structural_identity_plans(graph: GraphV2) -> Dict[str, IdentityPlan
             # AIQ ISL #187 5860770241 (1): a sum has no ratio, so a stated 0 is an ordinary
             # level. Scaled absolute check: |o - sum| <= tau x max(|o|, sum|parts|); both
             # sides 0 is consistent exactly (R3-2: a tally of £0 today).
-            scale = max(abs(stated), math.fsum(abs(part) for part in parts))
+            # With subtraction, gross turnover is not the profit's scale. Keep the
+            # existing 5% tolerance, relative to the net, including exact 0 = 0.
+            scale = max(abs(stated), abs(reconstructed)) if identity.subtract else max(
+                abs(stated), math.fsum(abs(part) for part in parts)
+            )
             share = 0.0 if scale == 0.0 else abs(stated - reconstructed) / scale
         elif identity.operation == "accumulation":
             raise AssertionError("accumulation cannot enter today's reconciliation")
@@ -2203,6 +2216,7 @@ def _anchor_of(plan: IdentityPlan, graph: GraphV2) -> Optional[IdentityLevelAnch
     level = _identity_term(
         plan.operation,
         [plan.levels[i] * plan.frames[i] for i in plan.factor_ids],
+        signs=plan.signs,
         horizon_months=plan.horizon_months,
         rate_scale=plan.rate_scale,
     ) + math.fsum(plan.levels[i] * plan.frames[i] for i in plan.addends)
@@ -2552,7 +2566,7 @@ def identity_partials(
                 others = math.prod(user[j] for j in plan.factor_ids if j != i)
                 partials[(i, node_id)] = scale * others * plan.frames[i] / frame
             elif plan.operation == "sum":
-                partials[(i, node_id)] = plan.frames[i] / frame
+                partials[(i, node_id)] = (-1 if i in plan.subtract else 1) * plan.frames[i] / frame
             elif plan.operation == "accumulation":
                 assert plan.horizon_months is not None and plan.rate_scale is not None
                 stock_id, rate_id, inflow_id = plan.factor_ids
@@ -2687,7 +2701,12 @@ def identity_blocking_critiques(
             operation=plan.operation,
             # MG ISL #187 5861838085 (6): the addends are named apart from the operands; the
             # typed ``identity.participants`` below is unchanged (CEE reads it).
-            operands=", ".join(plan.factor_ids),
+            operands=(
+                " ".join(
+                    ("minus " if part in plan.subtract else "plus " if index else "") + part
+                    for index, part in enumerate(plan.factor_ids)
+                ) if plan.subtract else ", ".join(plan.factor_ids)
+            ),
             addends=f" plus {', '.join(plan.addends)}" if plan.addends else "",
             reason=plan.withheld_reason,
             detail=detail,
@@ -2702,6 +2721,7 @@ def identity_blocking_critiques(
                         node_id=plan.node_id,
                         operation=plan.operation,
                         participants=list(plan.participants),
+                        subtract=list(plan.subtract) or None,
                         withheld_reason=plan.withheld_reason,
                         reconstructed=plan.reconstructed,
                         stated=plan.stated,
@@ -2746,6 +2766,7 @@ def identity_evaluations(
                 ),
                 factor_ids=list(plan.factor_ids),
                 addends=list(plan.addends),
+                subtract=list(plan.subtract) or None,
                 stated_in_brief=identity.stated_in_brief,
                 evaluated=plan.evaluated,
                 withheld_reason=cast(Any, plan.withheld_reason),
@@ -3370,6 +3391,7 @@ class SCMEvaluatorV2:
         term = _identity_term(
             plan.operation,
             operands,
+            signs=plan.signs,
             horizon_months=plan.horizon_months,
             rate_scale=plan.rate_scale,
         )
@@ -3380,7 +3402,7 @@ class SCMEvaluatorV2:
             return result
         elif plan.operation not in ("product", "sum"):
             raise ValueError(f"IDENTITY_OPERATION_UNSUPPORTED: {plan.operation}")
-        term_sq = _identity_term(plan.operation, [user(i, reference) for i in plan.factor_ids])
+        term_sq = _identity_term(plan.operation, [user(i, reference) for i in plan.factor_ids], signs=plan.signs)
         addend = math.fsum(user(i, values) for i in plan.addends)
         addend_sq = math.fsum(user(i, reference) for i in plan.addends)
         believed = [p for p in self._parents[node_id] if p not in plan.participants]
@@ -6312,21 +6334,19 @@ class RobustnessAnalyzerV2:
         """
         noisy = {node.id for node in request.graph.nodes if node.epsilon_std > 0}
         unit_domains = unit_level_domains(request)
-        horizon_plans = (
-            {
-                node_id: plan
-                for node_id, plan in resolve_identity_plans(
-                    request.graph, factor_centres(request)
-                ).items()
-                if plan.evaluated and plan.accumulation_derived
-            }
+        identity_plans = (
+            resolve_identity_plans(request.graph, factor_centres(request))
             if any(
                 n.nonlinear_identity is not None
-                and n.nonlinear_identity.operation == "accumulation"
+                and (n.nonlinear_identity.operation == "accumulation" or n.nonlinear_identity.subtract)
                 for n in request.graph.nodes
             )
             else {}
         )
+        horizon_plans = {
+            node_id: plan for node_id, plan in identity_plans.items()
+            if plan.evaluated and plan.accumulation_derived
+        }
         frames: List[NodeLevelFrame] = []
         for node in request.graph.nodes:
             if not parent_map.get(node.id):
@@ -6358,6 +6378,11 @@ class RobustnessAnalyzerV2:
                     if horizon_plan is not None
                     else anchored_level_domain(level, unit_domains.get(node.id))
                 )
+                identity_plan = identity_plans.get(node.id)
+                if identity_plan is not None and identity_plan.evaluated and identity_plan.subtract:
+                    # An evaluated difference is signed even when today's profit is positive.
+                    # A loss must stay negative in bands and threshold comparisons.
+                    low = None
                 frames.append(
                     NodeLevelFrame(
                         node_id=node.id,
