@@ -1,0 +1,173 @@
+[
+  {
+    "category": "controllable",
+    "has_own_std_or_range": false,
+    "id": "fac_grandfathering_existing_customers",
+    "kind": "factor",
+    "label": "Grandfathering existing customers",
+    "source": null,
+    "uncertainty_status": "controllable lever",
+    "unit": null,
+    "value": null
+  },
+  {
+    "category": "controllable",
+    "has_own_std_or_range": false,
+    "id": "fac_new_pro_customer_price",
+    "kind": "factor",
+    "label": "New Pro customer price",
+    "source": null,
+    "uncertainty_status": "controllable lever",
+    "unit": null,
+    "value": null
+  },
+  {
+    "category": "controllable",
+    "has_own_std_or_range": false,
+    "id": "fac_retention_intervention_for_at_risk_accounts",
+    "kind": "factor",
+    "label": "Retention intervention for at-risk accounts",
+    "source": null,
+    "uncertainty_status": "controllable lever",
+    "unit": null,
+    "value": null
+  },
+  {
+    "category": "controllable",
+    "has_own_std_or_range": false,
+    "id": "fac_trial_to_pro_conversion",
+    "kind": "factor",
+    "label": "Trial-to-Pro conversion",
+    "source": null,
+    "uncertainty_status": "controllable lever",
+    "unit": null,
+    "value": null
+  },
+  {
+    "category": "controllable",
+    "has_own_std_or_range": false,
+    "id": "feature_release_availability",
+    "kind": "factor",
+    "label": "Feature release availability",
+    "source": "user_assumption",
+    "uncertainty_status": "controllable lever",
+    "unit": "off/on",
+    "value": 0
+  },
+  {
+    "category": "observable",
+    "has_own_std_or_range": false,
+    "id": "feature_value_perception",
+    "kind": "factor",
+    "label": "Feature value perception",
+    "selection": "Latent score out of 100; a user range would not be meaningful without a scale anchor.",
+    "source": "cee_inference",
+    "uncertainty_status": "Olumi point estimate only (no range)",
+    "unit": "score out of 100",
+    "value": 50
+  },
+  {
+    "category": "observable",
+    "has_own_std_or_range": false,
+    "id": "monthly_churn",
+    "kind": "factor",
+    "label": "Monthly churn",
+    "selection": "CHOSEN: Olumi's own estimate with no range, on both the ≤4% churn limit and the £100k goal path; the existing Regions grid and its 1.5 pp threshold assume it is exactly 3%.",
+    "source": "cee_inference",
+    "uncertainty_status": "Olumi point estimate only (no range)",
+    "unit": "percent per month",
+    "value": 3
+  },
+  {
+    "category": "observable",
+    "has_own_std_or_range": false,
+    "id": "monthly_net_pro_additions",
+    "kind": "factor",
+    "label": "Monthly net Pro additions",
+    "selection": "Plausible second candidate (point-only Olumi estimate on the goal path); not this cycle.",
+    "source": "cee_inference",
+    "uncertainty_status": "Olumi point estimate only (no range)",
+    "unit": "subscribers per month",
+    "value": 40
+  },
+  {
+    "category": null,
+    "has_own_std_or_range": false,
+    "id": "mrr",
+    "kind": "goal",
+    "label": "MRR",
+    "source": "brief_extraction",
+    "uncertainty_status": "goal: today's level user-stated (point); target user-stated",
+    "unit": "GBP per month",
+    "value": 75000
+  },
+  {
+    "category": "observable",
+    "has_own_std_or_range": false,
+    "id": "non_pro_mrr",
+    "kind": "factor",
+    "label": "Non-Pro MRR",
+    "selection": "Not chosen: same month-0 identity coupling as Pro subscribers.",
+    "source": "cee_inference",
+    "uncertainty_status": "Olumi point estimate only (no range)",
+    "unit": "GBP per month",
+    "value": 16200
+  },
+  {
+    "category": null,
+    "has_own_std_or_range": false,
+    "id": "price_sensitivity",
+    "kind": "risk",
+    "label": "Price sensitivity",
+    "source": null,
+    "uncertainty_status": "no value (unquantified node)",
+    "unit": null,
+    "value": null
+  },
+  {
+    "category": "observable",
+    "has_own_std_or_range": false,
+    "id": "pro_paying_subscribers",
+    "kind": "factor",
+    "label": "Pro paying subscribers",
+    "selection": "Not chosen: bound with Non-Pro MRR by the month-0 identity 49 x 1,200 + 16,200 = 75,000, so a range on one alone contradicts the stated £75k and the evaluator withholds (IDENTITY_INCONSISTENT_WITH_HELD_LEVEL).",
+    "source": "cee_inference",
+    "uncertainty_status": "Olumi point estimate only (no range)",
+    "unit": "subscribers",
+    "value": 1200
+  },
+  {
+    "category": null,
+    "has_own_std_or_range": false,
+    "id": "pro_plan_mrr",
+    "kind": "outcome",
+    "label": "Pro plan MRR",
+    "source": null,
+    "uncertainty_status": "no value (unquantified node)",
+    "unit": null,
+    "value": null
+  },
+  {
+    "category": "controllable",
+    "has_own_std_or_range": false,
+    "id": "pro_plan_price",
+    "kind": "factor",
+    "label": "Pro plan price",
+    "selection": "Controllable lever: set by the options, never an evidence gap.",
+    "source": "brief_extraction",
+    "uncertainty_status": "controllable lever",
+    "unit": "GBP per month",
+    "value": 49
+  },
+  {
+    "category": null,
+    "has_own_std_or_range": false,
+    "id": "risk_competitive_price_or_ai_feature_response",
+    "kind": "risk",
+    "label": "Competitive price or AI-feature response",
+    "source": null,
+    "uncertainty_status": "no value (unquantified node)",
+    "unit": null,
+    "value": null
+  }
+]

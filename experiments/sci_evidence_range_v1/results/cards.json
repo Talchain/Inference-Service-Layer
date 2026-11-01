@@ -1,0 +1,210 @@
+{
+  "adapter": "olumi-programme-docs lab/w1_card.py card_from_served (frozen, unchanged)",
+  "body_note": "DERIVED served-body shape around each control response: analysis_state complete_current, leader withheld (this experiment makes no ranking), computed_against_hash = graph_hash, and ISL factor_sensitivity node_id/label mapped to factor_id/factor_label as PLoT serves them.",
+  "control_bodies": {
+    "after_user_range_sd_width_over_1_349": {
+      "lines": [
+        "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison."
+      ],
+      "rows": [
+        {
+          "factor_id": "pro_paying_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_churn",
+          "notes": [
+            "spread_source=user: the range is the user's own."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": "user",
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_new_pro_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "non_pro_mrr",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        }
+      ],
+      "withheld": null
+    },
+    "after_user_range_sd_width_over_4": {
+      "lines": [
+        "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison."
+      ],
+      "rows": [
+        {
+          "factor_id": "pro_paying_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_churn",
+          "notes": [
+            "spread_source=user: the range is the user's own."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": "user",
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_new_pro_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "non_pro_mrr",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        }
+      ],
+      "withheld": null
+    },
+    "before_as_sent": {
+      "lines": [
+        "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison."
+      ],
+      "rows": [
+        {
+          "factor_id": "pro_paying_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_churn",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_new_pro_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "non_pro_mrr",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        }
+      ],
+      "withheld": null
+    },
+    "before_same_default_labelled_template": {
+      "lines": [
+        "We can't tell from the current analysis whether checking Monthly churn, Monthly new Pro subscribers, Non-Pro MRR or Pro paying subscribers would change the comparison.",
+        "Olumi's range for ‘Monthly churn’ is a default width, not one from your evidence."
+      ],
+      "rows": [
+        {
+          "factor_id": "pro_paying_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_churn",
+          "notes": [
+            "spread_source=template: the range is Olumi's default width (AIQ Q2, 5895140735: say so; never an estimate)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": "template",
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "monthly_new_pro_subscribers",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        },
+        {
+          "factor_id": "non_pro_mrr",
+          "notes": [
+            "spread_source not stated (never inferred)."
+          ],
+          "shown_as": "below_resolution",
+          "spread_source": null,
+          "status": "below_resolution"
+        }
+      ],
+      "withheld": null
+    }
+  },
+  "real_served_before": {
+    "fixture_sha256": "9134d37b300535228ff202f1788151e6148f7f6e27303ca765a9aad282e04ee2",
+    "lines": [
+      "We can't tell from the current analysis whether checking Monthly churn or Paying subscribers would change the comparison."
+    ],
+    "rows": [
+      {
+        "factor_id": "paying_subscribers",
+        "shown_as": "below_resolution",
+        "spread_source": null,
+        "status": "below_resolution"
+      },
+      {
+        "factor_id": "monthly_churn",
+        "shown_as": "below_resolution",
+        "spread_source": null,
+        "status": "below_resolution"
+      },
+      {
+        "factor_id": "monthly_gross_subscriber_additions",
+        "shown_as": null,
+        "spread_source": null,
+        "status": "below_resolution"
+      }
+    ],
+    "source": "lab/fixtures/served-reload-c3f76e4f.json 'read' (the Lab join's PRIMARY input: a real served MRR reload, UI c3f76e4f, 28 Sep 2026)"
+  }
+}
